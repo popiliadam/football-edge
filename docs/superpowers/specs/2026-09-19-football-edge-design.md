@@ -41,7 +41,11 @@ Tek kuzey yıldızı: **CLV (Closing Line Value)** — yayınlanan seçimin ald�
 kapanış konsensüs oranına göre üstünlüğü. Tutturma oranı ikincil ve tek başına
 yanıltıcıdır (1.20 oranlarla %80 tutturup zarar edilebilir).
 
-Referans kapanış: **`AvgC*` konsensüs kapanış + Betfair Exchange kapanış (`BFEC*`)**.
+Referans kapanış — kaynağı döneme göre ayrılır:
+- **Tarihsel backtest:** football-data.co.uk `AvgC*` + `BFEC*` sütunları.
+- **Canlı:** kendi defterimizde mühürlenen kapanış anlık görüntüsü (The Odds API,
+  28 kitabın konsensüsü + Betfair Exchange). Bu ikisi **aynı büyüklük değildir**;
+  Faz 2'de örtüşen dönemde karşılaştırılıp sistematik fark ölçülecek ve düzeltilecek.
 Pinnacle referans DEĞİLDİR — public API'si 2025-07-23'te kapandı, sonrasındaki
 fiyatları sistematik olarak bayattır (kaynak: football-data.co.uk kendi notu +
 `pinnacleapi/pinnacleapi-documentation` README).
@@ -220,7 +224,7 @@ Her faz handoff'unda **kapının neyi ölçmediği** açıkça yazılır.
 | Faz | İçerik | Kapı |
 |---|---|---|
 | **0** | Supabase şeması + oran toplayıcı + **kapanış mühürleme** cron'u | Ledger append-only mı, kapanış yakalanıyor mu |
-| **1** | Toplayıcılar (Understat, FootyStats, FBref, ClubElo, Google News çok dilli, TFF, Open-Meteo, Wikidata/OSM) + varlık eşleme + **dil kalibrasyon testi** | Şema + tazelik iddiaları; dil doğruluğu ölçüldü mü |
+| **1** | Toplayıcılar (Understat, FootyStats, FBref, ClubElo, Google News çok dilli, TFF, Open-Meteo, Wikidata/OSM) + varlık eşleme + **dil kalibrasyon testi**. Lig kümesi bu fazda **geçici ve geniştir** — ücretsiz kaynakların kapsadığı her lig alınır; budama Faz 2'de ölçümle yapılır | Şema + tazelik iddiaları; dil doğruluğu ölçüldü mü |
 | **2** | Tarihsel taban (MIT CSV) + backtest harness + **piyasa verimliliği sıralaması** (lig seçimi burada yapılır) + Opus sızıntı denetimi | Sızıntı yok mu |
 | **3** | Baz model: Dixon-Coles + Elo + piyasa harmanı (Jev'siz baz çizgi) | Holdout CLV baz çizgisi |
 | **4** | Jev sinyal katmanı + özellik deposu + budama | Baz çizgiye karşı marjinal CLV |
@@ -238,9 +242,14 @@ sonraki fazın ön koşulları · açık sorular.
    Avrupa ortalamasının üstünde — Avrupa konsensüsüne göre bulunan value orada value
    olmayabilir. Global kapsamda önceliği düştü ama TR trafiği için çözülmeli.
    Nesine ToS §4.2.1 ticari kullanımı yasaklıyor → veri kaynağı hukuki soru.
-2. **Transfermarkt robots.txt** doğrulanmadı (Faz 1).
-3. **Jev'in çok dilli doğruluğu** ölçülmedi (Faz 1).
-4. **Highlightly** $9.49 planında oran var mı — teyit alınmadı. The Odds API $30 seçildiği
+2. **Lisans zinciri: MIT CSV'nin kaynağı.** `xgabora/Club-Football-Match-Data` MIT
+   ilan ediyor ama verisi büyük ölçüde football-data.co.uk'tan türetilmiş; o kaynağın
+   lisansı ticari/otomatik türev ürünleri dışlıyor. MIT yeniden lisanslaması bu zinciri
+   temizler mi — **ticari lansman öncesi avukata sorulacak.** Şimdilik: eğitim verisi
+   olarak kullanılır, ham satırları yeniden yayınlanmaz.
+3. **Transfermarkt robots.txt** doğrulanmadı (Faz 1).
+4. **Jev'in çok dilli doğruluğu** ölçülmedi (Faz 1).
+5. **Highlightly** $9.49 planında oran var mı — teyit alınmadı. The Odds API $30 seçildiği
    için kritik değil, yedek olarak kalsın.
-5. **API-Football ücretsiz katman sezon aralığı** (2022-2024 iddiası birincil kaynaktan
+6. **API-Football ücretsiz katman sezon aralığı** (2022-2024 iddiası birincil kaynaktan
    doğrulanmadı). Kullanmıyoruz; kayıt amaçlı.
