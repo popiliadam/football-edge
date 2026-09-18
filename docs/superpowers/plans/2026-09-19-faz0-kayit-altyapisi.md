@@ -47,7 +47,8 @@
 ### Task 1: Proje iskeleti ve kapı
 
 **Files:**
-- Create: `pyproject.toml`, `verify.sh`, `.gitignore`, `src/football_edge/__init__.py`, `tests/__init__.py`, `tests/test_smoke.py`
+- Create: `pyproject.toml`, `uv.lock`, `verify.sh`, `src/football_edge/__init__.py`, `tests/__init__.py`, `tests/test_smoke.py`
+- Zaten var, DOKUNMA: `.gitignore` (`.env` girdisiyle birlikte commit'li)
 
 **Interfaces:**
 - Consumes: yok
@@ -166,28 +167,32 @@ fi
 echo "KAPI YEŞİL"
 ```
 
-`.gitignore`:
-```
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.env
-```
+`.gitignore` **zaten var ve commit'li** — yeniden yazma, üzerine yazma, dokunma.
+İçeriği `.venv/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.mypy_cache/`,
+`.ruff_cache/`, `.env`, `.env.*`, `!.env.example` satırlarını içeriyor.
+`uv.lock` ignore EDİLMEMELİ; listede yok, öyle kalmalı.
 
-- [ ] **Step 7: Run the gate**
+- [ ] **Step 7: Generate the lockfile**
+
+CI `uv sync --frozen` ile koşar ve bu, commit'lenmiş bir `uv.lock` olmadan hata verir.
+
+Run: `uv lock`
+Expected: `uv.lock` oluşur. `.gitignore`'a EKLENMEZ — repoya girmesi gerekir.
+
+- [ ] **Step 8: Run the gate**
 
 Run: `chmod +x verify.sh && ./verify.sh`
 Expected: `KAPI YEŞİL`, exit 0. Kırmızıysa log dosyasını oku ve düzelt.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add pyproject.toml verify.sh .gitignore src tests
-git commit -m "chore: proje iskeleti ve kapı (ruff+mypy+pytest)"
+git add pyproject.toml uv.lock verify.sh src tests
+git commit -m "chore: proje iskeleti, lockfile ve kapı (ruff+mypy+pytest)"
 ```
+
+**Not:** `.gitignore` zaten mevcut ve commit'li — yeniden oluşturma, sadece doğrula
+(`git check-ignore -v .env` `.env` satırını göstermeli).
 
 ---
 
@@ -432,6 +437,8 @@ git commit -m "feat: lig konfigürasyonu yükleyici ve doğrulayıcı"
 ```python
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 import httpx
 import pytest
 
@@ -544,13 +551,17 @@ def test_fetch_odds_builds_request_and_returns_rows() -> None:
 
     assert len(rows) == 5
     assert quota.remaining == 499
-    url = str(captured["url"])
-    assert "/v4/sports/soccer_epl/odds" in url
-    assert "apiKey=KEY" in url
-    assert "regions=eu" in url
-    assert "markets=h2h" in url
-    assert "oddsFormat=decimal" in url
-    assert "commenceTimeTo=2026-09-26T00%3A00%3A00Z" in url
+
+    parsed = urlparse(str(captured["url"]))
+    assert parsed.path == "/v4/sports/soccer_epl/odds"
+    # Ham dizede yüzde-kodlamaya bakma: onu httpx belirler, biz değil.
+    params = parse_qs(parsed.query)
+    assert params["apiKey"] == ["KEY"]
+    assert params["regions"] == ["eu"]
+    assert params["markets"] == ["h2h"]
+    assert params["oddsFormat"] == ["decimal"]
+    assert params["dateFormat"] == ["iso"]
+    assert params["commenceTimeTo"] == ["2026-09-26T00:00:00Z"]
 
 
 def test_fetch_odds_raises_on_http_error() -> None:
