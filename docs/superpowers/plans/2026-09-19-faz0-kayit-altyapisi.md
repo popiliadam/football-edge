@@ -1230,6 +1230,67 @@ def test_seal_window_true_at_exact_boundary() -> None:
 
 def test_horizon_iso_formats_utc_with_z() -> None:
     assert horizon_iso(NOW, days=7) == "2026-09-26T12:00:00Z"
+
+
+def test_latest_anchor_reads_newest_file(tmp_path: Path) -> None:
+    (tmp_path / "head-2026-09-18.txt").write_text(
+        "2026-09-18T00:00:00+00:00\nrows=10\nhead=aaa\n", encoding="utf-8"
+    )
+    (tmp_path / "head-2026-09-19.txt").write_text(
+        "2026-09-19T00:00:00+00:00\nrows=25\nhead=bbb\n", encoding="utf-8"
+    )
+    anchor = _latest_anchor(tmp_path)
+    assert anchor is not None
+    assert anchor.rows == 25
+    assert anchor.head == "bbb"
+
+
+def test_latest_anchor_none_when_empty(tmp_path: Path) -> None:
+    assert _latest_anchor(tmp_path) is None
+```
+
+**Veritabanı turu testi — bu test olmadan zincir yanlış alarm verir.** Postgres `numeric`
+sütununu `Decimal`, `timestamptz` sütununu `datetime` olarak geri verir; `verify-chain`
+komutundaki normalizasyon bu tipleri yazma anındaki METNE geri çevirir. Normalizasyon
+bozulursa kurcalanmamış her satır "KIRIK" der. Testi ekle:
+
+```python
+from decimal import Decimal
+
+from football_edge.ledger import chain, verify_chain
+
+
+def test_chain_survives_postgres_type_round_trip() -> None:
+    written = {
+        "match_id": "evt1",
+        "observed_at": "2026-09-19T12:00:00+00:00",
+        "bookmaker": "pinnacle",
+        "market": "h2h",
+        "outcome": "A",
+        "point": None,
+        "price": 2.40,
+        "bookmaker_last_update": "2026-09-19T10:00:00Z",
+        "is_closing": False,
+    }
+    linked = chain((written,))
+
+    # Postgres'ten dönüş: numeric -> Decimal, timestamptz -> datetime
+    from_db = {
+        **linked[0],
+        "observed_at": datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        "bookmaker_last_update": datetime(2026, 9, 19, 10, 0, tzinfo=UTC),
+        "price": Decimal("2.40"),
+        "point": None,
+    }
+    # verify-chain komutunun uyguladığı normalizasyonun aynısı
+    normalised = {
+        **from_db,
+        "observed_at": from_db["observed_at"].isoformat(),
+        "bookmaker_last_update": from_db["bookmaker_last_update"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "price": float(from_db["price"]),
+        "point": None,
+    }
+    assert verify_chain((normalised,)).ok is True, "DB turu sonrası zincir kırılmamalı"
 ```
 
 Aynı dosyaya dayanıklılık testini de ekle — tek ligin arızası diğerlerini düşürmemeli:
@@ -1371,6 +1432,29 @@ class CollectResult:
     written: int
     quota: Quota | None
     failed_leagues: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Anchor:
+    path: Path
+    rows: int
+    head: str
+
+
+def _latest_anchor(directory: Path = Path("ledger")) -> Anchor | None:
+    """En son yayınlanmış zincir çıpasını okur; yoksa None döner."""
+    files = sorted(directory.glob("head-*.txt"))
+    if not files:
+        return None
+    target = files[-1]
+    values: dict[str, str] = {}
+    for line in target.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            values[key] = value
+    if "rows" not in values or "head" not in values:
+        return None
+    return Anchor(path=target, rows=int(values["rows"]), head=values["head"])
 
 
 def horizon_iso(now: datetime, days: int) -> str:
@@ -1523,6 +1607,14 @@ def _verify_chain_command(conn: psycopg.Connection[Any]) -> int:
         columns = [desc[0] for desc in cur.description or ()]
         records = tuple(dict(zip(columns, record, strict=True)) for record in cur.fetchall())
 
+    # ── BU NORMALİZASYON LOAD-BEARING'DİR, SADELEŞTİRMEYİN ──────────────────
+    # Zincir hash'i satırın kanonik JSON METNİNİ kapsıyor. Postgres aynı değeri
+    # farklı Python tipiyle geri veriyor ve metin hâli değişiyor:
+    #   numeric  → Decimal: json.dumps(Decimal) TypeError fırlatır; ayrıca
+    #              yazarken float 2.40 → "2.4", okurken Decimal("2.40") → "2.40"
+    #   timestamptz → datetime: yazarken .isoformat() metni yazılmıştı
+    # Bu dönüşümler kaldırılırsa KURCALANMAMIŞ HER SATIR "KIRIK" der —
+    # yanlış alarm, kaçırılan kurcalama kadar zararlıdır çünkü alarma güven biter.
     normalised = tuple(
         {
             **record,
@@ -1542,7 +1634,20 @@ def _verify_chain_command(conn: psycopg.Connection[Any]) -> int:
         f"zincir: {'SAĞLAM' if result.ok else 'KIRIK'} "
         f"kontrol={result.checked} baş={result.head[:16]} hata={result.error}\n"
     )
-    return 0 if result.ok else 1
+    if not result.ok:
+        return 1
+
+    # Çıplak hash zinciri KUYRUKTAN silmeyi yakalayamaz: son satırlar atılırsa
+    # kalan zincir kendi içinde tutarlıdır. Dış çıpa bunu kapatır.
+    anchor = _latest_anchor()
+    if anchor is not None and result.checked < anchor.rows:
+        sys.stdout.write(
+            f"ÇIPA UYUŞMAZLIĞI: defterde {result.checked} satır var, "
+            f"son yayınlanan çıpa {anchor.rows} diyordu ({anchor.path.name}) "
+            f"— kuyruktan satır silinmiş olabilir\n"
+        )
+        return 1
+    return 0
 
 
 def _publish_head_command(conn: psycopg.Connection[Any], now: datetime) -> int:
