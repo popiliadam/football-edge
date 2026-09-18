@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import os
+from datetime import datetime
+from typing import Any
+
+import psycopg
+
+from football_edge.ledger import GENESIS, chain
+from football_edge.odds_api import PriceRow
+
+
+def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
+    resolved = dsn or os.getenv("DATABASE_URL")
+    if not resolved:
+        raise RuntimeError("DATABASE_URL tanımlı değil")
+    # Oturum saat dilimi UTC'ye sabitlenir: zincir hash'i zaman damgasının
+    # metin hâlini kapsıyor, oturum TZ'si değişirse geri okumada zincir kırılır.
+    return psycopg.connect(resolved, options="-c timezone=UTC")
+
+
+def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) -> dict[str, Any]:
+    return {
+        "match_id": row.event_id,
+        "observed_at": observed_at.isoformat(),
+        "bookmaker": row.bookmaker,
+        "market": row.market,
+        "outcome": row.outcome,
+        "point": row.point,
+        "price": row.price,
+        "bookmaker_last_update": row.bookmaker_last_update,
+        "is_closing": is_closing,
+    }
+
+
+def chain_head(conn: psycopg.Connection[Any]) -> str:
+    with conn.cursor() as cur:
+        cur.execute("SELECT row_hash FROM odds_snapshots ORDER BY id DESC LIMIT 1")
+        found = cur.fetchone()
+    return GENESIS if found is None else str(found[0])
+
+
+def upsert_matches(
+    conn: psycopg.Connection[Any], rows: tuple[PriceRow, ...], league_id: str
+) -> int:
+    seen: dict[str, PriceRow] = {}
+    for row in rows:
+        seen.setdefault(row.event_id, row)
+    with conn.cursor() as cur:
+        for event_id, row in seen.items():
+            cur.execute(
+                """
+                INSERT INTO matches (id, league_id, commence_time, home_team, away_team)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (event_id, league_id, row.commence_time, row.home_team, row.away_team),
+            )
+    return len(seen)
+
+
+def insert_snapshots(
+    conn: psycopg.Connection[Any],
+    rows: tuple[PriceRow, ...],
+    observed_at: datetime,
+    *,
+    is_closing: bool,
+) -> int:
+    payloads = tuple(snapshot_payload(row, observed_at, is_closing=is_closing) for row in rows)
+    linked = chain(payloads, prev_hash=chain_head(conn))
+    with conn.cursor() as cur:
+        for entry in linked:
+            cur.execute(
+                """
+                INSERT INTO odds_snapshots
+                  (match_id, observed_at, bookmaker, market, outcome, point, price,
+                   bookmaker_last_update, is_closing, prev_hash, row_hash)
+                VALUES (%(match_id)s, %(observed_at)s, %(bookmaker)s, %(market)s, %(outcome)s,
+                        %(point)s, %(price)s, %(bookmaker_last_update)s, %(is_closing)s,
+                        %(prev_hash)s, %(row_hash)s)
+                ON CONFLICT (row_hash) DO NOTHING
+                """,
+                entry,
+            )
+    return len(linked)
