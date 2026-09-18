@@ -1595,9 +1595,63 @@ Bu adımları kullanıcıya anlat ve onay iste; kendi başına yapma.
 - Consumes: hepsi
 - Produces: Faz 0'ın bittiğini kanıtlayan çıktı + Faz 1 için handoff.
 
-- [ ] **Step 1: Add chain verification to the gate**
+- [ ] **Step 1: Add the secret scan to the gate**
+
+Depo **public**. `.env` canlı bir API anahtarı ve veritabanı parolası tutuyor. Bir secret
+commit'e kaçarsa insan kontrol noktası olmadan anında halka açılır. Kapı bunu yakalamalı.
+
+`scripts/check_secrets.sh` oluştur:
+```bash
+#!/usr/bin/env bash
+# İzlenen hiçbir dosyada gerçek secret olmamalı; .env ignore edilmiş olmalı.
+set -uo pipefail
+
+fail=0
+
+if ! git check-ignore -q .env 2>/dev/null; then
+  echo "HATA: .env gitignore'da değil"
+  fail=1
+fi
+
+if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+  echo "HATA: .env git tarafından izleniyor"
+  fail=1
+fi
+
+# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç).
+if git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
+     -- . ':!*.md' ':!.env.example' ':!uv.lock'; then
+  echo "HATA: izlenen dosyada dolu secret ataması var"
+  fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "secret taraması temiz"
+exit "$fail"
+```
+
+`chmod +x scripts/check_secrets.sh`
 
 `verify.sh` içinde `step "pytest" ...` satırından sonra ekle:
+```bash
+step "secrets" ./scripts/check_secrets.sh
+```
+
+- [ ] **Step 1b: Prove the secret scan actually fails**
+
+Kapının kırmızı verdiğini kanıtlamadan yeşiline güvenilmez:
+```bash
+printf 'ODDS_API_KEY=abcdef0123456789abcdef\n' > /tmp/fake_secret_probe.py
+cp /tmp/fake_secret_probe.py ./fake_secret_probe.py
+git add ./fake_secret_probe.py
+./scripts/check_secrets.sh; echo "beklenen exit 1, gerçek: $?"
+git rm -f --cached ./fake_secret_probe.py >/dev/null && rm -f ./fake_secret_probe.py
+./scripts/check_secrets.sh; echo "beklenen exit 0, gerçek: $?"
+```
+Beklenen: önce `1`, sonra `0`. İkisi de gerçekleşmezse tarama işe yaramıyor demektir.
+
+- [ ] **Step 1c: Add chain verification to the gate**
+
+`verify.sh` içinde `step "secrets" ...` satırından sonra ekle:
 ```bash
 if [ -n "${DATABASE_URL:-}" ]; then
   step "zincir" uv run python -m football_edge.collect verify-chain
