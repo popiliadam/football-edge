@@ -13,42 +13,35 @@ Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, **Task 5 yarıda kesildi**,
 Altyapı (Supabase, GitHub, kimlik bilgileri) **canlı ve doğrulanmış durumda**.
 Dal push edilmedi — kullanıcı sabah kendisi push edecek.
 
-### ⚠️ Task 5 yarım kaldı — ÖNCE BUNU ÇÖZ
+### ⚠️ Task 5 uygulandı ama İNCELENMEDİ — ilk iş bu
 
-Oturum, Task 5'in implementer'ı çalışırken kullanıcı talebiyle durduruldu. Ajan üç dosyayı
-yazmıştı ama **commit etmemişti**. Taze oturum başlarken çalışma ağacında şunları bulabilir:
+Oturum durdurulduktan sonra Task 5'in implementer'ı işini kendi tamamladı ve commit attı:
 
+- **Commit:** `e0f0b1a` — *"feat: append-only defter şeması ve hash-zincirli yazma"*
+- **Dosyalar:** `db/migrations/0001_init.sql` (54) · `src/football_edge/db.py` (85) ·
+  `tests/test_db.py` (82) — toplam 221 satır
+- **Doğrulandı:** çalışma ağacı temiz, `pytest` → **28 passed, 2 skipped**
+  (skip'ler beklenen: defter boş olduğu için append-only DB testleri atlanıyor)
+- **Push edildi:** origin `fa6275f..e0f0b1a`
+
+**Ama bu görev hiç incelenmedi.** Diğer dört görevin her biri ayrı bir inceleme ajanından
+geçti; Task 5 geçmedi. İlk iş, incelemeyi koşturmak:
+
+```bash
+SDD=/Users/apple/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development
+PLAN=docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md
+"$SDD/scripts/review-package" "$PLAN" b379d1a e0f0b1a
 ```
-?? db/                          → db/migrations/0001_init.sql (şema dosyası)
-?? src/football_edge/db.py      → connect, snapshot_payload, chain_head, upsert_matches, insert_snapshots
-?? tests/test_db.py             → 3 saf test + 2 DB testi (DATABASE_URL varsa ama defter boşsa SKIP)
-```
 
-**Bu dosyaların beklenen içeriği tam olarak şurada yazılı:**
-`.superpowers/sdd/2026-09-19-faz0-kayit-altyapisi/task-5-brief.md`
+Sonra inceleme ajanını gönder (§11'deki dispatch kalıbıyla). İnceleme temizlenmeden
+Task 6'ya geçme — Task 6, `db.py`'nin tüm fonksiyonlarını çağırıyor.
 
-İki seçenek, ikisi de geçerli:
-
-- **(A) Doğrula ve devam et** — dosyaları brief'e karşı diff'le. Birebir uyuyorsa
-  `./verify.sh` koş, yeşilse `git add db src/football_edge/db.py tests/test_db.py` ile
-  commit'le ve normal inceleme döngüsüne sok (BASE = `1949bee`).
-- **(B) Sil ve Task 5'i baştan gönder** — dosyalar eksik/tutarsızsa sil, implementer'ı
-  yeniden gönder. **Bu durumda ajana mutlaka söyle:** migrasyon ZATEN canlıya uygulandı,
-  Supabase projesi ZATEN var, 6 lig ZATEN yüklü — Step 4'te yalnız SQL DOSYASINI oluşturacak,
-  hiçbir şeyi uygulamayacak.
-
-**(C) Üçüncü ihtimal:** ajan bu satırlar yazıldıktan sonra commit'ini tamamlamış olabilir.
-O zaman `git status` temiz olur ve `git log` içinde *"feat: append-only defter şeması ve
-hash-zincirli yazma"* mesajlı bir commit görürsün. Bu durumda Task 5 **uygulandı ama
-İNCELENMEDİ** demektir — implementer raporu `task-5-report.md`'de olabilir, ama inceleme
-ajanı hiç gönderilmedi. Doğrudan inceleme adımına geç:
-`"$SDD/scripts/review-package" "$PLAN" 1949bee <o commit>` ve inceleme ajanını gönder.
-
-Hangisini seçersen seç, **`git status` temiz olmadan sonraki göreve geçme.**
-
-**Her üç durumda da ortak olan:** Task 5'in incelemesi HİÇ yapılmadı. Diğer dört görevin
-her biri ayrı bir inceleme ajanından geçti; Task 5 geçmedi. İnceleme atlanmış bir görevin
-üstüne inşa etmeyin.
+İnceleme ajanına özellikle sordurulacaklar:
+- `connect()` hâlâ `options="-c timezone=UTC"` taşıyor mu (zincir tutarlılığı buna bağlı)
+- `snapshot_payload` anahtar kümesi `_CHAIN_KEYS` ile çelişmiyor mu
+- `insert_snapshots` zinciri `chain_head(conn)`'dan devam ettiriyor mu (GENESIS'ten değil)
+- `ON CONFLICT (row_hash) DO NOTHING` sessizce satır düşürüyor mu — düşürüyorsa
+  yazılan sayı ile gerçekte eklenen sayı ayrışır ve çıpa satır sayısı yanlış olur
 
 ## 2. Taze oturumun ilk beş komutu
 
@@ -101,7 +94,7 @@ yokken bile her gün veri birikmeli.
 | 2 | Lig konfigürasyonu | ✅ tamam · spec ✅ · 1 minor ertelendi | `c3d25a7` |
 | 3 | Odds API istemcisi | ✅ tamam · spec ✅ · 1 minor ertelendi | `e6151a5` |
 | 4 | Hash zinciri | ✅ tamam · spec ✅ · 2 Important ruling'e bağlandı | `61df9ca` |
-| 5 | Şema + append-only + db.py | ⚠️ **yarıda kesildi** — dosyalar yazıldı, commit yok (bkz. §1) | — |
+| 5 | Şema + append-only + db.py | ⚠️ uygulandı, **İNCELENMEDİ** (bkz. §1) | `e0f0b1a` |
 | 6 | snapshot/seal/verify-chain/publish-head | sırada · brief hazır (540 satır) | — |
 | 7 | GitHub Actions workflow'ları | sırada · brief hazır | — |
 | 8 | Uçtan uca doğrulama + handoff | sırada · brief hazır | — |
