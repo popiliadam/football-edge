@@ -20,7 +20,15 @@
 - **Defter append-only.** `odds_snapshots` üzerinde UPDATE/DELETE veritabanı seviyesinde reddedilir.
 - **Kaynak politikası (spec §3.2):** robots.txt'i otomatik erişime kapalı kaynak taranmaz; erişim kontrolü aşılmaz.
 - **Kredi disiplini:** The Odds API maliyeti = `market sayısı × region sayısı`. `/v4/sports` ve `/v4/sports/{sport}/events` ücretsizdir. Her çağrıdan sonra `x-requests-remaining` okunur ve eşiğin altına inince iş durur.
-- **Kapı (`./verify.sh`):** `ruff check` + `ruff format --check` + `mypy src` + `pytest` + zincir doğrulama. Hepsi yeşil değilse faz bitmemiştir.
+- **Kapı (`./verify.sh`):** `ruff check` + `ruff format --check` + `mypy src` + `pytest` + secret taraması + zincir doğrulama. Hepsi yeşil değilse faz bitmemiştir.
+- **Biçimlendirme:** bu dokümandaki kod blokları elle yazıldı ve `line-length = 100` ayarında
+  `ruff format`'ın tercih ettiği biçimle birebir aynı olmayabilir. Kodu birebir aktardıktan sonra
+  `uv run ruff format` çalıştır; **yalnız boşluk/satır kırma değişikliği** beklenir. İsim, değer
+  veya mantık değişiyorsa aktarım hatalıdır — düzelt. Bu bir sapma değil, beklenen adımdır.
+- **Paket gerçekten kurulu olmalı:** testler `pythonpath = ["src"]` sayesinde çalışır, ama CI
+  `python -m football_edge.collect` ile **kurulu paketi** çağırır. `uv sync` bazen bozuk bir
+  editable kurulum bırakabiliyor (dist-info var, `.pth` yok) ve bunu testler maskeler.
+  Bozulursa: `uv sync --reinstall-package football-edge`.
 
 ---
 
@@ -1635,6 +1643,20 @@ exit "$fail"
 ```bash
 step "secrets" ./scripts/check_secrets.sh
 ```
+
+- [ ] **Step 1a: Add the installed-package import check to the gate**
+
+Testler `pythonpath = ["src"]` ile koşar ve **kurulu paket bozuk olsa bile geçer**. CI ise
+`python -m football_edge.collect` ile kurulu paketi çağırır. Bu fark, "yerelde yeşil, CI'da
+ImportError" arızasının tam kaynağıdır — Task 2'de bir kez gerçekleşti. Kapı bunu yakalamalı.
+
+`verify.sh` içinde `step "secrets" ...` satırından ÖNCE ekle:
+```bash
+step "paket-kurulu" env PYTHONPATH= uv run python -c "import football_edge, sys; sys.stdout.write(football_edge.__file__)"
+```
+
+`PYTHONPATH=` boşaltması kasıtlıdır: `src/`'den değil, **kurulu paketten** import edildiğini
+kanıtlar. Kırmızı verirse `uv sync --reinstall-package football-edge` ile onar; kapıyı gevşetme.
 
 - [ ] **Step 1b: Prove the secret scan actually fails**
 
