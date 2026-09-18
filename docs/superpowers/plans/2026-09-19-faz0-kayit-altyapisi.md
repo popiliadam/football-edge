@@ -887,7 +887,20 @@ git commit -m "feat: hash zinciri hesaplama ve kurcalama tespiti"
   - `upsert_matches(conn, rows: tuple[PriceRow, ...], league_id: str) -> int`
   - `insert_snapshots(conn, rows: tuple[PriceRow, ...], observed_at: datetime, *, is_closing: bool) -> int`
 
-**Not:** Bu görevde Supabase projesi oluşturulur. Maliyet **$0/ay** olarak doğrulandı (org `rkwkgvljyppbldscylwf`). Proje oluşturmadan önce kullanıcıya maliyeti tekrar söyle ve onay al.
+**Not:** Supabase projesi **zaten oluşturuldu** — `football-edge`, ref `aaxadphezxavohkhqdrf`,
+bölge `eu-central-1`, durum `ACTIVE_HEALTHY`. Yeniden oluşturma.
+
+**Bağlantı tuzağı — bunu baştan doğru yap:**
+- Supabase'in **doğrudan** bağlantısı (`db.<ref>.supabase.co:5432`) yalnız **IPv6** üzerinden
+  erişilebilir. GitHub Actions runner'ları IPv4'tür → doğrudan bağlantı CI'da çalışmaz.
+- Bu yüzden `DATABASE_URL` **pooler** ana makinesini kullanmalı:
+  `aws-0-eu-central-1.pooler.supabase.com`. Kullanıcı adı `postgres.<ref>` biçimindedir.
+- **Session pooler (port 5432)** tercih edilir: hazırlanmış ifadelerle (prepared statements)
+  sorun çıkarmaz. **Transaction pooler (port 6543)** kullanılacaksa psycopg3'ün hazırlanmış
+  ifadeleri kapatılmalıdır (`prepare_threshold=None`), aksi hâlde birkaç çağrıdan sonra
+  beklenmedik hatalar başlar.
+- Bağlantı dizesi Supabase panelinden alınır (Project Settings → Database → Connection string);
+  parola MCP üzerinden okunamaz.
 
 - [ ] **Step 1: Write the failing test**
 
