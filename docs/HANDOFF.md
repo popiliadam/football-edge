@@ -9,9 +9,35 @@ Sıra: önce §1 (nerede kaldık), sonra §2 (ilk beş komut), sonra §7 (kararl
 
 ## 1. Tek cümlede nerede kaldık
 
-Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, Task 5 koşuyor, T6–T8 kaldı.
+Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, **Task 5 yarıda kesildi**, T6–T8 kaldı.
 Altyapı (Supabase, GitHub, kimlik bilgileri) **canlı ve doğrulanmış durumda**.
 Dal push edilmedi — kullanıcı sabah kendisi push edecek.
+
+### ⚠️ Task 5 yarım kaldı — ÖNCE BUNU ÇÖZ
+
+Oturum, Task 5'in implementer'ı çalışırken kullanıcı talebiyle durduruldu. Ajan üç dosyayı
+yazmıştı ama **commit etmemişti**. Taze oturum başlarken çalışma ağacında şunları bulabilir:
+
+```
+?? db/                          → db/migrations/0001_init.sql (şema dosyası)
+?? src/football_edge/db.py      → connect, snapshot_payload, chain_head, upsert_matches, insert_snapshots
+?? tests/test_db.py             → 3 saf test + 2 DB testi (DATABASE_URL varsa ama defter boşsa SKIP)
+```
+
+**Bu dosyaların beklenen içeriği tam olarak şurada yazılı:**
+`.superpowers/sdd/2026-09-19-faz0-kayit-altyapisi/task-5-brief.md`
+
+İki seçenek, ikisi de geçerli:
+
+- **(A) Doğrula ve devam et** — dosyaları brief'e karşı diff'le. Birebir uyuyorsa
+  `./verify.sh` koş, yeşilse `git add db src/football_edge/db.py tests/test_db.py` ile
+  commit'le ve normal inceleme döngüsüne sok (BASE = `1949bee`).
+- **(B) Sil ve Task 5'i baştan gönder** — dosyalar eksik/tutarsızsa sil, implementer'ı
+  yeniden gönder. **Bu durumda ajana mutlaka söyle:** migrasyon ZATEN canlıya uygulandı,
+  Supabase projesi ZATEN var, 6 lig ZATEN yüklü — Step 4'te yalnız SQL DOSYASINI oluşturacak,
+  hiçbir şeyi uygulamayacak.
+
+Hangisini seçersen seç, **`git status` temiz olmadan sonraki göreve geçme.**
 
 ## 2. Taze oturumun ilk beş komutu
 
@@ -64,7 +90,7 @@ yokken bile her gün veri birikmeli.
 | 2 | Lig konfigürasyonu | ✅ tamam · spec ✅ · 1 minor ertelendi | `c3d25a7` |
 | 3 | Odds API istemcisi | ✅ tamam · spec ✅ · 1 minor ertelendi | `e6151a5` |
 | 4 | Hash zinciri | ✅ tamam · spec ✅ · 2 Important ruling'e bağlandı | `61df9ca` |
-| 5 | Şema + append-only + db.py | ⏳ koşuyor | — |
+| 5 | Şema + append-only + db.py | ⚠️ **yarıda kesildi** — dosyalar yazıldı, commit yok (bkz. §1) | — |
 | 6 | snapshot/seal/verify-chain/publish-head | sırada · brief hazır (540 satır) | — |
 | 7 | GitHub Actions workflow'ları | sırada · brief hazır | — |
 | 8 | Uçtan uca doğrulama + handoff | sırada · brief hazır | — |
