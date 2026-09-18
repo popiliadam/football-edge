@@ -9,9 +9,9 @@ Sıra: önce §1 (nerede kaldık), sonra §2 (ilk beş komut), sonra §7 (kararl
 
 ## 1. Tek cümlede nerede kaldık
 
-Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, **Task 5 yarıda kesildi**, T6–T8 kaldı.
-Altyapı (Supabase, GitHub, kimlik bilgileri) **canlı ve doğrulanmış durumda**.
-Dal push edilmedi — kullanıcı sabah kendisi push edecek.
+Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, **Task 5 uygulandı ama incelenmedi**,
+T6–T8 kaldı. Altyapı (Supabase, GitHub, kimlik bilgileri) **canlı ve doğrulanmış durumda**.
+Dal push edildi: `origin/faz-0-kayit-altyapisi` = `e0f0b1a` (ve sonrası).
 
 ### ⚠️ Task 5 uygulandı ama İNCELENMEDİ — ilk iş bu
 
@@ -78,8 +78,8 @@ yokken bile her gün veri birikmeli.
 | Bağlantı | `aws-0-eu-central-1.pooler.supabase.com:5432` (session pooler) | canlı bağlanıldı, `TimeZone=UTC` uygulandı |
 | Şema | `leagues`, `matches`, `odds_snapshots` + append-only tetikleyici | migrasyon uygulandı |
 | Append-only | UPDATE ve DELETE reddediliyor | **canlıda kanıtlandı** (geri alınan transaction içinde) |
-| Lig verisi | 6 lig yüklü, 0 maç, 0 defter satırı | sorgulandı |
-| GitHub | `popiliadam/football-edge` (public), dal `faz-0-kayit-altyapisi` | origin `fa6275f`'te |
+| Lig verisi | 6 lig yüklü, 0 maç, 0 defter satırı | sorgulandı (ilk snapshot henüz koşmadı) |
+| GitHub | `popiliadam/football-edge` (public), dal `faz-0-kayit-altyapisi` | push edildi, origin `e0f0b1a`+ |
 | Secrets | `ODDS_API_KEY`, `DATABASE_URL` depoda ayarlı | `gh secret list` |
 | Odds API | anahtar geçerli, **kota 500/500 bozulmadı** | `/v4/sports` HTTP 200, maliyet 0 |
 | Lig anahtarları | 6'sı da mevcut ve aktif (67 futbol anahtarı, 43 aktif) | `/v4/sports` çıktısı |
@@ -101,14 +101,19 @@ yokken bile her gün veri birikmeli.
 
 Sonra: final whole-branch inceleme (**Opus**, en yetenekli model), ardından main'e merge.
 
-## 6. Sabah kullanıcıyı bekleyen tek iş
+## 6. Push durumu
+
+Dal push edildi (kullanıcı elle): `fa6275f..e0f0b1a`. Sonraki commit'ler yerelde birikir.
+
+`outward_action_gate` push'u engelliyor, yani **asistan push edemez** — her push
+kullanıcının kendi terminalinden gelir:
 
 ```bash
-cd ~/dev/football-edge && git push -u origin faz-0-kayit-altyapisi
+cd ~/dev/football-edge && git push
 ```
 
-`outward_action_gate` push'u engelliyor; kullanıcı yerel-commit + sabah-push'u seçti.
-**Bedeli:** GitHub Actions gece koşmadı → workflow'lar canlı doğrulanmadı (bkz. §8).
+**Bedeli:** workflow'lar hâlâ canlı doğrulanmadı — `.github/workflows/` dosyaları Task 7'de
+yazılacak ve ancak push edildikten sonra Actions tetiklenir (bkz. §8).
 
 ## 7. Verilen kararlar (Ruling listesi)
 
