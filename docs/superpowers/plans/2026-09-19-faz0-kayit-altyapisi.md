@@ -1185,11 +1185,19 @@ git commit -m "feat: append-only defter şeması ve hash-zincirli yazma"
 **Interfaces:**
 - Consumes: `load_leagues`/`active_leagues` (Task 2), `fetch_odds`/`guard_quota`/`QuotaExhausted` (Task 3), `verify_chain` (Task 4), `connect`/`chain_head`/`upsert_matches`/`insert_snapshots` (Task 5)
 - Produces:
+  - `CollectResult` frozen dataclass: `written: int, quota: Quota | None, failed_leagues: tuple[str, ...]`
   - `horizon_iso(now: datetime, days: int) -> str`
   - `seal_window(commence_time: datetime, now: datetime, minutes: int) -> bool`
-  - `run_snapshot(conn, client, api_key, leagues, now, *, horizon_days=7, min_remaining=10) -> tuple[int, Quota | None]`
-  - `run_seal(conn, client, api_key, leagues, now, *, window_minutes=20, min_remaining=5) -> tuple[int, Quota | None]`
+  - `run_snapshot(conn, client, api_key, leagues, now, *, horizon_days=7, min_remaining=10) -> CollectResult`
+  - `run_seal(conn, client, api_key, leagues, now, *, window_minutes=20, min_remaining=5) -> CollectResult`
   - CLI: `python -m football_edge.collect snapshot|seal|verify-chain|publish-head`
+  - Çıkış kodları: `0` başarılı · `2` kredi tükendi · `3` en az bir lig toplanamadı (diğerleri toplandı)
+
+**Dayanıklılık kuralı:** tek bir ligin arızası (bozuk yanıt, HTTP hatası, eksik alan) diğer
+liglerin kapanış oranını kaçırmasına yol açmamalıdır — kaçan kapanış oranı geri gelmez.
+Bu yüzden lig döngüsü her ligi izole eder: hata loglanır, `failed_leagues`'a eklenir, döngü
+devam eder, ve komut sonunda **3 ile çıkar** ki CI kırmızı olsun. Sessizce geçmek yok.
+`QuotaExhausted` bu kuralın dışındadır: kredi bittiyse devam etmenin anlamı yok, yukarı fırlar.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1224,6 +1232,108 @@ def test_horizon_iso_formats_utc_with_z() -> None:
     assert horizon_iso(NOW, days=7) == "2026-09-26T12:00:00Z"
 ```
 
+Aynı dosyaya dayanıklılık testini de ekle — tek ligin arızası diğerlerini düşürmemeli:
+
+```python
+class _FakeCursor:
+    def __init__(self, recorder: list[str]) -> None:
+        self._recorder = recorder
+        self.description: object = None
+
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: object = None) -> None:
+        self._recorder.append(sql.strip().split()[0].upper())
+
+    def fetchone(self) -> None:
+        return None
+
+    def fetchall(self) -> list[object]:
+        return []
+
+
+class _FakeConn:
+    def __init__(self) -> None:
+        self.sql: list[str] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self) -> _FakeCursor:
+        return _FakeCursor(self.sql)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+ODDS_PAYLOAD = [
+    {
+        "id": "evt1",
+        "sport_key": "soccer_good",
+        "commence_time": "2026-09-20T14:00:00Z",
+        "home_team": "A",
+        "away_team": "B",
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-09-19T10:00:00Z",
+                "markets": [
+                    {"key": "h2h", "outcomes": [{"name": "A", "price": 1.9}, {"name": "B", "price": 4.0}]}
+                ],
+            }
+        ],
+    }
+]
+QUOTA_HEADERS = {
+    "x-requests-remaining": "400",
+    "x-requests-used": "100",
+    "x-requests-last": "1",
+}
+
+
+def _league(league_id: str, key: str) -> League:
+    return League(
+        id=league_id, odds_api_key=key, name=key, country="X", lang="en", gl="GB", active=True
+    )
+
+
+def test_collect_isolates_a_failing_league() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "soccer_bad" in str(request.url):
+            return httpx.Response(500, json={"message": "boom"})
+        return httpx.Response(200, json=ODDS_PAYLOAD, headers=QUOTA_HEADERS)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    leagues = (_league("bad.1", "soccer_bad"), _league("good.1", "soccer_good"))
+    conn = _FakeConn()
+
+    result = run_snapshot(conn, client, "KEY", leagues, NOW)  # type: ignore[arg-type]
+
+    assert result.failed_leagues == ("bad.1",)
+    assert result.written > 0, "sağlam lig yine de yazılmalıydı"
+    assert conn.rollbacks == 1
+    assert conn.commits == 1
+```
+
+Bu testin import satırı şöyle olmalı:
+```python
+import httpx
+
+from football_edge.collect import CollectResult, horizon_iso, run_snapshot, seal_window
+from football_edge.leagues import League
+```
+
+**Not:** `# type: ignore[arg-type]` yalnız bu test satırında kabul edilir — `_FakeConn` bilerek
+`psycopg.Connection` değildir. `src/` altında `type: ignore` kullanmak yasaktır ve mypy zaten
+yalnız `src`'i denetler.
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_collect.py -v`
@@ -1239,6 +1349,7 @@ import argparse
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1253,6 +1364,13 @@ from football_edge.odds_api import Quota, QuotaExhausted, fetch_odds, guard_quot
 
 LOGGER = logging.getLogger("football_edge.collect")
 LEAGUES_PATH = Path("config/leagues.yaml")
+
+
+@dataclass(frozen=True)
+class CollectResult:
+    written: int
+    quota: Quota | None
+    failed_leagues: tuple[str, ...]
 
 
 def horizon_iso(now: datetime, days: int) -> str:
@@ -1274,23 +1392,32 @@ def _collect(
     commence_time_to: str,
     is_closing: bool,
     min_remaining: int,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     written = 0
     quota: Quota | None = None
+    failed: tuple[str, ...] = ()
     for league in leagues:
         if quota is not None:
             guard_quota(quota, min_remaining)
-        rows, quota = fetch_odds(
-            client, api_key, league.odds_api_key, commence_time_to=commence_time_to
-        )
-        if not rows:
-            LOGGER.info("lig=%s maç yok", league.id)
+        try:
+            rows, quota = fetch_odds(
+                client, api_key, league.odds_api_key, commence_time_to=commence_time_to
+            )
+            if not rows:
+                LOGGER.info("lig=%s maç yok", league.id)
+                continue
+            upsert_matches(conn, rows, league.id)
+            written += insert_snapshots(conn, rows, now, is_closing=is_closing)
+            conn.commit()
+        except Exception:
+            # Tek bir ligin arızası diğer liglerin kapanış oranını kaçırmasına yol açmamalı.
+            # Kapanış oranı kaçarsa geri gelmez; bozuk bir lig ise sonraki turda tekrar denenir.
+            conn.rollback()
+            LOGGER.exception("lig=%s toplanamadı, diğer liglere devam ediliyor", league.id)
+            failed = (*failed, league.id)
             continue
-        upsert_matches(conn, rows, league.id)
-        written += insert_snapshots(conn, rows, now, is_closing=is_closing)
-        conn.commit()
         LOGGER.info("lig=%s satır=%d kalan_kredi=%d", league.id, len(rows), quota.remaining)
-    return written, quota
+    return CollectResult(written=written, quota=quota, failed_leagues=failed)
 
 
 def run_snapshot(
@@ -1302,7 +1429,7 @@ def run_snapshot(
     *,
     horizon_days: int = 7,
     min_remaining: int = 10,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     return _collect(
         conn,
         client,
@@ -1344,12 +1471,12 @@ def run_seal(
     *,
     window_minutes: int = 20,
     min_remaining: int = 5,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     due = _leagues_due_for_seal(conn, leagues, now, window_minutes)
     if not due:
         LOGGER.info("mühürlenecek maç yok")
-        return 0, None
-    written, quota = _collect(
+        return CollectResult(written=0, quota=None, failed_leagues=())
+    result = _collect(
         conn,
         client,
         api_key,
@@ -1359,16 +1486,22 @@ def run_seal(
         is_closing=True,
         min_remaining=min_remaining,
     )
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE matches SET sealed_at = %s
-            WHERE sealed_at IS NULL AND commence_time BETWEEN %s AND %s
-            """,
-            (now, now, now + timedelta(minutes=window_minutes)),
-        )
-    conn.commit()
-    return written, quota
+    # Yalnız gerçekten toplanabilen ligler mühürlenmiş sayılır; başarısız lig
+    # sealed_at almaz ki sonraki tur tekrar denesin.
+    sealed_leagues = tuple(lg.id for lg in due if lg.id not in result.failed_leagues)
+    if sealed_leagues:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE matches SET sealed_at = %s
+                WHERE sealed_at IS NULL
+                  AND league_id = ANY(%s)
+                  AND commence_time BETWEEN %s AND %s
+                """,
+                (now, list(sealed_leagues), now, now + timedelta(minutes=window_minutes)),
+            )
+        conn.commit()
+    return result
 
 
 def _require_env(name: str) -> str:
@@ -1445,14 +1578,18 @@ def main(argv: list[str] | None = None) -> int:
                 # Ayrı if/else: run_snapshot ve run_seal farklı keyword argümanlara
                 # sahip, tek değişkene atanınca mypy --strict uyumsuzluk bildirir.
                 if args.command == "snapshot":
-                    written, quota = run_snapshot(conn, client, api_key, leagues, now)
+                    result = run_snapshot(conn, client, api_key, leagues, now)
                 else:
-                    written, quota = run_seal(conn, client, api_key, leagues, now)
+                    result = run_seal(conn, client, api_key, leagues, now)
             except QuotaExhausted:
                 LOGGER.exception("kredi tükendi, iş durduruldu")
                 return 2
-        remaining = "bilinmiyor" if quota is None else str(quota.remaining)
-        sys.stdout.write(f"yazılan satır: {written}, kalan kredi: {remaining}\n")
+        remaining = "bilinmiyor" if result.quota is None else str(result.quota.remaining)
+        sys.stdout.write(f"yazılan satır: {result.written}, kalan kredi: {remaining}\n")
+        if result.failed_leagues:
+            # Diğer ligler toplandı ama bu sessizce geçilmemeli: CI kırmızı olmalı.
+            sys.stdout.write("başarısız ligler: " + ", ".join(result.failed_leagues) + "\n")
+            return 3
     return 0
 
 
