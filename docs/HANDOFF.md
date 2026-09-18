@@ -37,7 +37,18 @@ yazmıştı ama **commit etmemişti**. Taze oturum başlarken çalışma ağacı
   Supabase projesi ZATEN var, 6 lig ZATEN yüklü — Step 4'te yalnız SQL DOSYASINI oluşturacak,
   hiçbir şeyi uygulamayacak.
 
+**(C) Üçüncü ihtimal:** ajan bu satırlar yazıldıktan sonra commit'ini tamamlamış olabilir.
+O zaman `git status` temiz olur ve `git log` içinde *"feat: append-only defter şeması ve
+hash-zincirli yazma"* mesajlı bir commit görürsün. Bu durumda Task 5 **uygulandı ama
+İNCELENMEDİ** demektir — implementer raporu `task-5-report.md`'de olabilir, ama inceleme
+ajanı hiç gönderilmedi. Doğrudan inceleme adımına geç:
+`"$SDD/scripts/review-package" "$PLAN" 1949bee <o commit>` ve inceleme ajanını gönder.
+
 Hangisini seçersen seç, **`git status` temiz olmadan sonraki göreve geçme.**
+
+**Her üç durumda da ortak olan:** Task 5'in incelemesi HİÇ yapılmadı. Diğer dört görevin
+her biri ayrı bir inceleme ajanından geçti; Task 5 geçmedi. İnceleme atlanmış bir görevin
+üstüne inşa etmeyin.
 
 ## 2. Taze oturumun ilk beş komutu
 
