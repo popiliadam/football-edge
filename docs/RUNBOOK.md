@@ -128,3 +128,108 @@ Bu kilitlenme değildir: kontrol koşar, yalnız **daha eski** bir çıpadan ko�
 bozuksa (eksik alan, sayı olmayan `rows`/`last_id`) sebebi bulunur; içerik kasten
 değiştirilmişse §1.3'teki kurcalama dalına gidilir. Sessizce görmezden gelinmez:
 düşürülmüş kontrol de geçmiş sayılmaz.
+
+---
+
+## 2. Zincir çatalı — iki eşzamanlı yazar defteri kalıcı olarak kırdı
+
+### 2.1 Nasıl tanınır
+
+`verify-chain` şunu yazar ve **her turda aynısını yazar**:
+
+```
+zincir: KIRIK kontrol=<N> baş=<16 hane> hata=prev_hash zincire uymuyor
+```
+
+`hata=` alanı ayırt edicidir:
+
+| `hata=` | ne demek | nereye |
+|---|---|---|
+| `prev_hash zincire uymuyor` | zincir **çatallandı**: iki satır aynı önceki hash'ten türemiş | §2.2 |
+| `row_hash içerikle uyuşmuyor` | bir satırın **İÇERİĞİ** değişmiş — çatal değil | **kurcalama şüphesi** → §1.3 |
+
+### 2.2 Teşhis: çatal mı, kurcalama mı?
+
+Çatalın imzası **aynı `prev_hash`ı paylaşan iki satırdır**. Kurcalamada böyle bir
+çift yoktur; kurcalanan satırın kendi hash'i kendi yükünü üretmez.
+
+```sql
+select prev_hash, count(*) as dal, min(id) as ilk, max(id) as son
+from odds_snapshots
+group by prev_hash
+having count(*) > 1
+order by ilk;
+```
+
+- **Satır dönerse → çatal.** `ilk` ve `son` id'lerin `observed_at`ları birbirine çok
+  yakındır (aynı turun iki yazarı). §2.3'e geç.
+- **Hiç satır dönmezse** ama zincir yine kırıksa: bu çatal değildir. §1.3'teki
+  kurcalama dalına gidilir, hiçbir şey taşınmaz, durum bir insana eskale edilir.
+
+### 2.3 Neden onarılamaz — ve `DISABLE TRIGGER` neden YASAK
+
+Çatalı "düzeltmenin" tek teknik yolu bozuk satırı **silmektir**. O yol kapalıdır:
+
+- `DELETE` append-only tetikleyicisine çarpar (`odds_snapshots append-only bir
+  defterdir; DELETE reddedildi`). **Bu doğru davranıştır.**
+- Toplayıcı bugün tablonun **sahibi** olarak bağlanıyor, yani `ALTER TABLE
+  odds_snapshots DISABLE TRIGGER ...` teknik olarak elinin altında. **Asla
+  kullanılmaz.** Bir kez kullanıldığında ürünün sattığı şey geriye dönük biter:
+  o tarihten sonra hiç kimse — operatörün kendisi dâhil — bir satırın prosedürle mi
+  yoksa saldırganla mı kaldırıldığını ayırt edemez. Tetikleyiciyi kapatan bir
+  prosedür, bypass bayrağının SQL'ce yazılmış hâlidir (§1.2).
+
+Yani defter onarılmaz. Yapılabilecek tek dürüst şey **kesittir**: kırık defter
+olduğu gibi saklanır, yeni defter yanında başlatılır, ve **neyin kaybedildiği yazılır.**
+
+### 2.4 Önce SEBEBİ kapat — yoksa kesit bir sonraki turda yeniden kırılır
+
+Çatal, kilitsiz bir yazma yolundan gelir. Kesitten **önce** koşan kodun
+`src/football_edge/db.py` içindeki `lock_ledger`ı çağırdığı doğrulanır:
+
+```bash
+git -C . grep -n "pg_advisory_xact_lock" -- src/football_edge/db.py
+# beklenen: insert_snapshots'ın İLK ifadesi olarak alınan kilit
+```
+
+Ayrıca **elle koşan tur kalmadığı** teyit edilir: iki cron aynı `odds-collect`
+concurrency grubundadır, ama bir dizüstünden koşulan `collect snapshot` o grubun
+**içinde değildir.** Kilit bu ikinciyi de yakalar — ama yalnız kilitli sürüm koşuyorsa.
+
+### 2.5 Kesit — tablo SİLİNMEZ, yeniden adlandırılır
+
+```sql
+-- 1) Kırık defter DURUR, yalnız adı değişir. drop/truncate YOK.
+alter table odds_snapshots rename to odds_snapshots_kirik_20260919;
+alter table odds_snapshots_kirik_20260919 rename constraint odds_snapshots_row_hash_key
+  to odds_snapshots_kirik_20260919_row_hash_key;
+
+-- 2) Yeni defter 0001_init.sql'den yeniden kurulur (tetikleyici dâhil).
+--    Eski tablo yerinde durduğu için hiçbir satır kaybolmaz.
+```
+
+Sonra çıpalar §1.4'teki prosedürle `ledger/archive/` altına **taşınır** (silinmez) ve
+gerekçe notuna **ne kaybedildiği** yazılır:
+
+```
+**KAYBEDİLEN KANIT:** <ilk_id>..<son_id> arasındaki çatal onarılamadı. O aralık için
+zincir kanıtı yoktur; satırlar odds_snapshots_kirik_20260919 tablosunda DURUYOR ama
+hash zinciri onları artık doğrulamıyor. Çatalın sebebi: <kilitsiz sürüm / elle tur>.
+```
+
+### 2.6 Kesit sonrası — kapı ne demeli
+
+```bash
+uv run python -m football_edge.collect verify-chain
+# beklenen: "çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI"
+#           + "zincir: SAĞLAM kontrol=0"
+
+uv run python -m football_edge.collect publish-head
+# beklenen: "zincir başı yazıldı: ledger/head-YYYY-MM-DD.txt"
+```
+
+`ATLANDI` bir tur beklenir, sonra kaybolmalıdır (§1.5). Kaybolmuyorsa çıpa
+yazılmıyordur → §1.1.
+
+**Kesit bedava değildir:** CLV kapanış fiyatını eski defterden okumak isteyen Faz 1
+kodu artık iki tabloya bakmak zorundadır. Bu borç `docs/DEFERRED.md`'ye yazılır.

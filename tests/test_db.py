@@ -8,10 +8,15 @@ from functools import lru_cache
 import pytest
 
 from football_edge.collect import _ledger_rows
-from football_edge.db import insert_snapshots, snapshot_payload, upsert_matches
+from football_edge.db import (
+    LEDGER_LOCK_KEY,
+    insert_snapshots,
+    snapshot_payload,
+    upsert_matches,
+)
 from football_edge.ledger import chain, verify_chain
 from football_edge.odds_api import PriceRow
-from tests.fake_db import FakeChainDb, stored_row
+from tests.fake_db import FakeChainDb, FakeLedgerDb, stored_row
 
 ROW = PriceRow(
     event_id="abc123",
@@ -130,6 +135,52 @@ def test_insert_snapshots_names_only_matches_actually_written() -> None:
 
     assert written == ("abc123", "abc123"), "ON CONFLICT ile düşen satır yazılmış sayılmamalı"
     assert "def456" not in written, "tek satırı düşen maç yazılmış sayılamaz"
+
+
+# ── C2: iki eşzamanlı yazar zinciri KALICI olarak kırıyordu ─────────────────
+# `insert_snapshots` önce zincir başını OKUR, sonra ondan zincirleyip YAZAR.
+# READ COMMITTED altında iki yazar aynı başı okur ve ikisi de ondan zincirler.
+# UNIQUE (row_hash) bunu YAKALAMAZ: yükler farklı → hash'ler farklı. İkisi de
+# commit eder, `verify_chain` "prev_hash zincire uymuyor" der ve bu KALICIDIR —
+# append-only tetikleyici bozuk satırı sildirmez, `verify-chain` exit 1 de
+# `publish-head`i durdurur, yani kanıt üretimi biter.
+#
+# Bugün ulaşılabilir: iki cron aynı concurrency grubunda, ama dizüstünden elle
+# koşulan bir `collect snapshot` o grubun içinde değildir.
+
+
+def _index_of(statements: list[str], needle: str) -> int | None:
+    for index, text in enumerate(statements):
+        if needle in text:
+            return index
+    return None
+
+
+def test_insert_snapshots_locks_the_ledger_before_reading_the_chain_head() -> None:
+    """Kilit, BAŞ OKUMASINDAN önce alınmalı — sonra alınırsa hiçbir şey serileşmez."""
+    db = FakeLedgerDb(leagues={"eng.1": ("eng.1",)})
+
+    insert_snapshots(db, (ROW,), OBSERVED, is_closing=False)  # type: ignore[arg-type]
+
+    lock = _index_of(db.statements, "pg_advisory_xact_lock")
+    head = _index_of(db.statements, "SELECT row_hash FROM odds_snapshots")
+    assert lock is not None, "defter kilidi hiç alınmıyor: iki yazar aynı baştan zincirler"
+    assert head is not None, "baş okuması hiç koşmadı — test kurgusu bayatlamış"
+    assert lock < head, (
+        f"kilit baş okumasından SONRA alınmış (kilit={lock}, baş={head}): "
+        "iki yazar da başı okuduktan sonra sıraya girer, zincir yine çatallanır"
+    )
+
+
+def test_insert_snapshots_takes_the_one_shared_lock_key() -> None:
+    """Anahtar SABİT ve paylaşımlı olmalı; yazar başına farklı anahtar kimseyi bekletmez."""
+    db = FakeLedgerDb(leagues={"eng.1": ("eng.1",)})
+
+    insert_snapshots(db, (ROW,), OBSERVED, is_closing=False)  # type: ignore[arg-type]
+
+    assert db.lock_keys == [LEDGER_LOCK_KEY], (
+        f"kilit anahtarı modül sabiti değil: {db.lock_keys!r} — yazarlar serileşmez"
+    )
 
 
 def test_upsert_matches_counts_only_rows_actually_written() -> None:

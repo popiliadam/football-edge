@@ -114,6 +114,13 @@ class FakeLedgerDb:
     # saklanmıştı: rollback satırları geri alır, kod ise match_id'leri yazılmış sayıp
     # mühürler. Mühürlenen maç bir daha denenmez; kapanış fiyatı geri gelmez.
     commit_fails: Callable[[FakeLedgerDb], bool] | None = None
+    # Yürütülen SQL'in kanonik metni, SIRASIYLA. Sıra yük taşır: zincir başı
+    # okunmadan ÖNCE defter kilidi alınmazsa iki eşzamanlı yazar aynı baştan
+    # zincirler ve defter KALICI olarak kırılır (append-only: bozuk satır silinemez).
+    statements: list[str] = field(default_factory=list)
+    # pg_advisory_xact_lock'a geçirilen anahtarlar. Her yazar AYNI sayıyı istemezse
+    # kimse kimseyi beklemez; kilit çağrısının varlığı tek başına yetmez.
+    lock_keys: list[Any] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._committed = self._state()
@@ -202,8 +209,11 @@ class _LedgerCursor:
 
     def execute(self, sql: str, params: Any = None) -> None:
         text = " ".join(sql.split())
+        self._db.statements = [*self._db.statements, text]
         self.rowcount, self._result = 0, []
-        if text.startswith("INSERT INTO leagues"):
+        if text.startswith("SELECT pg_advisory_xact_lock"):
+            self._db.lock_keys = [*self._db.lock_keys, None if not params else params[0]]
+        elif text.startswith("INSERT INTO leagues"):
             self.rowcount = self._db.put_league(params)
         elif text.startswith("INSERT INTO matches"):
             self.rowcount = self._db.put_match(params)

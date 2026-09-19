@@ -42,6 +42,28 @@ def test_runbook_recovery_archives_the_anchors_instead_of_deleting_them() -> Non
     assert "gerekçe" in text, "arşivleme gerekçesinin kayda geçirileceği yazılmamış"
 
 
+def test_runbook_covers_a_chain_broken_by_two_concurrent_writers() -> None:
+    """C2: kilit koda girdi, ama ZATEN kırılmış bir defterin çıkışı yazılı değildi.
+
+    Kilitsiz koşmuş her tur bu çatalı bırakmış olabilir ve çatal onarılamaz:
+    append-only tetikleyici bozuk satırı sildirmez. Prosedür yoksa operatörün
+    elinde kalan tek "çözüm" tetikleyiciyi kapatmaktır — ürünün iddiasını o an bitirir.
+    """
+    text = _runbook()
+
+    assert "prev_hash zincire uymuyor" in text, "çatalın teşhis çıktısı yazılmamış"
+    assert "DISABLE TRIGGER" in text, "tetikleyiciyi kapatma yasağı adıyla yazılmamış"
+    assert "pg_advisory_xact_lock" in text, "önce SEBEBİN kapatılacağı yazılmamış"
+
+
+def test_runbook_never_offers_deleting_the_broken_row() -> None:
+    """Tek onarım yolu satırı silmektir ve o yol KAPALIDIR: yerine kesit prosedürü var."""
+    text = _runbook()
+
+    assert "DELETE" in text and "asla" in text.lower(), "silme yasağı yazılmamış"
+    assert "rename" in text.lower(), "bozuk defterin silinmeyip yeniden adlandırılacağı yazılmamış"
+
+
 def test_phase_handoff_points_at_the_runbook() -> None:
     """Runbook, kimsenin bakmadığı bir dosyada durursa yok sayılır."""
     assert "RUNBOOK.md" in PHASE_HANDOFF.read_text(encoding="utf-8"), (

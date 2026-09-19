@@ -10,6 +10,26 @@ from football_edge.leagues import League
 from football_edge.ledger import GENESIS, canonical_timestamp, chain
 from football_edge.odds_api import PriceRow
 
+# ── DEFTER YAZMA KİLİDİ ─────────────────────────────────────────────────────
+# `insert_snapshots` önce zincir başını OKUR, sonra ondan zincirleyip YAZAR.
+# READ COMMITTED altında (Postgres varsayılanı) bu kilitsiz bir oku-sonra-yazdır:
+# iki yazar aynı başı `H` okur, ikisi de `H`den zincirler, ikisi de commit eder.
+# UNIQUE (row_hash) bunu YAKALAMAZ — yükler farklı olduğu için hash'ler de farklı.
+# Sonuç KALICIDIR: `verify_chain` o çatalda sonsuza dek "prev_hash zincire uymuyor"
+# der, append-only tetikleyici bozuk satırı sildirmez, `verify-chain` exit 1 de
+# `publish-head`i durdurur — yani kanıt üretimi tamamen durur.
+#
+# Neden `pg_advisory_xact_lock`: TRANSACTION kapsamlıdır, commit ya da rollback'te
+# kendiliğinden bırakılır (düşen yazar kilidi tutamaz) ve hem session (5432) hem
+# transaction (6543) Supabase pooler'ında çalışır — `pg_advisory_lock` transaction
+# pooler'da bırakılmayan kilit sızdırırdı.
+#
+# Anahtar SABİT ve TEK olmalı: yazarlar aynı sayıyı istemezse kimse kimseyi
+# beklemez ve kilit hiçbir şey serileştirmez. Değer keyfîdir, yalnız bu defter
+# için ayrılmıştır ve DEĞİŞTİRİLEMEZ — eski sürümü koşan bir yazar kalırsa
+# serileşme sessizce biter.
+LEDGER_LOCK_KEY = 0x0DD51EDE  # "ODDS-LEDGE" — keyfî ama sabit
+
 
 def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     resolved = dsn or os.getenv("DATABASE_URL")
@@ -39,6 +59,16 @@ def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) 
         ),
         "is_closing": is_closing,
     }
+
+
+def lock_ledger(conn: psycopg.Connection[Any]) -> None:
+    """Defter yazma kilidini alır; `insert_snapshots`ın İLK ifadesi budur.
+
+    Kilit baş okumasından SONRA alınırsa hiçbir şey serileşmez: iki yazar da başı
+    okuduktan sonra sıraya girer ve yine aynı baştan zincirler. Sıra yük taşır.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_xact_lock(%s)", (LEDGER_LOCK_KEY,))
 
 
 def chain_head(conn: psycopg.Connection[Any]) -> str:
@@ -118,7 +148,12 @@ def insert_snapshots(
     bir maça `sealed_at` basılırsa maç bir daha denenmez ve kapanış fiyatı kalıcı olarak
     kaybolur. Denenen satır da sayılmaz: `ON CONFLICT DO NOTHING` sessizce satır düşürür
     ve yeniden deneme senaryosunda tüm batch no-op olabilir.
+
+    İLK İFADE defter kilididir: baş okuması ile insert arasındaki yarış, zinciri
+    KALICI olarak çatallar (bkz. LEDGER_LOCK_KEY). Kilit transaction kapsamlı
+    olduğu için çağıranın commit/rollback'inde kendiliğinden bırakılır.
     """
+    lock_ledger(conn)
     payloads = tuple(snapshot_payload(row, observed_at, is_closing=is_closing) for row in rows)
     linked = chain(payloads, prev_hash=chain_head(conn))
     written: tuple[str, ...] = ()
