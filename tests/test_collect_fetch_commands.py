@@ -1,11 +1,18 @@
-"""M1/M7 — `fetch-tff`/`fetch-venues`/`fetch-news`/`fetch-results` kablolaması.
+"""M1/M7/R50 — `fetch-footystats`/`fetch-tff`/`fetch-venues`/`fetch-news`/`fetch-results`
+kablolaması.
 
-Bu dosya `collect.py`nin DAĞITIM (dispatch) katmanını sınar: doğru toplayıcı fonksiyon
-çağrılıyor mu, sonuç doğru satırlarla raporlanıyor mu, doğru çıkış kodu dönüyor mu.
-Toplayıcıların KENDİ mantığı (izolasyon, UTC dönüşümü, M6 kararı, ...) zaten
-`tests/test_venues.py`, `tests/test_news.py`, `tests/test_results.py`de kanıtlanmış —
-burada TEKRAR edilmez. `collect.*` fonksiyonları monkeypatch'lenir (aynı desen:
-`test_collect_main.py::test_main_spends_no_credit_when_the_league_mirror_fails`).
+Bu dosya DAĞITIM (dispatch) katmanını sınar: doğru toplayıcı fonksiyon çağrılıyor mu,
+sonuç doğru satırlarla raporlanıyor mu, doğru çıkış kodu dönüyor mu. Toplayıcıların
+KENDİ mantığı (izolasyon, UTC dönüşümü, M6 kararı, ...) zaten `tests/test_venues.py`,
+`tests/test_news.py`, `tests/test_results.py`de kanıtlanmış — burada TEKRAR edilmez.
+
+R50 (Task 11): beş `_fetch_*_command` fonksiyonu `collect.py`den `fetch.py`ye taşındı
+(collect.py 774/800 satırdaydı, #M41). `fetch.*` fonksiyonları monkeypatch'lenir (aynı
+desen: `test_collect_main.py::test_main_spends_no_credit_when_the_league_mirror_fails`)
+— ama artık `collect` DEĞİL `fetch` modülünün namespace'inde, çünkü taşınan fonksiyonlar
+serbest değişkenlerini KENDİ tanımlandıkları modülün globals'ından çözer. `main()` hâlâ
+`collect.py`de yaşıyor ve `connect()`i hâlâ oradan çağırıyor — o yüzden "uçtan uca"
+testler `collect.main(...)`i çağırmaya, `collect.connect`i yamalamaya devam ediyor.
 """
 
 from __future__ import annotations
@@ -15,7 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from football_edge import collect
+from football_edge import collect, fetch
+from football_edge.collectors.footystats import FootyStatsResult
 from football_edge.collectors.news import NewsCollectResult
 from football_edge.collectors.results import ResultsCollectResult
 from football_edge.collectors.venues import VenuesResult
@@ -34,6 +42,44 @@ class _RollbackCountingConn:
 
 
 # ---------------------------------------------------------------------------
+# fetch-footystats — R50 öncesi `main()` içine gömülüydü, hiç doğrudan test
+# edilmemişti (yalnız `collectors/test_footystats.py` ayrıştırıcıyı sınıyordu).
+# Taşıma bu boşluğu görünür kıldı; kardeşleriyle aynı desende iki test eklendi.
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_footystats_command_reports_written_count_and_returns_zero(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        fetch, "collect_footystats", lambda *a, **k: FootyStatsResult(written=6, failed_leagues=())
+    )
+
+    code = fetch._fetch_footystats_command(object(), object(), NOW)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "footystats: 6 yeni gözlem" in out
+    assert "başarısız" not in out
+
+
+def test_fetch_footystats_command_names_failed_leagues_and_returns_exit_league_failed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        fetch,
+        "collect_footystats",
+        lambda *a, **k: FootyStatsResult(written=2, failed_leagues=("tur.1",)),
+    )
+
+    code = fetch._fetch_footystats_command(object(), object(), NOW)
+
+    out = capsys.readouterr().out
+    assert code == collect.EXIT_LEAGUE_FAILED
+    assert "footystats başarısız ligler: tur.1" in out
+
+
+# ---------------------------------------------------------------------------
 # fetch-tff
 # ---------------------------------------------------------------------------
 
@@ -41,9 +87,9 @@ class _RollbackCountingConn:
 def test_fetch_tff_command_reports_written_count_and_returns_zero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(collect, "collect_tff", lambda *a, **k: 7)
+    monkeypatch.setattr(fetch, "collect_tff", lambda *a, **k: 7)
 
-    code = collect._fetch_tff_command(object(), object(), NOW)
+    code = fetch._fetch_tff_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -56,10 +102,10 @@ def test_fetch_tff_command_rolls_back_and_returns_exit_source_failed_on_exceptio
     def boom(*args: object, **kwargs: object) -> int:
         raise RuntimeError("tff sayfası çekilemedi")
 
-    monkeypatch.setattr(collect, "collect_tff", boom)
+    monkeypatch.setattr(fetch, "collect_tff", boom)
     conn = _RollbackCountingConn()
 
-    code = collect._fetch_tff_command(conn, object(), NOW)  # type: ignore[arg-type]
+    code = fetch._fetch_tff_command(conn, object(), NOW)  # type: ignore[arg-type]
 
     out = capsys.readouterr().out
     assert code == collect.EXIT_SOURCE_FAILED
@@ -76,12 +122,12 @@ def test_fetch_venues_command_reports_written_and_returns_zero_when_nothing_fail
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        collect,
+        fetch,
         "collect_venues",
         lambda *a, **k: VenuesResult(written=3, failed_venues=(), failed_matches=()),
     )
 
-    code = collect._fetch_venues_command(object(), object(), NOW)
+    code = fetch._fetch_venues_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -93,14 +139,14 @@ def test_fetch_venues_command_names_failed_venues_and_matches_and_returns_exit_s
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        collect,
+        fetch,
         "collect_venues",
         lambda *a, **k: VenuesResult(
             written=1, failed_venues=("Q81492",), failed_matches=("evt-bad",)
         ),
     )
 
-    code = collect._fetch_venues_command(object(), object(), NOW)
+    code = fetch._fetch_venues_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == collect.EXIT_SOURCE_FAILED
@@ -118,12 +164,12 @@ def test_fetch_news_command_reports_self_stamped_count_without_failing(
 ) -> None:
     """M6: kendi-damgalı öğe sayısı BAŞARILI bir turda da adıyla raporlanır — sessiz kalmaz."""
     monkeypatch.setattr(
-        collect,
+        fetch,
         "collect_news",
         lambda *a, **k: NewsCollectResult(written=5, self_stamped=2, failed_sources=()),
     )
 
-    code = collect._fetch_news_command(object(), object(), NOW)
+    code = fetch._fetch_news_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -135,12 +181,12 @@ def test_fetch_news_command_names_failed_sources_and_returns_exit_source_failed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        collect,
+        fetch,
         "collect_news",
         lambda *a, **k: NewsCollectResult(written=0, self_stamped=0, failed_sources=("ajansspor",)),
     )
 
-    code = collect._fetch_news_command(object(), object(), NOW)
+    code = fetch._fetch_news_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == collect.EXIT_SOURCE_FAILED
@@ -168,7 +214,7 @@ def test_fetch_results_command_reports_scoreless_and_returns_zero(
         "    footystats_path: /good/xg\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(collect, "LEAGUES_PATH", leagues_path)
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", leagues_path)
     monkeypatch.setenv("ODDS_API_KEY", "TEST-KEY")
     seen_leagues: list[tuple[str, ...]] = []
 
@@ -179,9 +225,9 @@ def test_fetch_results_command_reports_scoreless_and_returns_zero(
         assert api_key == "TEST-KEY"
         return ResultsCollectResult(written=2, failed_leagues=(), scoreless_completed=("evt9",))
 
-    monkeypatch.setattr(collect, "collect_results", fake_collect_results)
+    monkeypatch.setattr(fetch, "collect_results", fake_collect_results)
 
-    code = collect._fetch_results_command(object(), object(), NOW)
+    code = fetch._fetch_results_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -194,20 +240,20 @@ def test_fetch_results_command_reuses_exit_league_failed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """M7 kararı: `fetch-results` GERÇEKTEN lig döngüler — `EXIT_LEAGUE_FAILED`ı DOĞRU
-    biçimde yeniden kullanır, `EXIT_SOURCE_FAILED` ALMAZ (bkz. collect.py'deki yorum)."""
+    biçimde yeniden kullanır, `EXIT_SOURCE_FAILED` ALMAZ (bkz. fetch.py'deki yorum)."""
     leagues_path = tmp_path / "leagues.yaml"
     leagues_path.write_text("leagues: []\n", encoding="utf-8")
-    monkeypatch.setattr(collect, "LEAGUES_PATH", leagues_path)
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", leagues_path)
     monkeypatch.setenv("ODDS_API_KEY", "TEST-KEY")
     monkeypatch.setattr(
-        collect,
+        fetch,
         "collect_results",
         lambda *a, **k: ResultsCollectResult(
             written=0, failed_leagues=("bad.1",), scoreless_completed=()
         ),
     )
 
-    code = collect._fetch_results_command(object(), object(), NOW)
+    code = fetch._fetch_results_command(object(), object(), NOW)
 
     out = capsys.readouterr().out
     assert code == collect.EXIT_LEAGUE_FAILED
@@ -220,11 +266,11 @@ def test_fetch_results_command_requires_odds_api_key(
 ) -> None:
     leagues_path = tmp_path / "leagues.yaml"
     leagues_path.write_text("leagues: []\n", encoding="utf-8")
-    monkeypatch.setattr(collect, "LEAGUES_PATH", leagues_path)
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", leagues_path)
     monkeypatch.delenv("ODDS_API_KEY", raising=False)
 
     with pytest.raises(RuntimeError, match="ODDS_API_KEY"):
-        collect._fetch_results_command(object(), object(), NOW)
+        fetch._fetch_results_command(object(), object(), NOW)
 
 
 # ---------------------------------------------------------------------------
@@ -233,12 +279,32 @@ def test_fetch_results_command_requires_odds_api_key(
 # ---------------------------------------------------------------------------
 
 
+def test_main_routes_fetch_footystats_end_to_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R50: footystats artık inline değil, `fetch._fetch_footystats_command`."""
+    db = FakeLedgerDb()
+    leagues_path = tmp_path / "leagues.yaml"
+    leagues_path.write_text("leagues: []\n", encoding="utf-8")
+    monkeypatch.setattr(collect, "connect", lambda: db)
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", leagues_path)
+    monkeypatch.setattr(
+        fetch, "collect_footystats", lambda *a, **k: FootyStatsResult(written=6, failed_leagues=())
+    )
+
+    code = collect.main(["fetch-footystats"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "footystats: 6 yeni gözlem" in out
+
+
 def test_main_routes_fetch_tff_end_to_end(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     db = FakeLedgerDb()
     monkeypatch.setattr(collect, "connect", lambda: db)
-    monkeypatch.setattr(collect, "collect_tff", lambda *a, **k: 4)
+    monkeypatch.setattr(fetch, "collect_tff", lambda *a, **k: 4)
 
     code = collect.main(["fetch-tff"])
 
@@ -250,7 +316,7 @@ def test_main_routes_fetch_tff_end_to_end(
 def test_main_routes_fetch_venues_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     db = FakeLedgerDb()
     monkeypatch.setattr(collect, "connect", lambda: db)
-    monkeypatch.setattr(collect, "collect_venues", lambda *a, **k: VenuesResult(written=0))
+    monkeypatch.setattr(fetch, "collect_venues", lambda *a, **k: VenuesResult(written=0))
 
     assert collect.main(["fetch-venues"]) == 0
 
@@ -258,7 +324,7 @@ def test_main_routes_fetch_venues_end_to_end(monkeypatch: pytest.MonkeyPatch) ->
 def test_main_routes_fetch_news_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     db = FakeLedgerDb()
     monkeypatch.setattr(collect, "connect", lambda: db)
-    monkeypatch.setattr(collect, "collect_news", lambda *a, **k: NewsCollectResult(written=0))
+    monkeypatch.setattr(fetch, "collect_news", lambda *a, **k: NewsCollectResult(written=0))
 
     assert collect.main(["fetch-news"]) == 0
 
@@ -270,9 +336,9 @@ def test_main_routes_fetch_results_end_to_end(
     leagues_path = tmp_path / "leagues.yaml"
     leagues_path.write_text("leagues: []\n", encoding="utf-8")
     monkeypatch.setattr(collect, "connect", lambda: db)
-    monkeypatch.setattr(collect, "LEAGUES_PATH", leagues_path)
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", leagues_path)
     monkeypatch.setenv("ODDS_API_KEY", "TEST-KEY")
-    monkeypatch.setattr(collect, "collect_results", lambda *a, **k: ResultsCollectResult(written=0))
+    monkeypatch.setattr(fetch, "collect_results", lambda *a, **k: ResultsCollectResult(written=0))
 
     assert collect.main(["fetch-results"]) == 0
 
