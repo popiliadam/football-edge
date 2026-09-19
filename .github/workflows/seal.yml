@@ -56,6 +56,13 @@ jobs:
             2) echo "::error::kredi tükendi (exit 2) — mühür turu erken kapandı" ;;
             3) echo "::error::en az bir lig mühürlenemedi (exit 3) — diğerleri mühürlendi" ;;
             4) echo "::error::lig aynası tazelenemedi (exit 4) — mühür turu hiç koşmadı, MÜHÜR KAÇTI" ;;
+            # Kalıcı veri kaybı: başlama saati geçmiş ve hâlâ mühürsüz bir maç var.
+            # O maçın kapanış fiyatı bir daha OLUŞMAZ; sonraki tur telafi edemez.
+            # Bu kod eskiden 0'dı ve buradaki `0)` arm'ı onu "mühür turu tamam"
+            # diye okuyordu — Faz 0'ın önlemek için var olduğu TEK sonuç, başarı
+            # olarak raporlanıyordu. Kaçan maçların id'leri adım logunda:
+            # "kaçan mühür: <id>, <id>".
+            5) echo "::error::kaçan mühür (exit 5) — kapanış fiyatı KALICI olarak kayıp, id'ler adım logunda" ;;
             *) echo "::error::mühür beklenmedik kodla düştü (exit $code)" ;;
           esac
           # BURADA EXIT EDİLMEZ — kasıtlı. Adım burada düşerse zincir doğrulaması,

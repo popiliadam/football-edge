@@ -37,6 +37,21 @@ ANCHOR_DIR = Path("ledger")
 # db/migrations/0001_init.sql → check (price > 1.0). Şema kısıtının kod tarafındaki karşılığı.
 MIN_PRICE = 1.0
 
+# ── ÇIKIŞ KODLARI ───────────────────────────────────────────────────────────
+# Her kodun `.github/workflows/*.yml` içinde ADLANDIRILMIŞ bir `case` arm'ı vardır;
+# adı olmayan kod `*)` dalına düşer ve operatör arızayı ayırt edemez. Kod eklenince
+# workflow da güncellenir — `tests/test_workflows.py` bu bağı kapıda tutar.
+#
+# 0 ve 1 ayrılmıştır: 0 yalnız arızasız tur, 1 ise zincir kırığı (`verify-chain`)
+# ve Python'ın kendi beklenmedik arızaları.
+EXIT_QUOTA_EXHAUSTED = 2
+EXIT_LEAGUE_FAILED = 3
+EXIT_MIRROR_FAILED = 4
+# Kaçan mühür GERİ ALINAMAZ: maçın kapanış fiyatı bir daha oluşmaz. Bu yüzden 0
+# olamaz — 0, seal.yml'de "mühür turu tamam" diye okunur ve Faz 0'ın önlemek için
+# var olduğu TEK sonuç başarı olarak raporlanır.
+EXIT_MISSED_SEAL = 5
+
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
            bookmaker_last_update, is_closing, prev_hash, row_hash
@@ -559,13 +574,22 @@ def _exit_code(result: CollectResult) -> int:
 
     Kod, dalların arasından erken dönüldüğünde aynı turdaki ikinci arıza hiç
     yazılmıyordu: kredi bittiğinde operatör hangi ligin de düştüğünü öğrenemiyordu.
+
+    SIRA yalnız TEK bir sayıya indirgeme sırasıdır, önem sırası değil: aynı turun
+    her arızası `_report` tarafından zaten adıyla yazılır. Yerleşik üç basamak
+    dokunulmadan bırakıldı (kredi bitişi en üstte — incelenmiş davranış);
+    `missed_seals` en alta eklendi, çünkü yukarıdaki üçünün her biri zaten kırmızı
+    veriyor ve mührün kaçtığı satır raporda duruyor. Değişen tek şey: BAŞKA hiçbir
+    arıza yokken kaçan mühür artık 0 DEĞİL.
     """
     if result.quota_exhausted:
-        return 2
+        return EXIT_QUOTA_EXHAUSTED
     if result.failed_leagues:
-        return 3
+        return EXIT_LEAGUE_FAILED
     if not result.leagues_mirrored:
-        return 4
+        return EXIT_MIRROR_FAILED
+    if result.missed_seals:
+        return EXIT_MISSED_SEAL
     return 0
 
 

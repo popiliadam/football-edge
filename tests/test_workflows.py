@@ -18,6 +18,8 @@ from typing import Any
 import pytest
 import yaml
 
+from football_edge import collect
+
 REPO = Path(__file__).resolve().parent.parent
 WORKFLOWS = (
     REPO / ".github/workflows/snapshot.yml",
@@ -52,6 +54,40 @@ def test_workflow_scans_for_secrets_before_the_paid_run(path: Path) -> None:
     assert collector is not None, "iş akışı toplayıcıyı çağırmıyor — test kurgusu bayatlamış"
     assert checkout < scan, f"{path.name}: tarama checkout'tan önce, depo henüz yok"
     assert scan < collector, f"{path.name}: tarama ücretli/secret'lı adımdan sonra koşuyor"
+
+
+# ── I4: seal.yml, toplayıcının verdiği her kodu ADIYLA karşılamalı ──────────
+# Adı olmayan bir kod `*)` arm'ına düşer ve "beklenmedik kodla düştü" der: operatör
+# kalıcı kaybolmuş bir kapanış fiyatını, bilinmeyen bir arızadan ayırt edemez.
+
+SEAL = REPO / ".github/workflows/seal.yml"
+
+
+def _seal_run_body() -> str:
+    step = next(
+        step for step in _steps(SEAL) if "football_edge.collect seal" in str(step.get("run", ""))
+    )
+    return str(step["run"])
+
+
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [
+        (collect.EXIT_QUOTA_EXHAUSTED, "kredi"),
+        (collect.EXIT_LEAGUE_FAILED, "lig"),
+        (collect.EXIT_MIRROR_FAILED, "ayna"),
+        (collect.EXIT_MISSED_SEAL, "mühür"),
+    ],
+)
+def test_seal_workflow_names_every_exit_code_the_collector_can_return(code: int, name: str) -> None:
+    body = _seal_run_body()
+    arm = next((line for line in body.splitlines() if line.strip().startswith(f"{code})")), None)
+
+    assert arm is not None, (
+        f"seal.yml exit {code} için case arm'ı taşımıyor: '*)' dalına düşer ve "
+        "operatör arızayı adıyla göremez"
+    )
+    assert name in arm, f"exit {code} arm'ı arızayı adlandırmıyor ({name!r} geçmiyor): {arm!r}"
 
 
 def test_the_scanned_script_exists_and_is_executable() -> None:

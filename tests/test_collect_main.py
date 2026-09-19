@@ -278,4 +278,54 @@ def test_main_reports_a_missed_seal(
 
     out = capsys.readouterr().out
     assert "kaçan mühür: evt_past" in out, f"kaçan mühür raporlanmadı: {out!r}"
-    assert code == 0
+    assert code == collect.EXIT_MISSED_SEAL, (
+        f"kaçan mühür raporlandı ama çıkış kodu sessiz kaldı: {code} — "
+        "seal.yml 0'ı 'mühür turu tamam' diye okur, yani Faz 0'ın önlemek için var "
+        "olduğu TEK sonuç başarı olarak raporlanır"
+    )
+
+
+# ── I4: kalıcı kaybolan kapanış fiyatı exit 0 veriyordu ─────────────────────
+# `_report` "kaçan mühür: …" satırını, MÜHÜR KAÇARSA KALICIDIR diyen bir yorumun
+# altında yazıyor — ama `_exit_code` `missed_seals`e hiç bakmıyordu.
+
+
+def test_exit_code_is_non_zero_when_a_seal_was_permanently_missed() -> None:
+    result = collect.CollectResult(
+        written=0, quota=None, failed_leagues=(), missed_seals=("evt_past",)
+    )
+
+    assert collect._exit_code(result) == collect.EXIT_MISSED_SEAL
+
+
+def test_the_missed_seal_code_does_not_collide_with_the_other_failures() -> None:
+    """Kod, hangi arızanın olduğunu adıyla söylemeli; çakışırsa workflow yanlış arm'a girer."""
+    codes = {
+        collect.EXIT_QUOTA_EXHAUSTED,
+        collect.EXIT_LEAGUE_FAILED,
+        collect.EXIT_MIRROR_FAILED,
+        collect.EXIT_MISSED_SEAL,
+    }
+
+    assert len(codes) == 4, f"çıkış kodları çakışıyor: {codes}"
+    assert 1 not in codes, "1 zincir kırığına ve beklenmedik arızaya ayrılmıştır"
+    assert 0 not in codes, "0 yalnız arızasız tur demektir"
+
+
+def test_a_missed_seal_does_not_mask_a_louder_failure_in_the_same_round(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """İki arıza aynı turda olabilir: kod TEK değer taşır, rapor İKİSİNİ de yazar."""
+    result = collect.CollectResult(
+        written=0,
+        quota=None,
+        failed_leagues=("bad.1",),
+        missed_seals=("evt_past",),
+    )
+
+    code = collect._report(result)
+
+    out = capsys.readouterr().out
+    assert code == collect.EXIT_LEAGUE_FAILED, "arızalı lig daha üst basamaktır"
+    assert "kaçan mühür: evt_past" in out, f"kaçan mühür kodun altında kaldı: {out!r}"
+    assert "başarısız ligler: bad.1" in out
