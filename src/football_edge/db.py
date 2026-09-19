@@ -153,7 +153,7 @@ def upsert_matches(
 
     `DO NOTHING` ertelenen maçın ESKİ saatini taşımaya devam ediyordu: satır filtresi API'nin
     güncel saatine, mühür adaylığı veritabanının bayat saatine bakıyor ve maç eski saatinden
-    24 saat sonra `_seal_candidates` penceresinden SESSİZCE düşüyordu — ne mühürlenir ne de
+    24 saat sonra `rounds._seal_candidates` penceresinden SESSİZCE düşüyordu — ne mühürlenir ne de
     kaçan mühür olarak raporlanır. Kapanış fiyatı kaybolur ve kimse görmez (DEFERRED §3.1).
 
     Dönen sayı "yeni maç" değil "GÖRÜLEN maç"tır: `DO UPDATE` her satır için 1 bildirir.

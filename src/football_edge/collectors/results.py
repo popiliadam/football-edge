@@ -206,8 +206,9 @@ def collect_results(
 ) -> ResultsCollectResult:
     """Etkin liglerin tamamlanmış maç sonuçlarını toplar ve yazar.
 
-    Lig başına arıza izolasyonu Faz 0'daki `_collect`/`collect_footystats` ile AYNI
-    gerekçeyle: tek ligin `/scores` çağrısı düşerse diğer liglerin sonucu kaybolmamalı.
+    Lig başına arıza izolasyonu Faz 0'daki `rounds._collect` (R53'e kadar `collect.py`)
+    ve `collect_footystats` ile AYNI gerekçeyle: tek ligin `/scores` çağrısı düşerse
+    diğer liglerin sonucu kaybolmamalı.
     İzolasyon SESSİZ değildir — `failed_leagues` adıyla taşır, `main()` bunu raporlar.
     """
     written = 0

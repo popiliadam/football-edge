@@ -201,9 +201,9 @@ def collect_footystats(
 ) -> FootyStatsResult:
     """Etkin liglerin xG tablolarını toplar.
 
-    Lig başına arıza izolasyonu Faz 0'daki `_collect` ile aynı gerekçeyle: tek ligin
-    kırılması diğerlerini düşürmemeli. Ama izolasyon SESSİZ olamaz (review #3) — bkz.
-    `FootyStatsResult.failed_leagues` docstring'i.
+    Lig başına arıza izolasyonu Faz 0'daki `rounds._collect` ile aynı gerekçeyle (R53'e
+    kadar `collect.py`'deydi): tek ligin kırılması diğerlerini düşürmemeli. Ama izolasyon
+    SESSİZ olamaz (review #3) — bkz. `FootyStatsResult.failed_leagues` docstring'i.
     """
     source = _enabled_source(sources_path)
     parser = robots_for(source, robots_dir)

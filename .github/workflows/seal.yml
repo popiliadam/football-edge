@@ -4,7 +4,8 @@ on:
   schedule:
     # Her 15 dakikada bir: başlamak üzere olan maçların kapanış oranını mühürle.
     #
-    # Sıklık run_seal'in penceresine bağlıdır (collect.py → window_minutes=20).
+    # Sıklık run_seal'in penceresine bağlıdır (rounds.py → window_minutes=20;
+    # R53'e kadar collect.py'deydi, CLI girişi hâlâ `collect seal`).
     # Daha seyrek bir cron pencereyi ıskalar ve KAPANIŞ ORANI BİR DAHA GELMEZ;
     # kaçan mühür kalıcı veri kaybıdır, sonraki tur onu telafi edemez.
     #
