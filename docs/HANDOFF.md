@@ -9,23 +9,28 @@
 
 ---
 
-## 1. Senin yapman gereken TEK şey
+## 1. Durum: push edildi, CI yeşil, cron'lar silahlandı
+
+- ✅ `main` ve `faz-0-kayit-altyapisi` push edildi.
+- ✅ Varsayılan dal **`main`** yapıldı (`gh repo edit --default-branch main`). Bu şarttı:
+  GitHub `schedule`'ı yalnız varsayılan dalda onurlandırır. Düzeltilmeseydi cron'lar
+  `faz-0` dalından tetiklenecek ve o dal bir gün silindiğinde **sessizce duracaktı.**
+- ✅ `ci.yml` koştu ve **geçti** (17-19 sn) — kapı artık yerel bir alışkanlık değil, zorlanan bir kural.
+- ⏳ `snapshot.yml` ve `seal.yml` **henüz koşmadı** — ikisi de yalnız `schedule` ile tetikleniyor.
+
+**Senin yapacağın tek şey, ilk cron turlarını kontrol etmek:**
 
 ```bash
-cd ~/dev/football-edge && git push origin main && git push origin faz-0-kayit-altyapisi
+gh run list --repo popiliadam/football-edge --limit 10
 ```
 
-`outward_action_gate` asistanın push etmesini engelliyor; **21 commit yerelde bekliyor.**
+Beklenen: ilk `seal` push'tan sonraki ilk çeyrek saatte, ilk `snapshot` ertesi gün 06:17 UTC'de.
+`seal` yeşil döndüyse `ledger/` altına **yeni bir çıpa commit'i** düşmüş olmalı — asıl kanıt budur.
+Düşmediyse muhtemel sebepler: `DATABASE_URL` secret'ının pooler biçimi, `contents: write` izni,
+ya da bot'un push'unun reddedilmesi. Prosedür: `docs/RUNBOOK.md`.
 
-**Bu push üç workflow'u da ilk kez gerçekten test eder** — üçü de bugüne kadar hiç koşmadı:
-`ci.yml` (push/PR'da kapı) · `snapshot.yml` (günde 1, 06:17 UTC) · `seal.yml` (15 dakikada bir).
-
-GitHub `schedule`'ı **yalnız varsayılan dalda** onurlandırır. Yani `main` push edilene kadar
-hiçbir cron çalışmaz ve **her gecikme günü geri gelmeyecek kapanış oranı demektir** — Faz 0'ın
-var olma sebebiyle tam olarak aynı zarar.
-
-Push sonrası ilk kontrol: Actions'ta üç workflow da yeşil mi, ve ilk `seal` turundan sonra
-`ledger/` altına yeni bir çıpa commit'i düştü mü.
+Yerelde commit kaldıysa (`git status`), push senin terminalinden gelir — `outward_action_gate`
+asistanın push etmesini engelliyor.
 
 ---
 
