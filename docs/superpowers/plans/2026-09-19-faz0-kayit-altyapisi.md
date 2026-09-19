@@ -167,6 +167,30 @@ almadan kalıyor. Kredi bittiğinde bile o ana kadar toplanan iş raporlanır.
 
 ---
 
+## Düzeltme kaydı 3 — Task 7 bulguları (2026-09-19)
+
+**E9 — `publish-head` her turda dosyayı değiştiriyor, ayda ~2900 commit üretir.**
+`_publish_head_command` çıpaya `now.isoformat()` yazıyor; zincir hiç değişmese bile içerik
+değişiyor, dolayısıyla `git diff --cached --quiet` kontrolü her seferinde "değişti" diyor.
+15 dakikalık seal kadansıyla günde ~96, ayda ~2900 commit — public bir repoda çıpa geçmişi
+okunamaz hâle gelir ve **asıl amacı olan "ne zaman ne değişti" bilgisi gürültüde kaybolur.**
+
+Düzeltme: `publish-head`, mevcut `head` ve `rows` değerleri **en son yayınlanmış çıpayla
+aynıysa dosyayı hiç yazmasın** ve bunu stdout'a bildirsin (`"çıpa değişmedi, yazılmadı"`).
+Zaman damgası yalnız içerik değiştiğinde anlamlıdır.
+
+**E10 — snapshot kadansı ücretsiz katman bütçesini aşıyordu (Task 7'de düzeltildi).**
+Plandaki `0 3,9,15,21` = günde 4 tur × 6 lig = **ayda 744 kredi**, ücretsiz tavan 500.
+Task 7 bunu günde 1 tura (`17 6 * * *`, ayda 186) indirdi. **Ücretli plana (20K kredi/ay)
+geçildiğinde kadans artırılmalı** — aksi hâlde açılış→kapanış eğrisi seyrek kalır.
+Handoff'a yazıldı.
+
+**E11 — Cron'lar yalnız varsayılan dalda çalışır.** GitHub `schedule` tetikleyicisini
+yalnız default branch'te onurlandırır. Faz 0 main'e merge edilmeden **hiçbir zamanlanmış
+iş koşmaz**. Bu bir hata değil, bilinmesi gereken bir operasyonel gerçek.
+
+---
+
 ## Global Constraints
 
 - **Python ≥ 3.11.** Tür ipuçları zorunlu; `from __future__ import annotations` her modülde.
