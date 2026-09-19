@@ -14,43 +14,27 @@ from pathlib import Path
 
 import httpx
 
-from football_edge.sources import load_sources, robots_snapshot
+from football_edge.sources import Source, load_sources, robots_snapshot, snapshot_from_status
 
 SOURCES = Path("config/sources.yaml")
 ROBOTS = Path("config/robots")
-# 404/410 = politika dosyası GERÇEKTEN YOK — bu ölçülmüş ve boş çıkmış bir sonuçtur
-# (tff'nin anlık görüntüsü tam bunun kaydı). BAŞKA HİÇBİR non-200 bununla AYNI ŞEY
-# DEĞİLDİR: 403/429/5xx kaynağın bizi REDDETTİĞİ anlamına gelebilir. İkisini karıştırmak
-# "kapandı"yı "ölçülemedi"ye indirger — Important #1 (review): eskiden HER non-200 boş
-# metne dönüyordu, yani bizi engelleyen bir kaynak "sapma yok" ya da "bütün politika
-# silinmiş" (yanlış yön) diye raporlanıyordu.
-_NO_POLICY_FILE_CODES = (404, 410)
 
 
-class RobotsUnmeasurable(Exception):
-    """404/410 DIŞINDA bir non-200 durum kodu — "kapalı" ile "ölçülemedi" karışmasın diye
-    boş metin DEĞİL, bu istisna kullanılır; `main()` `httpx.HTTPError` ile AYNI muameleyi
-    yapar (adıyla yazar, işi kırmızı verir)."""
+def live_robots(client: httpx.Client, base_url: str, user_agent: str) -> httpx.Response:
+    """Canlı robots.txt için HAM HTTP yanıtı.
 
-
-def live_robots(client: httpx.Client, base_url: str, user_agent: str) -> str:
-    """Canlı robots.txt gövdesi.
-
-    404/410 → BOŞ metin (politika dosyası YOK — bkz. `sources.robots_for`'daki "hiç
-    ölçülmedi" / "ölçüldü, kısıt yok" ayrımı; burası ikinciyi üretir). Başka bir non-200
-    → `RobotsUnmeasurable` (bkz. yukarısı) — asla sessizce boş metne düşürülmez.
+    Durum kodunun NE ANLAMA geldiği (politika var / politika yok / ölçülemedi) burada
+    KARAR VERİLMEZ — bu, `sources.snapshot_from_status`'ın işi (review R15: "bu HTTP
+    durumu bir robots anlık görüntüsü için ne anlama gelir" kaynak-politikası mantığıdır,
+    betik iskeleti değil, `tests/test_sources.py`'de sıradan test edilir). Bu fonksiyon
+    yalnız ağa çıkar.
     """
-    response = client.get(
+    return client.get(
         f"{base_url}/robots.txt",
         headers={"user-agent": user_agent},
         timeout=25.0,
         follow_redirects=True,
     )
-    if response.status_code == 200:
-        return response.text
-    if response.status_code in _NO_POLICY_FILE_CODES:
-        return ""
-    raise RobotsUnmeasurable(f"HTTP {response.status_code}")
 
 
 def _normalised_newlines(text: str) -> str:
@@ -65,39 +49,45 @@ def _normalised_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _report_one(client: httpx.Client, source: Source, recorded: str) -> tuple[str, bool]:
+    """Tek kaynağı ölçer; (stdout'a yazılacak metin, turu kırmızı yapsın mı) döner."""
+    try:
+        response = live_robots(client, source.base_url, source.user_agent)
+    except httpx.HTTPError as error:
+        # ÖLÇÜLEMEYEN kaynak geçmek değildir: adıyla yazılır ve iş kırmızı verir.
+        return f"ÖLÇÜLEMEDİ: {source.id} — {error}\n", True
+    live_body = snapshot_from_status(response.status_code, response.text)
+    if live_body is None:
+        # `snapshot_from_status` 404/410 dışındaki her non-200'ü None döner — taşıma
+        # hatasıyla (yukarıdaki except) AYNI muameleyi görür: ikisi de "bu turda
+        # ölçemedik", ikisi de geçmek değil.
+        return f"ÖLÇÜLEMEDİ: {source.id} — HTTP {response.status_code}\n", True
+    current = _normalised_newlines(live_body)
+    if current.strip() == recorded.strip():
+        return f"sapma yok: {source.id}\n", False
+    diff = "".join(
+        difflib.unified_diff(
+            recorded.splitlines(keepends=True),
+            current.splitlines(keepends=True),
+            fromfile=f"{source.id} (kayıtlı)",
+            tofile=f"{source.id} (canlı)",
+        )
+    )
+    return f"ROBOTS SAPMASI: {source.id}\n{diff}", True
+
+
 def main() -> int:
-    drifted = 0
+    drifted = False
     with httpx.Client() as client:
         for source in load_sources(SOURCES):
             snapshot = robots_snapshot(source, ROBOTS)
             if not snapshot.is_file():
                 continue
             recorded = _normalised_newlines(snapshot.read_text(encoding="utf-8"))
-            try:
-                current = _normalised_newlines(
-                    live_robots(client, source.base_url, source.user_agent)
-                )
-            except (httpx.HTTPError, RobotsUnmeasurable) as error:
-                # ÖLÇÜLEMEYEN kaynak geçmek değildir: adıyla yazılır ve iş kırmızı verir.
-                # Taşıma hatası (bağlantı koptu vb.) ile "sunucu 403/429/5xx döndü" AYNI
-                # muameleyi görür — ikisi de "bu turda ölçemedik", ikisi de geçmek değil.
-                sys.stdout.write(f"ÖLÇÜLEMEDİ: {source.id} — {error}\n")
-                drifted = 1
-                continue
-            if current.strip() == recorded.strip():
-                sys.stdout.write(f"sapma yok: {source.id}\n")
-                continue
-            drifted = 1
-            sys.stdout.write(f"ROBOTS SAPMASI: {source.id}\n")
-            sys.stdout.writelines(
-                difflib.unified_diff(
-                    recorded.splitlines(keepends=True),
-                    current.splitlines(keepends=True),
-                    fromfile=f"{source.id} (kayıtlı)",
-                    tofile=f"{source.id} (canlı)",
-                )
-            )
-    return drifted
+            line, failed = _report_one(client, source, recorded)
+            sys.stdout.write(line)
+            drifted = drifted or failed
+    return 1 if drifted else 0
 
 
 if __name__ == "__main__":

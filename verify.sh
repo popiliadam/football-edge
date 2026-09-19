@@ -17,9 +17,12 @@ step() {
   fi
 }
 
-step "ruff-check"  uv run ruff check src tests
-step "ruff-format" uv run ruff format --check src tests
-step "mypy"        uv run mypy src
+# `scripts` HER ÜÇÜNE de dâhil (review R15): en yeni güvenlik-ilişkili dal (robots.txt
+# canlı ölçümünün HTTP durum kararı) burada yaşıyordu ve kapının hiçbiri onu görmüyordu.
+# `pytest` DIŞARIDA kalır — testler `tests/`de yaşar, `scripts/` betik değil test taşımaz.
+step "ruff-check"  uv run ruff check src tests scripts
+step "ruff-format" uv run ruff format --check src tests scripts
+step "mypy"        uv run mypy src scripts
 step "pytest"      uv run pytest -q
 
 # Testler `pythonpath = ["src"]` ile koşar: KURULU PAKET BOZUK OLSA BİLE geçerler.

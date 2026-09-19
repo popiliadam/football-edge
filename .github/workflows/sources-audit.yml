@@ -37,5 +37,13 @@ jobs:
         run: |
           curl -sS -m 25 -o /dev/null -w 'fbref robots HTTP %{http_code}\n' \
             https://fbref.com/robots.txt || true
+          # http:// KASITLI (R14): api.clubelo.com'un ÇALIŞAN bir HTTPS dinleyicisi yok —
+          # ölçüldü 2026-09-19, https:// 3/3 timeout, http:// aynı istekte HTTP 200 dönüyor.
+          # football-data.co.uk'nin apex'i için spec §7'de kayıtlı olanla AYNI tuzak. Burada
+          # düz metin KABUL EDİLEBİLİR çünkü bu istek kimlik bilgisi TAŞIMAZ, veri
+          # GÖNDERMEZ, yalnız bir durum kodu OKUR (-o /dev/null — gövde hiç kaydedilmez);
+          # araya girmenin en kötü sonucu log'da YANLIŞ TEK SATIRLIK bilgidir. Bu gerekçe
+          # BAŞKA hiçbir kaynağa genellenmez — her biri kendi robots.txt'i/ToS'una göre
+          # ayrı değerlendirilir.
           curl -sS -m 25 -o /dev/null -w 'clubelo /Fixtures HTTP %{http_code}\n' \
-            https://api.clubelo.com/Fixtures || true
+            http://api.clubelo.com/Fixtures || true

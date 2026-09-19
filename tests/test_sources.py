@@ -15,6 +15,7 @@ from football_edge.sources import (
     guard_path,
     load_sources,
     robots_for,
+    snapshot_from_status,
 )
 
 UNDERSTAT_ROBOTS = "User-agent: *\nDisallow: /\n"
@@ -318,3 +319,33 @@ def test_registry_rejects_an_unrecognised_access_basis(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="access_basis"):
         load_sources(target)
+
+
+# ── R15: what an HTTP status means for a live robots.txt check — moved here from
+# scripts/robots_drift.py because it is source-policy logic, not script plumbing, and
+# because it is the newest safety-relevant branch this project has (review Important #1
+# fixed it; review R15 moved the decision where the gate can see it). The 404-vs-403 cases
+# below are the whole point: a bug that made both return the same thing (either "" or None)
+# would pass a test suite that didn't assert them separately — these do.
+
+
+@pytest.mark.parametrize(
+    ("status_code", "body", "expected"),
+    [
+        (200, "User-agent: *\nDisallow: /x\n", "User-agent: *\nDisallow: /x\n"),
+        (404, "this body must never leak through — 404 means no policy file", ""),
+        (410, "this body must never leak through — 410 means no policy file", ""),
+        (403, "Forbidden", None),
+        (429, "Too Many Requests", None),
+        (500, "Internal Server Error", None),
+    ],
+)
+def test_snapshot_from_status_distinguishes_no_policy_from_unmeasured(
+    status_code: int, body: str, expected: str | None
+) -> None:
+    """200 carries the real body through untouched (proves the body isn't discarded).
+    404/410 collapse to "" — measured, no policy file (tff's real, committed shape).
+    403/429/500 must NOT collapse to "" too — they're None (unmeasured, a source that may
+    be blocking us), a genuinely different outcome from 404's "" that a caller must treat
+    differently (scripts/robots_drift.py fails the run on None; it does not on "")."""
+    assert snapshot_from_status(status_code, body) == expected

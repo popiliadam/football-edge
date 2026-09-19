@@ -101,6 +101,37 @@ def robots_snapshot(source: Source, robots_dir: Path) -> Path:
     return robots_dir / f"{source.id}.txt"
 
 
+# 404/410 = politika dosyası GERÇEKTEN YOK — ölçülmüş ve boş çıkmış bir sonuçtur (tff'nin
+# commit'lenmiş anlık görüntüsü tam bunun kaydı). BAŞKA HİÇBİR non-200 bununla AYNI ŞEY
+# DEĞİLDİR: 403/429/5xx kaynağın bizi REDDETTİĞİ anlamına gelebilir. İkisini karıştırmak
+# "kapandı"yı "ölçülemedi"ye indirger (review Important #1: scripts/robots_drift.py eskiden
+# HER non-200'ü boş metne düşürüyordu — bizi engelleyen bir kaynak "sapma yok" ya da "tüm
+# politika silinmiş" (yanlış yön) diye raporlanıyordu).
+_NO_POLICY_FILE_STATUS_CODES = (404, 410)
+
+
+def snapshot_from_status(status_code: int, body: str) -> str | None:
+    """Bir HTTP yanıtını robots.txt POLİTİKASINA çevirir — ya da ÖLÇÜLEMEDİYSE `None`.
+
+    Bu, `scripts/robots_drift.py`'nin canlı ölçüm turunda kullandığı karar mantığıdır
+    (kaynak-politikası bu kaynak kadar önemli, review R15: "en yeni güvenlik-ilişkili
+    dal" `src/`'in DIŞINDaydı — artık değil, ve bu fonksiyon `tests/test_sources.py`'de
+    sıradan test edilen kod hâline geliyor, canlı ağa çıkan bir betiğin elle doğrulanan
+    çıktısına güvenmek yerine).
+
+    - `200` → GÖVDE aynen döner (ölçülmüş, gerçek politika).
+    - `404`/`410` → BOŞ metin döner (ölçülmüş, politika dosyası YOK — `robots_for`'daki
+      "ölçüldü, kısıt yok" ile aynı anlam).
+    - Başka HERHANGİ bir durum → `None` (ÖLÇÜLEMEDİ). Asla sessizce boş metne düşürülmez;
+      çağıran bunu adıyla raporlamalı ve turu kırmızı vermelidir — geçmek değildir.
+    """
+    if status_code == 200:
+        return body
+    if status_code in _NO_POLICY_FILE_STATUS_CODES:
+        return ""
+    return None
+
+
 def robots_for(source: Source, robots_dir: Path) -> Protego:
     """Commit'lenmiş robots.txt anlık görüntüsünü ayrıştırır.
 
@@ -151,6 +182,22 @@ def guard_path(parser: Protego, source: Source, path: str) -> None:
         raise SourceBlocked(f"{source.id}: robots.txt '{path}' yolunu kapatıyor — istek atılmadı")
 
 
+def _date_violation(
+    source_id: str, verified_at: date, today: date, max_age_days: int
+) -> str | None:
+    """`verified_at` GEÇERLİ bir ölçüm tarihi mi — ne GELECEKTE (bir hatıra ölçüm olamaz,
+    `today - verified_at` negatifken tazelik kontrolü sessizce söner — review) ne de
+    `max_age_days`den ESKİ. İkisi birden olamaz; en fazla bir ihlal döner."""
+    if verified_at > today:
+        return (
+            f"{source_id}: robots doğrulama tarihi gelecekte ({verified_at}) "
+            "— bir hatıra ölçüm olamaz"
+        )
+    if today - verified_at > timedelta(days=max_age_days):
+        return f"{source_id}: robots doğrulaması {max_age_days} günden eski ({verified_at})"
+    return None
+
+
 def audit_offline(
     sources: tuple[Source, ...],
     robots_dir: Path,
@@ -183,21 +230,9 @@ def audit_offline(
         if not snapshot.is_file():
             violations = (*violations, f"{source.id}: robots anlık görüntü yok ({snapshot})")
             continue
-        # `today - verified_at` NEGATİF bir tarih için (typo ya da yanlış yıl) her zaman
-        # `max_age_days`den KÜÇÜK kalır — kontrol sessizce SÖNER, bir yıllığına "taze"
-        # der. Bir hatıra ÖLÇÜM DEĞİLDİR; gelecek tarih kendi ihlalini üretir (review).
-        if source.robots_verified_at > today:
-            violations = (
-                *violations,
-                f"{source.id}: robots doğrulama tarihi gelecekte "
-                f"({source.robots_verified_at}) — bir hatıra ölçüm olamaz",
-            )
-        if today - source.robots_verified_at > timedelta(days=max_age_days):
-            violations = (
-                *violations,
-                f"{source.id}: robots doğrulaması {max_age_days} günden eski "
-                f"({source.robots_verified_at})",
-            )
+        date_violation = _date_violation(source.id, source.robots_verified_at, today, max_age_days)
+        if date_violation is not None:
+            violations = (*violations, date_violation)
         parser = robots_for(source, robots_dir)
         for path in source.declared_paths:
             if not allows(parser, source, path):
