@@ -36,7 +36,13 @@ def _outcome(home_goals: int, away_goals: int) -> float:
 
 
 def _margin_multiplier(home_goals: int, away_goals: int, config: EloConfig) -> float:
-    """Gol farkı çarpanı. Kapalıyken 1.0 — sıfır toplam her iki hâlde de korunur."""
+    """Gol farkı çarpanı. Kapalıyken 1.0 — sıfır toplam her iki hâlde de korunur.
+
+    Eğrinin ŞEKLİ (`margin - 1` başına +0.5, doğrusal) de `EloConfig.k` ve
+    `home_advantage` gibi İSKELEDİR, ölçülmüş değil: Faz 2 gerçek veriyle hangi
+    fonksiyon biçiminin (doğrusal mi, logaritmik mi, başka mı) uyduğunu sınamadan bu
+    eğri gerçek sanılmamalı.
+    """
     if not config.goal_scaling:
         return 1.0
     margin = abs(home_goals - away_goals)

@@ -25,13 +25,34 @@ def test_rating_change_is_zero_sum() -> None:
 
     Sıfır toplam bozulursa lig ortalaması sürüklenir ve ligler arası ortak ölçek
     (Faz 3, task 3) anlamını yitirir.
+
+    HEM `FLAT` HEM `CONFIG` altında sınanır: `home_advantage=0.0`'da (`FLAT`)
+    `sigmoid(z) + sigmoid(-z) = 1` matematiksel bir RASTLANTIYLA sağlanır — bağımsız
+    hesaplanmış iki beklenti (ör. `expected_home`e ters argümanla ikinci bir çağrı) bu
+    özel durumda YİNE sıfır toplam verir ve testi yanıltır. `CONFIG`'in sıfır olmayan
+    `home_advantage`'ı (üretim varsayılanı, Faz 2 de buna yakın bir değere fit edecek)
+    bu rastlantıyı bozar; gerçek bir sızıntı yalnız orada görünür.
     """
     home, away = updated(1500.0, 1500.0, 2, 1, FLAT)
     assert (home - 1500.0) == pytest.approx(-(away - 1500.0))
 
+    home_ha, away_ha = updated(1500.0, 1500.0, 2, 1, CONFIG)
+    assert (home_ha - 1500.0) == pytest.approx(-(away_ha - 1500.0))
+
 
 def test_draw_between_equals_changes_nothing() -> None:
     assert updated(1500.0, 1500.0, 1, 1, FLAT) == pytest.approx((1500.0, 1500.0))
+
+
+def test_away_win_raises_the_away_rating_and_lowers_the_home_rating() -> None:
+    """`_outcome`'un `home_goals < away_goals` dalını sınayan tek test.
+
+    Diğer 11 testin hepsi ev sahibi galibiyeti ya da berabereyle çağırıyor; deplasman
+    galibiyetini yalnız bu test doğrudan sınıyor.
+    """
+    home, away = updated(1500.0, 1500.0, 0, 1, FLAT)
+    assert away > 1500.0
+    assert home < 1500.0
 
 
 def test_beating_a_stronger_team_gains_more_than_beating_a_weaker_one() -> None:
