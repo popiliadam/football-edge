@@ -6,8 +6,8 @@ from pathlib import Path
 
 import httpx
 
+from football_edge.anchors import _latest_anchor
 from football_edge.collect import (
-    _latest_anchor,
     _ledger_rows,
     horizon_iso,
     run_snapshot,

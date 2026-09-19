@@ -9,14 +9,13 @@ from typing import Any
 
 import pytest
 
-from football_edge.collect import (
+from football_edge.anchors import (
     _latest_anchor,
-    _publish_head_command,
-    _verify_chain_command,
     archived_anchors,
     expected_anchor_names,
     missing_anchors,
 )
+from football_edge.collect import _publish_head_command, _verify_chain_command
 from tests.fake_db import FakeChainDb, chained_rows
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
