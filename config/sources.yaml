@@ -19,7 +19,7 @@ sources:
   - id: footystats
     base_url: https://footystats.org
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
-    crawl_delay_seconds: 2.0
+    crawl_delay_seconds: 5.0
     robots_verified_at: 2026-09-19
     declared_paths: ['/turkey/super-lig/xg']
     enabled: true
@@ -32,8 +32,14 @@ sources:
       Anthropic'in tarayıcısı, biz Anthropic değiliz. O kimliği takınıp Anthropic'e verilen
       izni almak user-agent sahtekârlığıdır; doğrulanabilir dürüstlük iddia eden bir üründe
       savunulamaz. Artık dürüstçe KENDİ kimliğimizle tanımlanıyoruz ve `User-agent: *`
-      grubuna uyuyoruz. O grup Crawl-delay bildirmiyor; 2.0 saniye kendi seçtiğimiz temkinli
-      değer (ClaudeBot grubunun 1'inden temkinli). Ölçüldü: altı lig xg yolu da bu grup
+      grubuna uyuyoruz. O grup kendisi Crawl-delay bildirmiyor — bağlayıcı bir kural yok,
+      yalnız bir seçim var. crawl_delay_seconds 5.0 (R13 — review): site isimli üçüncü
+      taraf tarayıcılara 5, 10, 10, 20 ve 20 saniyelik Crawl-delay veriyor (ölçüldü:
+      SeznamBot 5, meta-externalagent/PerplexityBot 10, Applebot/Applebot-Extended 20);
+      5.0 bunların EN HIZLISI — daha hızlısı yalnız R9'un almamızı yasakladığı ClaudeBot
+      izni (1). Bu, site herhangi bir isimlendirilmiş üçüncü tarafa verdiğinden hızlı
+      davranmadığımızı garanti eder. Bedeli: bir toplama turunda altı istek başına beş kat
+      daha uzun süre — kabul edilebilir. Ölçüldü: altı lig xg yolu da bu grup
       altında izinli (/england/league-one ve /league-two hariç, onlar zaten kapalı) — dürüst
       kimliğin bedeli sıfır. Yalnız Türkiye şu an toplanıyor, declared_paths bunu yansıtıyor.
 

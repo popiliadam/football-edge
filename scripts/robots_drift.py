@@ -18,13 +18,27 @@ from football_edge.sources import load_sources, robots_snapshot
 
 SOURCES = Path("config/sources.yaml")
 ROBOTS = Path("config/robots")
+# 404/410 = politika dosyası GERÇEKTEN YOK — bu ölçülmüş ve boş çıkmış bir sonuçtur
+# (tff'nin anlık görüntüsü tam bunun kaydı). BAŞKA HİÇBİR non-200 bununla AYNI ŞEY
+# DEĞİLDİR: 403/429/5xx kaynağın bizi REDDETTİĞİ anlamına gelebilir. İkisini karıştırmak
+# "kapandı"yı "ölçülemedi"ye indirger — Important #1 (review): eskiden HER non-200 boş
+# metne dönüyordu, yani bizi engelleyen bir kaynak "sapma yok" ya da "bütün politika
+# silinmiş" (yanlış yön) diye raporlanıyordu.
+_NO_POLICY_FILE_CODES = (404, 410)
+
+
+class RobotsUnmeasurable(Exception):
+    """404/410 DIŞINDA bir non-200 durum kodu — "kapalı" ile "ölçülemedi" karışmasın diye
+    boş metin DEĞİL, bu istisna kullanılır; `main()` `httpx.HTTPError` ile AYNI muameleyi
+    yapar (adıyla yazar, işi kırmızı verir)."""
 
 
 def live_robots(client: httpx.Client, base_url: str, user_agent: str) -> str:
-    """Canlı robots.txt gövdesi. 404 = politika dosyası YOK ve bu BOŞ metne denktir.
+    """Canlı robots.txt gövdesi.
 
-    Eksik dosya ile boş dosya farklıdır (bkz. `sources.robots_for`): biri "bilmiyoruz",
-    diğeri "kısıt yok". Burada 404, kayıtlı boş anlık görüntüyle eşleşmelidir.
+    404/410 → BOŞ metin (politika dosyası YOK — bkz. `sources.robots_for`'daki "hiç
+    ölçülmedi" / "ölçüldü, kısıt yok" ayrımı; burası ikinciyi üretir). Başka bir non-200
+    → `RobotsUnmeasurable` (bkz. yukarısı) — asla sessizce boş metne düşürülmez.
     """
     response = client.get(
         f"{base_url}/robots.txt",
@@ -32,7 +46,11 @@ def live_robots(client: httpx.Client, base_url: str, user_agent: str) -> str:
         timeout=25.0,
         follow_redirects=True,
     )
-    return response.text if response.status_code == 200 else ""
+    if response.status_code == 200:
+        return response.text
+    if response.status_code in _NO_POLICY_FILE_CODES:
+        return ""
+    raise RobotsUnmeasurable(f"HTTP {response.status_code}")
 
 
 def _normalised_newlines(text: str) -> str:
@@ -59,8 +77,10 @@ def main() -> int:
                 current = _normalised_newlines(
                     live_robots(client, source.base_url, source.user_agent)
                 )
-            except httpx.HTTPError as error:
+            except (httpx.HTTPError, RobotsUnmeasurable) as error:
                 # ÖLÇÜLEMEYEN kaynak geçmek değildir: adıyla yazılır ve iş kırmızı verir.
+                # Taşıma hatası (bağlantı koptu vb.) ile "sunucu 403/429/5xx döndü" AYNI
+                # muameleyi görür — ikisi de "bu turda ölçemedik", ikisi de geçmek değil.
                 sys.stdout.write(f"ÖLÇÜLEMEDİ: {source.id} — {error}\n")
                 drifted = 1
                 continue

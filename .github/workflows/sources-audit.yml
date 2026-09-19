@@ -29,7 +29,13 @@ jobs:
         # Bilgilendirme: bu iki kaynak TR'den kapalı ölçüldü ve plan onları kapsam dışı
         # bıraktı (Ruling A). Runner'dan AÇIK çıkarlarsa bu adım bunu görünür kılar; kararı
         # değiştirmez, kararın dayanağını tazeler. `|| true`: bu adım işi düşürmez.
+        #
+        # `-o /dev/null` HER İKİ satırda da ŞART: bu iş PUBLIC bir depoda, günlük koşuyor.
+        # `-o` olmadan üçüncü tarafın YANITI (ClubElo'nun tüm Fixtures CSV'si) olduğu gibi
+        # CI log'una basılır — spec §3.2/3'ün "ham içerik yeniden yayınlanmaz" kuralını,
+        # tam da o kuralı zorlayan görevde ihlal eder. Yalnız durum kodu ölçülür, gövde değil.
         run: |
           curl -sS -m 25 -o /dev/null -w 'fbref robots HTTP %{http_code}\n' \
             https://fbref.com/robots.txt || true
-          curl -sS -m 25 -w '\nclubelo /Fixtures ^\n' http://api.clubelo.com/Fixtures || true
+          curl -sS -m 25 -o /dev/null -w 'clubelo /Fixtures HTTP %{http_code}\n' \
+            https://api.clubelo.com/Fixtures || true

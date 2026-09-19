@@ -183,6 +183,15 @@ def audit_offline(
         if not snapshot.is_file():
             violations = (*violations, f"{source.id}: robots anlık görüntü yok ({snapshot})")
             continue
+        # `today - verified_at` NEGATİF bir tarih için (typo ya da yanlış yıl) her zaman
+        # `max_age_days`den KÜÇÜK kalır — kontrol sessizce SÖNER, bir yıllığına "taze"
+        # der. Bir hatıra ÖLÇÜM DEĞİLDİR; gelecek tarih kendi ihlalini üretir (review).
+        if source.robots_verified_at > today:
+            violations = (
+                *violations,
+                f"{source.id}: robots doğrulama tarihi gelecekte "
+                f"({source.robots_verified_at}) — bir hatıra ölçüm olamaz",
+            )
         if today - source.robots_verified_at > timedelta(days=max_age_days):
             violations = (
                 *violations,

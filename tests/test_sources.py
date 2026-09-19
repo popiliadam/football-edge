@@ -109,8 +109,13 @@ def test_ajansspor_structural_paths_are_closed_but_news_is_open(tmp_path: Path) 
 def test_empty_robots_file_allows_everything(tmp_path: Path) -> None:
     """TFF'de robots.txt YOK (404) ve ClubElo'nunki boş. Boş politika = kısıt yok.
 
-    `RobotFileParser.can_fetch` HİÇ parse edilmemişken False döner; boş gövdeyle parse
-    edilince True. İkisini karıştırmak, izinli kaynağı sessizce kapatır.
+    Ayrım hâlâ iki farklı şeyi karıştırmama meselesi, ama artık farklı bir mekanizmayla:
+    "hiç ölçülmedi" (anlık görüntü dosyası hiç yok) `audit_offline`'ın AYRI, dosya
+    varlığına bakan kontrolüdür ve `robots_for()` o durumda hiç çağrılmaz. Bu test onun
+    yerine "ölçüldü ve boş çıktı" durumunu sınar: `robots_for()` dosyayı okur okumaz
+    `Protego.parse(body)` çağırır (stdlib'in "hiç parse edilmemişse False döner" tuzağı
+    protego'da YOK — `robots_for` koşulsuz parse eder), ve `Protego.parse("")` her yola
+    izin verir. İkisini karıştırmak izinli bir kaynağı sessizce kapatırdı.
     """
     write_robots(tmp_path, "tff", "")
     tff = source(id="tff", base_url="https://www.tff.org")
@@ -141,6 +146,17 @@ def test_stale_verification_is_a_violation(tmp_path: Path) -> None:
     write_robots(tmp_path, "footystats", FOOTYSTATS_ROBOTS)
     violations = audit_offline((source(),), tmp_path, date(2026, 11, 1))
     assert any("30 günden eski" in text for text in violations)
+
+
+def test_future_dated_verification_is_a_violation_not_a_year_of_freshness(tmp_path: Path) -> None:
+    """`today - verified_at` bir GELECEK tarih için hep negatif kalır, yani hep
+    `max_age_days`den küçüktür — düzeltilmezse bu, tazelik kontrolünü sessizce söndürür
+    (bir yazım hatasının kapıyı bir yıllığına kapatması gerekmez)."""
+    write_robots(tmp_path, "footystats", FOOTYSTATS_ROBOTS)
+    violations = audit_offline(
+        (source(robots_verified_at=date(2027, 9, 19)),), tmp_path, date(2026, 9, 19)
+    )
+    assert any("gelecekte" in text for text in violations), violations
 
 
 def test_disabled_sources_are_not_audited(tmp_path: Path) -> None:
