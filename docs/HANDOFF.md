@@ -1,236 +1,133 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-19 · **Yazan:** Opus 5 · **Durum:** Faz 0 sürüyor
+**Son güncelleme:** 2026-09-19 · **Durum:** **Faz 0 TAMAM ve main'e merge edildi**
+**main:** `2978fca` · 40 commit · **98 test geçiyor** · kapı 7 adım yeşil
 
-Bu dosya, taze bir oturumun hiçbir şey bilmeden devam edebilmesi için yazıldı.
-Sıra: önce §1 (nerede kaldık), sonra §2 (ilk beş komut), sonra §7 (kararlar).
+> Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
+> Faz 0'ın detaylı "ölçülmeyenler" listesi: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3.
+> Arıza prosedürleri: `docs/RUNBOOK.md`.
 
 ---
 
-## 1. Tek cümlede nerede kaldık
-
-Faz 0'ın 8 görevinden **4'ü bitti ve incelendi**, **Task 5 uygulandı ama incelenmedi**,
-T6–T8 kaldı. Altyapı (Supabase, GitHub, kimlik bilgileri) **canlı ve doğrulanmış durumda**.
-Dal push edildi: `origin/faz-0-kayit-altyapisi` = `e0f0b1a` (ve sonrası).
-
-### ⚠️ Task 5 uygulandı ama İNCELENMEDİ — ilk iş bu
-
-Oturum durdurulduktan sonra Task 5'in implementer'ı işini kendi tamamladı ve commit attı:
-
-- **Commit:** `e0f0b1a` — *"feat: append-only defter şeması ve hash-zincirli yazma"*
-- **Dosyalar:** `db/migrations/0001_init.sql` (54) · `src/football_edge/db.py` (85) ·
-  `tests/test_db.py` (82) — toplam 221 satır
-- **Doğrulandı:** çalışma ağacı temiz, `pytest` → **28 passed, 2 skipped**
-  (skip'ler beklenen: defter boş olduğu için append-only DB testleri atlanıyor)
-- **Push edildi:** origin `fa6275f..e0f0b1a`
-
-**Ama bu görev hiç incelenmedi.** Diğer dört görevin her biri ayrı bir inceleme ajanından
-geçti; Task 5 geçmedi. İlk iş, incelemeyi koşturmak:
+## 1. Senin yapman gereken TEK şey
 
 ```bash
-SDD=/Users/apple/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development
-PLAN=docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md
-"$SDD/scripts/review-package" "$PLAN" b379d1a e0f0b1a
+cd ~/dev/football-edge && git push origin main && git push origin faz-0-kayit-altyapisi
 ```
 
-Sonra inceleme ajanını gönder (§11'deki dispatch kalıbıyla). İnceleme temizlenmeden
-Task 6'ya geçme — Task 6, `db.py`'nin tüm fonksiyonlarını çağırıyor.
+`outward_action_gate` asistanın push etmesini engelliyor; **21 commit yerelde bekliyor.**
 
-İnceleme ajanına özellikle sordurulacaklar:
-- `connect()` hâlâ `options="-c timezone=UTC"` taşıyor mu (zincir tutarlılığı buna bağlı)
-- `snapshot_payload` anahtar kümesi `_CHAIN_KEYS` ile çelişmiyor mu
-- `insert_snapshots` zinciri `chain_head(conn)`'dan devam ettiriyor mu (GENESIS'ten değil)
-- `ON CONFLICT (row_hash) DO NOTHING` sessizce satır düşürüyor mu — düşürüyorsa
-  yazılan sayı ile gerçekte eklenen sayı ayrışır ve çıpa satır sayısı yanlış olur
+**Bu push üç workflow'u da ilk kez gerçekten test eder** — üçü de bugüne kadar hiç koşmadı:
+`ci.yml` (push/PR'da kapı) · `snapshot.yml` (günde 1, 06:17 UTC) · `seal.yml` (15 dakikada bir).
 
-## 2. Taze oturumun ilk beş komutu
+GitHub `schedule`'ı **yalnız varsayılan dalda** onurlandırır. Yani `main` push edilene kadar
+hiçbir cron çalışmaz ve **her gecikme günü geri gelmeyecek kapanış oranı demektir** — Faz 0'ın
+var olma sebebiyle tam olarak aynı zarar.
 
-```bash
-cd ~/dev/football-edge
-git log --oneline -8                      # nerede olduğunu gör
-cat .superpowers/sdd/2026-09-19-faz0-kayit-altyapisi/progress.md   # SDD defteri — asıl gerçek burası
-./verify.sh                               # kapı yeşil mi
-git status --short                        # temiz olmalı
-```
+Push sonrası ilk kontrol: Actions'ta üç workflow da yeşil mi, ve ilk `seal` turundan sonra
+`ledger/` altına yeni bir çıpa commit'i düştü mü.
 
-Sonra: **`superpowers:subagent-driven-development`** skill'ini yükle, defterdeki
-`Task <N>: complete` satırlarına bak, **ilk tamamlanmamış görevden devam et.**
-Tamamlanmış görevleri TEKRAR GÖNDERME.
+---
 
-## 3. Proje nedir
+## 2. Canlı ve doğrulanmış durum
 
-Futbol maçları için piyasa oranıyla model tahmini arasındaki **sapmayı** bulan ve bunu
-doğrulanabilir bir sicille yayınlayan analiz sistemi. Global, ~35–40 lig hedefi.
-Kuzey yıldızı **CLV** (yayın anındaki oran vs kapanış oranı), tutturma oranı değil.
-
-- **Tasarım spec'i:** `docs/superpowers/specs/2026-09-19-football-edge-design.md`
-- **Faz 0 planı:** `docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md`
-- **SDD defteri:** `.superpowers/sdd/2026-09-19-faz0-kayit-altyapisi/progress.md`
-
-Faz 0 = kayıt altyapısı. Sebebi: **kaçırılan kapanış oranı geri gelmez.** Model daha
-yokken bile her gün veri birikmeli.
-
-## 4. Canlı altyapı — hepsi doğrulandı
-
-| Şey | Değer | Doğrulama |
+| Şey | Değer | Nasıl doğrulandı |
 |---|---|---|
-| Supabase projesi | `football-edge` · ref `aaxadphezxavohkhqdrf` · eu-central-1 | `ACTIVE_HEALTHY` |
-| Bağlantı | `aws-0-eu-central-1.pooler.supabase.com:5432` (session pooler) | canlı bağlanıldı, `TimeZone=UTC` uygulandı |
-| Şema | `leagues`, `matches`, `odds_snapshots` + append-only tetikleyici | migrasyon uygulandı |
-| Append-only | UPDATE ve DELETE reddediliyor | **canlıda kanıtlandı** (geri alınan transaction içinde) |
-| Lig verisi | 6 lig yüklü, 0 maç, 0 defter satırı | sorgulandı (ilk snapshot henüz koşmadı) |
-| GitHub | `popiliadam/football-edge` (public), dal `faz-0-kayit-altyapisi` | push edildi, origin `e0f0b1a`+ |
-| Secrets | `ODDS_API_KEY`, `DATABASE_URL` depoda ayarlı | `gh secret list` |
-| Odds API | anahtar geçerli, **kota 500/500 bozulmadı** | `/v4/sports` HTTP 200, maliyet 0 |
-| Lig anahtarları | 6'sı da mevcut ve aktif (67 futbol anahtarı, 43 aktif) | `/v4/sports` çıktısı |
+| Supabase | `football-edge` · `aaxadphezxavohkhqdrf` · eu-central-1 | ACTIVE_HEALTHY |
+| Bağlantı | `aws-0-eu-central-1.pooler.supabase.com:5432` (**session** pooler) | canlı bağlanıldı, `TimeZone=UTC` |
+| **Defter** | **3.717 satır · 51 maç · 25 bookmaker** | canlı snapshot, exit 0 |
+| Zincir | **SAĞLAM**, baş `4768f367…` | `verify-chain`, 3717 satır tarandı |
+| Çıpa | `ledger/head-2026-09-19.txt` (`rows=3717 last_id=3718`) | `publish-head` |
+| **Append-only** | UPDATE ve DELETE **reddedildi** | 2 test, gerçek Postgres, 3717 satır üstünde |
+| Kapı | 7 adım, hepsi PASS | `DATABASE_URL` bağlı koşuldu, merge sonrası tekrar |
+| Secret taraması | kırmızı-sonra-yeşil **kanıtlı** | sahte secret → exit 1, kaldırıldı → exit 0 |
+| Odds API | **494/500 kredi** | lig başına tam 1 harcandı |
+| GitHub | `popiliadam/football-edge` (public) | secrets ayarlı |
 
 `.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. Repoda hiçbir yerde geçmiyor.
 
-## 5. Görev durumu
+---
 
-| # | Görev | Durum | Commit |
-|---|---|---|---|
-| 1 | İskelet + kapı (ruff/format/mypy/pytest) | ✅ tamam · spec ✅ · bulgu yok | `fa6275f` |
-| 2 | Lig konfigürasyonu | ✅ tamam · spec ✅ · 1 minor ertelendi | `c3d25a7` |
-| 3 | Odds API istemcisi | ✅ tamam · spec ✅ · 1 minor ertelendi | `e6151a5` |
-| 4 | Hash zinciri | ✅ tamam · spec ✅ · 2 Important ruling'e bağlandı | `61df9ca` |
-| 5 | Şema + append-only + db.py | ⚠️ uygulandı, **İNCELENMEDİ** (bkz. §1) | `e0f0b1a` |
-| 6 | snapshot/seal/verify-chain/publish-head | sırada · brief hazır (540 satır) | — |
-| 7 | GitHub Actions workflow'ları | sırada · brief hazır | — |
-| 8 | Uçtan uca doğrulama + handoff | sırada · brief hazır | — |
+## 3. Faz 0 ne üretti
 
-Sonra: final whole-branch inceleme (**Opus**, en yetenekli model), ardından main'e merge.
+8 görev · 4 düzeltme turu · **6 Critical + ~20 Important bulgu, hepsi kapatıldı** · 1 → 98 test.
 
-## 6. Push durumu
+Her görev ayrı bir inceleme ajanından geçti; her düzeltme turu kendi re-review'ünü aldı; final
+whole-branch inceleme (Opus) **YES WITH CONDITIONS** verdi ve altı koşulun altısı da karşılandı.
 
-Dal push edildi (kullanıcı elle): `fa6275f..e0f0b1a`. Sonraki commit'ler yerelde birikir.
+**Öğretici olan:** ilk üç düzeltme turunun her biri, bir öncekinin düzeltmesinde yeni bir kusur
+buldu — üçü de aynı kavram karmaşasının farklı derinlikleri: *"başarısız değil" ≠ "kalıcı olarak
+yazıldı"*. Doğru ölçüt en baştan şuydu: **bu maç için bir satır commit'lendi mi.**
 
-`outward_action_gate` push'u engelliyor, yani **asistan push edemez** — her push
-kullanıcının kendi terminalinden gelir:
+---
 
-```bash
-cd ~/dev/football-edge && git push
-```
+## 4. Verilen kararlar (Ruling listesi)
 
-**Bedeli:** workflow'lar hâlâ canlı doğrulanmadı — `.github/workflows/` dosyaları Task 7'de
-yazılacak ve ancak push edildikten sonra Actions tetiklenir (bkz. §8).
+Tam gerekçeler `.superpowers/sdd/2026-09-19-faz0-kayit-altyapisi/progress.md` içinde — **o dizin
+gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması gerekenler
+`docs/DEFERRED.md` ve `docs/RUNBOOK.md`'ye taşındı.
 
-## 7. Verilen kararlar (Ruling listesi)
+1. **Supabase pooler, doğrudan bağlantı değil** — doğrudan host yalnız IPv6, Actions IPv4. *Ölçüldü.*
+2. **Push anomalisi anomali değildi** — kullanıcı kendi attı, öncesinde onay vermişti.
+3. **Public repo + canlı anahtar → kapıya secret taraması**, ve kırmızı verdiği kanıtlandı.
+4. **Plan kod blokları format-temiz değil** → `ruff format` beklenen adım, sapma değil.
+5. **Kurulu-paket import kontrolü kapıya** — testler `pythonpath=["src"]`, CI kurulu paketi çağırıyor.
+6. **Lig döngüsüne arıza izolasyonu + exit 3** — bozuk yanıt tüm turu düşürüyordu.
+7. **`git add -A` yasak** (implementer koşarken) — bir kez yaptım, commit sınırını bozdum, ayırdım.
+8. **Kuyruktan silme kodda değil mimaride kapatıldı** — trigger + dış çıpa + çıpa karşılaştırması.
+9. **Kanonik zaman damgası load-bearing** — iki taraf tek fonksiyonu paylaşır, yoksa her satır "KIRIK".
+10. **Migrasyonu controller uyguladı** — subagent'ın MCP erişimi belirsizdi.
+11. **Mühür maç bazında, lig bazında değil** — ve liste **commit'ten sonra** birikir.
+12. **Çıpa hash'i yeniden hesaplanır** — saklı sütuna güvenmek, herkese açık bir değeri kopyalamaya açıktı.
+13. **Kilitlenmeye bypass bayrağı YOK** — kapalı-arızalanmak doğru; kurtarma yazılı prosedürle.
+14. **Ayna arızasında erken çıkış** — kredi yakmamak için; bedeli o turun mührü, yazılı.
+15. **Merge `--no-ff`** — squash/rebase gitleaks parmak izlerini geçersiz kılar.
 
-Her biri `progress.md` defterinde tam gerekçesiyle var. Yanlış olanı geri almak kullanıcının hakkı.
+---
 
-1. **Supabase pooler, doğrudan bağlantı değil.** Doğrudan host yalnız IPv6 çözülüyor
-   (ölçüldü), GitHub Actions runner'ları IPv4 — CI'da çalışmazdı. *Yanlışsa: tek satır değişir.*
-2. **Push anomalisi anomali değildi.** Task 1 incelemesi kaydı olmayan bir push tespit etti;
-   kullanıcı kendi terminalinden atmıştı, öncesinde açık onay vermişti. *Yanlışsa: maliyeti yok.*
-3. **Public repo + canlı anahtar → kapıya secret taraması.** Task 8'e `check_secrets.sh` ve
-   taramanın gerçekten kırmızı verdiğini kanıtlayan adım eklendi. *Yanlışsa: bir adım fazla.*
-4. **Plan kod blokları format-temiz değil → `ruff format` beklenen adım.** Global Constraints'e
-   yazıldı. *Yanlışsa: maliyeti yok.*
-5. **Kurulu-paket import kontrolü kapıya eklendi.** Testler `pythonpath=["src"]` ile koşuyor,
-   CI ise kurulu paketi çağırıyor; bozuk editable kurulum testlerce maskeleniyordu.
-   *Yanlışsa: bir adım fazla.*
-6. **Lig döngüsüne arıza izolasyonu + exit 3.** Bozuk bir API yanıtı tüm turu düşürüyordu ve
-   o turdaki bütün liglerin kapanış oranı kaçardı. Artık lig izole, komut 3 ile çıkar (CI kırmızı).
-   *Yanlışsa: geniş `except` programlama hatasını da yakalar — ama traceback loglanıyor ve çıkış
-   kodu gizlemiyor.*
-7. **Task 4'ün commit sınırı bozulması controller hatasıydı.** Implementer koşarken `git add -A`
-   kullandım, ajanın dosyalarını kendi docs commit'ime süpürdüm. Paylaşılmamış geçmiş olduğu için
-   `reset --soft` + yol bazlı mixed reset ile ayrıldı (`6925eab` docs, `61df9ca` kod).
-   **Kural: implementer koşarken asla `git add -A`.** *Yanlışsa: içerik aynıydı, yalnız sınır düzeldi.*
-8. **Kuyruktan silme kodda düzeltilmedi, mimaride kapatıldı.** Çıplak hash zinciri son satırların
-   silinmesini yakalayamaz (deneysel olarak doğrulandı). Üç katman kapatıyor: append-only tetikleyici
-   (canlıda kanıtlı), `publish-head` dış çıpası, ve `verify-chain`'in çıpa karşılaştırması.
-   *Yanlışsa: kuyruk kesme yalnız DB yazma erişimiyle mümkün, trigger onu da reddediyor.*
-9. **Decimal/datetime normalizasyonu load-bearing ilan edildi.** `float()`/`isoformat()` dönüşümleri
-   kaldırılsa kurcalanmamış HER satır "KIRIK" derdi. Gerekçe yorumu + round-trip testi eklendi.
-   *Yanlışsa: test zaten yakalar.*
-10. **Migrasyonu controller uyguladı, implementer değil.** Subagent'ın Supabase MCP erişimi belirsizdi.
-    Şema idempotent, T5 dosyayı yazınca birebir eşleşir. *Yanlışsa: maliyeti yok.*
+## 5. Kapının ÖLÇMEDİĞİ şeyler
 
-## 8. Kapının ÖLÇMEDİĞİ şeyler
+Tam liste: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3. Başlıcaları:
 
-Bunlar "yeşil" sayılmaz, adıyla yazılır:
+1. **Hiçbir workflow hiç koşmadı.** Push edilmedi; `schedule` yalnız varsayılan dalda çalışır.
+2. **Defterin İÇİ bir daha hash'lenmiyor.** Çıpa sonrası yalnız kuyruk taranıyor; 2..3718 arası
+   satırlar hiçbir zamanlanmış koşuda yeniden doğrulanmayacak. `--full` seçeneği yok.
+3. **Tetikleyici, ürünün adını koyduğu aktöre karşı savunma değil.** Toplayıcı tablo **sahibi**
+   olarak bağlanıyor; o rol `DISABLE TRIGGER` ve `TRUNCATE` yapabilir. En az yetkili rol yok.
+4. **Çıpa silmek, bozmaktan daha sessiz** — ve meşru arşivleme prosedüründen ayırt edilemiyor.
+5. **Eşzamanlı yazar güvenliği** yalnız sahte bağlantıyla, ifade sırası üzerinden kanıtlandı;
+   iki gerçek Postgres oturumu hiç ölçülmedi.
+6. **Ertelenen maçlar** kapanış oranını kaybeder ve 24 saat sonra rapordan düşer.
+7. **`matches` tablosuna hiç girmemiş maç**, kaçan-mühür raporunda görünmez.
+8. **Yazma yolu yavaş**: satır başına bir INSERT, ~3700 gidiş-dönüş, tur ~4 dakika.
+9. **Jev hiç kullanılmadı** (Faz 4) ve **çok dilli doğruluğu ölçülmedi** (Faz 1'in şartı).
 
-1. **GitHub Actions hiç koşmadı.** Dal push edilmedi. Workflow YAML'ları geçerli ve CLI ile uyumlu
-   ama *gerçekten tetiklendi mi, secret'ları okudu mu, cron çalıştı mı* ölçülmedi.
-2. **Dış çıpa henüz hiç yayınlanmadı.** `ledger/head-*.txt` ilk `seal` koşusunda oluşacak;
-   o zamana kadar `verify-chain`'in çıpa karşılaştırması karşılaştıracak bir şey bulamaz.
-3. **Append-only testleri SKIP.** Defter boş olduğu için `test_append_only_trigger_blocks_*`
-   atlanıyor. Tetikleyici canlıda ayrıca kanıtlandı, ama **test paketi bunu ölçmüyor.**
-   İlk gerçek snapshot'tan sonra bu testler koşacak.
-4. **Kapanış mührünün gerçek maç saatiyle hizası** canlı bir maçta doğrulanmadı.
-5. **Kredi tüketiminin aylık bütçeye oturduğu** bir ay boyunca gözlenmedi.
-6. **Jev hiç kullanılmadı.** Faz 0'da yok; Faz 4'te geliyor. Çok dilli doğruluğu **ölçülmedi** —
-   Faz 1'in şartı.
+---
 
-## 9. Ertelenmiş minor bulgular
+## 6. Faz 1 — nereden başlanır
 
-- **T2:** `load_leagues`, YAML kökünde `leagues` anahtarı yoksa çıplak `KeyError` fırlatıyor.
-- **T3:** `fetch_odds` içinde `params[...] = ...` item ataması (yerel, atılabilir dict).
-- **T4:** rezerve anahtarlar çıplak isim eşleşmesiyle hariç tutuluyor (dokümante değil);
-  `verify_chain` eksik alanla `KeyError` fırlatıyor; `checked` ve `failed_index` hata yolunda aynı.
+**Yol haritası:** `docs/superpowers/plans/2026-09-19-faz-1-7-yol-haritasi.md` (Faz 1 bölümü)
+**Devralınan borç:** `docs/DEFERRED.md`
 
-Final whole-branch incelemede triyaj edilecek.
+Faz 1 = toplayıcılar + varlık eşleme + **dil kalibrasyonu**. Task 2–8 (Understat, FootyStats,
+FBref, ClubElo, Google News çok dilli, TFF, Open-Meteo/Wikidata) birbirinden **bağımsız** →
+**izole git worktree'lerde paralel** koşturulmalı. Ortak çalışma ağacında paralel implementer
+çalıştırma: bu oturumda bedeli görüldü.
 
-## 10. Faz 0'dan sonra
+**Faz 1'in ilk işi Faz 0'ın borcu olmalı:** batch insert (yazma yolu) ve zincir iç taraması
+(`--full`). İkisi de Faz 1'in getireceği hacimde acil hâle gelir.
 
-Kullanıcı kararı: **Faz 1 fresh session'da, paralel izole worktree'lerle.**
-Faz 1'in ~8 toplayıcısı (Understat, FootyStats, FBref, ClubElo, Google News çok dilli, TFF×2,
-Open-Meteo, Wikidata/OSM) birbirinden bağımsız — paralelleştirmeye uygun.
-**Şart:** her ajana kendi worktree'si + kendi dalı + kendi venv'i. Ortak çalışma ağacında
-paralel implementer çalıştırma (bu oturumda commit sınırı bozulmasıyla bedeli görüldü).
+Faz 1 henüz **tam TDD planı almadı** — fresh session'ın ilk işi o planı yazmak olabilir
+(Faz 0'ın planı `docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md` örnek alınabilir).
 
-Faz 1'in tam planı **henüz yazılmadı**. Faz 2–7 yol haritası da yazılmadı.
-Kullanıcının istediği derinlik: *Faz 1 tam TDD detayı + Faz 2–7 yol haritası.*
+---
 
-## 11. SDD mekaniği — taze oturumun aynı disiplinle devam etmesi için
+## 7. Çalışma disiplini (bu projede öğrenilenler)
 
-**Skill:** `superpowers:subagent-driven-development` (yükle ve takip et).
-Script'ler şurada:
-`/Users/apple/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development/scripts/`
-
-```bash
-SDD=/Users/apple/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development
-PLAN=docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md
-
-# Görev brief'i üret (plan değiştiyse yeniden üret — brief Global Constraints'i de taşır)
-"$SDD/scripts/task-brief" "$PLAN" 6
-
-# İnceleme paketi üret (BASE = implementer'ı göndermeden ÖNCE kaydettiğin commit)
-"$SDD/scripts/review-package" "$PLAN" <BASE> <HEAD>
-
-# Çalışma alanı yolu
-"$SDD/scripts/sdd-workspace" "$PLAN"
-```
-
-**Görev döngüsü:** BASE kaydet → brief üret → implementer gönder → rapor oku →
-inceleme paketi üret → inceleme ajanı gönder → bulguları çöz → deftere
-`Task <N>: complete (commits <base7>..<head7>, review clean)` yaz → sonrakine geç.
-
-**Model seçimi (kullanıcı kuralı, 2026-09-19'da güncellendi):**
-- **Haiku ASLA kullanılmaz.** Hiçbir ajanda.
-- **Varsayılan: `opus`** — implementer de reviewer da. Kullanıcı "genel olarak opus max
-  ile ilerleyeceğiz" dedi; skill'in "en ucuz yeterli model" tavsiyesi bunun yerine geçmez.
-- **Çok karmaşık işler → `fable`** (Fable 5.1). Kullanıcı bunu açıkça izin verdi.
-- **Final whole-branch inceleme → `opus`** (skill'in ayrıca şartı)
-- İlk dört görev `sonnet` ile koşuldu (politika değişmeden önce); sonuçları temiz.
-
-**Dispatch prompt'u şunları içerir:** (1) görevin projedeki yeri tek cümle, (2) brief yolu
-"önce bunu oku, gereksinimlerin bu" diye, (3) önceki görevlerden gelen ve brief'in bilemeyeceği
-kararlar, (4) benim çözdüğüm belirsizlikler, (5) rapor dosyası yolu ve dönüş sözleşmesi.
-**Oturum geçmişi yapıştırılmaz** — taze ajan yalnız kendi görevini, dokunduğu arayüzleri ve
-global kısıtları bilmeli.
-
-**Implementer'a her seferinde söylenecekler:** dal `faz-0-kayit-altyapisi`, `.env` okunmaz/basılmaz,
-`ruff format` beklenen adımdır (yalnız boşluk değişir), kapı gevşetilmez, `git add -A` yasak,
-subagent göndermek yasak.
-
-## 12. Çalışma kuralları (bu projede öğrenilenler)
-
-- Kapı çıktısı **dosyadan** okunur, özeti değil. `SKIP` geçmek değildir.
-- Implementer koşarken **`git add -A` yok** — yalnız açık dosya yolları.
-- Append-only tabloya test satırı yazma: silemezsin. Sondayı **transaction içinde** koş, geri al.
-- Her görev sonunda: implementer raporu → inceleme paketi → inceleme ajanı → defter.
-- Belirsizlik karara bağlanır, `Ruling:` olarak deftere yazılır, devam edilir.
-  Yalnız geri alınamaz/yıkıcı bir şey için durulur.
+- Kapı çıktısı **dosyadan** okunur. `SKIP` geçmek değildir, adıyla raporlanır.
+- Implementer koşarken **`git add -A` yok** — yalnız açık yollar.
+- Append-only tabloya test satırı yazma: silinemez. Sondayı **transaction içinde** koş, geri al.
+- Her görev: implementer → rapor → inceleme paketi → inceleme ajanı → defter. Atlanmaz.
+- Bir test, konusunu **yeniden yazıyorsa** yalnız aynı kodu iki kez yazabildiğinizi kanıtlar.
+- Bir düzeltme komşu bir varsayımı geçersiz kılabilir — her turda "bu tur neyi bozdu" sorulur.
+- Model: varsayılan **opus**, çok karmaşık işlerde **fable**, **haiku asla**.
