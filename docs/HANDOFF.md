@@ -1,7 +1,7 @@
 # football-edge — Oturum Devri (Handoff)
 
 **Son güncelleme:** 2026-09-19 · **Durum:** **Faz 0 TAMAM ve main'e merge edildi**
-**main:** `2978fca` · 40 commit · **98 test geçiyor** · kapı 7 adım yeşil
+**main:** varsayılan dal · 42 commit · **98 test** · kapı 7 adım yeşil · **CI yeşil**
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 0'ın detaylı "ölçülmeyenler" listesi: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3.
@@ -89,7 +89,13 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması ge
 
 Tam liste: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3. Başlıcaları:
 
-1. **Hiçbir workflow hiç koşmadı.** Push edilmedi; `schedule` yalnız varsayılan dalda çalışır.
+1. **`ci.yml` koştu ve GEÇTİ** (2026-09-19 06:24 UTC, `main` ve `faz-0` üzerinde, 17-19 sn) —
+   yani kapı artık gerçekten zorlanıyor. **Ama `snapshot.yml` ve `seal.yml` hiç koşmadı**;
+   ikisi de yalnız `schedule` ile tetikleniyor. İlk `seal` turu push'tan sonraki ilk çeyrek
+   saatte, ilk `snapshot` ertesi gün 06:17 UTC'de beklenir. **Kontrol et:** `gh run list`
+   ile ikisinin de yeşil döndüğünü ve `ledger/` altına yeni bir çıpa commit'i düştüğünü gör.
+   Düşmediyse sebebi muhtemelen `DATABASE_URL` secret'ının pooler biçimi veya `contents: write`
+   izni — `docs/RUNBOOK.md`'ye bak.
 2. **Defterin İÇİ bir daha hash'lenmiyor.** Çıpa sonrası yalnız kuyruk taranıyor; 2..3718 arası
    satırlar hiçbir zamanlanmış koşuda yeniden doğrulanmayacak. `--full` seçeneği yok.
 3. **Tetikleyici, ürünün adını koyduğu aktöre karşı savunma değil.** Toplayıcı tablo **sahibi**
