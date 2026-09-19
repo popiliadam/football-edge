@@ -1,0 +1,97 @@
+name: seal
+
+on:
+  schedule:
+    # Her 15 dakikada bir: başlamak üzere olan maçların kapanış oranını mühürle.
+    #
+    # Sıklık run_seal'in penceresine bağlıdır (collect.py → window_minutes=20).
+    # Daha seyrek bir cron pencereyi ıskalar ve KAPANIŞ ORANI BİR DAHA GELMEZ;
+    # kaçan mühür kalıcı veri kaybıdır, sonraki tur onu telafi edemez.
+    #
+    # Kredi maliyeti: mühürlenecek maç yoksa run_seal _seal_candidates sorgusundan
+    # sonra hiç API çağırmadan döner — boş tur 0 kredi. Yani bu sıklık bütçeyi
+    # yakmaz, yalnız (public repoda ücretsiz olan) Actions dakikası harcar.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  # snapshot.yml ile AYNI grup: iki tur defteri aynı anda yazamaz.
+  group: odds-collect
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  seal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Dış çıpayı depoya YALNIZ bu iş yazar; yetki workflow geneline açılmaz.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret taraması
+        # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
+        # halka açılır ve geri alınamaz. Bu iş ayrıca `contents: write` taşıyor ve
+        # depoya commit atıyor — tarama, yazma yetkisi kullanılmadan ÖNCE koşar.
+        run: ./scripts/check_secrets.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Kapanışı mühürle
+        id: seal
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.collect seal
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "mühür turu tamam" ;;
+            2) echo "::error::kredi tükendi (exit 2) — mühür turu erken kapandı" ;;
+            3) echo "::error::en az bir lig mühürlenemedi (exit 3) — diğerleri mühürlendi" ;;
+            4) echo "::error::lig aynası tazelenemedi (exit 4) — mühür turu hiç koşmadı, MÜHÜR KAÇTI" ;;
+            # Kalıcı veri kaybı: başlama saati geçmiş ve hâlâ mühürsüz bir maç var.
+            # O maçın kapanış fiyatı bir daha OLUŞMAZ; sonraki tur telafi edemez.
+            # Bu kod eskiden 0'dı ve buradaki `0)` arm'ı onu "mühür turu tamam"
+            # diye okuyordu — Faz 0'ın önlemek için var olduğu TEK sonuç, başarı
+            # olarak raporlanıyordu. Kaçan maçların id'leri adım logunda:
+            # "kaçan mühür: <id>, <id>".
+            5) echo "::error::kaçan mühür (exit 5) — kapanış fiyatı KALICI olarak kayıp, id'ler adım logunda" ;;
+            *) echo "::error::mühür beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          # BURADA EXIT EDİLMEZ — kasıtlı. Adım burada düşerse zincir doğrulaması,
+          # çıpa yayını ve commit ATLANIR; yani tek bir ligin arızası dış
+          # kurcalama kanıtını bir turluğuna yok eder. Kod son adımda kırmızıya
+          # çevrilir, yutulmaz.
+      - name: Zinciri doğrula
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        # Kasıtlı olarak sert düşer (exit 1 = zincir kırık ya da çıpa uyuşmazlığı):
+        # kırık zincirin başı dışarı YAYINLANMAMALIDIR, yoksa kurcalanmış hâl
+        # çıpalanır ve kanıt değeri biter. Düşerse sonraki iki adım atlanır.
+        run: uv run python -m football_edge.collect verify-chain
+      - name: Zincir başını yayınla
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python -m football_edge.collect publish-head
+      - name: Dış çıpayı commit'le
+        run: |
+          git config user.name "football-edge-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add ledger/
+          git diff --cached --quiet || git commit -m "chore: zincir başı $(date -u +%F)"
+          git -c http.version=HTTP/1.1 push origin HEAD
+      - name: Mühür turunun sonucunu yansıt
+        if: always() && steps.seal.outputs.code != '0'
+        env:
+          # Adım çıktısı script gövdesine doğrudan gömülmez, env üzerinden geçer.
+          SEAL_CODE: ${{ steps.seal.outputs.code }}
+        run: |
+          echo "::error::mühür adımı exit ${SEAL_CODE:-bilinmiyor} ile döndü"
+          exit 1

@@ -10,6 +10,187 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-19-football-edge-design.md`
 
+## Düzeltme kaydı — Task 5 incelemesi sonrası (2026-09-19)
+
+Task 5'in incelemesi 1 Critical + 2 Important buldu. Aşağıdaki üç değişiklik **Task 5 ve
+Task 6'ya koordineli** uygulanır (ikisi de aynı veriye dokunuyor):
+
+**D1 — Kanonik zaman damgası (Critical'in kardeşi, I1).** `bookmaker_last_update` sütunu
+`timestamptz`, ama yazarken API'nin ham metni (`"...T10:00:00Z"`) hash'leniyor. Geri okunduğunda
+`datetime` olur ve `isoformat()` asla `Z` üretmez → **kurcalanmamış her satır "KIRIK" der.**
+Çözüm okuma tarafında yama değil, **iki tarafın da çağırdığı tek fonksiyon**:
+
+`src/football_edge/ledger.py` içine ekle:
+```python
+from datetime import UTC, datetime
+
+
+def canonical_timestamp(value: str | datetime) -> str:
+    """Zaman damgasını hash'lenebilir TEK kanonik metne çevirir.
+
+    Yazma tarafı API'den gelen metni verir, okuma tarafı Postgres'ten gelen
+    datetime'ı verir; ikisi de AYNI metni üretmek zorundadır. Aksi hâlde zincir
+    kurcalanmamış satırlar için yanlış alarm verir — ki bu, kaçırılan kurcalamadan
+    daha zararlıdır, çünkü bir süre sonra alarma kimse bakmaz.
+    """
+    parsed = (
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if isinstance(value, str)
+        else value
+    )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+```
+
+`db.py` → `snapshot_payload` bu fonksiyonu **her iki zaman alanında** kullanır:
+```python
+"observed_at": canonical_timestamp(observed_at),
+"bookmaker_last_update": (
+    None if row.bookmaker_last_update is None else canonical_timestamp(row.bookmaker_last_update)
+),
+```
+
+`collect.py` → `_verify_chain_command` **aynı fonksiyonu** kullanır (`strftime` ve
+çıplak `isoformat()` kullanımları kaldırılır):
+```python
+"observed_at": canonical_timestamp(record["observed_at"]),
+"bookmaker_last_update": (
+    None if record["bookmaker_last_update"] is None
+    else canonical_timestamp(record["bookmaker_last_update"])
+),
+```
+
+**D2 — `insert_snapshots` gerçekten yazılan satırı saysın (C1).** `ON CONFLICT (row_hash)
+DO NOTHING` sessizce satır düşürebilir ama `return len(linked)` bunu görmüyor; yeniden deneme
+senaryosunda tüm batch no-op olur ve fonksiyon yine tam sayıyı döner.
+```python
+    written = 0
+    with conn.cursor() as cur:
+        for entry in linked:
+            cur.execute(...)          # mevcut INSERT
+            written += cur.rowcount   # ON CONFLICT DO NOTHING sonrası 1 veya 0
+    return written
+```
+Aynı düzeltme `upsert_matches` için de yapılır (`return len(seen)` → `cur.rowcount` toplamı).
+
+**D3 — Pooler beklentisi yazılsın (I2).** `connect()` içine yorum:
+```python
+    # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
+    # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
+    # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
+```
+
+**Gereken test (D1 için, `tests/test_ledger.py`):**
+```python
+def test_canonical_timestamp_is_symmetric_across_str_and_datetime() -> None:
+    from datetime import UTC, datetime
+
+    from football_edge.ledger import canonical_timestamp
+
+    assert canonical_timestamp("2026-09-19T10:00:00Z") == canonical_timestamp(
+        datetime(2026, 9, 19, 10, 0, tzinfo=UTC)
+    )
+
+
+def test_canonical_timestamp_preserves_microseconds() -> None:
+    assert canonical_timestamp("2026-09-19T10:00:00.123456Z").endswith(".123456+00:00")
+```
+
+---
+
+## Düzeltme kaydı 2 — Task 6 incelemesi sonrası (2026-09-19)
+
+İnceleme 2 Critical + 5 Important buldu. Üç yük taşıyan mekanizma (lig izolasyonu, mühür
+penceresi, çıpa okuma) doğru uygulanmıştı; kusurlar onların **etrafındaydı**.
+
+**E1 (Critical) — `leagues` tablosunu hiçbir kod doldurmuyor.**
+`upsert_matches` → `matches.league_id` → `leagues(id)` yabancı anahtarı. Tablo elle dolduruldu;
+temiz bir veritabanında altı lig de `ForeignKeyViolation` verir ve **lig izolasyonu tek sistemik
+sebebi altı ayrı arıza gibi gösterir**, krediler de yanar. Elle kurulan ön koşul, ön koşul değildir.
+
+`db.py`'ye ekle:
+```python
+def upsert_leagues(conn: psycopg.Connection[Any], leagues: tuple[League, ...]) -> int:
+    """config/leagues.yaml'ı leagues tablosuna yansıtır. Konfigürasyon kaynak, tablo aynadır."""
+```
+`INSERT ... ON CONFLICT (id) DO UPDATE SET` ile ad/dil/aktiflik güncellenir. `main()` içinde
+`snapshot` ve `seal` çalışmadan **önce** çağrılır. Bir test: boş tabloya 6 lig yazılır, tekrar
+çalıştırılınca 6 kalır (idempotent).
+
+**E2 (Critical) — `run_seal`, 24 saatlik çekimi `is_closing=True` damgalıyor.**
+Pencere filtresi yalnız lig seçiminde ve `sealed_at` UPDATE'inde var; **çekim ile insert
+arasında yok**. Cumartesi turunda pazar maçının fiyatı "kapanış" diye yazılır ve her turda
+tekrar birikir (`observed_at` farklı → `ON CONFLICT (row_hash)` elemez). Ürünün ölçtüğü şeyin
+ta kendisi bozuluyor.
+
+`_collect`'e satır filtresi parametresi eklenir:
+```python
+row_filter: Callable[[PriceRow], bool] | None = None
+```
+`run_seal` şunu geçer: satırın `commence_time`'ı `seal_window(..., now, window_minutes)`
+içinde mi. `run_snapshot` `None` geçer. Test: pencere dışı maçın satırları `is_closing=True`
+ile YAZILMAMALI.
+
+**E3 (Important) — kaçan mühür kalıcı ve sessiz.** Cron kayarsa maç mühürsüz kalır, komut
+`exit 0` der, hiçbir şey raporlanmaz. Veri zaten elde: `_leagues_due_for_seal`'in aday kümesi
+`now - interval '1 day'`'i kapsıyor ve 138'de atılıyor.
+`CollectResult`'a `missed_seals: tuple[str, ...]` eklenir (mühürsüz ve başlangıcı geçmiş maç
+id'leri); `main()` bunu stdout'a yazar. Mühür kaçtıysa sessiz kalınmaz.
+
+**E4 (Important) — `anchor.head` hiç kullanılmıyor + `verify-chain` her turda tüm defteri
+yeniden hash'liyor.** `TRUNCATE` satır-seviyesi tetikleyiciyi **ateşlemez**; kuyruk kesilip
+aynı sayıda sahte satır eklenirse `checked == anchor.rows` olur ve kontrol geçer.
+İkisi tek değişiklikle kapanır:
+- `publish-head` çıpaya `last_id=` de yazar (`SELECT max(id)`).
+- `_latest_anchor` bunu okur; `Anchor` alanı `last_id: int`.
+- `verify-chain` yalnız `id > anchor.last_id` satırlarını çeker ve
+  `verify_chain(rows, start_hash=anchor.head)` ile doğrular.
+Böylece hem kuyruk kesme yakalanır hem tarama sabit maliyete iner.
+
+**E5 (Important) — çıpa yoksa kontrol sessizce atlanıyor.** Atlanan kontrol geçmek değildir.
+`_latest_anchor()` `None` dönerse stdout'a adıyla yazılır:
+`"çıpa yok — kuyruk kesme kontrolü ATLANDI"`. Bozuk çıpa dosyası da (`int()` hatası)
+yakalanıp aynı şekilde raporlanır, traceback ile düşülmez.
+
+**E6 (Important) — tek bozuk fiyat ligin tüm turunu geri alıyor.** Şemada
+`check (price > 1.0)` var; `flatten_odds` doğrulama yapmıyor. Bir bookmaker `1.0` yayınlarsa
+o ligin **bütün** maçları kaybolur — mühür turundaki kapanış fiyatları dahil.
+Insert öncesi geçersiz fiyatlı satırlar ayıklanır ve **adıyla loglanır** (sessizce atılmaz).
+
+**E7 (Minor ama yük taşıyor) — çıkış kodları testsiz.** `return 3`'ü `return 0` yapmak
+9 testin hiçbirini kırmıyor. `main()` için exit 0 / 2 / 3 testleri eklenir.
+
+**E8 (Minor) — `QuotaExhausted` `CollectResult`'ı atıyor.** Exit 2, o turda başarısız olan
+liglerin de kaybolmasına yol açıyor, ve `run_seal`'de başarıyla toplanan ligler `sealed_at`
+almadan kalıyor. Kredi bittiğinde bile o ana kadar toplanan iş raporlanır.
+
+---
+
+## Düzeltme kaydı 3 — Task 7 bulguları (2026-09-19)
+
+**E9 — `publish-head` her turda dosyayı değiştiriyor, ayda ~2900 commit üretir.**
+`_publish_head_command` çıpaya `now.isoformat()` yazıyor; zincir hiç değişmese bile içerik
+değişiyor, dolayısıyla `git diff --cached --quiet` kontrolü her seferinde "değişti" diyor.
+15 dakikalık seal kadansıyla günde ~96, ayda ~2900 commit — public bir repoda çıpa geçmişi
+okunamaz hâle gelir ve **asıl amacı olan "ne zaman ne değişti" bilgisi gürültüde kaybolur.**
+
+Düzeltme: `publish-head`, mevcut `head` ve `rows` değerleri **en son yayınlanmış çıpayla
+aynıysa dosyayı hiç yazmasın** ve bunu stdout'a bildirsin (`"çıpa değişmedi, yazılmadı"`).
+Zaman damgası yalnız içerik değiştiğinde anlamlıdır.
+
+**E10 — snapshot kadansı ücretsiz katman bütçesini aşıyordu (Task 7'de düzeltildi).**
+Plandaki `0 3,9,15,21` = günde 4 tur × 6 lig = **ayda 744 kredi**, ücretsiz tavan 500.
+Task 7 bunu günde 1 tura (`17 6 * * *`, ayda 186) indirdi. **Ücretli plana (20K kredi/ay)
+geçildiğinde kadans artırılmalı** — aksi hâlde açılış→kapanış eğrisi seyrek kalır.
+Handoff'a yazıldı.
+
+**E11 — Cron'lar yalnız varsayılan dalda çalışır.** GitHub `schedule` tetikleyicisini
+yalnız default branch'te onurlandırır. Faz 0 main'e merge edilmeden **hiçbir zamanlanmış
+iş koşmaz**. Bu bir hata değil, bilinmesi gereken bir operasyonel gerçek.
+
+---
+
 ## Global Constraints
 
 - **Python ≥ 3.11.** Tür ipuçları zorunlu; `from __future__ import annotations` her modülde.
@@ -20,7 +201,15 @@
 - **Defter append-only.** `odds_snapshots` üzerinde UPDATE/DELETE veritabanı seviyesinde reddedilir.
 - **Kaynak politikası (spec §3.2):** robots.txt'i otomatik erişime kapalı kaynak taranmaz; erişim kontrolü aşılmaz.
 - **Kredi disiplini:** The Odds API maliyeti = `market sayısı × region sayısı`. `/v4/sports` ve `/v4/sports/{sport}/events` ücretsizdir. Her çağrıdan sonra `x-requests-remaining` okunur ve eşiğin altına inince iş durur.
-- **Kapı (`./verify.sh`):** `ruff check` + `ruff format --check` + `mypy src` + `pytest` + zincir doğrulama. Hepsi yeşil değilse faz bitmemiştir.
+- **Kapı (`./verify.sh`):** `ruff check` + `ruff format --check` + `mypy src` + `pytest` + secret taraması + zincir doğrulama. Hepsi yeşil değilse faz bitmemiştir.
+- **Biçimlendirme:** bu dokümandaki kod blokları elle yazıldı ve `line-length = 100` ayarında
+  `ruff format`'ın tercih ettiği biçimle birebir aynı olmayabilir. Kodu birebir aktardıktan sonra
+  `uv run ruff format` çalıştır; **yalnız boşluk/satır kırma değişikliği** beklenir. İsim, değer
+  veya mantık değişiyorsa aktarım hatalıdır — düzelt. Bu bir sapma değil, beklenen adımdır.
+- **Paket gerçekten kurulu olmalı:** testler `pythonpath = ["src"]` sayesinde çalışır, ama CI
+  `python -m football_edge.collect` ile **kurulu paketi** çağırır. `uv sync` bazen bozuk bir
+  editable kurulum bırakabiliyor (dist-info var, `.pth` yok) ve bunu testler maskeler.
+  Bozulursa: `uv sync --reinstall-package football-edge`.
 
 ---
 
@@ -47,7 +236,8 @@
 ### Task 1: Proje iskeleti ve kapı
 
 **Files:**
-- Create: `pyproject.toml`, `verify.sh`, `.gitignore`, `src/football_edge/__init__.py`, `tests/__init__.py`, `tests/test_smoke.py`
+- Create: `pyproject.toml`, `uv.lock`, `verify.sh`, `src/football_edge/__init__.py`, `tests/__init__.py`, `tests/test_smoke.py`
+- Zaten var, DOKUNMA: `.gitignore` (`.env` girdisiyle birlikte commit'li)
 
 **Interfaces:**
 - Consumes: yok
@@ -166,28 +356,32 @@ fi
 echo "KAPI YEŞİL"
 ```
 
-`.gitignore`:
-```
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.env
-```
+`.gitignore` **zaten var ve commit'li** — yeniden yazma, üzerine yazma, dokunma.
+İçeriği `.venv/`, `__pycache__/`, `*.pyc`, `.pytest_cache/`, `.mypy_cache/`,
+`.ruff_cache/`, `.env`, `.env.*`, `!.env.example` satırlarını içeriyor.
+`uv.lock` ignore EDİLMEMELİ; listede yok, öyle kalmalı.
 
-- [ ] **Step 7: Run the gate**
+- [ ] **Step 7: Generate the lockfile**
+
+CI `uv sync --frozen` ile koşar ve bu, commit'lenmiş bir `uv.lock` olmadan hata verir.
+
+Run: `uv lock`
+Expected: `uv.lock` oluşur. `.gitignore`'a EKLENMEZ — repoya girmesi gerekir.
+
+- [ ] **Step 8: Run the gate**
 
 Run: `chmod +x verify.sh && ./verify.sh`
 Expected: `KAPI YEŞİL`, exit 0. Kırmızıysa log dosyasını oku ve düzelt.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add pyproject.toml verify.sh .gitignore src tests
-git commit -m "chore: proje iskeleti ve kapı (ruff+mypy+pytest)"
+git add pyproject.toml uv.lock verify.sh src tests
+git commit -m "chore: proje iskeleti, lockfile ve kapı (ruff+mypy+pytest)"
 ```
+
+**Not:** `.gitignore` zaten mevcut ve commit'li — yeniden oluşturma, sadece doğrula
+(`git check-ignore -v .env` `.env` satırını göstermeli).
 
 ---
 
@@ -432,6 +626,8 @@ git commit -m "feat: lig konfigürasyonu yükleyici ve doğrulayıcı"
 ```python
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 import httpx
 import pytest
 
@@ -544,13 +740,17 @@ def test_fetch_odds_builds_request_and_returns_rows() -> None:
 
     assert len(rows) == 5
     assert quota.remaining == 499
-    url = str(captured["url"])
-    assert "/v4/sports/soccer_epl/odds" in url
-    assert "apiKey=KEY" in url
-    assert "regions=eu" in url
-    assert "markets=h2h" in url
-    assert "oddsFormat=decimal" in url
-    assert "commenceTimeTo=2026-09-26T00%3A00%3A00Z" in url
+
+    parsed = urlparse(str(captured["url"]))
+    assert parsed.path == "/v4/sports/soccer_epl/odds"
+    # Ham dizede yüzde-kodlamaya bakma: onu httpx belirler, biz değil.
+    params = parse_qs(parsed.query)
+    assert params["apiKey"] == ["KEY"]
+    assert params["regions"] == ["eu"]
+    assert params["markets"] == ["h2h"]
+    assert params["oddsFormat"] == ["decimal"]
+    assert params["dateFormat"] == ["iso"]
+    assert params["commenceTimeTo"] == ["2026-09-26T00:00:00Z"]
 
 
 def test_fetch_odds_raises_on_http_error() -> None:
@@ -876,7 +1076,20 @@ git commit -m "feat: hash zinciri hesaplama ve kurcalama tespiti"
   - `upsert_matches(conn, rows: tuple[PriceRow, ...], league_id: str) -> int`
   - `insert_snapshots(conn, rows: tuple[PriceRow, ...], observed_at: datetime, *, is_closing: bool) -> int`
 
-**Not:** Bu görevde Supabase projesi oluşturulur. Maliyet **$0/ay** olarak doğrulandı (org `rkwkgvljyppbldscylwf`). Proje oluşturmadan önce kullanıcıya maliyeti tekrar söyle ve onay al.
+**Not:** Supabase projesi **zaten oluşturuldu** — `football-edge`, ref `aaxadphezxavohkhqdrf`,
+bölge `eu-central-1`, durum `ACTIVE_HEALTHY`. Yeniden oluşturma.
+
+**Bağlantı tuzağı — bunu baştan doğru yap:**
+- Supabase'in **doğrudan** bağlantısı (`db.<ref>.supabase.co:5432`) yalnız **IPv6** üzerinden
+  erişilebilir. GitHub Actions runner'ları IPv4'tür → doğrudan bağlantı CI'da çalışmaz.
+- Bu yüzden `DATABASE_URL` **pooler** ana makinesini kullanmalı:
+  `aws-0-eu-central-1.pooler.supabase.com`. Kullanıcı adı `postgres.<ref>` biçimindedir.
+- **Session pooler (port 5432)** tercih edilir: hazırlanmış ifadelerle (prepared statements)
+  sorun çıkarmaz. **Transaction pooler (port 6543)** kullanılacaksa psycopg3'ün hazırlanmış
+  ifadeleri kapatılmalıdır (`prepare_threshold=None`), aksi hâlde birkaç çağrıdan sonra
+  beklenmedik hatalar başlar.
+- Bağlantı dizesi Supabase panelinden alınır (Project Settings → Database → Connection string);
+  parola MCP üzerinden okunamaz.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1153,11 +1366,19 @@ git commit -m "feat: append-only defter şeması ve hash-zincirli yazma"
 **Interfaces:**
 - Consumes: `load_leagues`/`active_leagues` (Task 2), `fetch_odds`/`guard_quota`/`QuotaExhausted` (Task 3), `verify_chain` (Task 4), `connect`/`chain_head`/`upsert_matches`/`insert_snapshots` (Task 5)
 - Produces:
+  - `CollectResult` frozen dataclass: `written: int, quota: Quota | None, failed_leagues: tuple[str, ...]`
   - `horizon_iso(now: datetime, days: int) -> str`
   - `seal_window(commence_time: datetime, now: datetime, minutes: int) -> bool`
-  - `run_snapshot(conn, client, api_key, leagues, now, *, horizon_days=7, min_remaining=10) -> tuple[int, Quota | None]`
-  - `run_seal(conn, client, api_key, leagues, now, *, window_minutes=20, min_remaining=5) -> tuple[int, Quota | None]`
+  - `run_snapshot(conn, client, api_key, leagues, now, *, horizon_days=7, min_remaining=10) -> CollectResult`
+  - `run_seal(conn, client, api_key, leagues, now, *, window_minutes=20, min_remaining=5) -> CollectResult`
   - CLI: `python -m football_edge.collect snapshot|seal|verify-chain|publish-head`
+  - Çıkış kodları: `0` başarılı · `2` kredi tükendi · `3` en az bir lig toplanamadı (diğerleri toplandı)
+
+**Dayanıklılık kuralı:** tek bir ligin arızası (bozuk yanıt, HTTP hatası, eksik alan) diğer
+liglerin kapanış oranını kaçırmasına yol açmamalıdır — kaçan kapanış oranı geri gelmez.
+Bu yüzden lig döngüsü her ligi izole eder: hata loglanır, `failed_leagues`'a eklenir, döngü
+devam eder, ve komut sonunda **3 ile çıkar** ki CI kırmızı olsun. Sessizce geçmek yok.
+`QuotaExhausted` bu kuralın dışındadır: kredi bittiyse devam etmenin anlamı yok, yukarı fırlar.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1190,7 +1411,170 @@ def test_seal_window_true_at_exact_boundary() -> None:
 
 def test_horizon_iso_formats_utc_with_z() -> None:
     assert horizon_iso(NOW, days=7) == "2026-09-26T12:00:00Z"
+
+
+def test_latest_anchor_reads_newest_file(tmp_path: Path) -> None:
+    (tmp_path / "head-2026-09-18.txt").write_text(
+        "2026-09-18T00:00:00+00:00\nrows=10\nhead=aaa\n", encoding="utf-8"
+    )
+    (tmp_path / "head-2026-09-19.txt").write_text(
+        "2026-09-19T00:00:00+00:00\nrows=25\nhead=bbb\n", encoding="utf-8"
+    )
+    anchor = _latest_anchor(tmp_path)
+    assert anchor is not None
+    assert anchor.rows == 25
+    assert anchor.head == "bbb"
+
+
+def test_latest_anchor_none_when_empty(tmp_path: Path) -> None:
+    assert _latest_anchor(tmp_path) is None
 ```
+
+**Veritabanı turu testi — bu test olmadan zincir yanlış alarm verir.** Postgres `numeric`
+sütununu `Decimal`, `timestamptz` sütununu `datetime` olarak geri verir; `verify-chain`
+komutundaki normalizasyon bu tipleri yazma anındaki METNE geri çevirir. Normalizasyon
+bozulursa kurcalanmamış her satır "KIRIK" der. Testi ekle:
+
+```python
+from decimal import Decimal
+
+from football_edge.ledger import chain, verify_chain
+
+
+def test_chain_survives_postgres_type_round_trip() -> None:
+    written = {
+        "match_id": "evt1",
+        "observed_at": "2026-09-19T12:00:00+00:00",
+        "bookmaker": "pinnacle",
+        "market": "h2h",
+        "outcome": "A",
+        "point": None,
+        "price": 2.40,
+        "bookmaker_last_update": "2026-09-19T10:00:00Z",
+        "is_closing": False,
+    }
+    linked = chain((written,))
+
+    # Postgres'ten dönüş: numeric -> Decimal, timestamptz -> datetime
+    from_db = {
+        **linked[0],
+        "observed_at": datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
+        "bookmaker_last_update": datetime(2026, 9, 19, 10, 0, tzinfo=UTC),
+        "price": Decimal("2.40"),
+        "point": None,
+    }
+    # verify-chain komutunun uyguladığı normalizasyonun aynısı
+    normalised = {
+        **from_db,
+        "observed_at": from_db["observed_at"].isoformat(),
+        "bookmaker_last_update": from_db["bookmaker_last_update"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "price": float(from_db["price"]),
+        "point": None,
+    }
+    assert verify_chain((normalised,)).ok is True, "DB turu sonrası zincir kırılmamalı"
+```
+
+Aynı dosyaya dayanıklılık testini de ekle — tek ligin arızası diğerlerini düşürmemeli:
+
+```python
+class _FakeCursor:
+    def __init__(self, recorder: list[str]) -> None:
+        self._recorder = recorder
+        self.description: object = None
+
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: object = None) -> None:
+        self._recorder.append(sql.strip().split()[0].upper())
+
+    def fetchone(self) -> None:
+        return None
+
+    def fetchall(self) -> list[object]:
+        return []
+
+
+class _FakeConn:
+    def __init__(self) -> None:
+        self.sql: list[str] = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self) -> _FakeCursor:
+        return _FakeCursor(self.sql)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+ODDS_PAYLOAD = [
+    {
+        "id": "evt1",
+        "sport_key": "soccer_good",
+        "commence_time": "2026-09-20T14:00:00Z",
+        "home_team": "A",
+        "away_team": "B",
+        "bookmakers": [
+            {
+                "key": "pinnacle",
+                "title": "Pinnacle",
+                "last_update": "2026-09-19T10:00:00Z",
+                "markets": [
+                    {"key": "h2h", "outcomes": [{"name": "A", "price": 1.9}, {"name": "B", "price": 4.0}]}
+                ],
+            }
+        ],
+    }
+]
+QUOTA_HEADERS = {
+    "x-requests-remaining": "400",
+    "x-requests-used": "100",
+    "x-requests-last": "1",
+}
+
+
+def _league(league_id: str, key: str) -> League:
+    return League(
+        id=league_id, odds_api_key=key, name=key, country="X", lang="en", gl="GB", active=True
+    )
+
+
+def test_collect_isolates_a_failing_league() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "soccer_bad" in str(request.url):
+            return httpx.Response(500, json={"message": "boom"})
+        return httpx.Response(200, json=ODDS_PAYLOAD, headers=QUOTA_HEADERS)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    leagues = (_league("bad.1", "soccer_bad"), _league("good.1", "soccer_good"))
+    conn = _FakeConn()
+
+    result = run_snapshot(conn, client, "KEY", leagues, NOW)  # type: ignore[arg-type]
+
+    assert result.failed_leagues == ("bad.1",)
+    assert result.written > 0, "sağlam lig yine de yazılmalıydı"
+    assert conn.rollbacks == 1
+    assert conn.commits == 1
+```
+
+Bu testin import satırı şöyle olmalı:
+```python
+import httpx
+
+from football_edge.collect import CollectResult, horizon_iso, run_snapshot, seal_window
+from football_edge.leagues import League
+```
+
+**Not:** `# type: ignore[arg-type]` yalnız bu test satırında kabul edilir — `_FakeConn` bilerek
+`psycopg.Connection` değildir. `src/` altında `type: ignore` kullanmak yasaktır ve mypy zaten
+yalnız `src`'i denetler.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1207,6 +1591,7 @@ import argparse
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1221,6 +1606,36 @@ from football_edge.odds_api import Quota, QuotaExhausted, fetch_odds, guard_quot
 
 LOGGER = logging.getLogger("football_edge.collect")
 LEAGUES_PATH = Path("config/leagues.yaml")
+
+
+@dataclass(frozen=True)
+class CollectResult:
+    written: int
+    quota: Quota | None
+    failed_leagues: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Anchor:
+    path: Path
+    rows: int
+    head: str
+
+
+def _latest_anchor(directory: Path = Path("ledger")) -> Anchor | None:
+    """En son yayınlanmış zincir çıpasını okur; yoksa None döner."""
+    files = sorted(directory.glob("head-*.txt"))
+    if not files:
+        return None
+    target = files[-1]
+    values: dict[str, str] = {}
+    for line in target.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            values[key] = value
+    if "rows" not in values or "head" not in values:
+        return None
+    return Anchor(path=target, rows=int(values["rows"]), head=values["head"])
 
 
 def horizon_iso(now: datetime, days: int) -> str:
@@ -1242,23 +1657,32 @@ def _collect(
     commence_time_to: str,
     is_closing: bool,
     min_remaining: int,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     written = 0
     quota: Quota | None = None
+    failed: tuple[str, ...] = ()
     for league in leagues:
         if quota is not None:
             guard_quota(quota, min_remaining)
-        rows, quota = fetch_odds(
-            client, api_key, league.odds_api_key, commence_time_to=commence_time_to
-        )
-        if not rows:
-            LOGGER.info("lig=%s maç yok", league.id)
+        try:
+            rows, quota = fetch_odds(
+                client, api_key, league.odds_api_key, commence_time_to=commence_time_to
+            )
+            if not rows:
+                LOGGER.info("lig=%s maç yok", league.id)
+                continue
+            upsert_matches(conn, rows, league.id)
+            written += insert_snapshots(conn, rows, now, is_closing=is_closing)
+            conn.commit()
+        except Exception:
+            # Tek bir ligin arızası diğer liglerin kapanış oranını kaçırmasına yol açmamalı.
+            # Kapanış oranı kaçarsa geri gelmez; bozuk bir lig ise sonraki turda tekrar denenir.
+            conn.rollback()
+            LOGGER.exception("lig=%s toplanamadı, diğer liglere devam ediliyor", league.id)
+            failed = (*failed, league.id)
             continue
-        upsert_matches(conn, rows, league.id)
-        written += insert_snapshots(conn, rows, now, is_closing=is_closing)
-        conn.commit()
         LOGGER.info("lig=%s satır=%d kalan_kredi=%d", league.id, len(rows), quota.remaining)
-    return written, quota
+    return CollectResult(written=written, quota=quota, failed_leagues=failed)
 
 
 def run_snapshot(
@@ -1270,7 +1694,7 @@ def run_snapshot(
     *,
     horizon_days: int = 7,
     min_remaining: int = 10,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     return _collect(
         conn,
         client,
@@ -1312,12 +1736,12 @@ def run_seal(
     *,
     window_minutes: int = 20,
     min_remaining: int = 5,
-) -> tuple[int, Quota | None]:
+) -> CollectResult:
     due = _leagues_due_for_seal(conn, leagues, now, window_minutes)
     if not due:
         LOGGER.info("mühürlenecek maç yok")
-        return 0, None
-    written, quota = _collect(
+        return CollectResult(written=0, quota=None, failed_leagues=())
+    result = _collect(
         conn,
         client,
         api_key,
@@ -1327,16 +1751,22 @@ def run_seal(
         is_closing=True,
         min_remaining=min_remaining,
     )
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE matches SET sealed_at = %s
-            WHERE sealed_at IS NULL AND commence_time BETWEEN %s AND %s
-            """,
-            (now, now, now + timedelta(minutes=window_minutes)),
-        )
-    conn.commit()
-    return written, quota
+    # Yalnız gerçekten toplanabilen ligler mühürlenmiş sayılır; başarısız lig
+    # sealed_at almaz ki sonraki tur tekrar denesin.
+    sealed_leagues = tuple(lg.id for lg in due if lg.id not in result.failed_leagues)
+    if sealed_leagues:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE matches SET sealed_at = %s
+                WHERE sealed_at IS NULL
+                  AND league_id = ANY(%s)
+                  AND commence_time BETWEEN %s AND %s
+                """,
+                (now, list(sealed_leagues), now, now + timedelta(minutes=window_minutes)),
+            )
+        conn.commit()
+    return result
 
 
 def _require_env(name: str) -> str:
@@ -1358,6 +1788,14 @@ def _verify_chain_command(conn: psycopg.Connection[Any]) -> int:
         columns = [desc[0] for desc in cur.description or ()]
         records = tuple(dict(zip(columns, record, strict=True)) for record in cur.fetchall())
 
+    # ── BU NORMALİZASYON LOAD-BEARING'DİR, SADELEŞTİRMEYİN ──────────────────
+    # Zincir hash'i satırın kanonik JSON METNİNİ kapsıyor. Postgres aynı değeri
+    # farklı Python tipiyle geri veriyor ve metin hâli değişiyor:
+    #   numeric  → Decimal: json.dumps(Decimal) TypeError fırlatır; ayrıca
+    #              yazarken float 2.40 → "2.4", okurken Decimal("2.40") → "2.40"
+    #   timestamptz → datetime: yazarken .isoformat() metni yazılmıştı
+    # Bu dönüşümler kaldırılırsa KURCALANMAMIŞ HER SATIR "KIRIK" der —
+    # yanlış alarm, kaçırılan kurcalama kadar zararlıdır çünkü alarma güven biter.
     normalised = tuple(
         {
             **record,
@@ -1377,7 +1815,20 @@ def _verify_chain_command(conn: psycopg.Connection[Any]) -> int:
         f"zincir: {'SAĞLAM' if result.ok else 'KIRIK'} "
         f"kontrol={result.checked} baş={result.head[:16]} hata={result.error}\n"
     )
-    return 0 if result.ok else 1
+    if not result.ok:
+        return 1
+
+    # Çıplak hash zinciri KUYRUKTAN silmeyi yakalayamaz: son satırlar atılırsa
+    # kalan zincir kendi içinde tutarlıdır. Dış çıpa bunu kapatır.
+    anchor = _latest_anchor()
+    if anchor is not None and result.checked < anchor.rows:
+        sys.stdout.write(
+            f"ÇIPA UYUŞMAZLIĞI: defterde {result.checked} satır var, "
+            f"son yayınlanan çıpa {anchor.rows} diyordu ({anchor.path.name}) "
+            f"— kuyruktan satır silinmiş olabilir\n"
+        )
+        return 1
+    return 0
 
 
 def _publish_head_command(conn: psycopg.Connection[Any], now: datetime) -> int:
@@ -1413,14 +1864,18 @@ def main(argv: list[str] | None = None) -> int:
                 # Ayrı if/else: run_snapshot ve run_seal farklı keyword argümanlara
                 # sahip, tek değişkene atanınca mypy --strict uyumsuzluk bildirir.
                 if args.command == "snapshot":
-                    written, quota = run_snapshot(conn, client, api_key, leagues, now)
+                    result = run_snapshot(conn, client, api_key, leagues, now)
                 else:
-                    written, quota = run_seal(conn, client, api_key, leagues, now)
+                    result = run_seal(conn, client, api_key, leagues, now)
             except QuotaExhausted:
                 LOGGER.exception("kredi tükendi, iş durduruldu")
                 return 2
-        remaining = "bilinmiyor" if quota is None else str(quota.remaining)
-        sys.stdout.write(f"yazılan satır: {written}, kalan kredi: {remaining}\n")
+        remaining = "bilinmiyor" if result.quota is None else str(result.quota.remaining)
+        sys.stdout.write(f"yazılan satır: {result.written}, kalan kredi: {remaining}\n")
+        if result.failed_leagues:
+            # Diğer ligler toplandı ama bu sessizce geçilmemeli: CI kırmızı olmalı.
+            sys.stdout.write("başarısız ligler: " + ", ".join(result.failed_leagues) + "\n")
+            return 3
     return 0
 
 
@@ -1431,7 +1886,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_collect.py -v`
-Expected: 5 PASS
+Expected: 9 PASS (5 pencere/ufuk + 2 çıpa + 1 DB-turu + 1 arıza izolasyonu)
 
 - [ ] **Step 5: Run the gate and commit**
 
@@ -1571,9 +2026,77 @@ Bu adımları kullanıcıya anlat ve onay iste; kendi başına yapma.
 - Consumes: hepsi
 - Produces: Faz 0'ın bittiğini kanıtlayan çıktı + Faz 1 için handoff.
 
-- [ ] **Step 1: Add chain verification to the gate**
+- [ ] **Step 1: Add the secret scan to the gate**
+
+Depo **public**. `.env` canlı bir API anahtarı ve veritabanı parolası tutuyor. Bir secret
+commit'e kaçarsa insan kontrol noktası olmadan anında halka açılır. Kapı bunu yakalamalı.
+
+`scripts/check_secrets.sh` oluştur:
+```bash
+#!/usr/bin/env bash
+# İzlenen hiçbir dosyada gerçek secret olmamalı; .env ignore edilmiş olmalı.
+set -uo pipefail
+
+fail=0
+
+if ! git check-ignore -q .env 2>/dev/null; then
+  echo "HATA: .env gitignore'da değil"
+  fail=1
+fi
+
+if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+  echo "HATA: .env git tarafından izleniyor"
+  fail=1
+fi
+
+# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç).
+if git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
+     -- . ':!*.md' ':!.env.example' ':!uv.lock'; then
+  echo "HATA: izlenen dosyada dolu secret ataması var"
+  fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "secret taraması temiz"
+exit "$fail"
+```
+
+`chmod +x scripts/check_secrets.sh`
 
 `verify.sh` içinde `step "pytest" ...` satırından sonra ekle:
+```bash
+step "secrets" ./scripts/check_secrets.sh
+```
+
+- [ ] **Step 1a: Add the installed-package import check to the gate**
+
+Testler `pythonpath = ["src"]` ile koşar ve **kurulu paket bozuk olsa bile geçer**. CI ise
+`python -m football_edge.collect` ile kurulu paketi çağırır. Bu fark, "yerelde yeşil, CI'da
+ImportError" arızasının tam kaynağıdır — Task 2'de bir kez gerçekleşti. Kapı bunu yakalamalı.
+
+`verify.sh` içinde `step "secrets" ...` satırından ÖNCE ekle:
+```bash
+step "paket-kurulu" env PYTHONPATH= uv run python -c "import football_edge, sys; sys.stdout.write(football_edge.__file__)"
+```
+
+`PYTHONPATH=` boşaltması kasıtlıdır: `src/`'den değil, **kurulu paketten** import edildiğini
+kanıtlar. Kırmızı verirse `uv sync --reinstall-package football-edge` ile onar; kapıyı gevşetme.
+
+- [ ] **Step 1b: Prove the secret scan actually fails**
+
+Kapının kırmızı verdiğini kanıtlamadan yeşiline güvenilmez:
+```bash
+printf 'ODDS_API_KEY=abcdef0123456789abcdef\n' > /tmp/fake_secret_probe.py
+cp /tmp/fake_secret_probe.py ./fake_secret_probe.py
+git add ./fake_secret_probe.py
+./scripts/check_secrets.sh; echo "beklenen exit 1, gerçek: $?"
+git rm -f --cached ./fake_secret_probe.py >/dev/null && rm -f ./fake_secret_probe.py
+./scripts/check_secrets.sh; echo "beklenen exit 0, gerçek: $?"
+```
+Beklenen: önce `1`, sonra `0`. İkisi de gerçekleşmezse tarama işe yaramıyor demektir.
+
+- [ ] **Step 1c: Add chain verification to the gate**
+
+`verify.sh` içinde `step "secrets" ...` satırından sonra ekle:
 ```bash
 if [ -n "${DATABASE_URL:-}" ]; then
   step "zincir" uv run python -m football_edge.collect verify-chain
