@@ -99,6 +99,74 @@ def test_canonical_timestamp_preserves_microseconds() -> None:
 
 ---
 
+## Düzeltme kaydı 2 — Task 6 incelemesi sonrası (2026-09-19)
+
+İnceleme 2 Critical + 5 Important buldu. Üç yük taşıyan mekanizma (lig izolasyonu, mühür
+penceresi, çıpa okuma) doğru uygulanmıştı; kusurlar onların **etrafındaydı**.
+
+**E1 (Critical) — `leagues` tablosunu hiçbir kod doldurmuyor.**
+`upsert_matches` → `matches.league_id` → `leagues(id)` yabancı anahtarı. Tablo elle dolduruldu;
+temiz bir veritabanında altı lig de `ForeignKeyViolation` verir ve **lig izolasyonu tek sistemik
+sebebi altı ayrı arıza gibi gösterir**, krediler de yanar. Elle kurulan ön koşul, ön koşul değildir.
+
+`db.py`'ye ekle:
+```python
+def upsert_leagues(conn: psycopg.Connection[Any], leagues: tuple[League, ...]) -> int:
+    """config/leagues.yaml'ı leagues tablosuna yansıtır. Konfigürasyon kaynak, tablo aynadır."""
+```
+`INSERT ... ON CONFLICT (id) DO UPDATE SET` ile ad/dil/aktiflik güncellenir. `main()` içinde
+`snapshot` ve `seal` çalışmadan **önce** çağrılır. Bir test: boş tabloya 6 lig yazılır, tekrar
+çalıştırılınca 6 kalır (idempotent).
+
+**E2 (Critical) — `run_seal`, 24 saatlik çekimi `is_closing=True` damgalıyor.**
+Pencere filtresi yalnız lig seçiminde ve `sealed_at` UPDATE'inde var; **çekim ile insert
+arasında yok**. Cumartesi turunda pazar maçının fiyatı "kapanış" diye yazılır ve her turda
+tekrar birikir (`observed_at` farklı → `ON CONFLICT (row_hash)` elemez). Ürünün ölçtüğü şeyin
+ta kendisi bozuluyor.
+
+`_collect`'e satır filtresi parametresi eklenir:
+```python
+row_filter: Callable[[PriceRow], bool] | None = None
+```
+`run_seal` şunu geçer: satırın `commence_time`'ı `seal_window(..., now, window_minutes)`
+içinde mi. `run_snapshot` `None` geçer. Test: pencere dışı maçın satırları `is_closing=True`
+ile YAZILMAMALI.
+
+**E3 (Important) — kaçan mühür kalıcı ve sessiz.** Cron kayarsa maç mühürsüz kalır, komut
+`exit 0` der, hiçbir şey raporlanmaz. Veri zaten elde: `_leagues_due_for_seal`'in aday kümesi
+`now - interval '1 day'`'i kapsıyor ve 138'de atılıyor.
+`CollectResult`'a `missed_seals: tuple[str, ...]` eklenir (mühürsüz ve başlangıcı geçmiş maç
+id'leri); `main()` bunu stdout'a yazar. Mühür kaçtıysa sessiz kalınmaz.
+
+**E4 (Important) — `anchor.head` hiç kullanılmıyor + `verify-chain` her turda tüm defteri
+yeniden hash'liyor.** `TRUNCATE` satır-seviyesi tetikleyiciyi **ateşlemez**; kuyruk kesilip
+aynı sayıda sahte satır eklenirse `checked == anchor.rows` olur ve kontrol geçer.
+İkisi tek değişiklikle kapanır:
+- `publish-head` çıpaya `last_id=` de yazar (`SELECT max(id)`).
+- `_latest_anchor` bunu okur; `Anchor` alanı `last_id: int`.
+- `verify-chain` yalnız `id > anchor.last_id` satırlarını çeker ve
+  `verify_chain(rows, start_hash=anchor.head)` ile doğrular.
+Böylece hem kuyruk kesme yakalanır hem tarama sabit maliyete iner.
+
+**E5 (Important) — çıpa yoksa kontrol sessizce atlanıyor.** Atlanan kontrol geçmek değildir.
+`_latest_anchor()` `None` dönerse stdout'a adıyla yazılır:
+`"çıpa yok — kuyruk kesme kontrolü ATLANDI"`. Bozuk çıpa dosyası da (`int()` hatası)
+yakalanıp aynı şekilde raporlanır, traceback ile düşülmez.
+
+**E6 (Important) — tek bozuk fiyat ligin tüm turunu geri alıyor.** Şemada
+`check (price > 1.0)` var; `flatten_odds` doğrulama yapmıyor. Bir bookmaker `1.0` yayınlarsa
+o ligin **bütün** maçları kaybolur — mühür turundaki kapanış fiyatları dahil.
+Insert öncesi geçersiz fiyatlı satırlar ayıklanır ve **adıyla loglanır** (sessizce atılmaz).
+
+**E7 (Minor ama yük taşıyor) — çıkış kodları testsiz.** `return 3`'ü `return 0` yapmak
+9 testin hiçbirini kırmıyor. `main()` için exit 0 / 2 / 3 testleri eklenir.
+
+**E8 (Minor) — `QuotaExhausted` `CollectResult`'ı atıyor.** Exit 2, o turda başarısız olan
+liglerin de kaybolmasına yol açıyor, ve `run_seal`'de başarıyla toplanan ligler `sealed_at`
+almadan kalıyor. Kredi bittiğinde bile o ana kadar toplanan iş raporlanır.
+
+---
+
 ## Global Constraints
 
 - **Python ≥ 3.11.** Tür ipuçları zorunlu; `from __future__ import annotations` her modülde.
