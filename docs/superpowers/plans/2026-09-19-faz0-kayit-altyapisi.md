@@ -10,6 +10,95 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-19-football-edge-design.md`
 
+## Düzeltme kaydı — Task 5 incelemesi sonrası (2026-09-19)
+
+Task 5'in incelemesi 1 Critical + 2 Important buldu. Aşağıdaki üç değişiklik **Task 5 ve
+Task 6'ya koordineli** uygulanır (ikisi de aynı veriye dokunuyor):
+
+**D1 — Kanonik zaman damgası (Critical'in kardeşi, I1).** `bookmaker_last_update` sütunu
+`timestamptz`, ama yazarken API'nin ham metni (`"...T10:00:00Z"`) hash'leniyor. Geri okunduğunda
+`datetime` olur ve `isoformat()` asla `Z` üretmez → **kurcalanmamış her satır "KIRIK" der.**
+Çözüm okuma tarafında yama değil, **iki tarafın da çağırdığı tek fonksiyon**:
+
+`src/football_edge/ledger.py` içine ekle:
+```python
+from datetime import UTC, datetime
+
+
+def canonical_timestamp(value: str | datetime) -> str:
+    """Zaman damgasını hash'lenebilir TEK kanonik metne çevirir.
+
+    Yazma tarafı API'den gelen metni verir, okuma tarafı Postgres'ten gelen
+    datetime'ı verir; ikisi de AYNI metni üretmek zorundadır. Aksi hâlde zincir
+    kurcalanmamış satırlar için yanlış alarm verir — ki bu, kaçırılan kurcalamadan
+    daha zararlıdır, çünkü bir süre sonra alarma kimse bakmaz.
+    """
+    parsed = (
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if isinstance(value, str)
+        else value
+    )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+```
+
+`db.py` → `snapshot_payload` bu fonksiyonu **her iki zaman alanında** kullanır:
+```python
+"observed_at": canonical_timestamp(observed_at),
+"bookmaker_last_update": (
+    None if row.bookmaker_last_update is None else canonical_timestamp(row.bookmaker_last_update)
+),
+```
+
+`collect.py` → `_verify_chain_command` **aynı fonksiyonu** kullanır (`strftime` ve
+çıplak `isoformat()` kullanımları kaldırılır):
+```python
+"observed_at": canonical_timestamp(record["observed_at"]),
+"bookmaker_last_update": (
+    None if record["bookmaker_last_update"] is None
+    else canonical_timestamp(record["bookmaker_last_update"])
+),
+```
+
+**D2 — `insert_snapshots` gerçekten yazılan satırı saysın (C1).** `ON CONFLICT (row_hash)
+DO NOTHING` sessizce satır düşürebilir ama `return len(linked)` bunu görmüyor; yeniden deneme
+senaryosunda tüm batch no-op olur ve fonksiyon yine tam sayıyı döner.
+```python
+    written = 0
+    with conn.cursor() as cur:
+        for entry in linked:
+            cur.execute(...)          # mevcut INSERT
+            written += cur.rowcount   # ON CONFLICT DO NOTHING sonrası 1 veya 0
+    return written
+```
+Aynı düzeltme `upsert_matches` için de yapılır (`return len(seen)` → `cur.rowcount` toplamı).
+
+**D3 — Pooler beklentisi yazılsın (I2).** `connect()` içine yorum:
+```python
+    # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
+    # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
+    # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
+```
+
+**Gereken test (D1 için, `tests/test_ledger.py`):**
+```python
+def test_canonical_timestamp_is_symmetric_across_str_and_datetime() -> None:
+    from datetime import UTC, datetime
+
+    from football_edge.ledger import canonical_timestamp
+
+    assert canonical_timestamp("2026-09-19T10:00:00Z") == canonical_timestamp(
+        datetime(2026, 9, 19, 10, 0, tzinfo=UTC)
+    )
+
+
+def test_canonical_timestamp_preserves_microseconds() -> None:
+    assert canonical_timestamp("2026-09-19T10:00:00.123456Z").endswith(".123456+00:00")
+```
+
+---
+
 ## Global Constraints
 
 - **Python ≥ 3.11.** Tür ipuçları zorunlu; `from __future__ import annotations` her modülde.
