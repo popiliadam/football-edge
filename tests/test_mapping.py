@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -79,6 +80,22 @@ def test_no_match_option_is_offered_and_honoured() -> None:
     found = resolve("Panathinaikos", CANONICAL, client, league="tur.1")
     assert found.canonical_id is None
     assert NO_MATCH in client.seen[0]["criteria"]
+
+
+def test_model_answer_outside_the_offered_options_is_refused_and_named() -> None:
+    """Review (Important): tip cevabın ŞEKLİNİ garanti eder, DOĞRULUĞUNU değil (TypeSafe
+    dokümanı) — SDK modelin `criteria`de VERİLMEYEN bir değer döndürmesini KODLA
+    engellemez. Brief'in kendi örneği: Gaziantep FK'yi Gaziantep Basketbol'la karıştırmak
+    — spec §5.3'ün "1 numaralı ölüm sebebi" dediği tam bu sınıf arıza, yalnız kaynaktan
+    değil MODELDEN gelirse. `write_aliases` `canonical_id is not None` olan HER şeyi
+    yazar; `resolve` liste-dışı bir cevabı reddetmezse bu satır kalıcı, yanlış bir
+    join'e sessizce akar (entity_aliases.canonical_id `matches`e yabancı anahtarla
+    BAĞLI DEĞİL — db/migrations/0002_sources.sql).
+    """
+    client = FakeJev(answer("Gaziantep Basketbol", 0.99))
+    found = resolve("Gaziantep Futbol Kulübü", CANONICAL, client, league="tur.1")
+    assert found.canonical_id is None
+    assert "liste dışı" in found.reason
 
 
 def test_league_context_reaches_the_model() -> None:
@@ -290,3 +307,21 @@ def test_resolve_source_aliases_returns_none_when_no_observation_matches_the_lea
     )
 
     assert report is None
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_THRESHOLD — review (Minor #1, promoted): iki ayrı literal (0.75, 0.75) tutulursa
+# biri değişip diğeri unutulduğunda CLI yolu (resolve_source_aliases) GÜNCELLENMİŞ
+# GÖRÜNÜR ama davranışı SESSİZCE eski eşikte kalır.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_and_resolve_source_aliases_share_the_same_default_threshold() -> None:
+    """İki imzanın `threshold` varsayılanı AYNI modül sabitine bağlı olmalı — iki ayrı
+    literal DEĞİL. `inspect.signature` her ikisinin GERÇEK varsayılanını okur; sabit
+    değişirse ikisi de birlikte değişmeli, biri geride kalmamalı."""
+    assert inspect.signature(resolve).parameters["threshold"].default == mapping.DEFAULT_THRESHOLD
+    assert (
+        inspect.signature(resolve_source_aliases).parameters["threshold"].default
+        == mapping.DEFAULT_THRESHOLD
+    )

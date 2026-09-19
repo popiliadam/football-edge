@@ -136,6 +136,34 @@ def test_map_entities_command_requires_typesafe_api_key(
         collect._map_entities_command(object(), "footystats", "tur.1", NOW)
 
 
+def test_map_entities_command_reports_a_contract_violation_instead_of_a_bare_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Review (Minor #3, promoted): her kardeş komut arızayı adıyla stdout satırı + EXIT_*
+    koduna çevirir (`_fetch_tff_command`, `_fetch_venues_command`, ...) — `map-entities`
+    yalnız `mapping._alias_text`in `RuntimeError`'ını (eksik `team_name`) operatöre çıplak
+    traceback olarak veriyordu. `resolve_source_aliases` gerçekte bu hatayı fırlatır (bkz.
+    `test_mapping.py`); burada dispatch katmanı SINANIYOR, o yüzden kolaborasyon
+    monkeypatch'lenir (aynı desen: kardeş dosyalar KENDİ mantıklarını tekrar sınamaz)."""
+    monkeypatch.setattr(collect, "canonical_team_names", lambda conn, league: ("Galatasaray",))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+
+    def boom(*_a: object, **_k: object) -> object:
+        raise RuntimeError(
+            "footystats: gözlem payload'ında 'team_name' yok — bu kaynak henüz "
+            "map-entities'e bağlanmadı"
+        )
+
+    monkeypatch.setattr(collect, "resolve_source_aliases", boom)
+
+    code = collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+
+    out = capsys.readouterr().out
+    assert code == collect.EXIT_SOURCE_FAILED
+    assert "footystats/tur.1 eşlenemedi" in out
+    assert "team_name" in out
+
+
 # ---------------------------------------------------------------------------
 # main() kablolaması — argparse `choices`, `--league` zorunluluğu.
 # ---------------------------------------------------------------------------

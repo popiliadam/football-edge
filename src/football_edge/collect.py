@@ -85,6 +85,10 @@ EXIT_SOURCE_POLICY = 6
 # hiçbir yeni workflow/cron eklenmesini yasaklıyor, dört yeni alt komuttan hiçbiri
 # `seal.yml`/`snapshot.yml` tarafından hiç çağrılmıyor — `tests/test_workflows.py`deki
 # "BU LİSTE ELLE TUTULUR" yorumu bu kararı da adıyla taşır.
+# Task 11 (review fix, Minor #3 promoted) — `map-entities` de BU kodu alır: `mapping.
+# resolve_source_aliases`in fırlattığı `RuntimeError` (örn. `_alias_text`in eksik
+# `team_name` bulgusu) AYNI İSTİSNA, AYNI GEREKÇE — bir kaynağın veri sözleşmesi ihlali,
+# "lig" kavramına bağlı değil. `seal.yml`/`snapshot.yml` `map-entities`i de hiç çağırmaz.
 EXIT_SOURCE_FAILED = 7
 
 _LEDGER_COLUMNS = """
@@ -630,9 +634,17 @@ def _map_entities_command(
         sys.stdout.write(f"map-entities: {league_id} için matches tablosunda takım yok\n")
         return 0
     client = TypeSafeJev()
-    report: MappingReport | None = resolve_source_aliases(
-        conn, client, source_id, league_id, canonical, now
-    )
+    try:
+        report: MappingReport | None = resolve_source_aliases(
+            conn, client, source_id, league_id, canonical, now
+        )
+    except RuntimeError as exc:
+        # Kardeşleriyle AYNI şekil: adıyla stdout satırı + EXIT_SOURCE_FAILED — çıplak
+        # traceback değil (review, Minor #3 promoted). `TypeSafeJev()`in KENDİ
+        # RuntimeError'ı (anahtar eksik) buraya GİRMEZ: try bloğu yalnız `resolve_
+        # source_aliases`i sarıyor, o kurulum hatası hâlâ adıyla, yukarıda, patlıyor.
+        sys.stdout.write(f"map-entities: {source_id}/{league_id} eşlenemedi — {exc}\n")
+        return EXIT_SOURCE_FAILED
     if report is None:
         sys.stdout.write(f"map-entities: {source_id}/{league_id} için gözlem yok\n")
         return 0

@@ -14,6 +14,12 @@ from football_edge.observations import latest_observations
 
 LOGGER = logging.getLogger("football_edge.mapping")
 
+# TEK KAYNAK: `resolve` ve `resolve_source_aliases` İKİSİ de bu değeri varsayılan alır.
+# İki ayrı literal (0.75, 0.75) tutulsaydı biri değişip diğeri unutulduğunda CLI yolu
+# (resolve_source_aliases) GÜNCELLENMİŞ GÖRÜNÜR ama davranışı SESSİZCE eski eşikte kalırdı
+# (review, Minor #1 promoted).
+DEFAULT_THRESHOLD = 0.75
+
 _INSTRUCTIONS = (
     "The alias below is a football club name taken from one data source. "
     "Select the club from the canonical list that refers to the SAME club. "
@@ -53,7 +59,7 @@ def resolve(
     client: JevClient,
     *,
     league: str,
-    threshold: float = 0.75,
+    threshold: float = DEFAULT_THRESHOLD,
 ) -> Resolution:
     """Takma adı kanonik ada eşler; EŞİK ALTINDAKİ eşleşme reddedilir.
 
@@ -78,6 +84,19 @@ def resolve(
     )
     if answer.choice == NO_MATCH:
         return Resolution(alias, None, answer.confidence, "model 'hiçbiri' dedi")
+    if answer.choice not in options:
+        # Tip (`ChoiceAnswer.choice: str`) cevabın ŞEKLİNİ garanti eder, DOĞRULUĞUNU değil
+        # (TypeSafe dokümanı). SDK modelin `criteria`de VERİLMEYEN bir değer döndürmesini
+        # KODLA engellemez — Gaziantep FK'yi Gaziantep Basketbol'la karıştırmak (spec §5.3'ün
+        # "1 numaralı ölüm sebebi") burada da olabilir, yalnız kaynaktan değil MODELDEN
+        # gelirse. `entity_aliases.canonical_id` `matches`e yabancı anahtarla BAĞLI DEĞİL
+        # (0002_sources.sql) — bu kontrol olmazsa hiçbir şey aşağıda bunu yakalamaz.
+        return Resolution(
+            alias,
+            None,
+            answer.confidence,
+            f"model liste dışı bir değer döndürdü: {answer.choice!r}",
+        )
     if answer.confidence < threshold:
         return Resolution(
             alias,
@@ -173,7 +192,7 @@ def resolve_source_aliases(
     now: datetime,
     *,
     entity_kind: str = "team",
-    threshold: float = 0.75,
+    threshold: float = DEFAULT_THRESHOLD,
 ) -> MappingReport | None:
     """Bir kaynağın BİR ligdeki güncel takım gözlemlerini kanonik listeye eşler ve
     YALNIZ çözülenleri yazar. Bu ligde hiç gözlem yoksa (`entity_key` `{league_id}:`
