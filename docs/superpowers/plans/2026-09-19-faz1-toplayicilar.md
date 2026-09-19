@@ -191,6 +191,12 @@ hepsini yalnız okur. İhtiyaç duyulan her kayıt Task 3/4'te önceden yazılı
 `config/sources.yaml` tüm kaynakları baştan içerir). Bir paralel task bu dosyalardan birini
 değiştirmek zorunda kalıyorsa **dur ve bildir**: bu, çatının eksik olduğunun işaretidir.
 
+**`src/football_edge/collect.py` de salt okunurdur (Ruling R1).** Paralel task'lar CLI alt
+komutu EKLEMEZ — yalnız `collect_*()` kütüphane fonksiyonunu ve testini teslim eder. İki
+worktree aynı `main()` dalına yazarsa birleştirme çakışması kesindir ve çakışmayı çözen kişi
+iki ayrı ajanın niyetini tahmin etmek zorunda kalır. CLI kaydı, beş dal birleştikten sonra
+**tek sıralı adımda** yapılır (aşağıda, "Birleştirme adımı: CLI kaydı").
+
 Worktree kurulumu için `superpowers:using-git-worktrees` skill'ini kullan. Her worktree'de:
 
 ```bash
@@ -615,6 +621,20 @@ def test_missing_anchor_is_reported_by_name(tmp_path: Path, capsys: Any) -> None
 def test_missing_anchor_check_is_named_when_git_is_absent(tmp_path: Path) -> None:
     """Atlanan kontrol geçmek değildir; git yoksa None döner ve çağıran adıyla yazar."""
     assert expected_anchor_names(tmp_path) is None
+
+
+def test_shallow_clone_skips_by_name_rather_than_passing_vacuously(tmp_path: Path) -> None:
+    """Sığ klonda `git log` BAŞARILI olup boş döner — kontrol sessizce geçerdi.
+
+    `actions/checkout` varsayılanı `fetch-depth: 1`. Boş liste dönmek, "hiç çıpa yok" ile
+    "geçmişi göremiyorum"u aynı şeye indirger. İkincisi bir ATLAMADIR ve adıyla yazılır.
+    """
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "ledger").mkdir()
+    # Sığ olmayan taze depo: geçmiş var (boş), None DEĞİL boş demet beklenir.
+    assert expected_anchor_names(tmp_path / "ledger") == ()
 ```
 
 `tests/test_verify_chain.py`'nin import bloğuna ekle:
@@ -649,6 +669,19 @@ def expected_anchor_names(directory: Path = ANCHOR_DIR) -> tuple[str, ...] | Non
     DIŞARIDA tutmak gerekir; dışarısı zaten var — defterin dış kanıtı olan aynı git geçmişi.
     """
     try:
+        # SIĞ KLON SESSİZ BİR GEÇİŞTİR: `actions/checkout` varsayılanı `fetch-depth: 1` ve
+        # sığ bir depoda `git log` BAŞARILI olup boş liste döner. Boş liste "hiç çıpa
+        # yayınlanmamış" ile "geçmişi göremiyorum"u aynı şeye indirger ve kontrol hiçbir
+        # şey ölçmeden yeşil verir. Atlanan kontrol geçmek değildir — adıyla atlanır.
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        if shallow.stdout.strip() == "true":
+            return None
         found = subprocess.run(
             ["git", "log", "--diff-filter=A", "--name-only", "--format=", "--", str(directory)],
             capture_output=True,
@@ -823,7 +856,8 @@ Kayıt defteri §0'daki ölçümü de kalıcılaştırır: bir daha "Understat k
 **Files:**
 - Create: `config/sources.yaml`, `config/robots/` (7 dosya), `src/football_edge/sources.py`,
   `tests/test_sources.py`, `scripts/robots_drift.py`, `.github/workflows/sources-audit.yml`
-- Modify: `verify.sh` (yeni adım), `src/football_edge/collect.py` (yeni alt komut), `pyproject.toml`
+- Modify: `verify.sh` (yeni adım), `src/football_edge/collect.py` (yeni alt komut)
+- **Bağımlılık eklenmez** — `pyproject.toml` Task 4'ün işi.
 
 **Interfaces:**
 - Consumes: yok
@@ -836,7 +870,7 @@ Kayıt defteri §0'daki ölçümü de kalıcılaştırır: bir daha "Understat k
   - `allows(parser: RobotFileParser, source: Source, path: str) -> bool`
   - `guard_path(parser: RobotFileParser, source: Source, path: str) -> None` — izin yoksa `SourceBlocked`
   - `audit_offline(sources, robots_dir, today, *, max_age_days=30) -> tuple[str, ...]` — ihlal metinleri
-  - CLI: `python -m football_edge.collect sources-audit [--live]`
+  - CLI: `python -m football_edge.collect sources-audit`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1459,9 +1493,9 @@ ikisi de spec §8'in "sessiz kaynak arızası" panzehiridir: **tazelik** (veri n
 şema iddiası olmadan başarılı bir turdan ayırt edilemez.
 
 **Files:**
-- Create: `src/football_edge/collector.py`, `src/football_edge/observations.py`,
-  `db/migrations/0002_sources.sql`, `tests/test_collector.py`, `tests/test_observations.py`,
-  `tests/fake_sources.py`
+- Create: `src/football_edge/naming.py`, `src/football_edge/collector.py`,
+  `src/football_edge/observations.py`, `db/migrations/0002_sources.sql`,
+  `tests/test_collector.py`, `tests/test_observations.py`, `tests/fake_sources.py`
 - Modify: `verify.sh`, `pyproject.toml`
 
 **Interfaces:**
@@ -1475,6 +1509,10 @@ ikisi de spec §8'in "sessiz kaynak arızası" panzehiridir: **tazelik** (veri n
   - `Breaker` frozen dataclass: `failures: int, opened_at: datetime | None`; `record(breaker, now, *, ok: bool, threshold: int = 3, cooldown: timedelta) -> Breaker`; `is_open(breaker, now, *, cooldown) -> bool`
   - `write_observations(conn, observations) -> int`
   - `latest_observations(conn, source_id, entity_kind) -> tuple[Observation, ...]`
+  - **`naming.normalise_team(name: str) -> str`** — paylaşılan ad normalleştirici.
+    Task 6 (TFF) ve Task 11 (varlık eşleme) İKİSİ de bunu import eder. Genel amaçlı bir
+    normalleştirici tek bir toplayıcının iç detayı olamaz; paralel bir task'ın içine
+    gömülü bir sembole sıralı bir task'ın bağlanması cross-worktree kırılganlığıdır.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1645,7 +1683,56 @@ def write_robots(directory: Path, source_id: str, body: str) -> Path:
 Run: `uv run pytest tests/test_collector.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.collector'`
 
-- [ ] **Step 3: Write the framework**
+- [ ] **Step 3: Write the shared name normaliser, then the framework**
+
+`src/football_edge/naming.py`:
+
+```python
+from __future__ import annotations
+
+import re
+import unicodedata
+
+# Hukuki/kurumsal ekler: eşleşme anahtarına katkısı yok, gürültüsü çok.
+_SUFFIXES = re.compile(r"\b(a\.?ş\.?|spor kul(ü|u)b(ü|u)|futbol|sk|as|fk|fc|cf)\b")
+_NON_WORD = re.compile(r"[^a-z0-9ğüşıöç ]+")
+
+
+def normalise_team(name: str) -> str:
+    """Kaynaklar arası eşleşme anahtarı: küçük harf, aksan korunur, ek ve noktalama atılır.
+
+    TÜRKÇE'YE ÖZEL VE LOAD-BEARING: Python'da `"I".lower()` `"i"` verir, oysa Türkçe'de
+    `I`nın küçüğü `ı`, `İ`nin küçüğü `i`dir. `casefold()` da bunu bilmez. Açık eşleme
+    yapılmazsa aynı takım iki kaynakta FARKLI anahtar üretir ve join sessizce boş kalır —
+    bu projenin 1 numaralı ölüm sebebi (spec §5.3).
+
+    Task 6 (TFF) ve Task 11 (varlık eşleme) bu TEK fonksiyonu paylaşır. İki kopya tutulursa
+    biri diğerinden sessizce ayrışır ve eşleşme anahtarı iki farklı şey olur.
+    """
+    folded = name.replace("İ", "i").replace("I", "ı").strip().lower()
+    folded = unicodedata.normalize("NFC", folded)
+    folded = _SUFFIXES.sub(" ", folded)
+    folded = _NON_WORD.sub(" ", folded)
+    return " ".join(folded.split())
+```
+
+Testlerini `tests/test_collector.py`'nin sonuna ekle:
+
+```python
+def test_normalise_team_strips_legal_suffixes_and_punctuation() -> None:
+    from football_edge.naming import normalise_team
+
+    assert normalise_team("  Galatasaray A.Ş. ") == normalise_team("GALATASARAY AŞ")
+    assert normalise_team("Gaziantep F.K.") == normalise_team("gaziantep fk")
+
+
+def test_normalise_team_uses_turkish_case_rules() -> None:
+    """`"I".lower()` Python'da `"i"` verir; Türkçe'de `ı` olmalı. Karıştıran join boş kalır."""
+    from football_edge.naming import normalise_team
+
+    assert normalise_team("FENERBAHÇE") == normalise_team("Fenerbahçe")
+    assert normalise_team("ISTANBULSPOR") == normalise_team("Istanbulspor")
+```
 
 `src/football_edge/collector.py`:
 
@@ -2096,7 +2183,7 @@ Expected: `uv.lock` güncellenir; repoya girer, `.gitignore`'a EKLENMEZ.
 
 ```bash
 ./verify.sh
-git add src/football_edge/collector.py src/football_edge/observations.py db/migrations/0002_sources.sql tests/test_collector.py tests/test_observations.py tests/fake_sources.py tests/fake_obs_db.py verify.sh pyproject.toml uv.lock
+git add src/football_edge/naming.py src/football_edge/collector.py src/football_edge/observations.py db/migrations/0002_sources.sql tests/test_collector.py tests/test_observations.py tests/fake_sources.py tests/fake_obs_db.py verify.sh pyproject.toml uv.lock
 git commit -m "feat: toplayıcı çatısı, gözlem deposu ve veri sözleşmesi adımı
 
 izin -> fetch -> doğrula -> yaz. İzin kontrolü fetch'in İLK işi: disallow edilen
@@ -2130,7 +2217,8 @@ eşleme için bedava çıpa.
 - Create: `src/football_edge/collectors/__init__.py`, `src/football_edge/collectors/footystats.py`,
   `tests/test_footystats.py`, `tests/fixtures/footystats/turkey-super-lig-xg.html`
 - Modify: `config/sources.yaml` (6 lig yolu), `config/leagues.yaml`, `src/football_edge/leagues.py`,
-  `src/football_edge/collect.py`
+  `src/football_edge/collect.py`, **`tests/test_leagues.py`** (Faz 0'ın fixture'ları yeni
+  zorunlu alanı taşımıyor ve `_validate` bilinmeyen/eksik alanda patlıyor — güncellenmezse kırılır)
 
 **Interfaces:**
 - Consumes: `collector.{Observation, ContractViolation, fetch_text, assert_schema, assert_fresh}`,
@@ -2487,7 +2575,7 @@ Sıfır değilse `content_hash`'e `observed_at` sızmıştır.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/football_edge/collectors tests/test_footystats.py tests/fixtures/footystats config/sources.yaml config/leagues.yaml src/football_edge/leagues.py src/football_edge/collect.py
+git add src/football_edge/collectors tests/test_footystats.py tests/fixtures/footystats config/sources.yaml config/leagues.yaml src/football_edge/leagues.py tests/test_leagues.py src/football_edge/collect.py
 git commit -m "feat: FootyStats xG toplayıcı — çatının referans uygulaması
 
 Understat robots.txt ile kapalı (Disallow: /); xG kapsamını FootyStats devraldı
@@ -2528,7 +2616,8 @@ hakem verisi **sayfada yok**; içinde yalnız `pageID=433`'e bir bağlantı var.
 
 **Files:**
 - Create: `src/football_edge/collectors/tff.py`, `tests/test_tff.py`, `tests/fixtures/tff/`
-- **Salt okunur:** `config/sources.yaml` (`tff` kaydı ve `declared_paths` hazır)
+- **Salt okunur:** `config/sources.yaml` (`tff` kaydı ve `declared_paths` hazır),
+  `src/football_edge/collect.py` (Ruling R1 — CLI dalı EKLEME)
 
 **Interfaces:**
 - Consumes: `collector.{Observation, ContractViolation, fetch_text, assert_schema}`,
@@ -2538,7 +2627,7 @@ hakem verisi **sayfada yok**; içinde yalnız `pageID=433`'e bir bağlantı var.
     — `entity_kind="fixture_official"`, `entity_key=f"{home}|{away}"` (normalize edilmiş),
     payload: `{"home_team": str, "away_team": str, "referee": str, "league": str}`
   - `collect_tff(conn, client, *, sources_path, robots_dir, now) -> int`
-  - CLI: `fetch-tff`
+  - CLI: **bu task'ta YOK** (Ruling R1) — `fetch-tff` dalı birleştirme adımında eklenir.
 
 - [ ] **Step 1: Capture the fixture with the correct encoding**
 
@@ -2590,7 +2679,8 @@ from pathlib import Path
 import pytest
 
 from football_edge.collector import ContractViolation
-from football_edge.collectors.tff import normalise_team, parse_referees
+from football_edge.collectors.tff import parse_referees
+from football_edge.naming import normalise_team
 
 FIXTURE = Path("tests/fixtures/tff/hakem-433.html")
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -2641,8 +2731,6 @@ Run: `uv run pytest tests/test_tff.py -v` → `ModuleNotFoundError`
 from __future__ import annotations
 
 import logging
-import re
-import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -2652,6 +2740,7 @@ import psycopg
 from bs4 import BeautifulSoup, Tag
 
 from football_edge.collector import ContractViolation, Observation, assert_schema, fetch_text
+from football_edge.naming import normalise_team
 from football_edge.observations import write_observations
 from football_edge.sources import load_sources, robots_for
 
@@ -2666,22 +2755,6 @@ _REFEREE_TABLE_HINT = ""
 # TFF gövdesi windows-1254. Kodlama fetch tarafında AÇIKÇA verilir; httpx'in tahminine
 # bırakılırsa Türkçe adlar sessizce bozulur ve varlık eşleme hiçbir şey bulamaz.
 ENCODING = "windows-1254"
-
-_SUFFIXES = re.compile(r"\b(a\.?ş\.?|spor kul(ü|u)b(ü|u)|futbol|sk|as)\b")
-_NON_WORD = re.compile(r"[^a-z0-9ğüşiöç ]+")
-
-
-def normalise_team(name: str) -> str:
-    """Eşleşme anahtarı: küçük harf, aksan korunur, hukuki ek ve noktalama atılır.
-
-    Türkçe'de `"I".lower()` yanlış harfi verir; `casefold` da Türkçe'ye özel değildir.
-    Bu yüzden önce açık bir İ→i eşlemesi yapılır.
-    """
-    folded = name.replace("İ", "i").replace("I", "ı").strip().lower()
-    folded = unicodedata.normalize("NFC", folded)
-    folded = _SUFFIXES.sub(" ", folded)
-    folded = _NON_WORD.sub(" ", folded)
-    return " ".join(folded.split())
 
 
 def _cells(row: Tag) -> tuple[str, ...]:
@@ -2763,9 +2836,19 @@ gerçek fixture'a karşı koşuyor; yanlış indeks orada kırmızı verir.
 
 ```bash
 uv run pytest tests/test_tff.py -v && ./verify.sh
-DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" \
-  uv run python -m football_edge.collect fetch-tff
-git add src/football_edge/collectors/tff.py tests/test_tff.py tests/fixtures/tff src/football_edge/collect.py
+# CLI dalı henüz YOK (Ruling R1): toplayıcı doğrudan çağrılır.
+DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)" uv run python -c "
+from datetime import UTC, datetime
+from pathlib import Path
+import httpx
+from football_edge.db import connect
+from football_edge.collectors.tff import collect_tff
+with connect() as conn, httpx.Client() as client:
+    n = collect_tff(conn, client, sources_path=Path('config/sources.yaml'),
+                    robots_dir=Path('config/robots'), now=datetime.now(UTC))
+    print('tff yeni gozlem:', n)
+"
+git add src/football_edge/collectors/tff.py tests/test_tff.py tests/fixtures/tff
 git commit -m "feat: TFF hakem ataması toplayıcı (windows-1254)
 
 Spec pageID=600 diyordu; ölçüldü: 600 'Tüm Liglerin Fikstürleri' ve hakem verisi
@@ -3382,7 +3465,8 @@ zaten harcıyor → **günde bir** koşar, `guard_quota` eşiği `min_remaining=
 
 **Files:**
 - Create: `src/football_edge/collectors/results.py`, `tests/test_results.py`, `tests/fixtures/results/`
-- **Salt okunur:** `config/leagues.yaml`, `src/football_edge/odds_api.py`
+- **Salt okunur:** `config/leagues.yaml`, `src/football_edge/odds_api.py`,
+  `src/football_edge/collect.py` (Ruling R1 — CLI dalı EKLEME)
 
 **Interfaces:**
 - Consumes: `odds_api.{read_quota, guard_quota, Quota, QuotaExhausted}`, `leagues.League`
@@ -3391,7 +3475,7 @@ zaten harcıyor → **günde bir** koşar, `guard_quota` eşiği `min_remaining=
   - `parse_scores(payload: list[dict[str, Any]], observed_at: datetime) -> tuple[MatchOutcome, ...]`
   - `fetch_scores(client, api_key, sport_key, *, days_from=3) -> tuple[tuple[MatchOutcome, ...], Quota]`
   - `write_results(conn, outcomes) -> int`
-  - CLI: `fetch-results`
+  - CLI: **bu task'ta YOK** (Ruling R1) — `fetch-results` dalı birleştirme adımında eklenir.
   - **Task 10 bu tipi import ETMEZ** — Elo motoru düz demet alır (paralel bağımsızlık).
 
 - [ ] **Step 1: Write the failing test**
@@ -3592,7 +3676,7 @@ def write_results(conn: psycopg.Connection[Any], outcomes: tuple[MatchOutcome, .
 
 ```bash
 uv run pytest tests/test_results.py -v && ./verify.sh
-git add src/football_edge/collectors/results.py tests/test_results.py src/football_edge/collect.py
+git add src/football_edge/collectors/results.py tests/test_results.py
 git commit -m "feat: maç sonucu toplayıcı (The Odds API /scores)
 
 ClubElo API deaktif; Elo'yu kendimiz hesaplayacağız ve sonuç gerekiyordu.
@@ -3833,6 +3917,25 @@ uv run pytest -q          # çakışan fixture/işaret yok mu
 git log --oneline --graph -12
 ```
 
+### Birleştirme adımı: CLI kaydı (Ruling R1)
+
+Paralel task'ların hiçbiri `collect.py`'a dokunmadı. Beş dal birleştikten sonra, **tek sıralı
+commit'te** dört alt komut eklenir: `fetch-tff`, `fetch-venues`, `fetch-news`, `fetch-results`.
+Her biri kendi `collect_*()` fonksiyonunu çağırır; imzalar ilgili task'ların Interfaces
+bloklarında yazılıdır. `choices` demetine dördü de eklenir ve **eklenen her yeni çıkış kodunun
+`.github/workflows/*.yml` içinde adlandırılmış bir `case` arm'ı olur** —
+`tests/test_workflows.py` bu bağı kapıda tutuyor.
+
+```bash
+uv run pytest tests/test_workflows.py -v && ./verify.sh
+git add src/football_edge/collect.py .github/workflows
+git commit -m "feat: paralel toplayicilarin CLI kaydi
+
+R1: paralel task'lar collect.py'a dokunmadi; dort alt komut tek sirali commit'te.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
 **Birleştirme sonrası tek bir soru sorulur ve cevabı yazılır:** *bu tur neyi bozdu?* Faz 0'ın
 dördüncü düzeltme turuna kadar süren ders buydu — bir düzeltme komşu bir varsayımı geçersiz
 kılabilir. Beş bağımsız dalın hepsi `collector.py`'nin aynı sözleşmesine dayanıyor; biri onu
@@ -4040,7 +4143,7 @@ from typing import Any
 
 import psycopg
 
-from football_edge.collectors.tff import normalise_team
+from football_edge.naming import normalise_team
 from football_edge.jev import NO_MATCH, ChoiceAnswer, JevClient
 
 LOGGER = logging.getLogger("football_edge.mapping")
@@ -4194,7 +4297,11 @@ Etiketsiz bir kalibrasyon, kendi konusunu yeniden yazan bir testtir.
   - `CalibrationReport` frozen dataclass: `language: str, n: int, accuracy: float, false_positive: int, false_negative: int, mean_confidence: float`
   - `score_language(items, client, *, language) -> CalibrationReport`
   - `production_ready(report, *, min_n=100, min_accuracy=0.85) -> tuple[bool, str]`
-  - CLI: `calibrate --language tr`
+  - CLI: `calibrate --language tr` — Jev'i koşturur, `<lang>.report.json` yazar (PARA HARCAR)
+  - CLI: `check-languages` — **ağa çıkmaz**; `config/languages.yaml`'daki her
+    `production_enabled: true` için rapor dosyasının var olduğunu ve `production_ready()`'yi
+    geçtiğini doğrular. Kapının `dil-kalibrasyonu` adımı bunu çağırır, `calibrate`'i değil:
+    kapı ne para harcar ne ağa çıkar.
 
 - [ ] **Step 1: Write the labelling format and the seed file**
 
@@ -4457,6 +4564,37 @@ karar verilir."*
 step "dil-kalibrasyonu" uv run python -m football_edge.collect check-languages
 ```
 
+`check-languages` uygulaması (`collect.py`'ye ekle):
+
+```python
+def _check_languages_command(*, languages_path: Path = LANGUAGES_PATH) -> int:
+    """Rapor OLMADAN production_enabled olan dil var mı? Ağa çıkmaz, para harcamaz."""
+    raw = yaml.safe_load(languages_path.read_text(encoding="utf-8"))
+    violations: tuple[str, ...] = ()
+    for entry in raw["languages"]:
+        if not entry["production_enabled"]:
+            continue
+        report_path = Path(entry["calibration_report"])
+        if not report_path.is_file():
+            violations = (*violations, f"{entry['code']}: production_enabled ama rapor yok")
+            continue
+        report = CalibrationReport(**json.loads(report_path.read_text(encoding="utf-8")))
+        ready, reason = production_ready(report)
+        if not ready:
+            violations = (*violations, reason)
+    for text in violations:
+        sys.stdout.write(f"DİL KALİBRASYON İHLALİ: {text}\n")
+    if violations:
+        return EXIT_LANGUAGE_UNCALIBRATED
+    sys.stdout.write("dil kalibrasyonu: TEMİZ\n")
+    return 0
+```
+
+`collect.py`'ye `EXIT_LANGUAGE_UNCALIBRATED = 7`, `LANGUAGES_PATH = Path("config/languages.yaml")`
+ve `import json` / `import yaml` ekle; `choices` demetine `"calibrate"` ve `"check-languages"`
+ekle; `calibrate` için `--language` argümanı tanımla. İkisi de `connect()` AÇILMADAN önce
+dallanır — hiçbiri veritabanına dokunmaz.
+
 ```bash
 ./verify.sh
 git add config/languages.yaml data/calibration src/football_edge/calibration.py tests/test_calibration.py verify.sh src/football_edge/collect.py
@@ -4623,8 +4761,8 @@ kimse ezbere bilemez ve uydurmak yasaktır) ve Task 12 Step 1 (insan etiketleri 
 **Tip tutarlılığı.** `Observation` Task 4'te tanımlandı; Task 5-8 aynı alanları kullanıyor.
 `Source` Task 3'te; `fetch_text`/`guard_path` imzaları Task 4-8 arasında sabit.
 `ChoiceAnswer` Task 11'de; Task 12 aynı `ask_choice` protokolünü çağırıyor.
-`normalise_team` **Task 6'da tanımlanıp Task 11'de kullanılıyor** — Task 11, paralel kümenin
-birleşmesinden SONRA koştuğu için bu bağımlılık geçerlidir ve sıralamada yazılıdır.
+`normalise_team` **Task 4'ün `naming.py`'sinde** tanımlı; Task 6 ve Task 11 ikisi de oradan
+import eder (Ruling R2 — önceden Task 6'nın içindeydi ve bu cross-worktree kırılganlıktı).
 `MatchOutcome` (Task 9) Task 10'a **sızmaz**: Elo düz demet alır, paralel bağımsızlık korunur.
 
 ---
