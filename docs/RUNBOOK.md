@@ -108,12 +108,19 @@ olup NE üst düzeyde NE DE arşivde bulunamayan bir çıpa `ÇIPA EKSİK` ile e
 
 ```bash
 uv run python -m football_edge.collect verify-chain
-# beklenen: "çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI"
+# beklenen: "ÇIPA ARŞİVLENDİ (kanıt kapsamı daraldı): head-YYYY-MM-DD.txt"
+#           + "çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI"
 #           + "zincir: SAĞLAM kontrol=<tüm defter>"
 
 uv run python -m football_edge.collect publish-head
 # beklenen: "zincir başı yazıldı: ledger/head-YYYY-MM-DD.txt"
 ```
+
+**`ÇIPA ARŞİVLENDİ` satırı beklenen çıktıdır ve kaybolmaz.** Arşivlenmiş bir çıpa
+"hesaba katılmış" sayılır — yani §1.4'ün prosedürü kapıyı KALICI kırmızıya düşürmez —
+ama daralan kanıt kapsamı her turda ADIYLA raporlanır. Silmek yerine arşive taşıyan biri
+bu satırı üretir; sessiz geçmez. Satır git geçmişindeki taşıma commit'iyle birlikte
+okunmalıdır (§1.4 adım 3: gerekçe ve taşıma AYNI commit'te).
 
 Yeni çıpa commit'lenip **push edilmeden** koruma geri gelmez: çalışma ağacındaki çıpa,
 defteri yeniden yazabilen birinin ayrıca yazabileceği bir dosyadır. Dış kanıt ancak
