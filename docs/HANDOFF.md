@@ -1,8 +1,10 @@
 # football-edge — Oturum Devri (Handoff)
 
 **Son güncelleme:** 2026-09-19 · **Durum:** **Faz 1 TAMAM — `faz-1-toplayicilar` merge'e HAZIR**
-**Dal:** `faz-1-toplayicilar` · **46 commit** (main'den itibaren) · **349 test** (+18 contract)
-· kapı **9 adım yeşil + `zincir` adıyla SKIP** · **push edilmedi, CI hiç koşmadı**
+**Dal:** `faz-1-toplayicilar` · **349 test** (+18 contract) · kapı **9 adım yeşil +
+`zincir` adıyla SKIP** · **push edilmedi, CI hiç koşmadı**
+· commit sayısı: `git log --oneline main..HEAD | wc -l` (donmuş bir sayı burada tutulmaz —
+bu belgenin kendisi onu bir commit sonra yanlışlıyordu)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
