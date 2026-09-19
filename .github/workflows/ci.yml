@@ -1,0 +1,73 @@
+name: ci
+
+# PROJENİN KAPISI BUDUR. `.github/workflows/` uzun süre yalnız `snapshot.yml` ve
+# `seal.yml` taşıdı; ikisi de `schedule` + `workflow_dispatch`. Yani dokümantasyon
+# yedi adımlık bir kapıyı anlatırken CI'ın gerçekten koştuğu tek adım secret
+# taramasıydı. Merge sonrası bozuk bir push 15 dakikalık mühür cron'una KAPISIZ
+# ulaşır ve kalıcı, yanlış etiketli satırlar yazar — defter append-only, o satırlar
+# silinemez. Kapı push anında koşmalı, tur koşmadan önce.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # snapshot/seal'in `odds-collect` grubundan AYRI: bu iş deftere hiç dokunmaz,
+  # onları beklemesi için bir sebep yok. Ref başına eskisi iptal edilir: yalnız
+  # dalın SON hâlinin yeşil olması anlamlıdır.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  # Salt okunur. Bu iş hiçbir şey commit'lemez; `seal.yml`'in `contents: write`
+  # yetkisi yalnız çıpa yayını içindir ve buraya sızmaz.
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      # `uv sync --frozen` ŞART: kapının `paket-kurulu` adımı `PYTHONPATH` boşken
+      # KURULU paketi import eder. Kurulum olmadan o adım düşer — ve düşmesi
+      # doğrudur, çünkü workflow'lar `python -m football_edge.collect` ile tam da
+      # kurulu paketi çağırıyor.
+      - run: uv sync --frozen
+      - name: Kapı
+        env:
+          # `verify.sh` logu `${TMPDIR:-/tmp}` altına yazar. Runner'da `TMPDIR`
+          # tanımlı değildir; sabitlenmezse log /tmp'ye düşer ve aşağıdaki yükleme
+          # adımı yanlış yere bakar — yani tam da kırmızı koşuda çıktı kaybolur.
+          TMPDIR: ${{ runner.temp }}
+        # SECRET VERİLMEZ — `DATABASE_URL` de `ODDS_API_KEY` de yok. İkisi de
+        # kasıtlı:
+        #   - `DATABASE_URL`: kapının `zincir` adımı CANLI deftere bağlanırdı ve
+        #     her fork PR'ı üretim veritabanına erişmiş olurdu. Defter append-only,
+        #     her yazma kalıcı.
+        #   - `ODDS_API_KEY`: her push ücretli çağrı demek olurdu (ayda 500 kredi).
+        # Kapı secret'sız DOĞRU biçimde bozulur: `zincir` adımı
+        # "SKIP: zincir (DATABASE_URL yok)" basar — ATLANAN KONTROL GEÇMEK DEĞİLDİR,
+        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan altı adım koşar:
+        # ruff-check · ruff-format · mypy · pytest · paket-kurulu · secrets.
+        #
+        # `zincir` adımının gerçekten koştuğu tek yer `seal.yml`'dir (her 15 dakika,
+        # varsayılan dalda, kendi secret'ıyla). Bu boşluk HANDOFF §3'te yazılıdır.
+        run: ./verify.sh
+      - name: Kapı logunu yükle
+        # `verify.sh` özet basar, ayrıntıyı log dosyasına yazar ve projenin kuralı
+        # "çıktı DOSYADAN okunur". `if: always()` olmadan log tam da okunması
+        # gereken koşuda — kırmızıda — kaybolur.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-log
+          path: ${{ runner.temp }}/football-edge-verify.log
+          if-no-files-found: warn
+# BİLİNEN MALİYET (dal filtresi KASITLI olarak yok): `seal.yml` her mühür turunda
+# `ledger/` altına bir çıpa commit'leyip push'luyor, yani varsayılan dalda günde
+# ~96 ek CI koşusu doğuyor. Depo public → Actions dakikası ücretsiz. `paths-ignore`
+# ile susturulabilirdi ama kapıya filtre eklemek onu zayıflatmaktır; maliyet
+# susturulmak yerine ADIYLA yazıldı (docs/DEFERRED.md).

@@ -12,6 +12,7 @@ Bu dosya iş akışlarının İÇERİĞİNİ okur, koşmaz: runner'da gerçekten
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,105 @@ def test_seal_workflow_names_every_exit_code_the_collector_can_return(code: int,
         "operatör arızayı adıyla göremez"
     )
     assert name in arm, f"exit {code} arm'ı arızayı adlandırmıyor ({name!r} geçmiyor): {arm!r}"
+
+
+# ── C1: CI kapıyı HİÇ koşmuyordu ────────────────────────────────────────────
+# `.github/workflows/` yalnız `snapshot.yml` ve `seal.yml` taşıyordu, ikisi de
+# `schedule` + `workflow_dispatch`. Yani projenin GERÇEK kapısı tek adımdı
+# (`check_secrets.sh`), dokümantasyon ise yedi diyordu. Merge sonrası bozuk bir
+# push 15 dakikalık mühür cron'una KAPISIZ ulaşır ve kalıcı, yanlış etiketli
+# satırlar yazar — append-only: o satırlar silinemez.
+
+CI = REPO / ".github/workflows/ci.yml"
+
+
+def _triggers(path: Path) -> dict[str, Any]:
+    """Tetikleyicileri döner.
+
+    PyYAML (YAML 1.1) `on:` anahtarını BOOLEAN True'ya çevirir — `document["on"]`
+    KeyError verir. Bu tuzak sessizce "tetik yok" sonucunu üretir, o yüzden iki
+    yazım da kabul edilir.
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return dict(document.get("on") or document.get(True) or {})
+
+
+def test_a_ci_workflow_exists_at_all() -> None:
+    assert CI.is_file(), (
+        "`.github/workflows/ci.yml` yok: kapı hiçbir push'ta koşmuyor, "
+        "projenin gerçek kapısı tek adım (secret taraması)"
+    )
+
+
+@pytest.mark.parametrize("trigger", ["push", "pull_request"])
+def test_ci_runs_the_gate_on_every_push_and_pull_request(trigger: str) -> None:
+    assert trigger in _triggers(CI), (
+        f"ci.yml `{trigger}` ile tetiklenmiyor — kapı yine yalnız zamanlanmış turlarda koşar"
+    )
+
+
+def test_ci_actually_runs_the_gate_script() -> None:
+    """`./verify.sh` koşmayan bir CI, adı CI olan bir dosyadır."""
+    assert _index_of(_steps(CI), "./verify.sh") is not None, "ci.yml kapıyı hiç koşmuyor"
+
+
+def test_ci_checks_out_and_installs_before_running_the_gate() -> None:
+    """Kapının `paket-kurulu` adımı KURULU paketi arar; `uv sync` olmadan düşer."""
+    steps = _steps(CI)
+    checkout = _index_of(steps, "actions/checkout", key="uses")
+    sync = _index_of(steps, "uv sync")
+    gate = _index_of(steps, "./verify.sh")
+
+    assert checkout is not None, "checkout yok: git tabanlı secret taraması koşamaz"
+    assert sync is not None, "`uv sync` yok: `paket-kurulu` adımı kurulu paketi bulamaz"
+    assert gate is not None
+    assert checkout < sync < gate, f"adım sırası yanlış: {checkout}, {sync}, {gate}"
+
+
+def _env_keys(path: Path) -> set[str]:
+    """Workflow/job/step seviyesindeki TÜM `env` anahtarları.
+
+    Ham metin taraması burada yanlış cevap verir: bir secret'ın NEDEN verilmediğini
+    anlatan yorum da `DATABASE_URL` yazar. C1'in bulunduğu yerin aynısı — `grep`
+    tek eşleşme bulmuştu ve o da bir YORUMDU. Bu yüzden AYRIŞTIRILMIŞ belge okunur.
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    keys = set(document.get("env") or {})
+    for job in document["jobs"].values():
+        keys |= set(job.get("env") or {})
+        for step in job["steps"]:
+            keys |= set(step.get("env") or {})
+    return keys
+
+
+def test_ci_is_never_given_the_live_database() -> None:
+    """CI CANLI DEFTERE DOKUNMAZ.
+
+    `DATABASE_URL` verilirse kapının `zincir` adımı canlı deftere bağlanır ve her
+    fork PR'ı üretim veritabanına erişmiş olur — defter append-only, her yazma
+    kalıcı. Kapı secret'sız DOĞRU biçimde bozulur: `zincir` adımı ATLANDI'yı
+    ADIYLA basar (atlanan kontrol geçmek değildir), geri kalan altı adım koşar.
+    """
+    bound = _env_keys(CI)
+
+    assert "DATABASE_URL" not in bound, "ci.yml canlı deftere bağlanıyor"
+    assert "ODDS_API_KEY" not in bound, "ci.yml ücretli API anahtarını taşıyor"
+
+
+def test_ci_reads_no_repository_secret_at_all() -> None:
+    """Bir sonraki mühendis `secrets.*` eklerse kapı kırmızı versin.
+
+    Aranan şey İFADEDİR, çıplak kelime değil: kapının `secrets` adlı bir adımı var
+    ve düz metin araması onu da yakalardı — C1'i gizleyen hatanın aynısı, yalnız
+    ters yönde (yanlış alarm). Yanlış alarm da kaçırılan bulgu kadar zararlıdır.
+    """
+    expressions = re.findall(r"\$\{\{(.*?)\}\}", CI.read_text(encoding="utf-8"), flags=re.S)
+    leaking = [text.strip() for text in expressions if "secrets" in text]
+
+    assert leaking == [], (
+        f"ci.yml depo secret'ı okuyor {leaking}: kapı her push'ta (fork PR'ları "
+        "dâhil) üretim kimlik bilgilerine erişmiş olur"
+    )
 
 
 def test_the_scanned_script_exists_and_is_executable() -> None:
