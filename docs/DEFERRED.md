@@ -276,3 +276,34 @@ Bunlar bulgu değil, **cevabı olmayan sorular** — `docs/phases/00-kayit-altya
 value olmayabilir), `Club-Football-Match-Data` lisans zinciri (ticari lansman öncesi
 avukat), Transfermarkt `robots.txt`, Jev'in çok dilli doğruluğu, Highlightly planında
 oran olup olmadığı.
+
+---
+
+## 8. Faz 1 merge adımı (Task M, 2026-09-19) — `fetch-venues` bilinçli olarak TEK stadyum topluyor
+
+**Bulgu değil, kasıtlı kapsam kararı — ama sessizce varsayılmasın diye burada.**
+`src/football_edge/collectors/venues.py:VENUES` şu an tek girdi taşıyor:
+`VenueSpec(home_team="Galatasaray", qid="Q81492")`. `fetch-venues` bugün yalnız Galatasaray'ın
+ev sahibi maçları için stadyum koordinatı ve maç-saati havası topluyor — Süper Lig'deki
+diğer 17 takım, hatta Faz 0'ın odds toplayıcısının izlediği diğer beş ligin HİÇBİRİ için değil.
+
+**Neden genişletilmedi (Ruling R44, coordinator):** `declared_paths`in TEK girdi taşıması
+(`config/sources.yaml`, wikidata kaydı) bu sınırı ZORUNLU KILMIYOR — `declared_paths` kapının
+çevrimdışı denetimi için TEMSİLİ yollardır, çalışma zamanında her gerçek istek `fetch_text`
+içindeki `guard_path` ile AYRI AYRI doğrulanır (tek beyan edilen yol zaten bu şekli kapsar).
+Asıl kısıt: genişletmek bir takım→QID (Wikidata varlık kimliği) eşlemesi gerektirir, ve bu TAM
+OLARAK Task 11'in işi (kaynaklar arası varlık eşleme, Jev `Choice`). Şimdi elle tutulan ikinci
+bir eşleme yazmak, Task 11'i onu ya devralmak ya da silmek zorunda bırakırdı — iki kez yazılan
+iş. Bu yüzden kayıt MİNİMAL kalıyor: `declared_paths`e yeni bir stadyum eklemek + `VENUES`e yeni
+bir `VenueSpec` eklemek yeterli olurdu (kod bunu destekliyor, mimari bir engel yok), ama bunu
+YAPMAK Task 11'in gerçek varlık-eşleme altyapısını beklemeli.
+
+**Yanlışsa bedeli:** Faz 1 boyunca yalnız Galatasaray'ın maç-saati havası toplanır; diğer
+takımların stadyum/hava özelliği modele hiç girmez. Task 11 tamamlandığında bu kayıt (ya da
+onun yerini alacak gerçek eşleme) genişletilmeli — genişletilmediği fark edilmeden Faz 2'ye
+geçilirse "hava özelliği var" varsayımı yanlış olur.
+
+Ayrıca (küçük, aynı görev): `config/sources.yaml`nin ajansspor kaydı artık `/sitemap` (index)
+ve `/sitemap/news` (urlset) declared_paths'lerinin İKİSİNİ de taşıyor, ama `collect_news`
+yalnız `/sitemap/news`i fetch ediyor — `/sitemap` beyan edilmiş ama alt-sitemap keşfi
+uygulanmamış bir giriş noktası (bkz. `task-M-report.md`, M4).
