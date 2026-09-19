@@ -1794,7 +1794,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_collect.py -v`
-Expected: 5 PASS
+Expected: 9 PASS (5 pencere/ufuk + 2 çıpa + 1 DB-turu + 1 arıza izolasyonu)
 
 - [ ] **Step 5: Run the gate and commit**
 

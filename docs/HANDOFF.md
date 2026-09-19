@@ -208,11 +208,13 @@ PLAN=docs/superpowers/plans/2026-09-19-faz0-kayit-altyapisi.md
 inceleme paketi üret → inceleme ajanı gönder → bulguları çöz → deftere
 `Task <N>: complete (commits <base7>..<head7>, review clean)` yaz → sonrakine geç.
 
-**Model seçimi (kullanıcı kuralı — `~/.claude/rules/performance.md`):**
+**Model seçimi (kullanıcı kuralı, 2026-09-19'da güncellendi):**
 - **Haiku ASLA kullanılmaz.** Hiçbir ajanda.
-- Mekanik aktarım (plan tam kodu içeriyor) → `sonnet`
-- İnceleme → `sonnet` (küçük diff) · karmaşık/riskli diff → `opus`
-- **Final whole-branch inceleme → `opus`** (en yetenekli model, skill'in şartı)
+- **Varsayılan: `opus`** — implementer de reviewer da. Kullanıcı "genel olarak opus max
+  ile ilerleyeceğiz" dedi; skill'in "en ucuz yeterli model" tavsiyesi bunun yerine geçmez.
+- **Çok karmaşık işler → `fable`** (Fable 5.1). Kullanıcı bunu açıkça izin verdi.
+- **Final whole-branch inceleme → `opus`** (skill'in ayrıca şartı)
+- İlk dört görev `sonnet` ile koşuldu (politika değişmeden önce); sonuçları temiz.
 
 **Dispatch prompt'u şunları içerir:** (1) görevin projedeki yeri tek cümle, (2) brief yolu
 "önce bunu oku, gereksinimlerin bu" diye, (3) önceki görevlerden gelen ve brief'in bilemeyeceği
