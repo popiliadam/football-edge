@@ -37,6 +37,25 @@ step "paket-kurulu" env PYTHONPATH= uv run python -c \
 # geri çevirir; bu adım onu kuralda tutar.
 step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect sources-audit
 
+# Veri sözleşmesi: toplayıcıların KAYDEDİLMİŞ fixture'ları üzerinde tazelik/şema iddiaları.
+# Ağa çıkmaz — fixture'lar repoda. Canlı tazeliği snapshot turu ölçer; burada ölçülen,
+# AYRIŞTIRICININ hâlâ beklenen şekli ürettiğidir.
+#
+# Task 4 sonunda `contract` marker'ını taşıyan HİÇBİR test yok — toplayıcılar (Task 5-8)
+# ekleyecek. `pytest -m contract` eşleşme yokken exit 5 ("no tests collected") verir; bu
+# FAIL DEĞİL, boş seçimdir. Ayrım burada AÇIKÇA yapılır — aksi hâlde exit 5 kapıyı yanlış
+# sebepten kırmızı yapar ve gerçek bir arıza gibi okunur (bkz. qa-loop "SKIP geçmek
+# değildir" ilkesi — burada tersi: BOŞ SEÇİM de arıza değildir, ama sessiz geçilmez).
+step "veri-sözleşmesi" bash -c '
+  uv run pytest tests/ -q -m contract
+  code=$?
+  if [ "$code" -eq 5 ]; then
+    echo "NOT: contract etiketiyle eşleşen test yok (boş seçim) — henüz hiçbir toplayıcı yok, hataya sayılmaz"
+    exit 0
+  fi
+  exit "$code"
+'
+
 step "secrets"     ./scripts/check_secrets.sh
 
 if [ -n "${DATABASE_URL:-}" ]; then

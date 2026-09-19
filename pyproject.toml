@@ -7,10 +7,20 @@ dependencies = [
     "protego>=0.3",
     "psycopg[binary]>=3.2",
     "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "defusedxml>=0.7",
+    "typesafe-sdk>=0.1",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11", "types-PyYAML"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+    "types-beautifulsoup4",
+    "types-defusedxml",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -22,6 +32,7 @@ packages = ["src/football_edge"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = ["contract: kaydedilmiş fixture üzerinde tazelik/şema sözleşmesi"]
 
 [tool.ruff]
 line-length = 100
