@@ -187,45 +187,40 @@ kapıda eşik yok.
 `ci.yml` dâhil. Dal merge edilene kadar `schedule` de koşmaz (GitHub `schedule`'ı
 yalnız varsayılan dalda onurlandırır). Merge sonrası **ilk koşu izlenmelidir.**
 
-### 5.5 `sources.allows()` stdlib'in `robotparser`ının İKİ sınırını ZORLAYAMAZ
+### 5.5 (KAPANDI — R10) stdlib `robotparser`ın ÜÇ sınırı vardı; `protego`ya geçilerek düzeltildi
 
-Faz 1 Task 3'te bulundu, revizyonda (R7 incelemesi) bir üçüncüsü daha bulunup DÜZELTİLDİ.
-`urllib.robotparser` RFC 9309'u iki eksende karşılamıyor:
+**Bu madde artık ERTELENMİŞ bir sorun DEĞİL — tarihi bir kayıt olarak tutuluyor.** Faz 1
+Task 3'te bulundu (joker karakter eksikliği), revizyonda (R7 incelemesi) iki tane daha
+bulundu (boş-satır blok kesilmesi; dosya-sırası önceliği). `urllib.robotparser` RFC 9309'u
+üç eksende karşılamıyordu:
 
-1. **Joker karakter (`*`/`$`) DESTEKLENMEZ** — yalnız orijinal 1996 taslağının düz önek
-   eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan geçirir; bu `*`/`?`yi
-   `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gibi bir satır gerçek bir istekte HİÇBİR
-   ZAMAN eşleşmeyen düz bir dizeye döner. Ölçüldü: `config/robots/footystats.txt`
-   (`Disallow: /*.php`, `/matches?*`) ve `ajansspor.txt`nin (`Disallow: /lineup/*`) gerçek
-   gövdeleri tam olarak bu deseni taşıyor — `sources.allows()` bu satırları SESSİZCE yok
-   sayar, engellemez.
-2. **Çakışan kurallarda "en ÖZGÜL (en uzun) kazanır" DEĞİL, dosya SIRASINDAKİ İLK eşleşen
-   kural kazanır** (`Entry.allowance()`). RFC 9309 en uzun/en özgül eşleşmeyi ister — sıra
-   önemli değildir. Ölçüldü: wikidata'nın robots.txt'i `Disallow: /wiki/Special:` (geniş,
-   erken) İLE `Allow: /wiki/Special:EntityData/*.` (özgül, geç) taşıyor; ikisi de aynı yola
-   uyduğunda erken/geniş olan kazanıyor, geç/özgül olan HİÇ sorulmuyor.
+1. **Joker karakter (`*`/`$`) DESTEKLENMİYORDU** — `RuleLine` her deseni `urllib.parse.quote`
+   'tan geçirip `*`/`?`yi `%2A`/`%3F`ye çeviriyordu; `Disallow: /*.php` gerçek bir istekte
+   HİÇBİR ZAMAN eşleşmeyen düz bir dizeye dönüyordu. Ölçüldü: `footystats.txt`
+   (`Disallow: /*.php`, `/matches?*`) ve `ajansspor.txt` (`Disallow: /lineup/*`).
+2. **Bir blok içindeki boş satır, YENİ bir `User-agent:` satırı görmeden kural birikimini
+   SESSİZCE kesiyordu** — RFC 9309'a aykırı (yalnız yeni User-agent satırı ya da EOF bir
+   grubu bitirir). Wikidata'nın gerçek robots.txt'i (446 satır, TEK "User-agent: *" satırı)
+   bunun kurbanıydı: satır 422/423/425'teki boş satırlar yüzünden 435-436'daki kurallar hiç
+   okunmuyordu.
+3. **Çakışan kurallarda "en ÖZGÜL (en uzun) kazanır" DEĞİL, dosya SIRASINDAKİ İLK eşleşen
+   kural kazanıyordu** (`Entry.allowance()`). Wikidata'nın robots.txt'i `Disallow:
+   /wiki/Special:` (geniş, erken) İLE `Allow: /wiki/Special:EntityData/*.` (özgül, geç)
+   taşıyor; erken/geniş olan kazanıyordu, geç/özgül olan HİÇ sorulmuyordu.
 
-(Bir ÜÇÜNCÜ, DAHA CİDDİ sorun — boş satırların `parse()`'ın blok birikimini bir "User-agent:"
-satırı görmeden sessizce kesmesi, RFC 9309'a aykırı — R7 incelemesinde bulundu ve
-`sources.robots_for()`de DÜZELTİLDİ; artık burada listeli DEĞİL çünkü ertelenmiş bir sorun
-değil, kapatılmış bir bulgu. Wikidata'nın gerçek dosyası bunun kurbanıydı: satır 435-436'daki
-kurallar hiç okunmuyordu. Düzeltme YALNIZ bunu giderdi — kural artık OKUNUYOR, ama yukarıdaki
-1 ve 2 numaralı sınırlar YÜZÜNDEN hâlâ yanlış SEÇİLİYOR.)
+Üçü BİRLİKTE `wikidata`'yı yanlışlıkla kapalı tutuyordu: `declared_paths:
+['/wiki/Special:EntityData/Q170980.json']` (R7'nin düzelttiği, gerçekten fetch edilen URL)
+Wikimedia'nın kendi `Allow` kuralıyla AÇIKÇA izinliydi, ama stdlib bunu göremiyordu.
 
-`kaynak-politikası` kapı adımı (`audit_offline`) bu yüzden yalnız DÜZ ÖNEKLİ VE ÇAKIŞMAYAN
-`Disallow` satırlarını güvenilir biçimde zorlar. `declared_paths`e bu iki tuzaktan birine
-düşen bir yol eklemek, kapının yakalayacağı yanılsamasını verir — `wikidata` kaydı bunun
-somut, commit'lenmiş örneğidir: `declared_paths: ['/wiki/Special:EntityData/Q170980.json']`
-gerçek, fetch edilen bir URL'dir (R7'nin düzelttiği önek hatası değil) ve Wikidata'nın
-robots.txt'i bunu Wikimedia'nın kendi `Allow` kuralıyla AÇIKÇA izin veriyor — ama yukarıdaki
-1 ve 2 sınırları BİRLİKTE bu izni `sources.allows()`tan gizliyor, bu yüzden kayıt `enabled:
-false` kalıyor (bkz. kaydın kendi notu, ve task-3-report.md'nin R7 fix bölümü).
-
-**Gereken:** joker-duyarlı, en-özgül-kazanır bir robots ayrıştırıcı (ör. `protego`) — yeni
-bağımlılık, bu görevin kapsamı dışında (Task 4+'ın işi, izlenen follow-up task mevcut).
-O zamana kadar `declared_paths` YALNIZ düz önekli VE ÇAKIŞMAYAN kısıtlara güvenerek
-seçilmeli; bu iki tuzaktan birine düşen bir `Disallow`/`Allow` çiftinin "zaten kapı yakalar"
-varsayılmaması gerekir.
+**Düzeltme (R10):** `urllib.robotparser` yerine `protego` (Scrapy ekibi, RFC 9309: joker
+karakter + en-uzun-eşleşme + doğru blok birikimi) — `pyproject.toml`'a eklenen tek yeni
+bağımlılık. `sources.robots_for()`/`allows()`/`guard_path()` imzaları AYNI kaldı, yalnız
+`robots_for`'ın dönüş tipi `Protego`. Üç sınırın hepsi `tests/test_sources.py`'de dedike
+testlerle pinlendi (`test_wildcard_disallow_actually_blocks_a_matching_path`,
+`test_longest_match_lets_a_narrow_allow_override_a_broad_disallow`,
+`test_blank_line_mid_block_does_not_drop_the_rule_that_follows`) — üçü de stdlib'e
+dönülürse (mutation ile kanıtlandı) KIRMIZI verir. `wikidata` artık `enabled: true`
+(ölçüldü: `/wiki/Special:EntityData/Q170980.json` artık `True`).
 
 ---
 

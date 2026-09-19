@@ -18,21 +18,22 @@ from football_edge.sources import (
 )
 
 UNDERSTAT_ROBOTS = "User-agent: *\nDisallow: /\n"
-# NOT "Disallow: /api/club*" / "/*.php" / "/matches?*" (footystats' REAL robots.txt, measured
-# 2026-09-19). `urllib.robotparser.RuleLine` runs disallow patterns through `urllib.parse.quote`,
-# which percent-encodes `*`/`?` — the stdlib parser has no wildcard support, so those patterns
-# become literal (and unmatchable) strings, not globs. Separately, a UA-specific block fully
-# REPLACES the `*` block for that agent (RFC 9309 precedence, which stdlib gets right): the real
-# `User-agent: ClaudeBot` stanza here carries only `Crawl-delay`, so ClaudeBot is exempt from
-# every `*` rule regardless of wildcard support. Both are load-bearing for real collectors (see
-# docs/DEFERRED.md) and both would silently swallow this test if `/c-dl.php` were disallowed only
-# via the `*` block — so the block that actually governs `footystats`' configured user_agent
-# (ClaudeBot) carries its own literal Disallow line. (R9: this exemption is also why
-# `config/sources.yaml` no longer configures footystats with this user_agent — see the
-# docstring on `test_allowed_path_passes_and_disallowed_path_raises` below.)
+# footystats' REAL robots.txt (measured 2026-09-19): "Disallow: /api/club*" / "/*.php" /
+# "/matches?*" — wildcards `protego` (R10) parses correctly, unlike stdlib's old
+# `urllib.robotparser` (which percent-encoded `*`/`?` into unmatchable literals; see
+# `test_wildcard_disallow_actually_blocks_a_matching_path` below for a fixture dedicated to
+# proving that). What THIS fixture still exists to prove is independent of wildcard support:
+# a UA-specific block fully REPLACES the `*` block for that agent (RFC 9309 precedence). The
+# real `User-agent: ClaudeBot` stanza here carries only `Crawl-delay`, so ClaudeBot is exempt
+# from every `*` rule, wildcard or not — that's real (footystats.org's live robots.txt has
+# this exact shape) and it's exactly the exemption R9 says we must not exploit by presenting
+# as ClaudeBot. To keep this test meaningful (an allowed path passes, a disallowed path
+# raises) despite that exemption, the ClaudeBot block carries its own literal
+# `Disallow: /c-dl.php` — the `*` block's rules are restored to the real wildcarded form
+# since `guard_path(parser, footystats, "/c-dl.php")` still doesn't depend on them.
 FOOTYSTATS_ROBOTS = (
     "User-agent: ClaudeBot\nCrawl-delay: 1\nDisallow: /c-dl.php\n\n"
-    "User-agent: *\nDisallow: /api/club/\nDisallow: /c-dl.php\nDisallow: /matches\n"
+    "User-agent: *\nDisallow: /api/club*\nDisallow: /*.php\nDisallow: /matches?*\n"
 )
 AJANSSPOR_ROBOTS = (
     "User-agent: *\n"
@@ -75,13 +76,15 @@ def test_site_wide_disallow_blocks_every_path(tmp_path: Path) -> None:
 
 
 def test_allowed_path_passes_and_disallowed_path_raises(tmp_path: Path) -> None:
-    """Also documents R9: `footystats()`'s ClaudeBot user_agent gets its own group with no
-    Disallow rules, exempting it from the `*` block entirely (RFC 9309 precedence, correctly
-    implemented by stdlib). That's real — footystats.org's live robots.txt has the identical
-    shape. `config/sources.yaml` does NOT use this user_agent for footystats: presenting as
-    Anthropic's crawler to receive an allowance granted to Anthropic, not to us, would be
-    user-agent spoofing. This test's `FOOTYSTATS_ROBOTS` fixture keeps the ClaudeBot exemption
-    on purpose, so the exemption's existence stays proven in code, not just asserted in prose.
+    """Documents the behaviour R9 forbids us from exploiting: `source()`'s ClaudeBot
+    user_agent gets its own group with no Disallow rules of its own, exempting it from the
+    `*` block entirely (RFC 9309 group precedence — correctly implemented by both stdlib and
+    `protego`; this was never the stdlib-specific bug). That exemption is real —
+    footystats.org's live robots.txt has this identical shape. `config/sources.yaml` does NOT
+    configure footystats with this user_agent: presenting as Anthropic's crawler to receive
+    an allowance granted to Anthropic, not to us, would be user-agent spoofing. This test's
+    `FOOTYSTATS_ROBOTS` fixture keeps the ClaudeBot exemption on purpose, so the exemption's
+    existence stays proven in code, not just asserted in prose.
     """
     write_robots(tmp_path, "footystats", FOOTYSTATS_ROBOTS)
     footystats = source()
@@ -178,15 +181,16 @@ def test_registry_loads_and_filters(tmp_path: Path) -> None:
     assert loaded[0].robots_verified_at == date(2026, 9, 19)
 
 
-# ── R7: a blank line mid-block must not silently drop the rules after it ────────────────────
+# ── R7 (then R10): a blank line mid-block must not silently drop the rules after it ─────────
 # Found while re-verifying wikidata's disable: the real robots.txt has a SINGLE
 # "User-agent: *" line (148) and never repeats it again in the whole 446-line file, but has
-# blank lines at 422/423/425 while still mid-block. `RobotFileParser.parse()` treats ANY blank
-# line while state==2 (at least one Disallow/Allow already seen) as ending that group, WITHOUT
-# requiring a fresh "User-agent:" line — RFC 9309 says only a new User-agent line (or EOF) ends
-# a group. Rules after such a stray blank line are silently dropped, appended to no entry at
-# all. This is a distinct bug from the wildcard-quoting one in DEFERRED §5.5 — recovering the
-# rule doesn't require wildcard support, just not truncating group accumulation early.
+# blank lines at 422/423/425 while still mid-block. stdlib's old `RobotFileParser.parse()`
+# treated ANY blank line while state==2 (at least one Disallow/Allow already seen) as ending
+# that group, WITHOUT requiring a fresh "User-agent:" line — RFC 9309 says only a new
+# User-agent line (or EOF) ends a group. Rules after such a stray blank line were silently
+# dropped, appended to no entry at all. `protego` (R10) never had this bug — this test now
+# guards a `protego` property instead of a stdlib workaround, kept because the scenario is
+# real (wikidata's own file) and worth pinning regardless of which parser sits underneath.
 
 BLANK_LINE_MID_BLOCK_ROBOTS = "User-agent: *\nDisallow: /a\n\nDisallow: /b\n"
 
@@ -201,6 +205,44 @@ def test_blank_line_mid_block_does_not_drop_the_rule_that_follows(tmp_path: Path
 
     assert allows(parser, blankmid, "/a") is False
     assert allows(parser, blankmid, "/b") is False
+
+
+# ── R10: protego must actually implement the two RFC 9309 properties stdlib lacked ──────────
+# Without these two tests, a future revert to (or copy of) stdlib's `urllib.robotparser` would
+# pass every other test in this file silently — none of the others exercise a wildcard pattern
+# or a specificity conflict on their own. These are what keep the guard honest.
+
+
+def test_wildcard_disallow_actually_blocks_a_matching_path(tmp_path: Path) -> None:
+    """`Disallow: /*.php` must block `/anything.php` — this is the exact pattern footystats'
+    and ajansspor's real robots.txt use, and the exact pattern stdlib's `RuleLine` silently
+    turned into an unmatchable literal (`%2A.php`) by percent-encoding the `*`."""
+    write_robots(tmp_path, "wildcard", "User-agent: *\nDisallow: /*.php\n")
+    wildcard_source = source(id="wildcard", base_url="https://wildcard.example")
+    parser = robots_for(wildcard_source, tmp_path)
+
+    assert allows(parser, wildcard_source, "/anything.php") is False
+    assert allows(parser, wildcard_source, "/anything.html") is True
+
+
+LONGEST_MATCH_ROBOTS = (
+    "User-agent: *\nDisallow: /wiki/Special:\nAllow: /wiki/Special:EntityData/*.\n"
+)
+
+
+def test_longest_match_lets_a_narrow_allow_override_a_broad_disallow(tmp_path: Path) -> None:
+    """This is wikidata's own robots.txt shape (Disallow: /wiki/Special: precedes, in file
+    order, the narrower Allow it's meant to carve an exception out of). stdlib's
+    `Entry.allowance()` returned the first matching rule in FILE ORDER, so the broad,
+    earlier `Disallow` always won — RFC 9309 requires the LONGEST/most specific matching
+    rule to win regardless of order, which is why Wikidata's own robots.txt author could
+    write the broad rule first at all."""
+    write_robots(tmp_path, "longestmatch", LONGEST_MATCH_ROBOTS)
+    longest_source = source(id="longestmatch", base_url="https://longestmatch.example")
+    parser = robots_for(longest_source, tmp_path)
+
+    assert allows(parser, longest_source, "/wiki/Special:EntityData/Q170980.json") is True
+    assert allows(parser, longest_source, "/wiki/Special:SomethingElse") is False
 
 
 # ── R8: access_basis=api_terms — robots.txt does not govern a documented API's client ───────

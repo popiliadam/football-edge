@@ -12,10 +12,9 @@
 # alır (R8). `api_terms` kaynaklarda robots.txt hiç sorulmaz — `terms_url` ZORUNLUDUR ve kapı
 # onun varlığını zorlar (bkz. sources.audit_offline).
 #
-# BİLİNEN SINIR (bkz. src/football_edge/sources.py:allows): `urllib.robotparser` joker
-# karakter (`*`/`$`) DESTEKLEMEZ ve birden çok kural çakıştığında dosya sırasındaki İLK
-# eşleşen kuralı kullanır (RFC 9309'un "en özgül kazanır" kuralını değil). `declared_paths`e
-# bu tuzaklara düşen bir yol eklemeyin; kapı onu sessizce ATLAR (yakalamaz), engellemez.
+# Ayrıştırıcı `protego`dur (Scrapy ekibi, RFC 9309: joker karakter + en-uzun-eşleşme —
+# R10). Eski `urllib.robotparser` sınırı (joker karakter yok, dosya-sırası önceliği) KAPANDI;
+# bkz. docs/DEFERRED.md geçmişi ve src/football_edge/sources.py:allows() docstring'i.
 sources:
   - id: footystats
     base_url: https://footystats.org
@@ -61,9 +60,9 @@ sources:
     note: >-
       Content-Signal: ai-train=no, search=yes, ai-input=yes. /lineup/, /mac/, /oyuncu/,
       /lig/ ve *rsc=* DISALLOW — muhtemel 11 ve yapısal sayfalar ALINMAZ, yalnız haber yolları.
-      NOT: /lineup/ gerçek robots'ta yalnız joker karakterli ("/lineup/*") — bu sınırın nasıl
-      ölçülmediği için sources.allows() docstring'ine bakın; declared_paths buraya asla
-      /lineup/... eklemeyin, kapı yakalamaz.
+      /lineup/ gerçek robots'ta joker karakterli ("/lineup/*"); protego (R10) bunu doğru
+      zorluyor (ölçüldü: /lineup/galatasaray artık kapı tarafından da engellenir) — eski not
+      burada "kapı yakalamaz" diyordu, stdlib döneminde doğruydu, artık değil.
 
   - id: openmeteo
     base_url: https://api.open-meteo.com
@@ -91,26 +90,19 @@ sources:
     crawl_delay_seconds: 1.0
     robots_verified_at: 2026-09-19
     declared_paths: ['/wiki/Special:EntityData/Q170980.json']
-    enabled: false
+    enabled: true
     access_basis: robots
     terms_url: ''
     note: >-
-      HÂLÂ KAPALI — R7'nin teşhisi doğrulandı ve düzeltildi, ama kapı hâlâ geçmiyor
-      (Task 3 revizyonu, bkz. task-3-report.md). Önceki declared_paths
-      (/wiki/Special:EntityData, çıplak önek) hiç fetch EDİLMEYEN bir yoldu — düzeltildi:
-      gerçekte fetch edilen yol /wiki/Special:EntityData/<QID>.json'dur (Q170980 = Task 7'nin
-      fixture'ındaki stadyum). Ayrıca gerçek robots.txt'te satır 422/423/425'teki boş
-      satırların `RobotFileParser`ın blok birikimini SESSİZCE kestiğini bulup düzelttik
-      (sources.robots_for, artık boş satırları eliyor). AMA bu iki düzeltmeden SONRA bile
-      `allows()` bu tam yol için False dönüyor — ÖLÇÜLDÜ, varsayılmadı: satır 436'daki
-      "Allow: /wiki/Special:EntityData/*." kuralı stdlib'in KENDİ, ayrı iki sınırına birden
-      çarpıyor (dosya-sırasında ondan ÖNCE gelen geniş bir Disallow kazanıyor VE joker `*`
-      quote()'tan geçip eşleşmez oluyor — bkz. sources.allows() docstring, DEFERRED §5.5).
-      Koordinatörün kendi ölçümü bu tam yolu izinli buluyor (muhtemelen RFC 9309 uyumlu,
-      en-özgül-kazanır bir araçla) — anlaşmazlık robots.txt'in NASIL okunacağı üzerine değil,
-      stdlib'in bunu YANLIŞ okuduğu üzerine. `enabled: true` yapmak şu an kapıyı KIRMIZI
-      yapardı; kapı gevşetilmez. Kalıcı çözüm joker-duyarlı bir ayrıştırıcı (DEFERRED §5.5'te
-      izlenen follow-up) ya da koordinatörün açık bir sonraki kararı.
+      YENİDEN AÇILDI (R7 + R10, iki aşamalı düzeltme — bkz. task-3-report.md).
+      R7: eski declared_paths (/wiki/Special:EntityData, çıplak önek) hiç fetch EDİLMEYEN
+      bir yoldu; düzeltildi — gerçekte fetch edilen yol /wiki/Special:EntityData/<QID>.json
+      (Q170980 = Task 7'nin fixture'ındaki stadyum). R10: stdlib `urllib.robotparser`
+      bu tam yol için False dönüyordu — ÖLÇÜLDÜ: dosya-sırası önceliği (geniş, erken bir
+      Disallow, özgül, geç bir Allow'u örtüyordu) VE joker `*` desteği yoktu, birlikte satır
+      436'daki "Allow: /wiki/Special:EntityData/*."ı görünmez kılıyordu. `protego`ya geçilince
+      (RFC 9309: en-uzun-eşleşme + joker karakter) aynı yol True ölçüldü — koordinatörün
+      ilk ölçümü DOĞRUYDU, stdlib'in DEĞİL. SPARQL değil REST kullanma kararı hâlâ geçerli.
 
   - id: googlenews
     base_url: https://news.google.com

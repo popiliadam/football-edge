@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.robotparser import RobotFileParser
 
 import yaml
+from protego import Protego
 
 
 class SourceBlocked(RuntimeError):
@@ -101,33 +101,33 @@ def robots_snapshot(source: Source, robots_dir: Path) -> Path:
     return robots_dir / f"{source.id}.txt"
 
 
-def robots_for(source: Source, robots_dir: Path) -> RobotFileParser:
+def robots_for(source: Source, robots_dir: Path) -> Protego:
     """Commit'lenmiş robots.txt anlık görüntüsünü ayrıştırır.
 
-    `parse()` ÇAĞRILMAZSA `can_fetch` her yola False der (CPython: "until the robots.txt file
-    has been read ... we must assume that no url is allowable"). Boş gövdeyle parse edilince
-    ise True döner. İkisi farklıdır: biri "bilmiyoruz", diğeri "kısıt yok". Boş dosya, ölçülmüş
-    ve boş çıkmış bir politikadır (TFF'de robots.txt 404, ClubElo'nunki boş) — ve parse edilir.
+    `Protego.parse("")` (boş gövde) her yola izin verir — "ölçüldü, kısıt yok" (TFF'de
+    robots.txt 404 → boş anlık görüntü, ClubElo'nunki de boş). Bu satır bu ayrımı hiçbir
+    zaman "hiç ölçülmedi" ile karıştırmaz — "hiç ölçülmedi" (anlık görüntü dosyası hiç
+    yok) `audit_offline`'ın AYRI, dosya varlığına bakan kontrolüdür; `robots_for` yalnız
+    dosya VARSA çağrılır (ölçüldü, doğrulandı: bkz. `test_empty_robots_file_allows_
+    everything`).
 
-    BOŞ SATIRLAR ELENİR — R7 incelemesinde bulundu. `RobotFileParser.parse()` state==2
-    (en az bir Disallow/Allow görülmüş) İKEN boş bir satıra rastlarsa, o bloğu YENİ bir
-    `User-agent:` satırı GÖRMEDEN bitmiş sayar; sonraki Disallow/Allow satırları hiçbir
-    gruba eklenmez, SESSİZCE atılır. RFC 9309'da bir grup yalnız YENİ bir User-agent
-    satırıyla (ya da EOF'ta) biter — boş satır kozmetiktir. Wikidata'nın gerçek robots.txt'i
-    (446 satır, 148'den sonra TEK "User-agent: *" satırı) tam bunu yapıyor: satır 422/423/425
-    boş, 435-436'daki `Disallow: /wiki/Special:EntityData/` + `Allow: /wiki/Special:EntityData/
-    *.` satırları BLOKA HİÇ EKLENMİYORDU (ölçüldü: boş satırlar elenmeden `default_entry.
-    rulelines`'ta "EntityData" geçen TEK satır yoktu). Boş satırları eleyerek stdlib'in kendi
-    state machine'i grubu doğru biçimde SÜRDÜRÜYOR.
+    `protego` (Scrapy ekibinin RFC 9309 uyumlu ayrıştırıcısı — R10) kullanılıyor, stdlib
+    `urllib.robotparser` DEĞİL: stdlib joker karakteri (`*`/`$`) desteklemiyordu VE çakışan
+    kurallarda dosya sırasındaki ilk eşleşeni kullanıyordu, RFC 9309'un "en uzun/en özgül
+    kazanır" kuralını değil — iki bağımsız, ÖLÇÜLMÜŞ kusur (eski DEFERRED §5.5, artık
+    kapatıldı). Üçüncü, bağımsız bir stdlib kusuru da vardı: `RobotFileParser.parse()`
+    bir bloğun kural birikimini YENİ bir `User-agent:` satırı görmeden, yalnızca boş bir
+    satırla kesiyordu (RFC 9309'a aykırı). `protego` üçünü de doğru yapıyor (ölçüldü —
+    bkz. `test_wildcard_disallow_actually_blocks_a_matching_path`,
+    `test_longest_match_lets_a_narrow_allow_override_a_broad_disallow`,
+    `test_blank_line_mid_block_does_not_drop_the_rule_that_follows`); eski, stdlib'e özel
+    boş-satır-eleme önlemi bu yüzden KALDIRILDI — protego'da gereksizdi.
     """
-    raw_lines = robots_snapshot(source, robots_dir).read_text(encoding="utf-8").splitlines()
-    non_blank_lines = [line for line in raw_lines if line.strip() != ""]
-    parser = RobotFileParser()
-    parser.parse(non_blank_lines)
-    return parser
+    body = robots_snapshot(source, robots_dir).read_text(encoding="utf-8")
+    return Protego.parse(body)
 
 
-def allows(parser: RobotFileParser, source: Source, path: str) -> bool:
+def allows(parser: Protego, source: Source, path: str) -> bool:
     """`path` bu kaynağın robots.txt'i altında istenebilir mi?
 
     `access_basis=api_terms` KAYNAKLARDA robots.txt HİÇ SORULMAZ — R8: Robots Exclusion
@@ -136,28 +136,17 @@ def allows(parser: RobotFileParser, source: Source, path: str) -> bool:
     varlığı `audit_offline`de ayrıca zorlanır. `parser` argümanı bu dalda KULLANILMAZ —
     imza `robots_for()`ın döndürdüğü tipe uysun diye hâlâ alınır.
 
-    BİLİNEN SINIR (robots-tabanlı kaynaklarda): `urllib.robotparser` `*`/`$` joker karakter
-    uzantısını (Google/Bing'in de-facto standardı) UYGULAMAZ — yalnız orijinal 1996
-    taslağının DÜZ ÖNEK eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan
-    geçirir; bu `*` ve `?`yi `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gerçek bir
-    istekte HİÇBİR ZAMAN eşleşmeyen düz bir dizeye döner (ölçüldü: `config/robots/
-    footystats.txt` ve `ajansspor.txt`'nin gerçek gövdesi tam olarak bu deseni taşıyor —
-    bkz. Task 3 raporu). AYRICA: birden çok kural aynı yola uyduğunda `RobotFileParser`
-    DOSYA SIRASINDAKİ İLK eşleşeni kullanır, RFC 9309'un "en UZUN/en ÖZGÜL eşleşen kural
-    kazanır" kuralını DEĞİL — yani daha sonra gelen, daha özgül bir `Allow`, daha önce gelen
-    geniş bir `Disallow`u asla geçemez (ölçüldü: wikidata'nın `/wiki/Special:EntityData/*.`
-    Allow'u tam bunun kurbanı — bkz. DEFERRED §5.5). Yalnız düz önekli VE ÇAKIŞMAYAN
-    `Disallow` satırları güvenilir biçimde zorlanır. Bu, yeni bağımlılık eklemeden stdlib'in
-    kendi sınırıdır; joker-duyarlı/en-özgül-kazanır bir ayrıştırıcı (ör. `protego`)
-    eklenene kadar `declared_paths`e bu tuzaklara düşen bir yol ekleyip "kapı zaten yakalar"
-    varsaymayın.
+    Joker karakter (`*`/`$`) ve çakışan kurallarda en-uzun/en-özgül-kazanır artık DOĞRU
+    işleniyor (`protego`, R10 — bkz. `robots_for()`). `RuleLine.applies_to` çağrılmaz;
+    `can_fetch`in argüman SIRASI stdlib'inkinin TERSİDİR (`url` önce, `user_agent` sonra)
+    — burada isimli argümanla verilir, sırayla değil, tam bu yüzden.
     """
     if source.access_basis == ACCESS_BASIS_API_TERMS:
         return True
-    return bool(parser.can_fetch(source.user_agent, f"{source.base_url}{path}"))
+    return bool(parser.can_fetch(url=f"{source.base_url}{path}", user_agent=source.user_agent))
 
 
-def guard_path(parser: RobotFileParser, source: Source, path: str) -> None:
+def guard_path(parser: Protego, source: Source, path: str) -> None:
     if not allows(parser, source, path):
         raise SourceBlocked(f"{source.id}: robots.txt '{path}' yolunu kapatıyor — istek atılmadı")
 
