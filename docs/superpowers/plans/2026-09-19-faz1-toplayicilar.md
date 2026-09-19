@@ -1187,7 +1187,10 @@ Expected: 9 PASS
 
 ```bash
 mkdir -p config/robots
-UA='ClaudeBot/1.0 (+https://anthropic.com/claudebot)'
+# R9: KENDI kimligimizle tanitiriz. FootyStats'in robots'u ClaudeBot'a kendi grubunu
+# (Crawl-delay 1, hic Disallow yok) veriyor; o izin Anthropic'in tarayicisina verilmis,
+# bize degil. Baskasinin kimligini almak user-agent sahteciligidir.
+UA='football-edge/0.1 (+https://github.com/popiliadam/football-edge)'
 for pair in "footystats:https://footystats.org" "tff:https://www.tff.org" \
             "ajansspor:https://ajansspor.com" "openmeteo:https://api.open-meteo.com" \
             "wikidata:https://www.wikidata.org" "googlenews:https://news.google.com" \
@@ -1222,12 +1225,16 @@ Görmüyorsan ölçüm yanlış; §0.1'in dayanağı odur, düzeltmeden devam et
 sources:
   - id: footystats
     base_url: https://footystats.org
-    user_agent: ClaudeBot/1.0 (+https://anthropic.com/claudebot)
-    crawl_delay_seconds: 1.0
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 5.0
     robots_verified_at: 2026-09-19
     declared_paths: ['/turkey/super-lig/xg']
     enabled: true
-    note: 'robots: User-agent ClaudeBot → Crawl-delay 1. Lig başına bir /xg yolu eklenir.'
+    note: >-
+      R9: ClaudeBot grubunun Crawl-delay 1 izni Anthropic'in tarayıcısınadır, bizim değil —
+      o kimliği almak sahteciliktir. `*` grubu altındayız ve altı /xg yolunun altısı da
+      orada izinli. `*` Crawl-delay bildirmiyor; 5.0 sitenin adlandırılmış bir üçüncü
+      taraf tarayıcıya verdiği en hızlı değerdir (R13).
 
   - id: tff
     base_url: https://www.tff.org
@@ -2238,7 +2245,7 @@ yalnız ilgili tabloyu sakla:
 
 ```bash
 mkdir -p tests/fixtures/footystats
-curl -sS -m 30 -A 'ClaudeBot/1.0 (+https://anthropic.com/claudebot)' \
+curl -sS -m 30 -A 'football-edge/0.1 (+https://github.com/popiliadam/football-edge)' \
   https://footystats.org/turkey/super-lig/xg -o /tmp/fs-xg.html
 uv run python - <<'PY'
 from pathlib import Path
@@ -2489,7 +2496,7 @@ for p in /england/premier-league/xg /spain/la-liga/xg /italy/serie-a/xg \
          /germany/bundesliga/xg /france/ligue-1/xg /turkey/super-lig/xg; do
   printf '%-32s ' "$p"
   curl -sS -m 25 -o /dev/null -w 'HTTP %{http_code}\n' \
-    -A 'ClaudeBot/1.0 (+https://anthropic.com/claudebot)' "https://footystats.org$p"
+    -A 'football-edge/0.1 (+https://github.com/popiliadam/football-edge)' "https://footystats.org$p"
   sleep 1   # Crawl-delay: 1
 done
 ```
