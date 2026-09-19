@@ -9,6 +9,7 @@ import pytest
 
 from football_edge.collect import _ledger_rows
 from football_edge.db import (
+    INSERT_SNAPSHOTS,
     LEDGER_LOCK_KEY,
     insert_snapshots,
     snapshot_payload,
@@ -297,31 +298,22 @@ def test_insert_snapshots_uses_a_single_statement() -> None:
     assert len(inserts) == 1, f"25 satır için {len(inserts)} ifade atıldı"
 
 
-def test_insert_snapshots_preserves_chain_order() -> None:
-    """Zincir `ORDER BY id` ile geri okunuyor. Toplu yazma sırayı bozarsa defter KIRIK der."""
-    db = FakeLedgerDb(leagues={"eng.1": ()})
-    rows = tuple(
-        PriceRow(
-            event_id="evt1",
-            sport_key="soccer_epl",
-            commence_time="2026-09-19T18:00:00Z",
-            home_team="A",
-            away_team="B",
-            bookmaker=f"book{index}",
-            bookmaker_last_update="2026-09-19T10:00:00Z",
-            market="h2h",
-            outcome="A",
-            point=None,
-            price=1.90 + index / 100,
-        )
-        for index in range(5)
-    )
-    upsert_matches(db, rows, "eng.1")
-    insert_snapshots(db, rows, utc("2026-09-19T12:00:00Z"), is_closing=False)
+def test_insert_snapshots_sql_declares_ordinality_and_order_by() -> None:
+    """`INSERT_SNAPSHOTS` metninde `WITH ORDINALITY` ve `ORDER BY ord` bulunmalı.
 
-    stored = sorted(db.snapshots, key=lambda row: int(row["id"]))
-    for earlier, later in zip(stored, stored[1:], strict=False):
-        assert later["prev_hash"] == earlier["row_hash"]
+    Bu, sırayı SINADIĞINI değil, sıra GARANTİSİNİN SQL'de hâlâ YAZILI olduğunu sınar.
+    Taklit (`FakeLedgerDb`) SQL metnini hiç okumaz — kolon-dizisini index sırasıyla
+    işler ve `id`yi de o sırayla atar; gerçek ifade `ORDER BY random()`e dönse, hatta
+    `WITH ORDINALITY` tamamen silinse bile taklit yine yeşil kalırdı (code review'da
+    tam olarak bu yakalandı: eski `test_insert_snapshots_preserves_chain_order`, adı
+    sırayı garanti ettiğini iddia ederken bunu hiçbir zaman gözlemleyemiyordu — RED
+    adımında bile PASSED vermişti). Zincirin GERÇEK Postgres'te `ORDER BY id` ile
+    kurulan sırayı koruduğunun kanıtı bu dosyada değil, canlı sondadadır
+    (task-1-report.md, Step 7 — `SELECT ... ORDER BY id` + ardışık prev_hash/row_hash
+    karşılaştırması).
+    """
+    assert "WITH ORDINALITY" in INSERT_SNAPSHOTS, "sıra garantisi SQL'den düştü"
+    assert "ORDER BY ord" in INSERT_SNAPSHOTS, "unnest çıktısı dizi sırasına göre eklenmiyor"
 
 
 def test_lock_is_still_taken_before_the_head_is_read() -> None:
