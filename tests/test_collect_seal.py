@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from football_edge.collect import run_seal
 from football_edge.leagues import League
+from football_edge.rounds import run_seal
 from tests.fake_db import FakeLedgerDb
 from tests.payloads import event, quota_headers
 

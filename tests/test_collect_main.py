@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from football_edge import collect
+from football_edge import collect, rounds
 from football_edge.odds_api import Quota
 from tests.fake_db import FakeLedgerDb
 from tests.payloads import event, quota_headers
@@ -163,7 +163,7 @@ def test_report_names_the_failed_leagues_even_when_credit_ran_out(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """F4: iki arıza aynı turda olabilir; ikisi de RAPORLANIR, sonra exit 2."""
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=2,
         quota=Quota(remaining=3, used=497, last_cost=1),
         failed_leagues=("bad.1",),
@@ -250,7 +250,7 @@ def test_main_spends_no_credit_when_the_league_mirror_fails(
         return inner(request)
 
     _patch_main(monkeypatch, tmp_path, db, counting_handler)
-    monkeypatch.setattr(collect, "upsert_leagues", exploding_upsert)
+    monkeypatch.setattr(rounds, "upsert_leagues", exploding_upsert)
 
     code = collect.main(["seal"])
 
@@ -296,7 +296,7 @@ def test_main_reports_a_missed_seal(
 
 
 def test_exit_code_is_non_zero_when_a_seal_was_permanently_missed() -> None:
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=0, quota=None, failed_leagues=(), missed_seals=("evt_past",)
     )
 
@@ -321,7 +321,7 @@ def test_a_missed_seal_does_not_mask_a_louder_failure_in_the_same_round(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """İki arıza aynı turda olabilir: kod TEK değer taşır, rapor İKİSİNİ de yazar."""
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=0,
         quota=None,
         failed_leagues=("bad.1",),

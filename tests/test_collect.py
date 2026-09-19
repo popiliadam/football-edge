@@ -7,14 +7,10 @@ from pathlib import Path
 import httpx
 
 from football_edge.anchors import _latest_anchor
-from football_edge.collect import (
-    _ledger_rows,
-    horizon_iso,
-    run_snapshot,
-    seal_window,
-)
+from football_edge.collect import _ledger_rows
 from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp, chain, verify_chain
+from football_edge.rounds import horizon_iso, run_snapshot, seal_window
 from tests.fake_db import FakeChainDb, FakeLedgerDb
 from tests.payloads import event, quota_headers
 
