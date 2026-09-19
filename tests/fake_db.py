@@ -8,7 +8,7 @@ temiz veritabanında patlayan kodu yeşil gösterir — tam da E1/E6'nın gizlen
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -152,14 +152,29 @@ class FakeLedgerDb:
         return 1
 
     def put_match(self, params: tuple[Any, ...]) -> int:
+        """`INSERT ... ON CONFLICT (id) DO UPDATE SET commence_time = excluded.commence_time`.
+
+        Yalnız `commence_time` güncellenir: gerçek Postgres'te de SET cümlesinde adı
+        geçmeyen sütun aynen kalır. `sealed_at` bu yüzden var olan satırdan taşınır —
+        aksi hâlde ikinci bir upsert, mühürlenmiş bir maçın mührünü sessizce siler.
+        Foreign key yalnız İLK yazımda kontrol edilir: gerçek Postgres de `league_id`
+        değişmeyen bir UPDATE'te o kısıtı yeniden sorgulamaz.
+        """
         match_id, league_id = str(params[0]), str(params[1])
-        if league_id not in self.leagues:
+        existing = self.matches.get(match_id)
+        if existing is None and league_id not in self.leagues:
             raise ForeignKeyViolation(f'matches.league_id="{league_id}" leagues tablosunda yok')
-        if match_id in self.matches:
-            return 0
         self.matches = {
             **self.matches,
-            match_id: {"league_id": league_id, "commence_time": params[2], "sealed_at": None},
+            match_id: {
+                "league_id": existing["league_id"] if existing else league_id,
+                # API'den STRING gelir; Postgres'te sütun timestamptz'dir ve psycopg
+                # geri okurken datetime verir. Taklit metni saklarsa `seal_candidates`
+                # (`commence_time > now - interval`) datetime'a karşı str kıyaslar ve
+                # TypeError atar — burada değil, ikinci bir mühür turunda.
+                "commence_time": _as_datetime(params[2]),
+                "sealed_at": existing["sealed_at"] if existing else None,
+            },
         }
         return 1
 
@@ -170,6 +185,24 @@ class FakeLedgerDb:
             return 0
         self.snapshots = [*self.snapshots, {**params, "id": len(self.snapshots) + 1}]
         return 1
+
+    def put_snapshots(self, params: dict[str, Any]) -> tuple[int, list[tuple[Any, ...]]]:
+        """Kolon-dizisi (unnest) biçimindeki toplu insert'i satırlara açar.
+
+        Gerçek ifade tek `INSERT ... SELECT * FROM unnest(...) ... RETURNING match_id`.
+        Taklit de tek çağrıda tüm satırları görmeli: aksi hâlde "kaç ifade atıldı" testi
+        taklidin şekline bakar, kodun şekline değil.
+        """
+        columns = tuple(LEDGER_COLUMNS)
+        count = len(params["row_hash"])
+        written: list[tuple[Any, ...]] = []
+        inserted = 0
+        for index in range(count):
+            row = {name: params[name][index] for name in columns}
+            if self.put_snapshot(row):
+                inserted += 1
+                written.append((row["match_id"],))
+        return inserted, written
 
     def seal(self, params: tuple[Any, ...]) -> int:
         now, match_ids = params
@@ -218,7 +251,7 @@ class _LedgerCursor:
         elif text.startswith("INSERT INTO matches"):
             self.rowcount = self._db.put_match(params)
         elif text.startswith("INSERT INTO odds_snapshots"):
-            self.rowcount = self._db.put_snapshot(params)
+            self.rowcount, self._result = self._db.put_snapshots(params)
         elif text.startswith("UPDATE matches SET sealed_at"):
             self.rowcount = self._db.seal(params)
         elif "FROM odds_snapshots ORDER BY id DESC" in text:
@@ -227,6 +260,20 @@ class _LedgerCursor:
             self._result = self._db.seal_candidates(params, with_id=text.startswith("SELECT id,"))
         else:
             raise AssertionError(f"taklit veritabanı bu sorguyu tanımıyor: {text}")
+
+    def executemany(self, sql: str, params_seq: Sequence[tuple[Any, ...]]) -> None:
+        """`upsert_matches` artık satır başına `execute` değil TEK `executemany` atar.
+
+        Gerçek psycopg'de `executemany` sonrası `rowcount` çalıştırılan ifade sayısını
+        yansıtır (`DO UPDATE` her satırı "etkiler"); taklit de aynı sayıyı vermeli, yoksa
+        `upsert_matches`in `max(cur.rowcount, 0)` dönüşü taklitte hep 0/yanlış görünür.
+        """
+        text = " ".join(sql.split())
+        self._db.statements = [*self._db.statements, text]
+        if not text.startswith("INSERT INTO matches"):
+            raise AssertionError(f"taklit veritabanı bu toplu ifadeyi tanımıyor: {text}")
+        self.rowcount = sum(self._db.put_match(params) for params in params_seq)
+        self._result = []
 
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._result[0] if self._result else None

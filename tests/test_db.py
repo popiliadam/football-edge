@@ -16,7 +16,7 @@ from football_edge.db import (
 )
 from football_edge.ledger import chain, verify_chain
 from football_edge.odds_api import PriceRow
-from tests.fake_db import FakeChainDb, FakeLedgerDb, stored_row
+from tests.fake_db import FakeChainDb, FakeLedgerDb, stored_row, utc
 
 ROW = PriceRow(
     event_id="abc123",
@@ -90,51 +90,65 @@ def test_chain_survives_round_trip_through_postgres_types(upstream_last_update: 
     assert result.ok is True, result.error
 
 
-class _SkippingCursor:
-    """ON CONFLICT DO NOTHING'i taklit eder: INSERT başına 1 (yazıldı) ya da 0 (düştü)."""
+class _StubCursor:
+    """execute/executemany'yi SQL içeriğine bakmadan taklit eder.
 
-    def __init__(self, outcomes: list[int]) -> None:
-        self._outcomes = outcomes
+    Faz 0'ın `_SkippingCursor`ının yerini alır: o, satır başına bir `execute` varsayıyordu
+    (kanal başına kuyruktan bir sonuç). Toplu yazmada `insert_snapshots` TEK `execute` +
+    `fetchall` (`RETURNING match_id`), `upsert_matches` TEK `executemany` atıyor — ikisi de
+    burada tek, sabit bir sonuçla yanıtlanır; SQL'in kendisi denetlenmez.
+    """
+
+    def __init__(self, *, returning: list[tuple[str]] | None = None) -> None:
+        self._returning = returning or []
         self.rowcount = -1
 
-    def __enter__(self) -> _SkippingCursor:
+    def __enter__(self) -> _StubCursor:
         return self
 
     def __exit__(self, *exc: object) -> None:
         return None
 
     def execute(self, sql: str, params: object = None) -> None:
-        self.rowcount = 0 if sql.strip().upper().startswith("SELECT") else self._outcomes.pop(0)
+        self.rowcount = 0 if sql.strip().upper().startswith("SELECT") else len(self._returning)
 
-    def fetchone(self) -> None:
-        return None
+    def executemany(self, sql: str, params_seq: list[tuple[object, ...]]) -> None:
+        self.rowcount = len(params_seq)
+
+    def fetchone(self) -> tuple[str] | None:
+        return self._returning[0] if self._returning else None
+
+    def fetchall(self) -> list[tuple[str]]:
+        return list(self._returning)
 
 
-class _SkippingConn:
-    def __init__(self, outcomes: list[int]) -> None:
-        self._cursor = _SkippingCursor(outcomes)
+class _StubConn:
+    def __init__(self, *, returning: list[tuple[str]] | None = None) -> None:
+        self._cursor = _StubCursor(returning=returning)
 
-    def cursor(self) -> _SkippingCursor:
+    def cursor(self) -> _StubCursor:
         return self._cursor
 
 
-def test_insert_snapshots_names_only_matches_actually_written() -> None:
-    """Denenen satır değil yazılan satır sayılır; yoksa no-op batch dolu görünür.
+def test_insert_snapshots_relays_returning_identities_in_order() -> None:
+    """`written`, Postgres'in `RETURNING match_id`le verdiği kimlikleri BİREBİR taşır.
 
-    F1: dönen değer sayı değil KİMLİK — tek satırı ON CONFLICT ile düşen maç
-    "yazıldı" sayılırsa mührü basılır ve kapanış fiyatı bir daha aranmaz.
+    F1: dönen değer sayı değil KİMLİK — tek satırı ON CONFLICT ile düşen maç "yazıldı"
+    sayılırsa mührü basılır ve kapanış fiyatı bir daha aranmaz. Bunu artık kod değil
+    Postgres'in `ON CONFLICT (row_hash) DO NOTHING ... RETURNING` cümlesi garanti eder
+    (üçüncü satır — `abc123`ün tekrarı — düşüp hiç dönmemiş gibi kurgulandı); burada
+    sınanan `insert_snapshots`in bu çıktıyı OLDUĞU GİBİ relay ettiğidir.
     """
     rows = (
         ROW,
         replace(ROW, event_id="def456", outcome="Chelsea"),
         replace(ROW, bookmaker="betfair_ex_eu"),
     )
-    conn = _SkippingConn([1, 0, 1])
+    conn = _StubConn(returning=[("abc123",), ("def456",)])  # üçüncü satır (abc123) düştü
 
     written = insert_snapshots(conn, rows, OBSERVED, is_closing=False)  # type: ignore[arg-type]
 
-    assert written == ("abc123", "abc123"), "ON CONFLICT ile düşen satır yazılmış sayılmamalı"
-    assert "def456" not in written, "tek satırı düşen maç yazılmış sayılamaz"
+    assert written == ("abc123", "def456"), "RETURNING'in verdiği kimlikler birebir taşınmalı"
 
 
 # ── C2: iki eşzamanlı yazar zinciri KALICI olarak kırıyordu ─────────────────
@@ -183,13 +197,19 @@ def test_insert_snapshots_takes_the_one_shared_lock_key() -> None:
     )
 
 
-def test_upsert_matches_counts_only_rows_actually_written() -> None:
+def test_upsert_matches_counts_every_seen_row_not_just_new_ones() -> None:
+    """Dönen sayı artık "yeni maç" değil "GÖRÜLEN maç": `DO UPDATE` her satır için 1 bildirir.
+
+    Faz 0'da `ON CONFLICT DO NOTHING` zaten var olan maçı 0 sayardı (bkz. git geçmişi);
+    bu ayrım artık YOK. `_write_league` bu dönüş değerini hiç okumaz — yalnız gözlem
+    amaçlı bir sayıdır, karar için kullanılmaz.
+    """
     rows = (ROW, replace(ROW, event_id="def456"))
-    conn = _SkippingConn([1, 0])
+    conn = _StubConn()
 
     written = upsert_matches(conn, rows, "eng.1")  # type: ignore[arg-type]
 
-    assert written == 1, "zaten var olan maç yeniden yazılmış sayılmamalı"
+    assert written == 2, "iki farklı maç GÖRÜLDÜ — biri 'zaten vardı' diye düşmemeli"
 
 
 @lru_cache(maxsize=1)
@@ -248,3 +268,107 @@ def test_append_only_trigger_blocks_delete() -> None:
         pytest.raises(psycopg.errors.RaiseException, match="append-only"),
     ):
         cur.execute("DELETE FROM odds_snapshots WHERE id = %s", (row_id,))
+
+
+def test_insert_snapshots_uses_a_single_statement() -> None:
+    """3 717 satır = 3 717 gidiş-dönüş demek değildir. Sayı yük taşır: mühür penceresi 20 dakika."""
+    db = FakeLedgerDb(leagues={"eng.1": ()})
+    rows = tuple(
+        PriceRow(
+            event_id="evt1",
+            sport_key="soccer_epl",
+            commence_time="2026-09-19T18:00:00Z",
+            home_team="A",
+            away_team="B",
+            bookmaker=f"book{index}",
+            bookmaker_last_update="2026-09-19T10:00:00Z",
+            market="h2h",
+            outcome="A",
+            point=None,
+            price=1.90 + index / 100,
+        )
+        for index in range(25)
+    )
+    upsert_matches(db, rows, "eng.1")
+    written = insert_snapshots(db, rows, utc("2026-09-19T12:00:00Z"), is_closing=False)
+
+    assert len(written) == 25
+    inserts = [s for s in db.statements if s.startswith("INSERT INTO odds_snapshots")]
+    assert len(inserts) == 1, f"25 satır için {len(inserts)} ifade atıldı"
+
+
+def test_insert_snapshots_preserves_chain_order() -> None:
+    """Zincir `ORDER BY id` ile geri okunuyor. Toplu yazma sırayı bozarsa defter KIRIK der."""
+    db = FakeLedgerDb(leagues={"eng.1": ()})
+    rows = tuple(
+        PriceRow(
+            event_id="evt1",
+            sport_key="soccer_epl",
+            commence_time="2026-09-19T18:00:00Z",
+            home_team="A",
+            away_team="B",
+            bookmaker=f"book{index}",
+            bookmaker_last_update="2026-09-19T10:00:00Z",
+            market="h2h",
+            outcome="A",
+            point=None,
+            price=1.90 + index / 100,
+        )
+        for index in range(5)
+    )
+    upsert_matches(db, rows, "eng.1")
+    insert_snapshots(db, rows, utc("2026-09-19T12:00:00Z"), is_closing=False)
+
+    stored = sorted(db.snapshots, key=lambda row: int(row["id"]))
+    for earlier, later in zip(stored, stored[1:], strict=False):
+        assert later["prev_hash"] == earlier["row_hash"]
+
+
+def test_lock_is_still_taken_before_the_head_is_read() -> None:
+    """Toplu yazma, kilidin baş okumasından ÖNCE gelmesini bozmamalı (db.LEDGER_LOCK_KEY)."""
+    db = FakeLedgerDb(leagues={"eng.1": ()})
+    rows = (
+        PriceRow(
+            event_id="evt1",
+            sport_key="soccer_epl",
+            commence_time="2026-09-19T18:00:00Z",
+            home_team="A",
+            away_team="B",
+            bookmaker="pinnacle",
+            bookmaker_last_update="2026-09-19T10:00:00Z",
+            market="h2h",
+            outcome="A",
+            point=None,
+            price=1.95,
+        ),
+    )
+    upsert_matches(db, rows, "eng.1")
+    insert_snapshots(db, rows, utc("2026-09-19T12:00:00Z"), is_closing=False)
+
+    lock_index = next(i for i, s in enumerate(db.statements) if s.startswith("SELECT pg_advisory"))
+    head_index = next(i for i, s in enumerate(db.statements) if "ORDER BY id DESC" in s)
+    assert lock_index < head_index
+
+
+def test_upsert_matches_refreshes_a_postponed_kickoff() -> None:
+    """Ertelenen maç: DO NOTHING eski saati taşıyordu ve maç mühür penceresinden
+    sessizce düşüyordu."""
+    db = FakeLedgerDb(leagues={"eng.1": ()})
+    original = PriceRow(
+        event_id="evt1",
+        sport_key="soccer_epl",
+        commence_time="2026-09-19T18:00:00Z",
+        home_team="A",
+        away_team="B",
+        bookmaker="pinnacle",
+        bookmaker_last_update="2026-09-19T10:00:00Z",
+        market="h2h",
+        outcome="A",
+        point=None,
+        price=1.95,
+    )
+    upsert_matches(db, (original,), "eng.1")
+    postponed = replace(original, commence_time="2026-09-26T18:00:00Z")
+    upsert_matches(db, (postponed,), "eng.1")
+
+    assert db.matches["evt1"]["commence_time"] == utc("2026-09-26T18:00:00Z")

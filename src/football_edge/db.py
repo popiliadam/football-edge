@@ -30,6 +30,38 @@ from football_edge.odds_api import PriceRow
 # serileşme sessizce biter.
 LEDGER_LOCK_KEY = 0x0DD51EDE  # "ODDS-LEDGE" — keyfî ama sabit
 
+# Toplu yazmanın kolon sırası. `_SNAPSHOT_COLUMNS` hem SQL metnini hem parametre sözlüğünü
+# üretir: iki listeyi elle eşlemek, sessizce kayan bir sütun eşlemesine davetiyedir.
+_SNAPSHOT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("match_id", "text"),
+    ("observed_at", "timestamptz"),
+    ("bookmaker", "text"),
+    ("market", "text"),
+    ("outcome", "text"),
+    ("point", "numeric"),
+    ("price", "numeric"),
+    ("bookmaker_last_update", "timestamptz"),
+    ("is_closing", "boolean"),
+    ("prev_hash", "text"),
+    ("row_hash", "text"),
+)
+
+_NAMES = ", ".join(name for name, _ in _SNAPSHOT_COLUMNS)
+_ARRAYS = ", ".join(f"%({name})s::{kind}[]" for name, kind in _SNAPSHOT_COLUMNS)
+
+# `WITH ORDINALITY ... ORDER BY ord` LOAD-BEARING'DİR: defter `ORDER BY id` ile geri okunur
+# ve `verify_chain` her satırın `prev_hash`ini bir öncekinin `row_hash`i sanar. Satırlar dizi
+# sırasından FARKLI bir sırayla eklenirse bigserial sırası zinciri çapraz keser ve KURCALANMAMIŞ
+# bir defter "KIRIK" der. Append-only olduğu için o satırlar silinemez.
+INSERT_SNAPSHOTS = f"""
+    INSERT INTO odds_snapshots ({_NAMES})
+    SELECT {_NAMES}
+    FROM unnest({_ARRAYS}) WITH ORDINALITY AS t({_NAMES}, ord)
+    ORDER BY ord
+    ON CONFLICT (row_hash) DO NOTHING
+    RETURNING match_id
+"""
+
 
 def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     resolved = dsn or os.getenv("DATABASE_URL")
@@ -117,22 +149,35 @@ def upsert_leagues(conn: psycopg.Connection[Any], leagues: tuple[League, ...]) -
 def upsert_matches(
     conn: psycopg.Connection[Any], rows: tuple[PriceRow, ...], league_id: str
 ) -> int:
+    """Maçları tazeler. `commence_time` HER TURDA güncellenir.
+
+    `DO NOTHING` ertelenen maçın ESKİ saatini taşımaya devam ediyordu: satır filtresi API'nin
+    güncel saatine, mühür adaylığı veritabanının bayat saatine bakıyor ve maç eski saatinden
+    24 saat sonra `_seal_candidates` penceresinden SESSİZCE düşüyordu — ne mühürlenir ne de
+    kaçan mühür olarak raporlanır. Kapanış fiyatı kaybolur ve kimse görmez (DEFERRED §3.1).
+
+    Dönen sayı "yeni maç" değil "GÖRÜLEN maç"tır: `DO UPDATE` her satır için 1 bildirir.
+    Çağıran bu değeri karar için kullanmaz.
+    """
     seen: dict[str, PriceRow] = {}
     for row in rows:
         seen.setdefault(row.event_id, row)
-    written = 0
+    if not seen:
+        return 0
+    params = [
+        (event_id, league_id, row.commence_time, row.home_team, row.away_team)
+        for event_id, row in seen.items()
+    ]
     with conn.cursor() as cur:
-        for event_id, row in seen.items():
-            cur.execute(
-                """
-                INSERT INTO matches (id, league_id, commence_time, home_team, away_team)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
-                """,
-                (event_id, league_id, row.commence_time, row.home_team, row.away_team),
-            )
-            written += cur.rowcount  # ON CONFLICT DO NOTHING sonrası 1 veya 0
-    return written
+        cur.executemany(
+            """
+            INSERT INTO matches (id, league_id, commence_time, home_team, away_team)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET commence_time = excluded.commence_time
+            """,
+            params,
+        )
+        return max(cur.rowcount, 0)
 
 
 def insert_snapshots(
@@ -156,21 +201,9 @@ def insert_snapshots(
     lock_ledger(conn)
     payloads = tuple(snapshot_payload(row, observed_at, is_closing=is_closing) for row in rows)
     linked = chain(payloads, prev_hash=chain_head(conn))
-    written: tuple[str, ...] = ()
+    if not linked:
+        return ()
+    columns = {name: [entry[name] for entry in linked] for name, _ in _SNAPSHOT_COLUMNS}
     with conn.cursor() as cur:
-        for entry in linked:
-            cur.execute(
-                """
-                INSERT INTO odds_snapshots
-                  (match_id, observed_at, bookmaker, market, outcome, point, price,
-                   bookmaker_last_update, is_closing, prev_hash, row_hash)
-                VALUES (%(match_id)s, %(observed_at)s, %(bookmaker)s, %(market)s, %(outcome)s,
-                        %(point)s, %(price)s, %(bookmaker_last_update)s, %(is_closing)s,
-                        %(prev_hash)s, %(row_hash)s)
-                ON CONFLICT (row_hash) DO NOTHING
-                """,
-                entry,
-            )
-            if cur.rowcount:  # ON CONFLICT DO NOTHING sonrası 1 veya 0
-                written = (*written, str(entry["match_id"]))
-    return written
+        cur.execute(INSERT_SNAPSHOTS, columns)
+        return tuple(str(record[0]) for record in cur.fetchall())
