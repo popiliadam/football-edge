@@ -6,7 +6,7 @@ from typing import Any
 
 import psycopg
 
-from football_edge.ledger import GENESIS, chain
+from football_edge.ledger import GENESIS, canonical_timestamp, chain
 from football_edge.odds_api import PriceRow
 
 
@@ -16,19 +16,26 @@ def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
         raise RuntimeError("DATABASE_URL tanımlı değil")
     # Oturum saat dilimi UTC'ye sabitlenir: zincir hash'i zaman damgasının
     # metin hâlini kapsıyor, oturum TZ'si değişirse geri okumada zincir kırılır.
+    # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
+    # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
+    # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
     return psycopg.connect(resolved, options="-c timezone=UTC")
 
 
 def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) -> dict[str, Any]:
     return {
         "match_id": row.event_id,
-        "observed_at": observed_at.isoformat(),
+        "observed_at": canonical_timestamp(observed_at),
         "bookmaker": row.bookmaker,
         "market": row.market,
         "outcome": row.outcome,
         "point": row.point,
         "price": row.price,
-        "bookmaker_last_update": row.bookmaker_last_update,
+        "bookmaker_last_update": (
+            None
+            if row.bookmaker_last_update is None
+            else canonical_timestamp(row.bookmaker_last_update)
+        ),
         "is_closing": is_closing,
     }
 
@@ -46,6 +53,7 @@ def upsert_matches(
     seen: dict[str, PriceRow] = {}
     for row in rows:
         seen.setdefault(row.event_id, row)
+    written = 0
     with conn.cursor() as cur:
         for event_id, row in seen.items():
             cur.execute(
@@ -56,7 +64,8 @@ def upsert_matches(
                 """,
                 (event_id, league_id, row.commence_time, row.home_team, row.away_team),
             )
-    return len(seen)
+            written += cur.rowcount  # ON CONFLICT DO NOTHING sonrası 1 veya 0
+    return written
 
 
 def insert_snapshots(
@@ -68,6 +77,9 @@ def insert_snapshots(
 ) -> int:
     payloads = tuple(snapshot_payload(row, observed_at, is_closing=is_closing) for row in rows)
     linked = chain(payloads, prev_hash=chain_head(conn))
+    # Denenen satır değil, GERÇEKTEN yazılan satır sayılır: ON CONFLICT DO NOTHING
+    # sessizce satır düşürebilir ve yeniden deneme senaryosunda tüm batch no-op olur.
+    written = 0
     with conn.cursor() as cur:
         for entry in linked:
             cur.execute(
@@ -82,4 +94,5 @@ def insert_snapshots(
                 """,
                 entry,
             )
-    return len(linked)
+            written += cur.rowcount  # ON CONFLICT DO NOTHING sonrası 1 veya 0
+    return written

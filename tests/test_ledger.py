@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from football_edge.ledger import GENESIS, chain, row_hash, verify_chain
+from football_edge.ledger import GENESIS, canonical_timestamp, chain, row_hash, verify_chain
 
 PAYLOADS: tuple[dict[str, Any], ...] = (
     {"event_id": "a", "bookmaker": "pinnacle", "price": 1.95},
@@ -71,3 +71,17 @@ def test_verify_resumes_from_known_head() -> None:
     head = first[-1]["row_hash"]
     second = chain(PAYLOADS[2:], prev_hash=head)
     assert verify_chain(second, start_hash=head).ok is True
+
+
+def test_canonical_timestamp_is_symmetric_across_str_and_datetime() -> None:
+    from datetime import UTC, datetime
+
+    from football_edge.ledger import canonical_timestamp
+
+    assert canonical_timestamp("2026-09-19T10:00:00Z") == canonical_timestamp(
+        datetime(2026, 9, 19, 10, 0, tzinfo=UTC)
+    )
+
+
+def test_canonical_timestamp_preserves_microseconds() -> None:
+    assert canonical_timestamp("2026-09-19T10:00:00.123456Z").endswith(".123456+00:00")

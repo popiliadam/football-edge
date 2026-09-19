@@ -8,7 +8,7 @@ import httpx
 
 from football_edge.collect import _latest_anchor, horizon_iso, run_snapshot, seal_window
 from football_edge.leagues import League
-from football_edge.ledger import chain, verify_chain
+from football_edge.ledger import canonical_timestamp, chain, verify_chain
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 
@@ -53,13 +53,14 @@ def test_latest_anchor_none_when_empty(tmp_path: Path) -> None:
 def test_chain_survives_postgres_type_round_trip() -> None:
     written = {
         "match_id": "evt1",
-        "observed_at": "2026-09-19T12:00:00+00:00",
+        # Yazma tarafı (db.snapshot_payload) ile AYNI fonksiyon.
+        "observed_at": canonical_timestamp("2026-09-19T12:00:00+00:00"),
         "bookmaker": "pinnacle",
         "market": "h2h",
         "outcome": "A",
         "point": None,
         "price": 2.40,
-        "bookmaker_last_update": "2026-09-19T10:00:00Z",
+        "bookmaker_last_update": canonical_timestamp("2026-09-19T10:00:00Z"),
         "is_closing": False,
     }
     linked = chain((written,))
@@ -75,8 +76,8 @@ def test_chain_survives_postgres_type_round_trip() -> None:
     # verify-chain komutunun uyguladığı normalizasyonun aynısı
     normalised = {
         **from_db,
-        "observed_at": from_db["observed_at"].isoformat(),
-        "bookmaker_last_update": from_db["bookmaker_last_update"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "observed_at": canonical_timestamp(from_db["observed_at"]),
+        "bookmaker_last_update": canonical_timestamp(from_db["bookmaker_last_update"]),
         "price": float(from_db["price"]),
         "point": None,
     }
@@ -87,6 +88,9 @@ class _FakeCursor:
     def __init__(self, recorder: list[str]) -> None:
         self._recorder = recorder
         self.description: object = None
+        # psycopg imleci her execute'tan sonra rowcount verir; öncesinde -1'dir.
+        # db.insert_snapshots/upsert_matches bu sayıyı topluyor, taklit de vermeli.
+        self.rowcount = -1
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -95,7 +99,9 @@ class _FakeCursor:
         return None
 
     def execute(self, sql: str, params: object = None) -> None:
-        self._recorder.append(sql.strip().split()[0].upper())
+        verb = sql.strip().split()[0].upper()
+        self._recorder.append(verb)
+        self.rowcount = 1 if verb == "INSERT" else 0
 
     def fetchone(self) -> None:
         return None

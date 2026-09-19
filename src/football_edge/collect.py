@@ -14,7 +14,7 @@ import psycopg
 
 from football_edge.db import chain_head, connect, insert_snapshots, upsert_matches
 from football_edge.leagues import League, active_leagues, load_leagues
-from football_edge.ledger import verify_chain
+from football_edge.ledger import canonical_timestamp, verify_chain
 from football_edge.odds_api import Quota, QuotaExhausted, fetch_odds, guard_quota
 
 LOGGER = logging.getLogger("football_edge.collect")
@@ -206,17 +206,19 @@ def _verify_chain_command(conn: psycopg.Connection[Any]) -> int:
     # farklı Python tipiyle geri veriyor ve metin hâli değişiyor:
     #   numeric  → Decimal: json.dumps(Decimal) TypeError fırlatır; ayrıca
     #              yazarken float 2.40 → "2.4", okurken Decimal("2.40") → "2.40"
-    #   timestamptz → datetime: yazarken .isoformat() metni yazılmıştı
+    #   timestamptz → datetime: yazma tarafı (db.snapshot_payload) ile okuma tarafı
+    #              AYNI `canonical_timestamp` fonksiyonunu çağırır. Burada ikinci bir
+    #              biçimlendirme yazılırsa iki taraf sessizce ayrışır — yasak.
     # Bu dönüşümler kaldırılırsa KURCALANMAMIŞ HER SATIR "KIRIK" der —
     # yanlış alarm, kaçırılan kurcalama kadar zararlıdır çünkü alarma güven biter.
     normalised = tuple(
         {
             **record,
-            "observed_at": record["observed_at"].isoformat(),
+            "observed_at": canonical_timestamp(record["observed_at"]),
             "bookmaker_last_update": (
-                record["bookmaker_last_update"].strftime("%Y-%m-%dT%H:%M:%SZ")
-                if record["bookmaker_last_update"] is not None
-                else None
+                None
+                if record["bookmaker_last_update"] is None
+                else canonical_timestamp(record["bookmaker_last_update"])
             ),
             "point": None if record["point"] is None else float(record["point"]),
             "price": float(record["price"]),

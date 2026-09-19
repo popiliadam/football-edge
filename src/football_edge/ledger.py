@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 GENESIS = "0" * 64
@@ -16,6 +17,22 @@ class ChainResult:
     head: str
     error: str | None = None
     failed_index: int | None = None
+
+
+def canonical_timestamp(value: str | datetime) -> str:
+    """Zaman damgasını hash'lenebilir TEK kanonik metne çevirir.
+
+    Yazma tarafı API'den gelen metni verir, okuma tarafı Postgres'ten gelen
+    datetime'ı verir; ikisi de AYNI metni üretmek zorundadır. Aksi hâlde zincir
+    kurcalanmamış satırlar için yanlış alarm verir — ki bu, kaçırılan kurcalamadan
+    daha zararlıdır, çünkü bir süre sonra alarma kimse bakmaz.
+    """
+    parsed = (
+        datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
+    )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
 
 
 def _canonical(payload: dict[str, Any]) -> str:
