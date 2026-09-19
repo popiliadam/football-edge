@@ -472,12 +472,15 @@ def collect_news(
                     max_age=max_age,
                     source_id=adapter.source_id,
                 )
-            written += write_observations(conn, tuple(news_observation(item) for item in items))
-            # `self_stamped` yalnız BAŞARILI (commit edilen) turda sayılır — `assert_fresh`
-            # yukarıda RAISE ederse bu satıra hiç gelinmez: yarım kalmış bir turun "N öğe
-            # kendi-damgalıydı" demesi, hiç yazılmamış bir şeyi yazılmış gibi raporlardı.
-            self_stamped += len(items) - len(sourced)
+            new_rows = write_observations(conn, tuple(news_observation(item) for item in items))
             conn.commit()
+            # `written` ve `self_stamped` yalnız BAŞARILI (commit edilen) turda sayılır (Minor
+            # #4, review, promoted — G1 ile aynı gerekçe: commit() kendisi düşerse satırlar
+            # geri alınır ama sayaç ÖNCEDEN artmış olurdu, "N yeni gözlem" hiç kalıcı olmamış
+            # veri için basılırdı). `assert_fresh` yukarıda RAISE ederse bu satırlara hiç
+            # gelinmez: yarım kalmış bir turun "N öğe kendi-damgalıydı" demesi de aynı hataydı.
+            written += new_rows
+            self_stamped += len(items) - len(sourced)
         except Exception:
             conn.rollback()
             LOGGER.exception("kaynak=%s haber toplanamadı", adapter.source_id)

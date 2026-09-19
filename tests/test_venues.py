@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import pytest
 from football_edge.collector import ContractViolation
 from football_edge.collectors.venues import (
     VenuesResult,
+    _forecast_path,
     collect_venues,
     parse_entity_coordinates,
     venue_observation,
@@ -65,6 +67,16 @@ def test_observation_is_venue_kinded() -> None:
     entry = venue_observation("Q81492", 41.1, 29.0, observed_at=NOW)
     assert entry.entity_kind == "venue"
     assert entry.entity_key == "Q81492"
+
+
+def test_forecast_path_requests_gmt_explicitly() -> None:
+    """review Important — M5'in İSTEK yarısı: vendor varsayılanına GÜVENMEK yerine
+    `timezone=GMT` AÇIKÇA istenir. Yanıt tarafı AYRICA `weather._require_gmt_response`
+    ile doğrulanır (bkz. test_weather.py) — bu iki katmanlı bir savunma, ikisi de gerekli:
+    istek parametresi tek başına vendor'ın onu GERÇEKTEN uyguladığını KANITLAMAZ.
+    """
+    path = _forecast_path(41.1, 29.0, forecast_days=3)
+    assert "timezone=GMT" in path
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +140,8 @@ def _wikidata_payload(qid: str, latitude: float, longitude: float) -> dict[str, 
 def _openmeteo_payload(hours: list[str], temps: list[float]) -> dict[str, Any]:
     return {
         "elevation": 42.0,
+        "timezone": "GMT",
+        "utc_offset_seconds": 0,
         "hourly": {
             "time": hours,
             "temperature_2m": temps,
@@ -306,3 +320,145 @@ def test_collect_venues_isolates_a_failing_match_but_keeps_the_others(tmp_path: 
     assert result.failed_matches == ("evt-bad",)
     weather_rows = [row for row in db.rows if row["entity_kind"] == "match_weather"]
     assert [row["entity_key"] for row in weather_rows] == ["evt-ok"]
+
+
+def test_collect_venues_rejects_a_naive_commence_time_instead_of_laundering_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Minor #2 (review, promoted): `.astimezone(UTC)` bir NAIVE datetime'da SİSTEM YEREL
+    saatini varsayıp SESSİZCE aware bir değere çevirir — `_require_utc`i GEÇEN ama YANLIŞ
+    bir `kickoff` üretir (`astimezone`'un kendisi hatasız çalışır; guard'ı atlatan LAUNDERING
+    tam olarak budur). Bugün `commence_time` her zaman aware (timestamptz) olduğu için
+    ERİŞİLEMEZ bir dal, ama `collect_venues` bu wiring'in TEK çağıranı — sütun ileride
+    `timestamp`e değişirse sessizce RUNNER'IN saat dilimine kayardı. `caplog` kullanılır
+    (yalnız `failed_matches` değil): sistem yerel saat dilimine göre laundered değer
+    KAZA ESERİ pencere içine düşüp "başarıyla" yazılabilir ya da farklı bir nedenle
+    (pencere dışı) düşebilir — ikisi de dışarıdan `failed_matches`e bakan bir testi
+    yanıltabilir. Loglanan mesajın KENDİSİ (`tzinfo yok`) guard'ın GERÇEKTEN tetiklendiğini,
+    sistemden BAĞIMSIZ biçimde kanıtlar.
+    """
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "wikidata", "")
+    write_robots(tmp_path, "openmeteo", "")
+    naive_kickoff = datetime(2026, 9, 19, 17, 0)  # tzinfo YOK
+    db = FakeVenuesDb(
+        matches={
+            "evt-naive": {
+                "home_team": "Galatasaray",
+                "commence_time": naive_kickoff,
+                "sealed_at": None,
+            }
+        }
+    )
+    wikidata_ok = _json_response(_wikidata_payload("Q81492", 41.1, 29.0))
+    openmeteo_ok = _json_response(
+        _openmeteo_payload(
+            ["2026-09-19T16:00", "2026-09-19T17:00", "2026-09-19T18:00"], [19.0, 20.3, 19.8]
+        )
+    )
+    client = httpx.Client(transport=httpx.MockTransport(_handler(wikidata_ok, [openmeteo_ok])))
+
+    with caplog.at_level(logging.ERROR):
+        result = collect_venues(
+            db,  # type: ignore[arg-type]
+            client,
+            sources_path=sources_path,
+            robots_dir=tmp_path,
+            now=NOW,
+        )
+
+    assert result.failed_matches == ("evt-naive",)
+    assert not any(row["entity_kind"] == "match_weather" for row in db.rows)
+    assert "tzinfo yok" in caplog.text, (
+        f"naive kickoff SESSİZCE laundering'e uğramış olabilir: {caplog.text}"
+    )
+
+
+def test_collect_venues_isolates_a_due_matches_query_failure(tmp_path: Path) -> None:
+    """Minor #3 (review, promoted): `_due_matches`in SQL'i koordinat commit edildikten
+    SONRA düşse bile arıza `collect_venues`in KENDİSİNDE izole edilmeli — `_fetch_venues_
+    command`ı, `main()`i atlayıp ÇIPLAK traceback olarak main()'e sızmamalı (aksi hâlde
+    `EXIT_SOURCE_FAILED` yok, adlandırılmış stdout satırı yok — yalnız teşhissiz bir exit
+    kodu). Koordinat bu senaryoda GERÇEKTEN yazılıp commit edildiği için `written` onu
+    sayar; yalnız SONRAKİ sorgu arızası bu turu `failed_venues`e düşürür.
+    """
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "wikidata", "")
+    write_robots(tmp_path, "openmeteo", "")
+    db = FakeVenuesDb(due_query_fails=True)
+    wikidata_ok = _json_response(_wikidata_payload("Q81492", 41.1, 29.0))
+    client = httpx.Client(transport=httpx.MockTransport(_handler(wikidata_ok, [])))
+
+    result = collect_venues(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.failed_venues == ("Q81492",), "sorgu arızası venue try'ının İÇİNDE izole edilmeli"
+    assert result.written == 1, "koordinat GERÇEKTEN commit edildi, kaybolmamalı"
+
+
+def test_collect_venues_does_not_count_a_venue_write_whose_commit_fails(tmp_path: Path) -> None:
+    """Minor #4 (review, promoted) — Faz 0'ın G1'iyle AYNI sınıf arıza: "not failed" ile
+    "durably written" aynı şey değildir. `commit()` düşerse satır kalıcı DEĞİLDİR;
+    `written`i önceden artırmak, hiç kalıcı olmamış veri için "N yeni gözlem" basmak demektir.
+    """
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "wikidata", "")
+    write_robots(tmp_path, "openmeteo", "")
+    db = FakeVenuesDb(commit_fails=lambda _db: True)
+    wikidata_ok = _json_response(_wikidata_payload("Q81492", 41.1, 29.0))
+    client = httpx.Client(transport=httpx.MockTransport(_handler(wikidata_ok, [])))
+
+    result = collect_venues(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.written == 0
+    assert result.failed_venues == ("Q81492",)
+    assert db.rollbacks == 1
+
+
+def test_collect_venues_does_not_count_a_weather_write_whose_commit_fails(tmp_path: Path) -> None:
+    """Minor #4 (review, promoted), İKİNCİ örnek — `venues.py:199`'daki hava-yazma satırı,
+    stadyum-yazma satırından AYRI (`venues.py:181`). Koordinatın commit'i BAŞARILI olsun
+    (`written` onu doğru sayar); yalnız hava gözleminin commit'i düşsün — `written` o
+    ikinci satırı SAYMAMALI.
+    """
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "wikidata", "")
+    write_robots(tmp_path, "openmeteo", "")
+    db = FakeVenuesDb(
+        matches={
+            "evt1": {
+                "home_team": "Galatasaray",
+                "commence_time": datetime(2026, 9, 19, 17, 0, tzinfo=UTC),
+                "sealed_at": None,
+            }
+        },
+        commit_fails=lambda current: current.commits >= 1,
+    )
+    wikidata_ok = _json_response(_wikidata_payload("Q81492", 41.1, 29.0))
+    openmeteo_ok = _json_response(_openmeteo_payload(["2026-09-19T17:00"], [20.3]))
+    client = httpx.Client(transport=httpx.MockTransport(_handler(wikidata_ok, [openmeteo_ok])))
+
+    result = collect_venues(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.written == 1  # yalnız koordinat — hava commit'i düştü, sayılmadı
+    assert result.failed_venues == ()
+    assert result.failed_matches == ("evt1",)
+    assert db.commits == 1  # koordinatın commit'i başarılı, hava'nınki denenip düştü
+    assert db.rollbacks == 1

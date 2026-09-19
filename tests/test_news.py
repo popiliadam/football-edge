@@ -463,20 +463,16 @@ def test_rss_ignores_item_tag_outside_channel() -> None:
 
 
 def _sources_yaml(tmp_path: Path, *, googlenews_enabled: bool = False) -> Path:
+    # SIRA KASITLI: googlenews ÖNCE, ajansspor SONRA (Minor #5, review, promoted).
+    # `enabled_adapters()` YAML sırasını korur; ajansspor önce gelseydi
+    # `test_collect_news_an_unmapped_adapter_path_isolates_only_that_source` yalnız
+    # "istisna dışarı sızmıyor"u kanıtlardı (ajansspor googlenews'e ULAŞMADAN ÖNCE zaten
+    # yazılmış/commit edilmiş olurdu) — docstring'in iddiası olan "SONRAKİ sağlam adaptör
+    # de çalışır"ı DEĞİL. Bu sıra o iddiayı gerçekten sınar.
     path = tmp_path / "sources.yaml"
     path.write_text(
         f"""
 sources:
-  - id: ajansspor
-    base_url: https://ajansspor.test
-    user_agent: football-edge-test/0.1
-    crawl_delay_seconds: 0.0
-    robots_verified_at: 2026-09-19
-    declared_paths: ['/sitemap', '/sitemap/news']
-    enabled: true
-    access_basis: robots
-    terms_url: ''
-    note: ''
   - id: googlenews
     base_url: https://news.google.test
     user_agent: football-edge-test/0.1
@@ -484,6 +480,16 @@ sources:
     robots_verified_at: 2026-09-19
     declared_paths: []
     enabled: {"true" if googlenews_enabled else "false"}
+    access_basis: robots
+    terms_url: ''
+    note: ''
+  - id: ajansspor
+    base_url: https://ajansspor.test
+    user_agent: football-edge-test/0.1
+    crawl_delay_seconds: 0.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/sitemap', '/sitemap/news']
+    enabled: true
     access_basis: robots
     terms_url: ''
     note: ''
@@ -662,9 +668,11 @@ def test_collect_news_self_stamped_items_do_not_mask_a_stale_source_provided_ite
 def test_collect_news_an_unmapped_adapter_path_isolates_only_that_source(tmp_path: Path) -> None:
     """`_ARTICLE_PATHS`te YOK bir adaptör (googlenews, bilinçli olarak eşlemesiz) bir
     wiring hatasıdır — ama bu döngü ADAPTÖR başına izole eder (`collect_footystats`teki
-    lig izolasyonuyla aynı ilke). Eşlemesiz googlenews `failed_sources`e düşmeli, ama
-    SAĞLAM ajansspor'un yazımını GÖTÜRMEMELİ — aksi hâlde tek bir eksik eşleme,
-    docstring'in vaat ettiği izolasyonu ihlal edip TÜM turu (ajansspor dâhil) çökertirdi."""
+    lig izolasyonuyla aynı ilke). `_sources_yaml` googlenews'i BİLİNÇLİ olarak ÖNCE listeler
+    (Minor #5, review, promoted): ajansspor önce gelseydi bu test yalnız "istisna dışarı
+    sızmıyor"u kanıtlardı — ajansspor googlenews'e hiç ULAŞILMADAN ÖNCE zaten yazılıp commit
+    edilmiş olurdu. Googlenews ÖNCE gelince asıl iddia sınanır: eşlemesiz (ve başarısız)
+    ÖNCEKİ bir adaptör, SONRAKİ sağlam ajansspor'un çalışmasını/yazmasını ENGELLEMEMELİ."""
     sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
     write_robots(tmp_path, "ajansspor", "")
     write_robots(tmp_path, "googlenews", "")
@@ -686,3 +694,30 @@ def test_collect_news_an_unmapped_adapter_path_isolates_only_that_source(tmp_pat
 
     assert result.written == 1, f"eşlemesiz googlenews, sağlam ajansspor'u da götürdü: {result}"
     assert result.failed_sources == ("googlenews",)
+
+
+def test_collect_news_does_not_count_a_batch_whose_commit_fails(tmp_path: Path) -> None:
+    """Minor #4 (review, promoted) — Faz 0'ın G1'iyle AYNI sınıf arıza: "not failed" ile
+    "durably written" aynı şey değildir. `commit()` düşerse satır kalıcı DEĞİLDİR;
+    `written`i önceden artırmak hiç kalıcı olmamış veri için "N yeni gözlem" basmak demektir.
+    """
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "ajansspor", "")
+    body = _ajansspor_urlset([("taze-haber", (NOW - timedelta(hours=1)).isoformat())])
+    client = httpx.Client(
+        transport=httpx.MockTransport(_news_handler({"ajansspor.test": body}))  # type: ignore[arg-type]
+    )
+    db = FakeObservationDb(commit_fails=lambda _db: True)
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.written == 0
+    assert result.self_stamped == 0
+    assert result.failed_sources == ("ajansspor",)
+    assert db.rollbacks == 1

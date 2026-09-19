@@ -57,6 +57,29 @@ def _payload_value(payload: dict[str, Any], key: str) -> float:
         raise ContractViolation(f"{SOURCE_ID}: alan yok: '{key}'") from error
 
 
+def _require_gmt_response(payload: dict[str, Any]) -> None:
+    """Yanıtın GERÇEKTEN GMT (offset=0) olduğunu doğrular — istek `timezone=GMT` parametresini
+    taşısa BİLE (review Important, 2026-09-19 — M5'in TAMAMLANMAMIŞ yarısı).
+
+    `hourly.time[]` alanları NAIVE'dir ve `parse_forecast` onları `kickoff.replace(tzinfo=
+    None)`e DOĞRUDAN karşılaştırır (bkz. aşağıdaki `target`) — bu yalnız yanıt GERÇEKTEN
+    GMT'yse doğrudur. `fetch_text`in `expect`i ZORUNLU kılması AYNI ilkedir: 200 bir yanıtın
+    DOĞRU veriyi taşıdığının kanıtı değildir. `timezone=GMT` göndermek isteği sağlamlaştırır
+    ama vendor parametreyi YOK SAYARSA ya da varsayılanı DEĞİŞTİRİRSE (istek tarafı burada
+    KANITLANAMAZ), kayma `_MAX_GAP`in içinde (48 saatlik yoğun ızgarada neredeyse hep öyle)
+    BAŞKA ama GEÇERLİ bir saate iner — `_require_utc`in önlediği TAM AYNI sınıf arıza, aynı
+    tur-gidişinin DİĞER yarısında (istek yerine yanıt). `.get()` kullanılır, çıplak indeksleme
+    değil: alan HİÇ yoksa da (`None != 0`) aynı ihlal, adlandırılmış olarak fırlar — "kanıtsız"
+    ile "yanlış" burada AYNI muameleyi görür, ikisi de "GMT olduğu doğrulanmadı" demektir.
+    """
+    offset = payload.get("utc_offset_seconds")
+    if offset != 0:
+        raise ContractViolation(
+            f"{SOURCE_ID}: yanıt GMT değil (utc_offset_seconds={offset!r}) — naive saatlik "
+            "damgalar güvenilir karşılaştırılamaz"
+        )
+
+
 def parse_forecast(payload: dict[str, Any], kickoff: datetime) -> dict[str, float]:
     """Maç saatine EN YAKIN saatlik tahmini seçer; pencere dışındaysa patlar.
 
@@ -65,9 +88,11 @@ def parse_forecast(payload: dict[str, Any], kickoff: datetime) -> dict[str, floa
     ölçülmüş gibi kullanmak.
 
     `kickoff` UTC-aware olmalı — bkz. `_require_utc` docstring'i: naive ya da başka
-    dilimli bir `kickoff` sessizce YANLIŞ AMA GEÇERLİ bir saate iner, hatasız.
+    dilimli bir `kickoff` sessizce YANLIŞ AMA GEÇERLİ bir saate iner, hatasız. Yanıtın
+    KENDİSİ de GMT olmalı — bkz. `_require_gmt_response`: turun öbür yarısı, aynı arıza sınıfı.
     """
     _require_utc(kickoff)
+    _require_gmt_response(payload)
     hourly = payload.get("hourly", {})
     stamps = hourly.get("time", [])
     if not stamps:

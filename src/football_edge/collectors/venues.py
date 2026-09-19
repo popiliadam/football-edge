@@ -81,6 +81,11 @@ def _forecast_path(latitude: float, longitude: float, *, forecast_days: int) -> 
             "longitude": longitude,
             "hourly": _HOURLY_FIELDS,
             "forecast_days": forecast_days,
+            # Review Important (M5'in eksik yarısı): `parse_forecast` saatlik damgaları NAIVE
+            # karşılaştırır, bu yalnız yanıt GMT'yse doğrudur. Vendor varsayılanına GÜVENMEK
+            # yerine AÇIKÇA istenir — `weather._require_gmt_response` yanıtı AYRICA doğrular,
+            # bu parametre yok sayılsa/değişse bile sessizce geçilmesin diye.
+            "timezone": "GMT",
         }
     )
     return f"{FORECAST_PATH}?{query}"
@@ -178,28 +183,52 @@ def collect_venues(
                 expect="application/json",
             )
             latitude, longitude = parse_entity_coordinates(json.loads(body), spec.qid)
-            written += write_observations(
+            new_rows = write_observations(
                 conn, (venue_observation(spec.qid, latitude, longitude, observed_at=now),)
             )
             conn.commit()
+            # Minor #4 (review, promoted): `written` yalnız commit BAŞARIYLA dönünce eklenir.
+            # commit() kendisi düşerse (G1 — Faz 0'ın dört düzeltme turu harcadığı ders: "not
+            # failed" "durably written" demek değildir) satırlar geri alınır ama SAYILMIŞ
+            # olurdu; "N yeni gözlem" hiç kalıcı olmamış veri için basılırdı.
+            written += new_rows
+            # Minor #3 (review, promoted): AYNI try İÇİNDE, KASITLI. Bu sorgu dışarıda
+            # kalsaydı bir DB arızası `collect_venues`i, `_fetch_venues_command`ı atlayıp
+            # `main()`e ÇIPLAK traceback olarak ulaşırdı — docstring'in vaat ettiği iki
+            # katmanlı izolasyonun ihlali: adsız stdout satırı yok, `EXIT_SOURCE_FAILED` yok,
+            # yalnız sıfır olmayan ama TEŞHİSSİZ bir exit kodu.
+            due = _due_matches(conn, spec.home_team, now, horizon_days)
         except Exception:
             conn.rollback()
             LOGGER.exception("stadyum=%s koordinat toplanamadı", spec.qid)
             failed_venues = (*failed_venues, spec.qid)
             continue
 
-        for match_id, commence_time in _due_matches(conn, spec.home_team, now, horizon_days):
+        for match_id, commence_time in due:
             try:
+                if commence_time.tzinfo is None:
+                    # Minor #2 (review, promoted): `.astimezone(UTC)` bir NAIVE datetime'da
+                    # SİSTEM YEREL saatini varsayıp SESSİZCE çevirir — `_require_utc`i GEÇEN
+                    # ama YANLIŞ bir aware değer üretir (`astimezone`'un kendisi hatasız çalışır;
+                    # guard'ı atlatan LAUNDERING tam olarak budur). Bugün ERİŞİLEMEZ
+                    # (`commence_time` timestamptz, psycopg her zaman aware döner) — ama bu
+                    # wiring `_require_utc`in TEK çağıranı, yani naive dal bugün ÖLÜ kod;
+                    # sütun ileride `timestamp`e değişirse sessizce RUNNER'IN saat dilimine
+                    # KAYARDI, hata vermeden.
+                    raise ContractViolation(
+                        f"maç={match_id}: commence_time naive (tzinfo yok) — UTC varsayılamaz"
+                    )
                 kickoff = commence_time.astimezone(UTC)
                 forecast_path = _forecast_path(latitude, longitude, forecast_days=horizon_days + 1)
                 forecast_body = fetch_text(
                     client, openmeteo, forecast_path, openmeteo_parser, expect="application/json"
                 )
                 values = parse_forecast(json.loads(forecast_body), kickoff)
-                written += write_observations(
+                new_weather_rows = write_observations(
                     conn, (weather_observation(match_id, values, observed_at=now),)
                 )
                 conn.commit()
+                written += new_weather_rows  # Minor #4 — bkz. yukarıdaki yorum, aynı gerekçe.
             except Exception:
                 conn.rollback()
                 LOGGER.exception("maç=%s hava toplanamadı (stadyum=%s)", match_id, spec.qid)

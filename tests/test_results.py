@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -301,6 +302,11 @@ class _PoisonConn:
         raise AssertionError("write_results boş demet için veritabanına dokunmamalıydı")
 
 
+class _CommitFailed(Exception):
+    """COMMIT'in kendisi düştü, bağlantı AYAKTA — `tests/fake_db.py:CommitFailed` ile aynı
+    desen (Minor #4 kanıtı: satırlar gider, `written` ÖNCEDEN artmış olmamalı — G1)."""
+
+
 @dataclass
 class _FakeResultsDb:
     """`match_results` INSERT'ini taklit eder: yabancı anahtarı (matches) VE birincil
@@ -321,11 +327,16 @@ class _FakeResultsDb:
     statements: list[str] = field(default_factory=list)
     commits: int = 0
     rollbacks: int = 0
+    # Minor #4 kanıtı (review, promoted): commit() BİLEREK düşürülebilir — `fake_db.py:
+    # FakeLedgerDb.commit_fails` ile aynı desen (varsayılan: hiç düşmez).
+    commit_fails: Callable[[_FakeResultsDb], bool] | None = None
 
     def cursor(self) -> _FakeResultsCursor:
         return _FakeResultsCursor(self)
 
     def commit(self) -> None:
+        if self.commit_fails is not None and self.commit_fails(self):
+            raise _CommitFailed("COMMIT düştü, bağlantı ayakta")
         self.commits += 1
 
     def rollback(self) -> None:
@@ -534,3 +545,26 @@ def test_collect_results_reports_scoreless_completed_matches_without_failing_the
         written=0, failed_leagues=(), scoreless_completed=("evt1",)
     )
     assert db.results == {}
+
+
+def test_collect_results_does_not_count_a_league_whose_commit_fails() -> None:
+    """Minor #4 (review, promoted) — Faz 0'ın G1'iyle AYNI sınıf arıza: "not failed" ile
+    "durably written" aynı şey değildir. `commit()` düşerse satır kalıcı DEĞİLDİR;
+    `written`i önceden artırmak hiç kalıcı olmamış veri için "N yeni sonuç" basmak demektir.
+    """
+    db = _FakeResultsDb(matches=frozenset({"evt1"}), commit_fails=lambda _db: True)
+    client = httpx.Client(
+        transport=httpx.MockTransport(_scores_handler({"soccer_good": [event()]}))
+    )
+
+    result = collect_results(
+        db,  # type: ignore[arg-type]
+        client,
+        "KEY",
+        (_league("good.1", "soccer_good"),),
+        NOW,
+    )
+
+    assert result.written == 0
+    assert result.failed_leagues == ("good.1",)
+    assert db.rollbacks == 1

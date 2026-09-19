@@ -218,13 +218,18 @@ def collect_results(
             parsed, _quota = fetch_scores(
                 client, api_key, league.odds_api_key, now, days_from=days_from
             )
-            written += write_results(conn, parsed.outcomes)
+            new_rows = write_results(conn, parsed.outcomes)
             conn.commit()
         except Exception:
             conn.rollback()
             LOGGER.exception("lig=%s sonuç toplanamadı, diğerlerine devam", league.id)
             failed = (*failed, league.id)
             continue
+        # `written` yalnız commit BAŞARIYLA dönünce eklenir (Minor #4, review, promoted —
+        # G1 ile aynı gerekçe: commit() kendisi düşerse satırlar geri alınır ama sayaç ÖNCEDEN
+        # artmış olurdu). `scoreless` de aynı nedenle try/except'in DIŞINDA, yalnız başarı
+        # yolunda birikir — bu zaten böyleydi, davranış değişmedi.
+        written += new_rows
         scoreless = (*scoreless, *parsed.scoreless_completed)
     return ResultsCollectResult(
         written=written, failed_leagues=failed, scoreless_completed=scoreless

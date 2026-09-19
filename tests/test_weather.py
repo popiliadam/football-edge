@@ -103,3 +103,32 @@ def test_missing_elevation_field_raises_a_named_violation() -> None:
     kickoff = datetime.fromisoformat(first_hour).replace(tzinfo=UTC)
     with pytest.raises(ContractViolation, match="elevation"):
         parse_forecast(body, kickoff)
+
+
+def test_response_not_gmt_raises() -> None:
+    """review Important — M5'in İSTEK tarafını sağlamlaştırdı, YANIT tarafı doğrulanmamış
+    kalmıştı. `hourly.time[]` NAIVE'dir ve `kickoff.replace(tzinfo=None)`e DOĞRUDAN
+    karşılaştırılır (bkz. `parse_forecast`) — bu yalnız yanıt GERÇEKTEN GMT'yse doğrudur.
+    Vendor `timezone=GMT` isteğini YOK SAYARSA ya da varsayılanı DEĞİŞTİRİRSE, kayma
+    `_MAX_GAP`in içinde (48 saatlik yoğun ızgarada neredeyse hep öyle) BAŞKA ama GEÇERLİ bir
+    saate iner — `_require_utc`in önlediği TAM AYNI sınıf arıza, turun DİĞER yarısında.
+    Burada TRT'nin (+3 saat) ofsetini taşıyan bir yanıt kullanılıyor — M5'in kendi TRT
+    senaryosuyla (task-7-report.md) simetrik."""
+    body = payload()
+    body["utc_offset_seconds"] = 10800  # +3 saat (TRT) — GMT DEĞİL
+    first_hour = str(body["hourly"]["time"][0])
+    kickoff = datetime.fromisoformat(first_hour).replace(tzinfo=UTC)
+    with pytest.raises(ContractViolation, match="GMT"):
+        parse_forecast(body, kickoff)
+
+
+def test_missing_utc_offset_field_raises_a_named_violation() -> None:
+    """Alan HİÇ yoksa da (kanıtsız, `None != 0`) aynı ihlal — `.get()` kullanılır, çıplak
+    indeksleme değil (bkz. `_require_gmt_response` docstring'i): "kanıtsız" ile "yanlış"
+    burada AYNI muameleyi görür."""
+    body = payload()
+    del body["utc_offset_seconds"]
+    first_hour = str(body["hourly"]["time"][0])
+    kickoff = datetime.fromisoformat(first_hour).replace(tzinfo=UTC)
+    with pytest.raises(ContractViolation, match="GMT"):
+        parse_forecast(body, kickoff)

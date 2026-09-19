@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 OBS_COLUMNS = ("source_id", "entity_kind", "entity_key", "observed_at", "payload", "content_hash")
+
+
+class CommitFailed(Exception):
+    """COMMIT'in kendisi düştü, bağlantı AYAKTA — `tests/fake_db.py:CommitFailed` ile aynı
+    desen (Minor #4 kanıtı: satırlar gider, sayaç ÖNCEDEN artmış olmamalı — G1)."""
 
 
 @dataclass
@@ -14,12 +20,17 @@ class FakeObservationDb:
     rows: list[dict[str, Any]] = field(default_factory=list)
     statements: list[str] = field(default_factory=list)
     rollbacks: int = 0
+    commits: int = 0
+    # Minor #4 kanıtı: commit() BİLEREK düşürülebilir (varsayılan: hiç düşmez).
+    commit_fails: Callable[[FakeObservationDb], bool] | None = None
 
     def cursor(self) -> _Cursor:
         return _Cursor(self)
 
     def commit(self) -> None:
-        return None
+        if self.commit_fails is not None and self.commit_fails(self):
+            raise CommitFailed("COMMIT düştü, bağlantı ayakta")
+        self.commits += 1
 
     def rollback(self) -> None:
         # `collect_footystats` (Task 5) lig başına izolasyonda `except Exception: conn.
