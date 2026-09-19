@@ -67,7 +67,7 @@ sources:
     user_agent: football-edge/0.1
     crawl_delay_seconds: 1.0
     robots_verified_at: 2026-09-19
-    declared_paths: ['/sitemap.xml']
+    declared_paths: ['/sitemap', '/sitemap/news']
     enabled: true
     access_basis: robots
     terms_url: ''
@@ -77,6 +77,15 @@ sources:
       /lineup/ gerçek robots'ta joker karakterli ("/lineup/*"); protego (R10) bunu doğru
       zorluyor (ölçüldü: /lineup/galatasaray artık kapı tarafından da engellenir) — eski not
       burada "kapı yakalamaz" diyordu, stdlib döneminde doğruydu, artık değil.
+      MERGE DÜZELTMESİ (M4, 2026-09-19): eski declared_paths (`/sitemap.xml`) canlıda 404
+      veriyordu (ölçüldü) — robots.txt hiç böyle bir yol beyan etmiyor. robots.txt'in KENDİ
+      `Sitemap:` satırları `/sitemap` (bir INDEX döner, ölçüldü: content-type application/xml,
+      200) ve `/sitemap/news` (gerçek makale urlset'i, ölçüldü: content-type application/xml,
+      200) — ikisi de canlıda ayrı ayrı doğrulandı. Toplayıcı (`collect_news`) şu an yalnız
+      `/sitemap/news`i fetch ediyor (urlset, `AjansporAdapter.parse` bunu doğrudan tüketir);
+      `/sitemap` index'i de burada beyan edilir çünkü robots.txt'in GERÇEKTEN adlandırdığı bir
+      giriş noktasıdır (R7: beyan edilen yol önek değil, GERÇEK bir istek olmalı — ikisi de
+      öyle), ileride alt-sitemap keşfi gerekirse kod tarafı hazır bulur.
 
   - id: openmeteo
     base_url: https://api.open-meteo.com
@@ -103,20 +112,28 @@ sources:
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 1.0
     robots_verified_at: 2026-09-19
-    declared_paths: ['/wiki/Special:EntityData/Q170980.json']
+    declared_paths: ['/wiki/Special:EntityData/Q81492.json']
     enabled: true
     access_basis: robots
     terms_url: ''
     note: >-
       YENİDEN AÇILDI (R7 + R10, iki aşamalı düzeltme — bkz. task-3-report.md).
       R7: eski declared_paths (/wiki/Special:EntityData, çıplak önek) hiç fetch EDİLMEYEN
-      bir yoldu; düzeltildi — gerçekte fetch edilen yol /wiki/Special:EntityData/<QID>.json
-      (Q170980 = Task 7'nin fixture'ındaki stadyum). R10: stdlib `urllib.robotparser`
-      bu tam yol için False dönüyordu — ÖLÇÜLDÜ: dosya-sırası önceliği (geniş, erken bir
-      Disallow, özgül, geç bir Allow'u örtüyordu) VE joker `*` desteği yoktu, birlikte satır
-      436'daki "Allow: /wiki/Special:EntityData/*."ı görünmez kılıyordu. `protego`ya geçilince
-      (RFC 9309: en-uzun-eşleşme + joker karakter) aynı yol True ölçüldü — koordinatörün
-      ilk ölçümü DOĞRUYDU, stdlib'in DEĞİL. SPARQL değil REST kullanma kararı hâlâ geçerli.
+      bir yoldu; düzeltildi — gerçekte fetch edilen yol /wiki/Special:EntityData/<QID>.json.
+      R10: stdlib `urllib.robotparser` bu tam yol için False dönüyordu — ÖLÇÜLDÜ: dosya-sırası
+      önceliği (geniş, erken bir Disallow, özgül, geç bir Allow'u örtüyordu) VE joker `*`
+      desteği yoktu, birlikte satır 436'daki "Allow: /wiki/Special:EntityData/*."ı görünmez
+      kılıyordu. `protego`ya geçilince (RFC 9309: en-uzun-eşleşme + joker karakter) aynı yol
+      True ölçüldü — koordinatörün ilk ölçümü DOĞRUYDU, stdlib'in DEĞİL. SPARQL değil REST
+      kullanma kararı hâlâ geçerli.
+      MERGE DÜZELTMESİ (M3, 2026-09-19): QID Q170980'den Q81492'ye değişti. Q170980 bir
+      "obelisk" kavram-öğesiymiş (Task 7'de ölçüldü) — P625 (koordinat) TAŞIMIYOR; fixture'ı
+      hâlâ commit'te ama testlerde kullanılmıyor. Q81492 = Rams Park (Galatasaray SK'nin
+      stadyumu, eski adıyla Türk Telekom Stadyumu/Arena), P625 doğrulandı — bkz.
+      tests/fixtures/venue/wikidata-Q81492.json. İkisi de AYNI joker robots deseniyle
+      ("Allow: /wiki/Special:EntityData/*.") eşleşir; kapının kaynak-politikası verdiği
+      sonuç değişmedi, yalnız beyan edilen yol artık `collect_venues`in GERÇEKTEN fetch
+      ettiği QID'yi adlandırıyor.
 
   - id: googlenews
     base_url: https://news.google.com

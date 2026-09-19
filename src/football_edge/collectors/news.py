@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import Protocol
+from pathlib import Path
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 from xml.etree.ElementTree import Element, ParseError
 
+import httpx
+import psycopg
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import fromstring
 
-from football_edge.collector import ContractViolation, Observation
-from football_edge.sources import Source, enabled_sources
+from football_edge.collector import ContractViolation, Observation, assert_fresh, fetch_text
+from football_edge.observations import write_observations
+from football_edge.sources import Source, enabled_sources, load_sources, robots_for
+
+LOGGER = logging.getLogger("football_edge.collectors.news")
 
 # Google News RSS feed'inin KENDİ <copyright> metni (alıntı; ölçüldü 2026-09-19, canlı feed'e
 # karşı). O ölçümün ARTEFAKTI — fetch edilen gövdenin kendisi — tests/fixtures/news/'ta ARTIK
@@ -363,3 +370,117 @@ def enabled_adapters(sources: tuple[Source, ...]) -> tuple[NewsAdapter, ...]:
     bu bir hata değil: bu modül yalnız HABER adaptörlerini bilir.
     """
     return tuple(_ADAPTERS[entry.id] for entry in enabled_sources(sources) if entry.id in _ADAPTERS)
+
+
+# ---------------------------------------------------------------------------
+# CLI kablolaması (`fetch-news`) — Task 8'in R1 gereği ERTELEDİĞİ kablolama.
+#
+# Her adaptörün GERÇEKTEN fetch ettiği tek yol burada adlandırılır (R7 — bkz.
+# `config/sources.yaml`nin ajansspor notu, M4): `/sitemap/news` bir urlset döner,
+# `AjansporAdapter.parse` onu doğrudan tüketir. `/sitemap` (index) `declared_paths`te
+# beyan edilir ama BURADA fetch edilmez — bir index'in içindeki alt-sitemap'i keşfetmek
+# ayrı bir iş, bu görevin kapsamı dışı. `googlenews` bu sözlükte YOK: `enabled: false`
+# olduğu sürece `enabled_adapters` onu zaten hiç döndürmez (bkz. `test_enabled_adapters_
+# excludes_disabled_sources`); ileride açılırsa BURAYA bir yol eklenmeden `collect_news`
+# adıyla (RuntimeError) durur — sessizce atlanmaz.
+# ---------------------------------------------------------------------------
+
+_ARTICLE_PATHS: dict[str, str] = {"ajansspor": "/sitemap/news"}
+
+
+@dataclass(frozen=True)
+class NewsCollectResult:
+    written: int
+    # `published_at_is_source_provided=False` olan (kaynak tarih vermediği için `now`a
+    # düşmüş) öğe sayısı — YAZILIR (kaybolmaz) ama tazelik iddiasının DIŞINDA tutulur.
+    # Sessizce yutulmaz: M6 kararı budur, aşağıdaki `collect_news` docstring'ine bkz.
+    self_stamped: int = 0
+    failed_sources: tuple[str, ...] = ()
+
+
+def _source_by_id(sources: tuple[Source, ...], source_id: str) -> Source:
+    for entry in sources:
+        if entry.id == source_id:
+            return entry
+    raise RuntimeError(f"{source_id}: kaynak kaydı yok — toplama durduruldu")
+
+
+def collect_news(
+    conn: psycopg.Connection[Any],
+    client: httpx.Client,
+    *,
+    sources_path: Path,
+    robots_dir: Path,
+    now: datetime,
+    max_age: timedelta = timedelta(days=2),
+) -> NewsCollectResult:
+    """Etkin haber adaptörlerini toplar ve yazar.
+
+    **M6 kararı — `assert_fresh` YALNIZ kaynak-verili öğelerde çağrılır.** `NewsItem.
+    published_at_is_source_provided` RSS yolunda `False` olur (Ajansspor'da HİÇ olmaz —
+    zorunlu alan, bkz. `_news_published_at`): kaynak kullanılabilir bir `pubDate` vermeyip
+    toplayıcı kendi `now()`ını yerine geçirdiğinde. Böyle bir öğe üzerinde `assert_fresh`
+    çağırmak `collector.assert_fresh`in KENDİ docstring'inin 1. maddesinin yasakladığı TAM
+    durumdur (R23): `observed_at` toplayıcının kendi damgaladığı an olduğu için `now -
+    observed_at ≈ 0`, iddia HER ZAMAN doğru olur — kırılamaz bir kontrol, testsizlikten
+    kötü. Bu yüzden bu fonksiyon, tazelik kontrolünü YALNIZ `published_at_is_source_
+    provided=True` öğelerinin ALT KÜMESİ üzerinde çalıştırır (`sourced`); kendi-damgalı
+    öğeler bu kontrolün DIŞINDA tutulur.
+
+    Kendi-damgalı öğeler SESSİZCE YUTULMAZ: (a) yine de YAZILIR — kaynak gerçekten bir
+    haber yayınladı, yalnız tarihini vermedi; veriyi atmak eksik-ama-var'ı hiç-yokla
+    karıştırır. (b) sayıları `NewsCollectResult.self_stamped`e eklenir ve `main()` bunu
+    adıyla raporlar — aksi hâlde bu bayrak (Task 8'in var olma nedeni) hiçbir yerde
+    OKUNMAMIŞ olur, tam qa-loop'un "kırılamayan test" uyarısının veri sözleşmesi hâli.
+    Eğer `sourced` TAMAMEN boşsa `assert_fresh` hiç ÇAĞRILMAZ (boş demet üzerinde çağrılan
+    `assert_fresh` "hiç gözlem yok" der — ama gözlem VAR, yalnız hiçbiri kaynak-verili
+    değil; bu farklı bir arıza, karıştırılmamalı).
+
+    Arıza izolasyonu ADAPTÖR bazındadır (`collect_footystats`teki lig izolasyonuyla aynı
+    gerekçe): bir kaynağın feed'i çekilemez/ayrıştırılamazsa ya da tazelik iddiası
+    kırılırsa o kaynak `failed_sources`e eklenir, diğer adaptörler denenmeye devam eder.
+    """
+    sources = load_sources(sources_path)
+    written = 0
+    self_stamped = 0
+    failed: tuple[str, ...] = ()
+
+    for adapter in enabled_adapters(sources):
+        try:
+            source = _source_by_id(sources, adapter.source_id)
+            path = _ARTICLE_PATHS.get(adapter.source_id)
+            if path is None:
+                # `try` İÇİNDE, KASITLI: bu bir wiring/yapılandırma hatasıdır ve
+                # `_enabled_source`'un (tff.py/footystats.py) tek-kaynaklı, döngüsüz
+                # çağrısında uncaught kalması doğruydu — ama BURADA birden çok adaptör
+                # AYNI döngüde. Dışarıda bırakılsaydı bir adaptörün eksik eşlemesi
+                # DİĞER (doğru yapılandırılmış) adaptörün hiç denenmeden çökmesine yol
+                # açardı — tam bu fonksiyonun docstring'inin vaat ettiği ADAPTÖR bazlı
+                # izolasyonun ihlali. Yakalanınca da SESSİZ değil: adıyla loglanır ve
+                # `failed_sources`e düşer, aynı diğer arızalar gibi.
+                raise RuntimeError(f"{adapter.source_id}: fetch yolu tanımlı değil — wiring eksik")
+            parser = robots_for(source, robots_dir)
+            # Ölçüldü (2026-09-19, M4): ajansspor.com/sitemap/news content-type'ı
+            # "application/xml" döner (canlı curl, config/sources.yaml notu).
+            body = fetch_text(client, source, path, parser, expect="application/xml")
+            items = adapter.parse(body, now=now)
+            sourced = tuple(item for item in items if item.published_at_is_source_provided)
+            if sourced:
+                assert_fresh(
+                    tuple(news_observation(item) for item in sourced),
+                    now,
+                    max_age=max_age,
+                    source_id=adapter.source_id,
+                )
+            written += write_observations(conn, tuple(news_observation(item) for item in items))
+            # `self_stamped` yalnız BAŞARILI (commit edilen) turda sayılır — `assert_fresh`
+            # yukarıda RAISE ederse bu satıra hiç gelinmez: yarım kalmış bir turun "N öğe
+            # kendi-damgalıydı" demesi, hiç yazılmamış bir şeyi yazılmış gibi raporlardı.
+            self_stamped += len(items) - len(sourced)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            LOGGER.exception("kaynak=%s haber toplanamadı", adapter.source_id)
+            failed = (*failed, adapter.source_id)
+
+    return NewsCollectResult(written=written, self_stamped=self_stamped, failed_sources=failed)

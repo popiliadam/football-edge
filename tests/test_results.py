@@ -12,7 +12,16 @@ import httpx
 import pytest
 
 from football_edge.collector import ContractViolation
-from football_edge.collectors.results import MatchOutcome, fetch_scores, parse_scores, write_results
+from football_edge.collectors.results import (
+    MatchOutcome,
+    ResultsCollectResult,
+    collect_results,
+    fetch_scores,
+    parse_scores,
+    write_results,
+)
+from football_edge.leagues import League
+from football_edge.ledger import canonical_timestamp
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 FIXTURE = Path("tests/fixtures/results/scores_sample.json")
@@ -310,9 +319,17 @@ class _FakeResultsDb:
     matches: frozenset[str] = frozenset()
     results: dict[tuple[str, str], tuple[int, int, bool]] = field(default_factory=dict)
     statements: list[str] = field(default_factory=list)
+    commits: int = 0
+    rollbacks: int = 0
 
     def cursor(self) -> _FakeResultsCursor:
         return _FakeResultsCursor(self)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
     def __enter__(self) -> _FakeResultsDb:
         return self
@@ -409,3 +426,111 @@ def test_write_results_sql_declares_the_foreign_key_guard_and_conflict_clause() 
     (statement,) = db.statements
     assert "WHERE EXISTS (SELECT 1 FROM matches WHERE id = %s)" in statement
     assert "ON CONFLICT (match_id, observed_at) DO NOTHING" in statement
+
+
+# ---------------------------------------------------------------------------
+# `collect_results` kablolaması (M1, merge adımı).
+# ---------------------------------------------------------------------------
+
+
+def _league(league_id: str, sport_key: str) -> League:
+    return League(
+        id=league_id,
+        odds_api_key=sport_key,
+        name=league_id,
+        country="X",
+        lang="en",
+        gl="GB",
+        active=True,
+        footystats_path="/x/xg",
+    )
+
+
+def _scores_handler(bodies: dict[str, object]) -> Any:
+    """`bodies`: sport_key → (yanıt gövdesi, durum kodu) ya da yalnız gövde (200 varsayılan)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        for sport_key, spec in bodies.items():
+            if f"/sports/{sport_key}/scores/" in str(request.url):
+                if isinstance(spec, tuple):
+                    body, status = spec
+                    return httpx.Response(status, json=body)
+                return httpx.Response(
+                    200,
+                    json=spec,
+                    headers={
+                        "x-requests-remaining": "100",
+                        "x-requests-used": "1",
+                        "x-requests-last": "1",
+                    },
+                )
+        raise AssertionError(f"beklenmeyen istek: {request.url}")
+
+    return handler
+
+
+def test_collect_results_writes_outcomes_and_commits() -> None:
+    db = _FakeResultsDb(matches=frozenset({"evt1"}))
+    client = httpx.Client(
+        transport=httpx.MockTransport(_scores_handler({"soccer_good": [event()]}))
+    )
+
+    result = collect_results(
+        db,  # type: ignore[arg-type]
+        client,
+        "KEY",
+        (_league("good.1", "soccer_good"),),
+        NOW,
+    )
+
+    assert result == ResultsCollectResult(written=1, failed_leagues=(), scoreless_completed=())
+    assert db.commits == 1
+    assert db.results[("evt1", canonical_timestamp(NOW))] == (2, 1, True)
+
+
+def test_collect_results_isolates_a_failing_league_but_keeps_the_others() -> None:
+    db = _FakeResultsDb(matches=frozenset({"evt-good"}))
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            _scores_handler(
+                {
+                    "soccer_bad": ({"message": "boom"}, 500),
+                    "soccer_good": [event(id="evt-good")],
+                }
+            )
+        )
+    )
+
+    result = collect_results(
+        db,  # type: ignore[arg-type]
+        client,
+        "KEY",
+        (_league("bad.1", "soccer_bad"), _league("good.1", "soccer_good")),
+        NOW,
+    )
+
+    assert result.failed_leagues == ("bad.1",)
+    assert result.written == 1, "sağlam ligin sonucu yine de yazılmalıydı"
+    assert ("evt-good", canonical_timestamp(NOW)) in db.results
+
+
+def test_collect_results_reports_scoreless_completed_matches_without_failing_the_round() -> None:
+    """R34: tamamlanmış ama skorsuz bir olay UYDURMA 0-0 yazdırmaz — atlanır ama isimle
+    raporlanır, bu ARIZA sayılmaz (`failed_leagues`e girmez)."""
+    db = _FakeResultsDb(matches=frozenset({"evt1"}))
+    client = httpx.Client(
+        transport=httpx.MockTransport(_scores_handler({"soccer_good": [event(scores=None)]}))
+    )
+
+    result = collect_results(
+        db,  # type: ignore[arg-type]
+        client,
+        "KEY",
+        (_league("good.1", "soccer_good"),),
+        NOW,
+    )
+
+    assert result == ResultsCollectResult(
+        written=0, failed_leagues=(), scoreless_completed=("evt1",)
+    )
+    assert db.results == {}

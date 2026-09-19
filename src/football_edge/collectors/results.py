@@ -9,6 +9,7 @@ import httpx
 import psycopg
 
 from football_edge.collector import ContractViolation
+from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp
 from football_edge.odds_api import BASE_URL, Quota, read_quota
 
@@ -175,3 +176,56 @@ def write_results(conn: psycopg.Connection[Any], outcomes: tuple[MatchOutcome, .
             ],
         )
         return max(cur.rowcount, 0)
+
+
+# ---------------------------------------------------------------------------
+# CLI kablolaması (`fetch-results`) — Task 9'un R1 gereği ERTELEDİĞİ kablolama.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResultsCollectResult:
+    written: int
+    # Başarısız lig id'leri — `collect_footystats.failed_leagues` ile AYNI gerekçe
+    # (review #3, task-5-report.md): boş demet "hepsi tamam" demek, sessizce yutulmaz.
+    failed_leagues: tuple[str, ...] = ()
+    # `ParsedScores.scoreless_completed`in TÜM liglerden BİRİKMİŞ hâli (R34) — "tamamlanmış
+    # ama skorsuz" nadir bir vantor arızasıdır, ayrı raporlanır (bkz. `ParsedScores`
+    # docstring'i).
+    scoreless_completed: tuple[str, ...] = ()
+
+
+def collect_results(
+    conn: psycopg.Connection[Any],
+    client: httpx.Client,
+    api_key: str,
+    leagues: tuple[League, ...],
+    now: datetime,
+    *,
+    days_from: int = 3,
+) -> ResultsCollectResult:
+    """Etkin liglerin tamamlanmış maç sonuçlarını toplar ve yazar.
+
+    Lig başına arıza izolasyonu Faz 0'daki `_collect`/`collect_footystats` ile AYNI
+    gerekçeyle: tek ligin `/scores` çağrısı düşerse diğer liglerin sonucu kaybolmamalı.
+    İzolasyon SESSİZ değildir — `failed_leagues` adıyla taşır, `main()` bunu raporlar.
+    """
+    written = 0
+    failed: tuple[str, ...] = ()
+    scoreless: tuple[str, ...] = ()
+    for league in leagues:
+        try:
+            parsed, _quota = fetch_scores(
+                client, api_key, league.odds_api_key, now, days_from=days_from
+            )
+            written += write_results(conn, parsed.outcomes)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            LOGGER.exception("lig=%s sonuç toplanamadı, diğerlerine devam", league.id)
+            failed = (*failed, league.id)
+            continue
+        scoreless = (*scoreless, *parsed.scoreless_completed)
+    return ResultsCollectResult(
+        written=written, failed_leagues=failed, scoreless_completed=scoreless
+    )

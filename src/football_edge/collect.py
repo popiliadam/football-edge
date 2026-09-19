@@ -22,6 +22,10 @@ from football_edge.anchors import (
     missing_anchors,
 )
 from football_edge.collectors.footystats import collect_footystats
+from football_edge.collectors.news import NewsCollectResult, collect_news
+from football_edge.collectors.results import ResultsCollectResult, collect_results
+from football_edge.collectors.tff import collect_tff
+from football_edge.collectors.venues import VenuesResult, collect_venues
 from football_edge.db import (
     chain_head,
     connect,
@@ -69,6 +73,22 @@ EXIT_MISSED_SEAL = 5
 # ham "başarılı/başarısız" diye okurlar. `tests/test_workflows.py`'nin parametrize listesi
 # YALNIZ seal.yml'in case'lerini tutar ve bunu KASITLI dışarıda bırakır (o dosyadaki yorum).
 EXIT_SOURCE_POLICY = 6
+# M7 (2026-09-19 merge) — AYNI İSTİSNA, AYNI GEREKÇE, EXIT_SOURCE_POLICY emsalini izler:
+# `fetch-tff`/`fetch-venues`/`fetch-news`nin arıza kodu. `EXIT_LEAGUE_FAILED` KASITLI
+# yeniden kullanılmadı: o kod "lig" kavramına bağlı (run_snapshot/run_seal/fetch-footystats/
+# fetch-results'ın döngülediği şey) — TFF ulusal TEK sayfa, haber KAYNAK'a (adaptöre) göre,
+# stadyum/hava VARLIK'a (stadyum QID'si) göre döngüleniyor; "lig" onların hiçbirini
+# adlandırmaz. Var olan bir kodu yanlış kavrama yeniden bağlamak, bu kod tabanının
+# tekrarlayan dersiyle (bkz. footystats.py, tff.py: "isimle bul, konumla değil") aynı
+# sınıf arızadır — yalnız isimlendirme yüzeyinde.
+# `fetch-results` bu kodu ALMAZ: o gerçekten LİG döngüler (aynı `League.odds_api_key`
+# kümesi, aynı per-lig izolasyon deseni) ve `EXIT_LEAGUE_FAILED`ı DOĞRU biçimde yeniden
+# kullanır — bkz. `collectors.results.collect_results` docstring'i.
+# Bu kod da (EXIT_SOURCE_POLICY gibi) `seal.yml`nin case listesinde YOKTUR: M8 bu görevde
+# hiçbir yeni workflow/cron eklenmesini yasaklıyor, dört yeni alt komuttan hiçbiri
+# `seal.yml`/`snapshot.yml` tarafından hiç çağrılmıyor — `tests/test_workflows.py`deki
+# "BU LİSTE ELLE TUTULUR" yorumu bu kararı da adıyla taşır.
+EXIT_SOURCE_FAILED = 7
 
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
@@ -584,6 +604,81 @@ def _exit_code(result: CollectResult) -> int:
     return 0
 
 
+def _fetch_tff_command(conn: psycopg.Connection[Any], client: httpx.Client, now: datetime) -> int:
+    """`collect_tff` TEK bir ulusal sayfa fetch eder — footystats'ın aksine lig döngüsü
+    yok, izole edilecek bir "parça" yok, bu yüzden arıza TÜM komuta aittir.
+
+    `collect_tff` kendi `conn.commit()`ini zaten çağırıyor (başarı yolunda); burada
+    `rollback()` yalnız `commit()`in KENDİSİ düşüp bağlantı ayaktayken KALIRSA devreye
+    girer (G1 ile aynı sınıf arıza — bkz. `db.py:LEDGER_LOCK_KEY` yorumu) — traceback'i
+    yutmuyor, `LOGGER.exception` onu adıyla yazıyor, yalnız bağlantıyı temiz kapatıyor.
+    """
+    try:
+        written = collect_tff(
+            conn, client, sources_path=SOURCES_PATH, robots_dir=ROBOTS_DIR, now=now
+        )
+    except Exception:
+        conn.rollback()
+        LOGGER.exception("tff toplanamadı")
+        sys.stdout.write("tff: toplama başarısız — günlüğe bakın\n")
+        return EXIT_SOURCE_FAILED
+    sys.stdout.write(f"tff: {written} yeni gözlem\n")
+    return 0
+
+
+def _fetch_venues_command(
+    conn: psycopg.Connection[Any], client: httpx.Client, now: datetime
+) -> int:
+    result: VenuesResult = collect_venues(
+        conn, client, sources_path=SOURCES_PATH, robots_dir=ROBOTS_DIR, now=now
+    )
+    sys.stdout.write(f"venues: {result.written} yeni gözlem\n")
+    if result.failed_venues:
+        sys.stdout.write("venues başarısız stadyumlar: " + ", ".join(result.failed_venues) + "\n")
+    if result.failed_matches:
+        sys.stdout.write(
+            "venues başarısız maçlar (hava): " + ", ".join(result.failed_matches) + "\n"
+        )
+    if result.failed_venues or result.failed_matches:
+        return EXIT_SOURCE_FAILED
+    return 0
+
+
+def _fetch_news_command(conn: psycopg.Connection[Any], client: httpx.Client, now: datetime) -> int:
+    result: NewsCollectResult = collect_news(
+        conn, client, sources_path=SOURCES_PATH, robots_dir=ROBOTS_DIR, now=now
+    )
+    sys.stdout.write(f"news: {result.written} yeni gözlem\n")
+    if result.self_stamped:
+        # M6: kaynak tarih vermediği için `now`a düşmüş öğeler — yazıldı ama tazelik
+        # iddiasının DIŞINDA tutuldu (bkz. collectors.news.collect_news docstring'i).
+        # Sessizce yutulmaz: bu sayı burada raporlanmazsa bayrak hiçbir yerde okunmamış olur.
+        sys.stdout.write(f"news kendi-damgalı (tazelik denetlenmedi): {result.self_stamped}\n")
+    if result.failed_sources:
+        sys.stdout.write("news başarısız kaynaklar: " + ", ".join(result.failed_sources) + "\n")
+        return EXIT_SOURCE_FAILED
+    return 0
+
+
+def _fetch_results_command(
+    conn: psycopg.Connection[Any], client: httpx.Client, now: datetime
+) -> int:
+    api_key = _require_env("ODDS_API_KEY")
+    configured = active_leagues(load_leagues(LEAGUES_PATH))
+    result: ResultsCollectResult = collect_results(conn, client, api_key, configured, now)
+    sys.stdout.write(f"results: {result.written} yeni sonuç\n")
+    if result.scoreless_completed:
+        # R34: tamamlanmış ama skorsuz — uydurma 0-0 yazılmadı, adıyla raporlanır.
+        sys.stdout.write(
+            "results tamamlanmış ama skorsuz: " + ", ".join(result.scoreless_completed) + "\n"
+        )
+    if result.failed_leagues:
+        # `EXIT_LEAGUE_FAILED`ın BİLİNÇLİ yeniden kullanımı — bkz. o sabitin yorumu.
+        sys.stdout.write("results başarısız ligler: " + ", ".join(result.failed_leagues) + "\n")
+        return EXIT_LEAGUE_FAILED
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="football-edge")
@@ -596,6 +691,10 @@ def main(argv: list[str] | None = None) -> int:
             "publish-head",
             "sources-audit",
             "fetch-footystats",
+            "fetch-tff",
+            "fetch-venues",
+            "fetch-news",
+            "fetch-results",
         ),
     )
     parser.add_argument(
@@ -643,6 +742,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return EXIT_LEAGUE_FAILED
             return 0
+        if args.command == "fetch-tff":
+            with httpx.Client() as client:
+                return _fetch_tff_command(conn, client, now)
+        if args.command == "fetch-venues":
+            with httpx.Client() as client:
+                return _fetch_venues_command(conn, client, now)
+        if args.command == "fetch-news":
+            with httpx.Client() as client:
+                return _fetch_news_command(conn, client, now)
+        if args.command == "fetch-results":
+            with httpx.Client() as client:
+                return _fetch_results_command(conn, client, now)
 
         api_key = _require_env("ODDS_API_KEY")
         configured = load_leagues(LEAGUES_PATH)

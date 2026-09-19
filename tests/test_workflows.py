@@ -82,6 +82,13 @@ def _seal_run_body() -> str:
 # gerçekten çalıştıran iki yer (`verify.sh`, `sources-audit.yml`) case arm'ı taşımaz; ikisi de
 # adımın çıkışını ham haliyle "adım başarılı/başarısız" diye okur — bkz. `collect.py`'deki
 # `EXIT_SOURCE_POLICY` yorumu.
+# `EXIT_SOURCE_FAILED = 7` (M7, 2026-09-19 merge) AYNI GEREKÇEYLE KASITLI OLARAK YOKTUR:
+# `fetch-tff`/`fetch-venues`/`fetch-news` `seal.yml`/`snapshot.yml` tarafından HİÇ çağrılmaz
+# (M8: bu merge adımı yeni bir workflow/cron eklemiyor — dört yeni alt komut şimdilik yalnız
+# elle/CLI'dan çalıştırılıyor). `_seal_run_body()`nin döndürdüğü metin bu yüzden 7'yi üretecek
+# bir case arm'ı ASLA taşımaz; `fetch-results` ise `EXIT_LEAGUE_FAILED`ı (3, zaten listede)
+# yeniden kullanıyor — bkz. `collect.py`'deki `EXIT_SOURCE_FAILED` yorumu ve
+# `collectors.results.collect_results` docstring'i.
 @pytest.mark.parametrize(
     ("code", "name"),
     [

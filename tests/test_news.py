@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 
 from football_edge.collector import ContractViolation, fetch_text
+from football_edge.collectors import news as news_module
 from football_edge.collectors.news import (
     AjansporAdapter,
     GoogleNewsAdapter,
+    NewsCollectResult,
     NewsItem,
+    collect_news,
     enabled_adapters,
     news_observation,
 )
 from football_edge.sources import SourceBlocked, load_sources, robots_for
+from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import fake_source, write_robots
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -449,3 +453,236 @@ def test_rss_ignores_item_tag_outside_channel() -> None:
     items = GoogleNewsAdapter().parse(body, now=NOW)
     assert len(items) == 1
     assert items[0].url == "https://example.test/gercek"
+
+
+# ---------------------------------------------------------------------------
+# `collect_news` kablolaması (M1/M6, merge adımı). `FakeObservationDb`
+# (tests/fake_obs_db.py) yeterli: `collect_news` yalnız `source_observations`e yazar,
+# `matches` tablosuna hiç dokunmaz.
+# ---------------------------------------------------------------------------
+
+
+def _sources_yaml(tmp_path: Path, *, googlenews_enabled: bool = False) -> Path:
+    path = tmp_path / "sources.yaml"
+    path.write_text(
+        f"""
+sources:
+  - id: ajansspor
+    base_url: https://ajansspor.test
+    user_agent: football-edge-test/0.1
+    crawl_delay_seconds: 0.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/sitemap', '/sitemap/news']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: ''
+  - id: googlenews
+    base_url: https://news.google.test
+    user_agent: football-edge-test/0.1
+    crawl_delay_seconds: 0.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: {"true" if googlenews_enabled else "false"}
+    access_basis: robots
+    terms_url: ''
+    note: ''
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _ajansspor_urlset(entries: list[tuple[str, str]]) -> str:
+    """`entries`: (url yolu, ISO news:publication_date) çiftleri."""
+    blocks = "".join(
+        f"<url><loc>https://ajansspor.test/haber/{slug}</loc>"
+        f"<news:news><news:title>X</news:title>"
+        f"<news:publication_date>{published}</news:publication_date>"
+        f"</news:news></url>"
+        for slug, published in entries
+    )
+    return (
+        "<?xml version='1.0'?>"
+        "<urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9' "
+        "xmlns:news='http://www.google.com/schemas/sitemap-news/0.9'>" + blocks + "</urlset>"
+    )
+
+
+def _rss_body(entries: list[tuple[str, str | None]]) -> str:
+    """`entries`: (url yolu, RFC2822 pubDate ya da None [pubDate hiç YAZILMAZ]) çiftleri."""
+    items = "".join(
+        f"<item><title>X</title><link>https://news.google.test/{slug}</link>"
+        + (f"<pubDate>{pub_date}</pubDate>" if pub_date else "")
+        + "</item>"
+        for slug, pub_date in entries
+    )
+    return f"<rss version='2.0'><channel>{items}</channel></rss>"
+
+
+def _news_handler(bodies: dict[str, str]) -> object:
+    def handler(request: httpx.Request) -> httpx.Response:
+        for host, body in bodies.items():
+            if host in str(request.url):
+                return httpx.Response(200, text=body, headers={"content-type": "application/xml"})
+        return httpx.Response(404, text="not found")
+
+    return handler
+
+
+def test_collect_news_writes_ajansspor_items_and_checks_freshness(tmp_path: Path) -> None:
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "ajansspor", "")
+    fresh = (NOW - timedelta(hours=2)).isoformat()
+    body = _ajansspor_urlset([("taze-haber", fresh)])
+    client = httpx.Client(
+        transport=httpx.MockTransport(_news_handler({"ajansspor.test": body}))  # type: ignore[arg-type]
+    )
+    db = FakeObservationDb()
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result == NewsCollectResult(written=1, self_stamped=0, failed_sources=())
+    assert len(db.rows) == 1
+
+
+def test_collect_news_isolates_and_reports_a_stale_source_provided_batch(tmp_path: Path) -> None:
+    """Kaynak-verili ama BAYAT bir haber: `assert_fresh` KIRILMALI — kendi-damgalı hiçbir
+    öğe yok, bu yüzden bu tamamen sıradan bir tazelik ihlalidir (M6'nın istisnası değil)."""
+    sources_path = _sources_yaml(tmp_path)
+    write_robots(tmp_path, "ajansspor", "")
+    stale = (NOW - timedelta(days=30)).isoformat()
+    body = _ajansspor_urlset([("bayat-haber", stale)])
+    client = httpx.Client(
+        transport=httpx.MockTransport(_news_handler({"ajansspor.test": body}))  # type: ignore[arg-type]
+    )
+    db = FakeObservationDb()
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result == NewsCollectResult(written=0, self_stamped=0, failed_sources=("ajansspor",))
+    assert db.rows == []
+
+
+def test_collect_news_writes_and_counts_self_stamped_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6: kaynak tarih VERMEDİĞİ (RSS `pubDate` yok) için `now`a düşen bir öğe SESSİZCE
+    yutulmaz — yazılır VE `self_stamped` sayacına eklenir."""
+    # `_ARTICLE_PATHS` googlenews'i taşımıyor (`enabled: false` olduğu sürece bilinçli
+    # olarak, bkz. news.py). Yalnız BU testte, self-stamped davranışını `collect_news`
+    # ÜZERİNDEN sınamak için geçici olarak bir yol ekleniyor (gerçek, ölçülmüş yol —
+    # task-8-report.md — ama canlıya hiç istek atılmıyor, MockTransport devrede).
+    monkeypatch.setitem(
+        news_module._ARTICLE_PATHS, "googlenews", "/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr"
+    )
+    sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
+    write_robots(tmp_path, "ajansspor", "")
+    write_robots(tmp_path, "googlenews", "")
+    ajansspor_body = _ajansspor_urlset([("taze-haber", (NOW - timedelta(hours=1)).isoformat())])
+    rss_body = _rss_body([("tarihsiz-haber", None)])
+    client = httpx.Client(
+        transport=httpx.MockTransport(  # type: ignore[arg-type]
+            _news_handler({"ajansspor.test": ajansspor_body, "news.google.test": rss_body})
+        )
+    )
+    db = FakeObservationDb()
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result == NewsCollectResult(written=2, self_stamped=1, failed_sources=())
+
+
+def test_collect_news_self_stamped_items_do_not_mask_a_stale_source_provided_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6'nın ÇEKİRDEK kanıtı (R23): AYNI feed'de biri BAYAT kaynak-verili, biri kendi-damgalı
+    iki öğe olsun. Kendi-damgalı öğe `observed_at=now` taşıdığı için `assert_fresh` TÜM
+    öğeler üzerinde çağrılsaydı `max(...)` `now`a sürüklenir ve BAYAT öğe SESSİZCE geçerdi —
+    tam R23'ün uyardığı "kendi-damgalı gözlem gerçek tazeliği MASKELER" durumu. Doğru kod
+    `assert_fresh`i YALNIZ kaynak-verili alt kümede çalıştırır: bayat öğe kendi başına
+    `max_age`i aşar ve iddia KIRILIR — kaynak `failed_sources`e düşer, HİÇBİR ŞEY yazılmaz
+    (kendi-damgalı öğe dahil — batch bölünmez, bkz. `collect_news` docstring'i)."""
+    monkeypatch.setitem(
+        news_module._ARTICLE_PATHS, "googlenews", "/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr"
+    )
+    sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
+    write_robots(tmp_path, "ajansspor", "")
+    write_robots(tmp_path, "googlenews", "")
+    stale_pub_date = (NOW - timedelta(days=30)).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    rss_body = _rss_body([("bayat-kaynakli", stale_pub_date), ("tarihsiz-kendi-damgali", None)])
+    client = httpx.Client(
+        transport=httpx.MockTransport(  # type: ignore[arg-type]
+            _news_handler({"news.google.test": rss_body})
+        )
+    )
+    db = FakeObservationDb()
+    configured_sources = load_sources(sources_path)
+    assert {entry.id for entry in configured_sources if entry.enabled} == {
+        "ajansspor",
+        "googlenews",
+    }
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+        max_age=timedelta(days=2),
+    )
+
+    # ajansspor'un kendi fetch'i bu testte 404 döner (_news_handler eşleşmiyor) — o da
+    # başarısız sayılır; asıl iddia googlenews'in KENDİSİ hakkında.
+    assert "googlenews" in result.failed_sources, (
+        f"bayat kaynak-verili öğe kendi-damgalı öğe tarafından MASKELENMİŞ olabilir: {result}"
+    )
+    assert result.written == 0
+    assert result.self_stamped == 0
+
+
+def test_collect_news_an_unmapped_adapter_path_isolates_only_that_source(tmp_path: Path) -> None:
+    """`_ARTICLE_PATHS`te YOK bir adaptör (googlenews, bilinçli olarak eşlemesiz) bir
+    wiring hatasıdır — ama bu döngü ADAPTÖR başına izole eder (`collect_footystats`teki
+    lig izolasyonuyla aynı ilke). Eşlemesiz googlenews `failed_sources`e düşmeli, ama
+    SAĞLAM ajansspor'un yazımını GÖTÜRMEMELİ — aksi hâlde tek bir eksik eşleme,
+    docstring'in vaat ettiği izolasyonu ihlal edip TÜM turu (ajansspor dâhil) çökertirdi."""
+    sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
+    write_robots(tmp_path, "ajansspor", "")
+    write_robots(tmp_path, "googlenews", "")
+    ajansspor_body = _ajansspor_urlset([("taze-haber", (NOW - timedelta(hours=1)).isoformat())])
+    client = httpx.Client(
+        transport=httpx.MockTransport(  # type: ignore[arg-type]
+            _news_handler({"ajansspor.test": ajansspor_body})
+        )
+    )
+    db = FakeObservationDb()
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.written == 1, f"eşlemesiz googlenews, sağlam ajansspor'u da götürdü: {result}"
+    assert result.failed_sources == ("googlenews",)

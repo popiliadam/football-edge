@@ -67,8 +67,14 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # ALTINDAYSA kapı kırmızı verir — pytest hiç ÇALIŞTIRILMADAN önce, exit kodu ne olursa
 # olsun. Tek marker kaldırılarak (2 kaldı) kanıtlandı: kapı kırmızı verdi, marker geri
 # eklenince yeşile döndü (task-5-report.md, fix-report).
+# MERGE GÜNCELLEMESİ (M2, 2026-09-19): `uv run pytest -q -m contract` ile ÖLÇÜLDÜ — Task 5'in
+# 3'ü artık 18. Task 6-9 (tff/venues+weather/haber/sonuç) kendi `contract` testlerini
+# ekledi, sayı yeniden yükseltilmedi (dört paralel worktree birbirinin bu satırına
+# DOKUNAMAZDI — sabit budur). Bu sabit YALNIZ bugünün ölçümünü taşır; yeniden ölçmeden
+# büyütülmez, bkz. yukarıdaki "DÜZELTİLMİŞ SÜRÜM" notu — kırma/geri-yükleme kanıtı bu
+# görevin raporundadır (task-M-report.md, "EXPECTED_MIN_CONTRACT break-and-restore proof").
 step "veri-sözleşmesi" bash -c '
-  EXPECTED_MIN_CONTRACT=3
+  EXPECTED_MIN_CONTRACT=18
 
   collect_output=$(uv run pytest tests/ -q -m contract --collect-only 2>&1)
   collect_code=$?
