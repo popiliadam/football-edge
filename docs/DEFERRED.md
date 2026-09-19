@@ -187,6 +187,26 @@ kapıda eşik yok.
 `ci.yml` dâhil. Dal merge edilene kadar `schedule` de koşmaz (GitHub `schedule`'ı
 yalnız varsayılan dalda onurlandırır). Merge sonrası **ilk koşu izlenmelidir.**
 
+### 5.5 `sources.allows()` joker karakterli `Disallow` satırlarını ZORLAYAMAZ
+
+Faz 1 Task 3'te bulundu. `urllib.robotparser` `*`/`$` joker karakter uzantısını
+(Google/Bing'in de-facto standardı) UYGULAMAZ — yalnız orijinal 1996 taslağının düz
+önek eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan geçirir; bu
+`*`/`?`yi `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gibi bir satır gerçek bir
+istekte HİÇBİR ZAMAN eşleşmeyen düz bir dizeye döner. Ölçüldü: `config/robots/
+footystats.txt` (`Disallow: /*.php`, `/matches?*`) ve `ajansspor.txt`nin
+(`Disallow: /lineup/*`) gerçek gövdeleri tam olarak bu deseni taşıyor — `sources.
+allows()` bu satırları SESSİZCE yok sayar, engellemez.
+
+`kaynak-politikası` kapı adımı (`audit_offline`) bu yüzden yalnız DÜZ ÖNEKLİ
+`Disallow` satırlarını güvenilir biçimde zorlar. `declared_paths`e joker karakterli
+bir desenle "eşleşecek" bir yol eklemek, kapının yakalayacağı yanılsamasını verir.
+
+**Gereken:** joker-duyarlı bir robots ayrıştırıcı (ör. `protego`) — yeni bağımlılık,
+bu görevin kapsamı dışında (Task 4'ün işi). O zamana kadar `declared_paths`
+YALNIZ düz önekli kısıtlara güvenerek seçilmeli; joker karakterli bir `Disallow`
+satırının "zaten kapı yakalar" varsayılmaması gerekir.
+
 ---
 
 ## 6. Devralınan minor bulgular (Faz 0 incelemelerinden)
