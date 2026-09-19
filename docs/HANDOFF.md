@@ -1,7 +1,7 @@
 # football-edge — Oturum Devri (Handoff)
 
 **Son güncelleme:** 2026-09-19 · **Durum:** **Faz 1 TAMAM — `faz-1-toplayicilar` merge'e HAZIR**
-**Dal:** `faz-1-toplayicilar` · **45 commit** (main'den itibaren) · **349 test** (+18 contract)
+**Dal:** `faz-1-toplayicilar` · **46 commit** (main'den itibaren) · **349 test** (+18 contract)
 · kapı **9 adım yeşil + `zincir` adıyla SKIP** · **push edilmedi, CI hiç koşmadı**
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
@@ -74,8 +74,8 @@ Repoda hiçbir yerde geçmiyor.
 
 ## 3. Faz 1 ne üretti
 
-13 görev · 5 paralel worktree · **0 Critical** bulgu · **~45 Important**, hepsi kapatıldı ·
-98 → **349 test** (+18 `contract` etiketli).
+13 görev · 5 paralel worktree · **0 Critical** bulgu · **40'tan fazla Important**, hepsi
+kapatıldı · 98 → **349 test** (+18 `contract` etiketli).
 
 Her görev ayrı bir inceleme ajanından geçti; her düzeltme turu kendi re-review'ünü aldı.
 İncelemeciler rapora güvenmedi: mutasyonları izole klonlarda (`git archive`) canlı uygulayıp
