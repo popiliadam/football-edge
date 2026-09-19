@@ -18,6 +18,17 @@ class SourceBlocked(RuntimeError):
     """
 
 
+# access_basis: hangi mekanizma bu kaynağa erişimi haklı çıkarıyor. Spec §3.2 kendi
+# içinde ayırıyor: madde 1 ROBOTS.TXT'İ TARAYICILAR için (bkz. ACCESS_BASIS_ROBOTS —
+# varsayılan, mevcut davranış), madde 3 ise TOS'u ayrı bir sınama olarak ele alıyor
+# (bkz. ACCESS_BASIS_API_TERMS). Bir API sunucusunun robots.txt'i o sunucuyu kazıyan
+# TARAYICILARI hedefler, belgelenmiş bir API'nin istemcisini değil — ikisini karıştırmak
+# R8'in bulduğu hatanın ta kendisiydi.
+ACCESS_BASIS_ROBOTS = "robots"
+ACCESS_BASIS_API_TERMS = "api_terms"
+VALID_ACCESS_BASES = frozenset({ACCESS_BASIS_ROBOTS, ACCESS_BASIS_API_TERMS})
+
+
 @dataclass(frozen=True)
 class Source:
     id: str
@@ -28,6 +39,10 @@ class Source:
     declared_paths: tuple[str, ...]
     enabled: bool
     note: str
+    access_basis: str
+    # access_basis=api_terms İÇİN ZORUNLU (bkz. audit_offline); robots-tabanlı kaynaklarda ''.
+    # İstisna GEREKÇESİZ olamaz — boş kalırsa kapı kırmızı verir, dipnot olarak kaybolmaz.
+    terms_url: str
 
 
 REQUIRED_FIELDS = frozenset(
@@ -40,6 +55,8 @@ REQUIRED_FIELDS = frozenset(
         "declared_paths",
         "enabled",
         "note",
+        "access_basis",
+        "terms_url",
     }
 )
 
@@ -54,6 +71,10 @@ def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
         raise ValueError(f"kaynak kaydında bilinmeyen alan: {sorted(unknown)} ({entry['id']})")
     if entry["id"] in seen:
         raise ValueError(f"yinelenen kaynak id: {entry['id']}")
+    if entry["access_basis"] not in VALID_ACCESS_BASES:
+        raise ValueError(
+            f"kaynak kaydında geçersiz access_basis: {entry['access_basis']!r} ({entry['id']})"
+        )
 
 
 def load_sources(path: Path) -> tuple[Source, ...]:
@@ -87,26 +108,52 @@ def robots_for(source: Source, robots_dir: Path) -> RobotFileParser:
     has been read ... we must assume that no url is allowable"). Boş gövdeyle parse edilince
     ise True döner. İkisi farklıdır: biri "bilmiyoruz", diğeri "kısıt yok". Boş dosya, ölçülmüş
     ve boş çıkmış bir politikadır (TFF'de robots.txt 404, ClubElo'nunki boş) — ve parse edilir.
+
+    BOŞ SATIRLAR ELENİR — R7 incelemesinde bulundu. `RobotFileParser.parse()` state==2
+    (en az bir Disallow/Allow görülmüş) İKEN boş bir satıra rastlarsa, o bloğu YENİ bir
+    `User-agent:` satırı GÖRMEDEN bitmiş sayar; sonraki Disallow/Allow satırları hiçbir
+    gruba eklenmez, SESSİZCE atılır. RFC 9309'da bir grup yalnız YENİ bir User-agent
+    satırıyla (ya da EOF'ta) biter — boş satır kozmetiktir. Wikidata'nın gerçek robots.txt'i
+    (446 satır, 148'den sonra TEK "User-agent: *" satırı) tam bunu yapıyor: satır 422/423/425
+    boş, 435-436'daki `Disallow: /wiki/Special:EntityData/` + `Allow: /wiki/Special:EntityData/
+    *.` satırları BLOKA HİÇ EKLENMİYORDU (ölçüldü: boş satırlar elenmeden `default_entry.
+    rulelines`'ta "EntityData" geçen TEK satır yoktu). Boş satırları eleyerek stdlib'in kendi
+    state machine'i grubu doğru biçimde SÜRDÜRÜYOR.
     """
+    raw_lines = robots_snapshot(source, robots_dir).read_text(encoding="utf-8").splitlines()
+    non_blank_lines = [line for line in raw_lines if line.strip() != ""]
     parser = RobotFileParser()
-    parser.parse(robots_snapshot(source, robots_dir).read_text(encoding="utf-8").splitlines())
+    parser.parse(non_blank_lines)
     return parser
 
 
 def allows(parser: RobotFileParser, source: Source, path: str) -> bool:
     """`path` bu kaynağın robots.txt'i altında istenebilir mi?
 
-    BİLİNEN SINIR: `urllib.robotparser` `*`/`$` joker karakter uzantısını (Google/Bing'in
-    de-facto standardı) UYGULAMAZ — yalnız orijinal 1996 taslağının DÜZ ÖNEK eşleşmesini
-    yapar. `RuleLine` her deseni `urllib.parse.quote`'tan geçirir; bu `*` ve `?`yi
-    `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gerçek bir istekte HİÇBİR ZAMAN
-    eşleşmeyen düz bir dizeye döner (ölçüldü: `config/robots/footystats.txt` ve
-    `ajansspor.txt`'nin gerçek gövdesi tam olarak bu deseni taşıyor — bkz. Task 3 raporu).
-    Yalnız düz önekli `Disallow` satırları (ör. `/wiki/Special:`, `/lineup/` — joker YOK)
-    güvenilir biçimde zorlanır. Bu, yeni bağımlılık eklemeden (bu görevin kısıtı) stdlib'in
-    kendi sınırıdır; joker-duyarlı bir ayrıştırıcı (ör. `protego`) eklenene kadar
-    `declared_paths`e joker karakterli bir düzen ekleyip "kapı zaten yakalar" varsaymayın.
+    `access_basis=api_terms` KAYNAKLARDA robots.txt HİÇ SORULMAZ — R8: Robots Exclusion
+    Protocol tarayıcıları hedefler (spec §3.2/1), belgelenmiş bir API'nin istemcisini değil;
+    o kaynağın erişim gerekçesi kendi ToS'udur (§3.2/3), `Source.terms_url`de tutulur ve
+    varlığı `audit_offline`de ayrıca zorlanır. `parser` argümanı bu dalda KULLANILMAZ —
+    imza `robots_for()`ın döndürdüğü tipe uysun diye hâlâ alınır.
+
+    BİLİNEN SINIR (robots-tabanlı kaynaklarda): `urllib.robotparser` `*`/`$` joker karakter
+    uzantısını (Google/Bing'in de-facto standardı) UYGULAMAZ — yalnız orijinal 1996
+    taslağının DÜZ ÖNEK eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan
+    geçirir; bu `*` ve `?`yi `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gerçek bir
+    istekte HİÇBİR ZAMAN eşleşmeyen düz bir dizeye döner (ölçüldü: `config/robots/
+    footystats.txt` ve `ajansspor.txt`'nin gerçek gövdesi tam olarak bu deseni taşıyor —
+    bkz. Task 3 raporu). AYRICA: birden çok kural aynı yola uyduğunda `RobotFileParser`
+    DOSYA SIRASINDAKİ İLK eşleşeni kullanır, RFC 9309'un "en UZUN/en ÖZGÜL eşleşen kural
+    kazanır" kuralını DEĞİL — yani daha sonra gelen, daha özgül bir `Allow`, daha önce gelen
+    geniş bir `Disallow`u asla geçemez (ölçüldü: wikidata'nın `/wiki/Special:EntityData/*.`
+    Allow'u tam bunun kurbanı — bkz. DEFERRED §5.5). Yalnız düz önekli VE ÇAKIŞMAYAN
+    `Disallow` satırları güvenilir biçimde zorlanır. Bu, yeni bağımlılık eklemeden stdlib'in
+    kendi sınırıdır; joker-duyarlı/en-özgül-kazanır bir ayrıştırıcı (ör. `protego`)
+    eklenene kadar `declared_paths`e bu tuzaklara düşen bir yol ekleyip "kapı zaten yakalar"
+    varsaymayın.
     """
+    if source.access_basis == ACCESS_BASIS_API_TERMS:
+        return True
     return bool(parser.can_fetch(source.user_agent, f"{source.base_url}{path}"))
 
 
@@ -127,9 +174,22 @@ def audit_offline(
     Kapının bu adımı her push'ta koşar, secret istemez ve ağa çıkmaz. Canlı sapmayı
     `sources-audit.yml` günde bir ölçer. Sözleşme kapıda, sapma zamanlanmış işte —
     `snapshot`/`seal` ayrımının aynısı.
+
+    `access_basis=api_terms` kaynaklarda robots kontrolü (anlık görüntü/tazelik/
+    beyan-edilen-yol) hâlâ koşar — o üçü YALNIZ robots.txt'in DENETİM İZİNİ tazeliyor,
+    erişim kararını değil (bkz. `allows()`). Erişim kararı için tek yeni sınama: `terms_url`
+    var mı.
     """
     violations: tuple[str, ...] = ()
     for source in enabled_sources(sources):
+        # access_basis=api_terms İÇİN ZORUNLU GEREKÇE: istisna dipnot olarak kaybolamaz.
+        # `allows()` zaten bu kaynaklarda robots'u sormuyor (aşağıdaki döngü no-op'tur) —
+        # burada denetlenen SPESİFİK olarak terms_url'in VAR OLDUĞUdur, robots içeriği değil.
+        if source.access_basis == ACCESS_BASIS_API_TERMS and not source.terms_url:
+            violations = (
+                *violations,
+                f"{source.id}: access_basis=api_terms ama terms_url yok — istisna gerekçesiz",
+            )
         snapshot = robots_snapshot(source, robots_dir)
         if not snapshot.is_file():
             violations = (*violations, f"{source.id}: robots anlık görüntü yok ({snapshot})")

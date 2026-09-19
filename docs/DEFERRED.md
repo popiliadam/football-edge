@@ -187,25 +187,45 @@ kapıda eşik yok.
 `ci.yml` dâhil. Dal merge edilene kadar `schedule` de koşmaz (GitHub `schedule`'ı
 yalnız varsayılan dalda onurlandırır). Merge sonrası **ilk koşu izlenmelidir.**
 
-### 5.5 `sources.allows()` joker karakterli `Disallow` satırlarını ZORLAYAMAZ
+### 5.5 `sources.allows()` stdlib'in `robotparser`ının İKİ sınırını ZORLAYAMAZ
 
-Faz 1 Task 3'te bulundu. `urllib.robotparser` `*`/`$` joker karakter uzantısını
-(Google/Bing'in de-facto standardı) UYGULAMAZ — yalnız orijinal 1996 taslağının düz
-önek eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan geçirir; bu
-`*`/`?`yi `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gibi bir satır gerçek bir
-istekte HİÇBİR ZAMAN eşleşmeyen düz bir dizeye döner. Ölçüldü: `config/robots/
-footystats.txt` (`Disallow: /*.php`, `/matches?*`) ve `ajansspor.txt`nin
-(`Disallow: /lineup/*`) gerçek gövdeleri tam olarak bu deseni taşıyor — `sources.
-allows()` bu satırları SESSİZCE yok sayar, engellemez.
+Faz 1 Task 3'te bulundu, revizyonda (R7 incelemesi) bir üçüncüsü daha bulunup DÜZELTİLDİ.
+`urllib.robotparser` RFC 9309'u iki eksende karşılamıyor:
 
-`kaynak-politikası` kapı adımı (`audit_offline`) bu yüzden yalnız DÜZ ÖNEKLİ
-`Disallow` satırlarını güvenilir biçimde zorlar. `declared_paths`e joker karakterli
-bir desenle "eşleşecek" bir yol eklemek, kapının yakalayacağı yanılsamasını verir.
+1. **Joker karakter (`*`/`$`) DESTEKLENMEZ** — yalnız orijinal 1996 taslağının düz önek
+   eşleşmesini yapar. `RuleLine` her deseni `urllib.parse.quote`'tan geçirir; bu `*`/`?`yi
+   `%2A`/`%3F`ye çevirir, yani `Disallow: /*.php` gibi bir satır gerçek bir istekte HİÇBİR
+   ZAMAN eşleşmeyen düz bir dizeye döner. Ölçüldü: `config/robots/footystats.txt`
+   (`Disallow: /*.php`, `/matches?*`) ve `ajansspor.txt`nin (`Disallow: /lineup/*`) gerçek
+   gövdeleri tam olarak bu deseni taşıyor — `sources.allows()` bu satırları SESSİZCE yok
+   sayar, engellemez.
+2. **Çakışan kurallarda "en ÖZGÜL (en uzun) kazanır" DEĞİL, dosya SIRASINDAKİ İLK eşleşen
+   kural kazanır** (`Entry.allowance()`). RFC 9309 en uzun/en özgül eşleşmeyi ister — sıra
+   önemli değildir. Ölçüldü: wikidata'nın robots.txt'i `Disallow: /wiki/Special:` (geniş,
+   erken) İLE `Allow: /wiki/Special:EntityData/*.` (özgül, geç) taşıyor; ikisi de aynı yola
+   uyduğunda erken/geniş olan kazanıyor, geç/özgül olan HİÇ sorulmuyor.
 
-**Gereken:** joker-duyarlı bir robots ayrıştırıcı (ör. `protego`) — yeni bağımlılık,
-bu görevin kapsamı dışında (Task 4'ün işi). O zamana kadar `declared_paths`
-YALNIZ düz önekli kısıtlara güvenerek seçilmeli; joker karakterli bir `Disallow`
-satırının "zaten kapı yakalar" varsayılmaması gerekir.
+(Bir ÜÇÜNCÜ, DAHA CİDDİ sorun — boş satırların `parse()`'ın blok birikimini bir "User-agent:"
+satırı görmeden sessizce kesmesi, RFC 9309'a aykırı — R7 incelemesinde bulundu ve
+`sources.robots_for()`de DÜZELTİLDİ; artık burada listeli DEĞİL çünkü ertelenmiş bir sorun
+değil, kapatılmış bir bulgu. Wikidata'nın gerçek dosyası bunun kurbanıydı: satır 435-436'daki
+kurallar hiç okunmuyordu. Düzeltme YALNIZ bunu giderdi — kural artık OKUNUYOR, ama yukarıdaki
+1 ve 2 numaralı sınırlar YÜZÜNDEN hâlâ yanlış SEÇİLİYOR.)
+
+`kaynak-politikası` kapı adımı (`audit_offline`) bu yüzden yalnız DÜZ ÖNEKLİ VE ÇAKIŞMAYAN
+`Disallow` satırlarını güvenilir biçimde zorlar. `declared_paths`e bu iki tuzaktan birine
+düşen bir yol eklemek, kapının yakalayacağı yanılsamasını verir — `wikidata` kaydı bunun
+somut, commit'lenmiş örneğidir: `declared_paths: ['/wiki/Special:EntityData/Q170980.json']`
+gerçek, fetch edilen bir URL'dir (R7'nin düzelttiği önek hatası değil) ve Wikidata'nın
+robots.txt'i bunu Wikimedia'nın kendi `Allow` kuralıyla AÇIKÇA izin veriyor — ama yukarıdaki
+1 ve 2 sınırları BİRLİKTE bu izni `sources.allows()`tan gizliyor, bu yüzden kayıt `enabled:
+false` kalıyor (bkz. kaydın kendi notu, ve task-3-report.md'nin R7 fix bölümü).
+
+**Gereken:** joker-duyarlı, en-özgül-kazanır bir robots ayrıştırıcı (ör. `protego`) — yeni
+bağımlılık, bu görevin kapsamı dışında (Task 4+'ın işi, izlenen follow-up task mevcut).
+O zamana kadar `declared_paths` YALNIZ düz önekli VE ÇAKIŞMAYAN kısıtlara güvenerek
+seçilmeli; bu iki tuzaktan birine düşen bir `Disallow`/`Allow` çiftinin "zaten kapı yakalar"
+varsayılmaması gerekir.
 
 ---
 
