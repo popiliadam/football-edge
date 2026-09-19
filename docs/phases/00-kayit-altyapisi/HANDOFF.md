@@ -49,8 +49,8 @@ Yeşil bir kapı yalnız §2'yi kanıtlar; §3'teki hiçbir satır "test edildi"
 
 `./verify.sh` çıktısı özet değil, **log dosyasından** (`$TMPDIR/football-edge-verify.log`).
 
-**Taze koşu — `710c4cb` + bu dokümantasyon commit'i** (yalnız `docs/` ve `README.md`;
-kod ve test değişmedi, o yüzden sayılar aynı kalır):
+**Taze koşu — `710c4cb` + bunu izleyen dokümantasyon commit'leri** (yalnız `docs/`
+ve `README.md`; kod ve test değişmedi, o yüzden sayılar aynı kalır):
 
 ```
 === ruff-check ===
@@ -78,8 +78,9 @@ sebebi aynı (ulaşılabilir veritabanı + dolu defter yok). **SKIP geçmek değ
 
 ### Yedi adımın hepsinin gerçekten koştuğu TEK ölçüm
 
-`DATABASE_URL` bağlıyken, **2026-09-19 04:31 UTC**, commit `fa225ef` ağacında
-(çıpa commit'i `dce3013` bunun üzerine yalnız `ledger/head-2026-09-19.txt` ekledi):
+`DATABASE_URL` bağlıyken, **2026-09-19 01:31–01:33 UTC** (yerel 04:31, +03:00),
+commit `fa225ef` ağacında (çıpa commit'i `dce3013` bunun üzerine yalnız
+`ledger/head-2026-09-19.txt` ekledi):
 
 ```
 ruff-check · ruff-format · mypy · pytest · paket-kurulu · secrets · zincir
@@ -108,14 +109,20 @@ merge sonrası ilk `seal` turu bunu kendiliğinden ölçecek (`zincir` adımı o
 
 ### 3.1 Atlanan kontroller (bu koşuda fiilen çalışmadı)
 
-1. **`zincir` adımı ATLANDI.** Yerel kabukta `DATABASE_URL` tanımlı değil; kapı
-   `SKIP: zincir (DATABASE_URL yok)` bastı. **Kapı bugüne kadar hiçbir zinciri doğrulamadı.**
-   Adımın koştuğu ve kırmızı verebildiği ayrıca kanıtlandı (§2), ama **gerçek defter üstünde
-   `zincir: SAĞLAM` çıktısı hiç alınmadı.**
+1. **`zincir` adımı bu koşuda ATLANDI.** Yerel kabukta `DATABASE_URL` tanımlı değil;
+   kapı `SKIP: zincir (DATABASE_URL yok)` bastı. *(Bu madde eskiden "kapı bugüne kadar
+   hiçbir zinciri doğrulamadı, gerçek defter üstünde `zincir: SAĞLAM` çıktısı hiç
+   alınmadı" diyordu — ilk canlı tur onu yanlışladı.)*
+   **Bir kez doğrulandı:** 2026-09-19 01:32 UTC, `zincir: SAĞLAM kontrol=3717
+   baş=4768f367` (çıpadan önce) ve `kontrol=0` (çıpadan sonra, kuyruk boş).
+   **Değişmeyen ve asıl mesele:** o TEK koşu dışında kapı hiçbir zinciri doğrulamıyor.
+   `DATABASE_URL` olmayan her koşuda — **CI dâhil, kasıtlı olarak** (§3.6/1) — adım
+   atlanır. Adım bugün düzenli olarak yalnız `seal.yml` içinde koşacak, o da ancak
+   **merge'den sonra** (§3.2/4).
 2. **Append-only tetikleyici testleri artık KOŞUYOR — ama yalnız bağlıyken.**
    *(Bu madde "defter boş olduğu sürece skip kalırlar, Faz 0'ın merkezî iddiası
    ölçülmüyor" diyordu; ilk canlı tur onu yanlışladı ve belge bir süre yanlış taşıdı.)*
-   `test_append_only_trigger_blocks_update` ve `..._blocks_delete` 2026-09-19 04:31
+   `test_append_only_trigger_blocks_update` ve `..._blocks_delete` 2026-09-19 01:32
    UTC'de **İLK KEZ gerçekten koştu ve PASS etti**: canlı Postgres, 3 717 satırlık
    defterde `UPDATE`i de `DELETE`i de reddetti. Faz 0'ın merkezî iddiası artık test
    paketinin ölçtüğü bir şeydir.
@@ -127,8 +134,9 @@ merge sonrası ilk `seal` turu bunu kendiliğinden ölçecek (`zincir` adımı o
    skip'ten çıkıp **FAIL** ediyordu (`2 failed, 69 passed` — ölçüldü). Artık guard testin
    gerçek ön koşulunu sorar: **ulaşılabilir veritabanı + en az bir defter satırı**
    (`_live_ledger_row_id`). Sahte DSN ile ölçüldü → `2 skipped`, sebebi adıyla yazılıyor.
-   **Değişmeyen:** testler hâlâ ölçmüyor; bu maddenin asıl konusu (2 numara) duruyor.
-   Ulaşılamayan veritabanı burada yutulur ama kapıda yutulmaz — `zincir` adımı düşer.
+   **Değişen:** bu maddenin asıl konusu (2 numara) ilk canlı turda kapandı — guard
+   artık gerçekten koşuyor. Ulaşılamayan veritabanı burada yutulur ama kapıda
+   yutulmaz: `zincir` adımı `DATABASE_URL` tanımlıyken bağlanamazsa adıyla düşer.
 
 ### 3.2 Hiç koşmamış şeyler
 
@@ -148,8 +156,8 @@ merge sonrası ilk `seal` turu bunu kendiliğinden ölçecek (`zincir` adımı o
    adımının `contents: write` ile geçtiği, `ci.yml`'in runner'da yeşil verdiği —
    **hiçbiri ölçülmedi.**
 5. **Gerçek snapshot KOŞTU — tablolar artık dolu.** *(Bu madde "gerçek snapshot
-   koşmadı, tablolar boş" diyordu; ilk canlı tur onu yanlışladı.)* 2026-09-19 04:31
-   UTC, `exit 0`: **6 lig · 51 maç · 25 bahisçi · 3 717 defter satırı**, min oran
+   koşmadı, tablolar boş" diyordu; ilk canlı tur onu yanlışladı.)* 2026-09-19 01:31
+   UTC (yerel 04:31), `exit 0`: **6 lig · 51 maç · 25 bahisçi · 3 717 defter satırı**, min oran
    1.12 / max 22, kredi 500 → 494 (lig başına tam 1, öngörüldüğü gibi).
    `is_closing` satırı 0 — doğru, o an mühür penceresinde maç yoktu.
    **O turun ölçtüğü ve kapının göremediği şey:** yazma ~4 dakika sürdü (120 sn
@@ -325,7 +333,7 @@ maddelerdir. Üçü aynı turda kapatıldı; kapatılanlar da burada kalır, ç�
 4. **Dalın merge'i.** Cron ancak varsayılan dalda çalışır (§3.2). Merge edilmeden
    sistem hiç koşmaz; kaçan kapanış oranı geri gelmez.
 5. **§3.1–3.2'nin kapatılması — YARISI bitti.** İlk gerçek `snapshot` koştu
-   (2026-09-19 04:31 UTC): `zincir` adımı SKIP olmadan koştu, append-only testleri
+   (2026-09-19 01:31 UTC): `zincir` adımı SKIP olmadan koştu, append-only testleri
    PASS etti, çıpa yayınlandı. **Kalan:** (a) aynı ölçümün BUGÜNKÜ ağaçta tekrarı —
    o koşudan bu yana 19 test eklendi; (b) gerçek bir `seal` turu hiç koşmadı, yani
    mühür penceresinin canlı maç saatiyle hizası hâlâ ölçülmedi (§3.5/20).
