@@ -111,12 +111,17 @@ def insert_snapshots(
     observed_at: datetime,
     *,
     is_closing: bool,
-) -> int:
+) -> tuple[str, ...]:
+    """GERÇEKTEN yazılan satırların match_id'lerini sırasıyla döner.
+
+    Sayı değil kimlik döner, çünkü mühür MAÇ bazındadır: hakkında tek satır yazılmamış
+    bir maça `sealed_at` basılırsa maç bir daha denenmez ve kapanış fiyatı kalıcı olarak
+    kaybolur. Denenen satır da sayılmaz: `ON CONFLICT DO NOTHING` sessizce satır düşürür
+    ve yeniden deneme senaryosunda tüm batch no-op olabilir.
+    """
     payloads = tuple(snapshot_payload(row, observed_at, is_closing=is_closing) for row in rows)
     linked = chain(payloads, prev_hash=chain_head(conn))
-    # Denenen satır değil, GERÇEKTEN yazılan satır sayılır: ON CONFLICT DO NOTHING
-    # sessizce satır düşürebilir ve yeniden deneme senaryosunda tüm batch no-op olur.
-    written = 0
+    written: tuple[str, ...] = ()
     with conn.cursor() as cur:
         for entry in linked:
             cur.execute(
@@ -131,5 +136,6 @@ def insert_snapshots(
                 """,
                 entry,
             )
-            written += cur.rowcount  # ON CONFLICT DO NOTHING sonrası 1 veya 0
+            if cur.rowcount:  # ON CONFLICT DO NOTHING sonrası 1 veya 0
+                written = (*written, str(entry["match_id"]))
     return written

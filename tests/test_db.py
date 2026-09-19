@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from datetime import UTC, datetime
-from decimal import Decimal
 
 import pytest
 
+from football_edge.collect import _ledger_rows
 from football_edge.db import insert_snapshots, snapshot_payload, upsert_matches
-from football_edge.ledger import canonical_timestamp, chain, verify_chain
+from football_edge.ledger import chain, verify_chain
 from football_edge.odds_api import PriceRow
+from tests.fake_db import FakeChainDb, stored_row
 
 ROW = PriceRow(
     event_id="abc123",
@@ -69,30 +70,17 @@ def test_chain_survives_round_trip_through_postgres_types(upstream_last_update: 
     Bu testin yakaladığı arıza: yazarken hash'lenen metin ile geri okunduğunda üretilen
     metin ayrışırsa, KURCALANMAMIŞ her satır "KIRIK" der. Yanlış alarm kaçırılan
     kurcalamadan zararlıdır, çünkü bir süre sonra alarma kimse bakmaz.
+
+    Normalizasyon burada YENİDEN YAZILMAZ; okuma yolunun kendisi (`_ledger_rows` →
+    `_normalised`) koşturulur. Kopyalanmış bir normalizasyon yalnız aynı kodu iki kez
+    yazabildiğimizi kanıtlar — asıl fonksiyon bozulsa test yine yeşil kalırdı.
     """
     row = replace(ROW, bookmaker_last_update=upstream_last_update)
     written = chain((snapshot_payload(row, OBSERVED, is_closing=False),))
+    db = FakeChainDb(({**stored_row(written[0]), "id": 1},))
 
-    # Postgres'in geri verdiği tipler: timestamptz → datetime (UTC), numeric → Decimal.
-    stored = {
-        **written[0],
-        "observed_at": OBSERVED,
-        "bookmaker_last_update": datetime.fromisoformat(
-            upstream_last_update.replace("Z", "+00:00")
-        ).astimezone(UTC),
-        "price": Decimal("1.95"),
-    }
+    result = verify_chain(_ledger_rows(db, None))  # type: ignore[arg-type]
 
-    # _verify_chain_command ile BİREBİR aynı normalizasyon.
-    normalised = {
-        **stored,
-        "observed_at": canonical_timestamp(stored["observed_at"]),
-        "bookmaker_last_update": canonical_timestamp(stored["bookmaker_last_update"]),
-        "point": None if stored["point"] is None else float(stored["point"]),
-        "price": float(stored["price"]),
-    }
-
-    result = verify_chain((normalised,))
     assert result.ok is True, result.error
 
 
@@ -124,18 +112,23 @@ class _SkippingConn:
         return self._cursor
 
 
-def test_insert_snapshots_counts_only_rows_actually_written() -> None:
-    """Denenen satır değil yazılan satır sayılır; yoksa no-op batch dolu görünür."""
+def test_insert_snapshots_names_only_matches_actually_written() -> None:
+    """Denenen satır değil yazılan satır sayılır; yoksa no-op batch dolu görünür.
+
+    F1: dönen değer sayı değil KİMLİK — tek satırı ON CONFLICT ile düşen maç
+    "yazıldı" sayılırsa mührü basılır ve kapanış fiyatı bir daha aranmaz.
+    """
     rows = (
         ROW,
-        replace(ROW, outcome="Chelsea"),
+        replace(ROW, event_id="def456", outcome="Chelsea"),
         replace(ROW, bookmaker="betfair_ex_eu"),
     )
     conn = _SkippingConn([1, 0, 1])
 
     written = insert_snapshots(conn, rows, OBSERVED, is_closing=False)  # type: ignore[arg-type]
 
-    assert written == 2, "ON CONFLICT ile düşen satır yazılmış sayılmamalı"
+    assert written == ("abc123", "abc123"), "ON CONFLICT ile düşen satır yazılmış sayılmamalı"
+    assert "def456" not in written, "tek satırı düşen maç yazılmış sayılamaz"
 
 
 def test_upsert_matches_counts_only_rows_actually_written() -> None:

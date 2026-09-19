@@ -21,7 +21,13 @@ from football_edge.db import (
     upsert_matches,
 )
 from football_edge.leagues import League, active_leagues, load_leagues
-from football_edge.ledger import ChainResult, canonical_timestamp, verify_chain
+from football_edge.ledger import (
+    ChainResult,
+    canonical_timestamp,
+    payload_of,
+    row_hash,
+    verify_chain,
+)
 from football_edge.odds_api import PriceRow, Quota, QuotaExhausted, fetch_odds, guard_quota
 
 LOGGER = logging.getLogger("football_edge.collect")
@@ -38,6 +44,7 @@ _LEDGER_COLUMNS = """
 """
 _LEDGER_ALL = _LEDGER_COLUMNS + " ORDER BY id"
 _LEDGER_AFTER = _LEDGER_COLUMNS + " WHERE id > %s ORDER BY id"
+_LEDGER_AT = _LEDGER_COLUMNS + " WHERE id = %s"
 _ANCHOR_FIELDS = ("rows", "last_id", "head")
 
 
@@ -46,9 +53,12 @@ class CollectResult:
     written: int
     quota: Quota | None
     failed_leagues: tuple[str, ...]
-    collected_leagues: tuple[str, ...] = ()
+    # Hakkında GERÇEKTEN satır yazılan maçlar. Mühür bu kümeye basılır; "ligi
+    # toplayabildik" mühür için yeterli değildir (F1).
+    written_matches: tuple[str, ...] = ()
     missed_seals: tuple[str, ...] = ()
     quota_exhausted: bool = False
+    leagues_mirrored: bool = True
 
 
 @dataclass(frozen=True)
@@ -74,16 +84,8 @@ def _anchor_values(target: Path) -> dict[str, str]:
     return values
 
 
-def _latest_anchor(directory: Path = ANCHOR_DIR) -> Anchor | None:
-    """En son yayınlanmış zincir çıpasını okur; yoksa ya da okunamıyorsa None döner.
-
-    Bozuk dosya traceback ile düşmez: çağıran taraf ATLANDI diye raporlar. Sessizce
-    None dönmek de yasak — atlanan kontrol geçmek değildir.
-    """
-    files = sorted(directory.glob("head-*.txt"))
-    if not files:
-        return None
-    target = files[-1]
+def _read_anchor(target: Path) -> Anchor | None:
+    """Tek çıpa dosyasını okur; bozuksa traceback yerine adıyla uyarı verip None döner."""
     values = _anchor_values(target)
     if any(field not in values for field in _ANCHOR_FIELDS):
         LOGGER.warning("çıpa dosyası eksik alanlı (%s bekleniyor): %s", _ANCHOR_FIELDS, target)
@@ -94,6 +96,23 @@ def _latest_anchor(directory: Path = ANCHOR_DIR) -> Anchor | None:
         LOGGER.warning("çıpa dosyasındaki sayılar okunamadı: %s", target)
         return None
     return Anchor(path=target, rows=rows, last_id=last_id, head=values["head"])
+
+
+def _anchors(directory: Path = ANCHOR_DIR) -> tuple[Anchor, ...]:
+    """Okunabilen tüm çıpalar, ESKİDEN YENİYE.
+
+    En yeni çıpa dosyası çalışma ağacındadır: defteri yeniden yazabilen biri onu da
+    yeniden yazabilir. Eski dosyalar git geçmişine commit'lenmiştir; öneki yeniden
+    yazılmış bir defteri gösteren tek kanıt onlardır. Bozuk dosya sessizce yutulmaz.
+    """
+    found = tuple(_read_anchor(target) for target in sorted(directory.glob("head-*.txt")))
+    return tuple(anchor for anchor in found if anchor is not None)
+
+
+def _latest_anchor(directory: Path = ANCHOR_DIR) -> Anchor | None:
+    """En son yayınlanmış zincir çıpası; yoksa ya da okunamıyorsa None."""
+    anchors = _anchors(directory)
+    return anchors[-1] if anchors else None
 
 
 def horizon_iso(now: datetime, days: int) -> str:
@@ -164,10 +183,11 @@ def _write_league(
     now: datetime,
     *,
     is_closing: bool,
-) -> int:
+) -> tuple[str, ...]:
+    """Yazılan satırların match_id'lerini döner — mühür bu listeden basılır."""
     if not rows:
         LOGGER.info("lig=%s yazılacak satır yok", league_id)
-        return 0
+        return ()
     upsert_matches(conn, rows, league_id)
     return insert_snapshots(conn, rows, now, is_closing=is_closing)
 
@@ -184,10 +204,9 @@ def _collect(
     min_remaining: int,
     row_filter: Callable[[PriceRow], bool] | None = None,
 ) -> CollectResult:
-    written = 0
+    written: tuple[str, ...] = ()
     quota: Quota | None = None
     failed: tuple[str, ...] = ()
-    collected: tuple[str, ...] = ()
     spent = False
     for league in leagues:
         if quota is not None and _quota_spent(quota, min_remaining):
@@ -198,7 +217,10 @@ def _collect(
                 client, api_key, league.odds_api_key, commence_time_to=commence_time_to
             )
             usable = _usable_rows(rows, league.id, row_filter)
-            written += _write_league(conn, usable, league.id, now, is_closing=is_closing)
+            written = (
+                *written,
+                *_write_league(conn, usable, league.id, now, is_closing=is_closing),
+            )
             conn.commit()
         except Exception:
             # Tek bir ligin arızası diğer liglerin kapanış oranını kaçırmasına yol açmamalı.
@@ -207,13 +229,12 @@ def _collect(
             LOGGER.exception("lig=%s toplanamadı, diğer liglere devam ediliyor", league.id)
             failed = (*failed, league.id)
             continue
-        collected = (*collected, league.id)
         LOGGER.info("lig=%s satır=%d kalan_kredi=%d", league.id, len(usable), quota.remaining)
     return CollectResult(
-        written=written,
+        written=len(written),
         quota=quota,
         failed_leagues=failed,
-        collected_leagues=collected,
+        written_matches=tuple(dict.fromkeys(written)),
         quota_exhausted=spent,
     )
 
@@ -293,26 +314,43 @@ def run_seal(
         # 24 saatlik çekimin tamamı "kapanış" değildir: pencere dışı satır yazılmaz.
         row_filter=_seal_row_filter(now, window_minutes),
     )
-    # Yalnız gerçekten toplanabilen ligler mühürlenmiş sayılır; başarısız ya da kredi
-    # bitince hiç denenmemiş lig sealed_at almaz ki sonraki tur tekrar denesin.
-    if result.collected_leagues:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE matches SET sealed_at = %s
-                WHERE sealed_at IS NULL
-                  AND league_id = ANY(%s)
-                  AND commence_time BETWEEN %s AND %s
-                """,
-                (
-                    now,
-                    list(result.collected_leagues),
-                    now,
-                    now + timedelta(minutes=window_minutes),
-                ),
-            )
-        conn.commit()
+    _stamp_sealed(conn, result.written_matches, now)
     return replace(result, missed_seals=candidates.missed)
+
+
+def _stamp_sealed(conn: psycopg.Connection[Any], match_ids: tuple[str, ...], now: datetime) -> None:
+    """Mühür MAÇ bazındadır: yalnız kapanış satırı gerçekten yazılan maç damgalanır.
+
+    Lig bazında damgalamak, ligin HTTP çekimi başarılı olduğu için o ligin penceredeki
+    her maçını mühürlüyordu — fiyatı kayda geçmemiş maçlar dâhil. Mühürlenen maç bir
+    daha denenmez; kapanış fiyatı geri gelmez.
+    """
+    if not match_ids:
+        LOGGER.info("mühürlenecek maç yok: bu turda kapanış satırı yazılmadı")
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE matches SET sealed_at = %s WHERE sealed_at IS NULL AND id = ANY(%s)",
+            (now, list(match_ids)),
+        )
+    conn.commit()
+
+
+def _mirror_leagues(conn: psycopg.Connection[Any], configured: tuple[League, ...]) -> bool:
+    """Lig aynasını tazeler; BAŞARISIZLIĞI turu götürmez, adıyla raporlanır.
+
+    Bu çağrı `try` dışındaydı: `leagues.odds_api_key` UNIQUE ihlali ya da geçici bir
+    veritabanı arızası `main()`den dışarı düşüp TÜM mühür turunu atlatıyordu. Kaçan
+    mühür kalıcıdır — tablo zaten bir önceki turun aynasını taşıyor, tur sürebilir.
+    """
+    try:
+        upsert_leagues(conn, configured)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        LOGGER.exception("lig aynası tazelenemedi, tur mevcut leagues tablosuyla sürdürülüyor")
+        return False
+    return True
 
 
 def _require_env(name: str) -> str:
@@ -358,25 +396,49 @@ def _ledger_rows(conn: psycopg.Connection[Any], after_id: int | None) -> tuple[d
     return tuple(_normalised(record) for record in records)
 
 
+def _ledger_row(conn: psycopg.Connection[Any], row_id: int) -> dict[str, Any] | None:
+    """Tek satırı yükü ve prev_hash'iyle birlikte okur — hash yeniden hesaplanabilsin diye."""
+    with conn.cursor() as cur:
+        cur.execute(_LEDGER_AT, (row_id,))
+        columns = [desc[0] for desc in cur.description or ()]
+        found = cur.fetchone()
+    return None if found is None else _normalised(dict(zip(columns, found, strict=True)))
+
+
 def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
-    """Çıpanın işaret ettiği satır hâlâ aynı hash'i taşıyor mu?
+    """Çıpanın işaret ettiği satırın İÇERİĞİ hâlâ çıpadaki hash'i üretiyor mu?
 
     TRUNCATE satır-seviyesi append-only tetikleyicisini ATEŞLEMEZ. Kuyruk kesilip aynı
     sayıda sahte satır eklenirse kalan zincir kendi içinde tutarlıdır ve satır sayısı da
     tutar — çıplak zincir doğrulaması bunu göremez. Arızayı yalnız dışarıda yayınlanmış
     hash gösterir.
+
+    SAKLANAN `row_hash` HÜCRESİ DELİL DEĞİLDİR: yayınlanan head herkese açıktır ve
+    veritabanına yazabilen biri o açık değeri last_id satırının hücresine yazıp sahte
+    kuyruğunu oradan zincirleyebilir. Bu yüzden hash, satırın yükünden ve `prev_hash`
+    değerinden YENİDEN HESAPLANIR; hücrenin kendisine bakılmaz.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM odds_snapshots")
         total = int((cur.fetchone() or (0,))[0])
-        cur.execute("SELECT row_hash FROM odds_snapshots WHERE id = %s", (anchor.last_id,))
-        found = cur.fetchone()
-    if found is None:
+    row = _ledger_row(conn, anchor.last_id)
+    if row is None:
         return f"çıpanın işaret ettiği satır (id={anchor.last_id}) defterde yok"
-    if str(found[0]) != anchor.head:
-        return f"id={anchor.last_id} satırının hash'i çıpadakinden farklı"
+    if row_hash(str(row["prev_hash"]), payload_of(row)) != anchor.head:
+        return f"id={anchor.last_id} satırının içeriği çıpadaki hash'i üretmiyor"
     if total < anchor.rows:
         return f"defterde {total} satır var, çıpa {anchor.rows} diyordu"
+    return None
+
+
+def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ...]) -> str | None:
+    """En eski ve en yeni çıpayı ayrı ayrı sorar; ilk uyuşmazlığı dosya adıyla döner."""
+    for anchor in anchors:
+        if anchor.last_id <= 0:
+            continue  # Boş defterin çıpası: kesilecek kuyruk yok.
+        breakage = _anchor_break(conn, anchor)
+        if breakage is not None:
+            return f"{breakage} ({anchor.path.name})"
     return None
 
 
@@ -389,19 +451,23 @@ def _report_chain(result: ChainResult) -> int:
 
 
 def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR) -> int:
-    anchor = _latest_anchor(anchor_dir)
-    if anchor is None:
+    anchors = _anchors(anchor_dir)
+    if not anchors:
         # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
         sys.stdout.write("çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI\n")
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
-    if anchor.last_id <= 0:
+    # En eski çıpa da sorulur: yalnız en yeniye bakmak, `ledger/`deki dosyayı da
+    # değiştiren bir saldırganın yeniden yazdığı öneki göremez.
+    asked = anchors if len(anchors) == 1 else (anchors[0], anchors[-1])
+    breakage = _first_anchor_break(conn, asked)
+    if breakage is not None:
+        sys.stdout.write(f"ÇIPA UYUŞMAZLIĞI: {breakage}\n")
+        return 1
+    newest = anchors[-1]
+    if newest.last_id <= 0:
         # Boş defterin çıpası: kesilecek kuyruk yok, defter GENESIS'ten doğrulanır.
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
-    breakage = _anchor_break(conn, anchor)
-    if breakage is not None:
-        sys.stdout.write(f"ÇIPA UYUŞMAZLIĞI: {breakage} ({anchor.path.name})\n")
-        return 1
-    return _report_chain(verify_chain(_ledger_rows(conn, anchor.last_id), start_hash=anchor.head))
+    return _report_chain(verify_chain(_ledger_rows(conn, newest.last_id), start_hash=newest.head))
 
 
 def _publish_head_command(
@@ -428,13 +494,28 @@ def _report(result: CollectResult) -> int:
     if result.missed_seals:
         # Kaçan mühür kalıcıdır; sessiz exit 0 arızayı gizler.
         sys.stdout.write("kaçan mühür: " + ", ".join(result.missed_seals) + "\n")
+    if not result.leagues_mirrored:
+        sys.stdout.write("lig aynası tazelenemedi — tur mevcut leagues tablosuyla koştu\n")
     if result.quota_exhausted:
         sys.stdout.write("kredi tükendi — tur erken kapandı\n")
-        return 2
     if result.failed_leagues:
         # Diğer ligler toplandı ama bu sessizce geçilmemeli: CI kırmızı olmalı.
         sys.stdout.write("başarısız ligler: " + ", ".join(result.failed_leagues) + "\n")
+    return _exit_code(result)
+
+
+def _exit_code(result: CollectResult) -> int:
+    """Çıkış kodu, rapor TAMAMEN yazıldıktan SONRA seçilir.
+
+    Kod, dalların arasından erken dönüldüğünde aynı turdaki ikinci arıza hiç
+    yazılmıyordu: kredi bittiğinde operatör hangi ligin de düştüğünü öğrenemiyordu.
+    """
+    if result.quota_exhausted:
+        return 2
+    if result.failed_leagues:
         return 3
+    if not result.leagues_mirrored:
+        return 4
     return 0
 
 
@@ -455,8 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         api_key = _require_env("ODDS_API_KEY")
         configured = load_leagues(LEAGUES_PATH)
         # matches.league_id'nin yabancı anahtarı her turdan ÖNCE konfigürasyondan tazelenir.
-        upsert_leagues(conn, configured)
-        conn.commit()
+        mirrored = _mirror_leagues(conn, configured)
         with httpx.Client() as client:
             # Ayrı if/else: run_snapshot ve run_seal farklı keyword argümanlara
             # sahip, tek değişkene atanınca mypy --strict uyumsuzluk bildirir.
@@ -464,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_snapshot(conn, client, api_key, active_leagues(configured), now)
             else:
                 result = run_seal(conn, client, api_key, active_leagues(configured), now)
-        return _report(result)
+        return _report(replace(result, leagues_mirrored=mirrored))
 
 
 if __name__ == "__main__":

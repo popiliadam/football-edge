@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -94,3 +95,76 @@ def test_seal_does_not_report_a_match_still_ahead_as_missed() -> None:
     result = run_seal(db, client, "KEY", (LEAGUE,), NOW)  # type: ignore[arg-type]
 
     assert result.missed_seals == ()
+
+
+# ── F1: mühür LİG değil MAÇ bazında basılır ─────────────────────────────────
+# Lig "toplandı" sayılmak için HTTP çekiminin başarılı olması yetiyordu; o ligin
+# penceredeki her maçı, hakkında tek satır yazılmamış olsa bile sealed_at alıyordu.
+# Mühürlenen maç bir daha denenmez: kapanış fiyatı kalıcı olarak kaybolur.
+
+POSTPONED = "2026-09-20T11:00:00Z"  # API'nin bildiği saat: pencerede DEĞİL
+
+
+def _db_with(*match_ids: str) -> FakeLedgerDb:
+    return FakeLedgerDb(
+        leagues={"good.1": ("good.1",)},
+        matches={
+            match_id: _match(NOW + timedelta(minutes=10)) for match_id in ("evt_near", *match_ids)
+        },
+    )
+
+
+def _run(db: FakeLedgerDb, handler: Callable[[httpx.Request], httpx.Response]) -> None:
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    run_seal(db, client, "KEY", (LEAGUE,), NOW)  # type: ignore[arg-type]
+
+
+def _assert_only_recorded_match_is_sealed(db: FakeLedgerDb, unwritten: str) -> None:
+    written = {row["match_id"] for row in db.snapshots}
+    assert unwritten not in written, "önce satır yazılmış: senaryo kurgusu bozuk"
+    assert db.matches["evt_near"]["sealed_at"] == NOW, "kaydı yazılan maç mühürlenmeliydi"
+    assert db.matches[unwritten]["sealed_at"] is None, (
+        f"{unwritten} hakkında tek satır yazılmadığı hâlde mühürlendi — kapanış fiyatı kayıp"
+    )
+
+
+def test_seal_does_not_stamp_a_match_whose_every_price_was_rejected() -> None:
+    """F1(a): tüm fiyatları check (price > 1.0) ihlal eden maç kaydedilmedi; mühürlenmemeli."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = [event("evt_near", NEAR), event("evt_cheap", NEAR, prices=(1.0, 1.0))]
+        return httpx.Response(200, json=payload, headers=quota_headers(400))
+
+    db = _db_with("evt_cheap")
+    _run(db, handler)
+
+    _assert_only_recorded_match_is_sealed(db, "evt_cheap")
+
+
+def test_seal_does_not_stamp_a_match_the_api_no_longer_quotes() -> None:
+    """F1(c): piyasa askıya alındı, API olayı hiç döndürmedi — mühür basılamaz."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[event("evt_near", NEAR)], headers=quota_headers(400))
+
+    db = _db_with("evt_gone")
+    _run(db, handler)
+
+    _assert_only_recorded_match_is_sealed(db, "evt_gone")
+
+
+def test_seal_does_not_stamp_a_postponed_match_whose_db_time_is_stale() -> None:
+    """F1(b): satır filtresi API saatine, UPDATE veritabanı saatine bakıyordu.
+
+    `ON CONFLICT (id) DO NOTHING` maçın commence_time'ını hiç tazelemez: veritabanı
+    maçı pencerede sanır (mühürler), API pencerede saymaz (tek satır yazılmaz).
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = [event("evt_near", NEAR), event("evt_postponed", POSTPONED)]
+        return httpx.Response(200, json=payload, headers=quota_headers(400))
+
+    db = _db_with("evt_postponed")
+    _run(db, handler)
+
+    _assert_only_recorded_match_is_sealed(db, "evt_postponed")

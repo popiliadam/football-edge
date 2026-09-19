@@ -6,10 +6,16 @@ from pathlib import Path
 
 import httpx
 
-from football_edge.collect import _latest_anchor, horizon_iso, run_snapshot, seal_window
+from football_edge.collect import (
+    _latest_anchor,
+    _ledger_rows,
+    horizon_iso,
+    run_snapshot,
+    seal_window,
+)
 from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp, chain, verify_chain
-from tests.fake_db import FakeLedgerDb
+from tests.fake_db import FakeChainDb, FakeLedgerDb
 from tests.payloads import event, quota_headers
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -54,6 +60,12 @@ def test_latest_anchor_none_when_empty(tmp_path: Path) -> None:
 
 
 def test_chain_survives_postgres_type_round_trip() -> None:
+    """Okuma yolu GERÇEKTEN koşturulur: `_ledger_rows` → `_normalised` → `verify_chain`.
+
+    `point` doludur ve `price` sondaki sıfırıyla saklanır (`Decimal("2.40")`): float
+    2.40 "2.4" metnini, Decimal("2.40") ise "2.40" metnini verir. Kaldırılan bir
+    dönüşüm KURCALANMAMIŞ satırı "KIRIK" gösterir.
+    """
     written = {
         "match_id": "evt1",
         # Yazma tarafı (db.snapshot_payload) ile AYNI fonksiyon.
@@ -61,30 +73,25 @@ def test_chain_survives_postgres_type_round_trip() -> None:
         "bookmaker": "pinnacle",
         "market": "h2h",
         "outcome": "A",
-        "point": None,
+        "point": 2.5,
         "price": 2.40,
         "bookmaker_last_update": canonical_timestamp("2026-09-19T10:00:00Z"),
         "is_closing": False,
     }
     linked = chain((written,))
-
     # Postgres'ten dönüş: numeric -> Decimal, timestamptz -> datetime
     from_db = {
         **linked[0],
         "observed_at": datetime(2026, 9, 19, 12, 0, tzinfo=UTC),
         "bookmaker_last_update": datetime(2026, 9, 19, 10, 0, tzinfo=UTC),
         "price": Decimal("2.40"),
-        "point": None,
+        "point": Decimal("2.50"),
+        "id": 1,
     }
-    # verify-chain komutunun uyguladığı normalizasyonun aynısı
-    normalised = {
-        **from_db,
-        "observed_at": canonical_timestamp(from_db["observed_at"]),
-        "bookmaker_last_update": canonical_timestamp(from_db["bookmaker_last_update"]),
-        "price": float(from_db["price"]),
-        "point": None,
-    }
-    assert verify_chain((normalised,)).ok is True, "DB turu sonrası zincir kırılmamalı"
+
+    result = verify_chain(_ledger_rows(FakeChainDb((from_db,)), None))  # type: ignore[arg-type]
+
+    assert result.ok is True, f"DB turu sonrası zincir kırılmamalı: {result.error}"
 
 
 class _FakeCursor:

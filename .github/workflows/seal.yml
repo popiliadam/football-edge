@@ -50,6 +50,7 @@ jobs:
             0) echo "mühür turu tamam" ;;
             2) echo "::error::kredi tükendi (exit 2) — mühür turu erken kapandı" ;;
             3) echo "::error::en az bir lig mühürlenemedi (exit 3) — diğerleri mühürlendi" ;;
+            4) echo "::error::lig aynası tazelenemedi (exit 4) — mühür turu yine de koştu" ;;
             *) echo "::error::mühür beklenmedik kodla düştü (exit $code)" ;;
           esac
           # BURADA EXIT EDİLMEZ — kasıtlı. Adım burada düşerse zincir doğrulaması,

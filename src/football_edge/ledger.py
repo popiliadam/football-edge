@@ -43,6 +43,16 @@ def row_hash(prev_hash: str, payload: dict[str, Any]) -> str:
     return hashlib.sha256((prev_hash + _canonical(payload)).encode("utf-8")).hexdigest()
 
 
+def payload_of(row: dict[str, Any]) -> dict[str, Any]:
+    """Satırdan zincir alanlarını (prev_hash/row_hash/id) ayıklar: hash'lenen METİN budur.
+
+    Tek kaynak: hem `verify_chain` hem çıpa kontrolü bu ayıklamayı kullanır. İki yerde
+    iki kopya tutulursa biri diğerinden sessizce ayrışır ve kontrol kendi konusunu
+    yeniden yazmış olur.
+    """
+    return {key: value for key, value in row.items() if key not in _CHAIN_KEYS}
+
+
 def chain(
     payloads: tuple[dict[str, Any], ...], prev_hash: str = GENESIS
 ) -> tuple[dict[str, Any], ...]:
@@ -58,7 +68,7 @@ def chain(
 def verify_chain(rows: tuple[dict[str, Any], ...], start_hash: str = GENESIS) -> ChainResult:
     current = start_hash
     for index, row in enumerate(rows):
-        payload = {key: value for key, value in row.items() if key not in _CHAIN_KEYS}
+        payload = payload_of(row)
         if row["prev_hash"] != current:
             return ChainResult(False, index, current, "prev_hash zincire uymuyor", index)
         expected = row_hash(current, payload)

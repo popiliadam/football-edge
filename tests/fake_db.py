@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from football_edge.ledger import GENESIS, canonical_timestamp, chain
@@ -37,10 +38,38 @@ class CheckViolation(Exception):
     """odds_snapshots.price > 1.0 kontrolü."""
 
 
+def _as_datetime(value: Any) -> datetime:
+    return datetime.fromisoformat(canonical_timestamp(value))
+
+
+def stored_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Kanonik yükü, PSYCOPG'NİN GERİ VERDİĞİ tiplere çevirir: datetime ve Decimal.
+
+    Kanonik metin ve düz float saklayan bir taklit, okuma tarafındaki `datetime` ve
+    `Decimal` dallarını hiç çalıştırmaz: `json.dumps(Decimal)` TypeError fırlatır ve
+    `Decimal("2.40")` ile float 2.40 aynı metni vermez. Testin önlediğini iddia ettiği
+    arıza tam orada yaşıyor — taklit oraya kadar gitmezse test kendi konusunu ıskalar.
+    """
+    return {
+        **row,
+        "observed_at": _as_datetime(row["observed_at"]),
+        "bookmaker_last_update": (
+            None
+            if row["bookmaker_last_update"] is None
+            else _as_datetime(row["bookmaker_last_update"])
+        ),
+        "point": None if row["point"] is None else Decimal(str(row["point"])),
+        "price": Decimal(str(row["price"])),
+    }
+
+
 def chained_rows(
     count: int, *, start_hash: str = GENESIS, bookmaker: str = "pinnacle", first_id: int = 1
 ) -> tuple[dict[str, Any], ...]:
-    """Geçerli bir hash zinciri üretir; `bookmaker` içeriği değiştirip hash'leri ayırır."""
+    """Geçerli bir hash zinciri üretir; `bookmaker` içeriği değiştirip hash'leri ayırır.
+
+    Hash kanonik yük üzerinden hesaplanır, saklanan satır Postgres tiplerini taşır.
+    """
     payloads = tuple(
         {
             "match_id": f"evt{index}",
@@ -56,7 +85,7 @@ def chained_rows(
         for index in range(count)
     )
     return tuple(
-        {**row, "id": index + first_id}
+        {**stored_row(row), "id": index + first_id}
         for index, row in enumerate(chain(payloads, prev_hash=start_hash))
     )
 
@@ -119,11 +148,10 @@ class FakeLedgerDb:
         return 1
 
     def seal(self, params: tuple[Any, ...]) -> int:
-        now, league_ids, start, end = params
+        now, match_ids = params
         sealed = 0
-        for match in self.matches.values():
-            in_window = start <= match["commence_time"] <= end
-            if match["sealed_at"] is None and match["league_id"] in league_ids and in_window:
+        for match_id, match in self.matches.items():
+            if match["sealed_at"] is None and match_id in match_ids:
                 match["sealed_at"] = now
                 sealed += 1
         return sealed
@@ -219,10 +247,15 @@ class _ChainCursor:
             self._result = [(len(rows), max((row["id"] for row in rows), default=0))]
         elif text.startswith("SELECT count(*)"):
             self._result = [(len(rows),)]
-        elif text.startswith("SELECT row_hash") and "WHERE id =" in text:
-            self._result = [(row["row_hash"],) for row in rows if row["id"] == params[0]]
         elif text.startswith("SELECT row_hash"):
             self._result = [(rows[-1]["row_hash"],)] if rows else []
+        elif text.startswith("SELECT match_id") and "WHERE id = %s" in text:
+            self.description = tuple((name,) for name in LEDGER_COLUMNS)
+            self._result = [
+                tuple(row[name] for name in LEDGER_COLUMNS)
+                for row in rows
+                if row["id"] == params[0]
+            ]
         elif text.startswith("SELECT match_id"):
             after = 0 if params is None else int(params[0])
             self.description = tuple((name,) for name in LEDGER_COLUMNS)

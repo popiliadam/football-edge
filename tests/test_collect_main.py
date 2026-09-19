@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from football_edge import collect
+from football_edge.odds_api import Quota
 from tests.fake_db import FakeLedgerDb
 from tests.payloads import event, quota_headers
 
@@ -121,6 +122,126 @@ def test_main_exits_2_and_reports_work_done_before_quota_ran_out(
     assert code == 2
     assert "yazılan satır: 2" in out, f"kredi bitince yazılan iş kayboldu: {out!r}"
     assert len(db.snapshots) == 2
+
+
+# ── F4: kredi bitince arızalı ligler isimsiz kalıyordu ──────────────────────
+# `_report` exit 2'yi `failed_leagues` dalından ÖNCE veriyordu: operatör hangi ligin
+# ayrıca düştüğünü hiç öğrenemiyordu — bulgunun adını koyduğu zararın ta kendisi.
+
+LEAGUES_YAML_THREE = """
+leagues:
+  - id: bad.1
+    odds_api_key: soccer_bad
+    name: Bad
+    country: Y
+    lang: en
+    gl: GB
+    active: true
+  - id: good.1
+    odds_api_key: soccer_good
+    name: Good
+    country: X
+    lang: en
+    gl: GB
+    active: true
+  - id: good.2
+    odds_api_key: soccer_good_two
+    name: Good Two
+    country: Z
+    lang: en
+    gl: GB
+    active: true
+"""
+
+
+def test_report_names_the_failed_leagues_even_when_credit_ran_out(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """F4: iki arıza aynı turda olabilir; ikisi de RAPORLANIR, sonra exit 2."""
+    result = collect.CollectResult(
+        written=2,
+        quota=Quota(remaining=3, used=497, last_cost=1),
+        failed_leagues=("bad.1",),
+        quota_exhausted=True,
+    )
+
+    code = collect._report(result)
+
+    out = capsys.readouterr().out
+    assert "başarısız ligler: bad.1" in out, f"kredi bitince arızalı lig isimsiz kaldı: {out!r}"
+    assert "kredi tükendi" in out
+    assert code == 2, "kredi bitişi en ağır arızadır, çıkış kodu 2 kalmalı"
+
+
+def test_main_names_both_the_failed_league_and_the_exhausted_credit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F4 uçtan uca: bad.1 düşer, good.1 krediyi tüketir, good.2 hiç denenmez."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "soccer_bad" in str(request.url):
+            return httpx.Response(500, json={"message": "boom"})
+        payload = [event("evt1", "2026-09-20T14:00:00Z")]
+        return httpx.Response(200, json=payload, headers=quota_headers(3))
+
+    db = FakeLedgerDb()
+    _patch_main(monkeypatch, tmp_path, db, handler)
+    (tmp_path / "leagues.yaml").write_text(LEAGUES_YAML_THREE, encoding="utf-8")
+
+    code = collect.main(["snapshot"])
+
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "kredi tükendi" in out
+    assert "başarısız ligler: bad.1" in out, f"arızalı lig kredi bitişinin altında kaldı: {out!r}"
+
+
+def _seal_handler(now: datetime) -> Handler:
+    """Mühür penceresinin İÇİNDE bir maç döndürür — kapanış satırı gerçekten yazılsın."""
+    kickoff = (now + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[event("evt1", kickoff)], headers=quota_headers(400))
+
+    return handler
+
+
+def _db_due_for_seal(now: datetime) -> FakeLedgerDb:
+    return FakeLedgerDb(
+        leagues={"good.1": ("good.1",)},
+        matches={
+            "evt1": {
+                "league_id": "good.1",
+                "commence_time": now + timedelta(minutes=10),
+                "sealed_at": None,
+            }
+        },
+    )
+
+
+def test_main_still_seals_when_the_league_mirror_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F3: `upsert_leagues` try dışındaydı; arızası TÜM mühür turunu atlatıyordu.
+
+    Kaçan mühür kalıcı veri kaybıdır — lig aynasının tazelenememesi buna mal olamaz.
+    """
+
+    def exploding_upsert(conn: object, leagues: object) -> int:
+        raise RuntimeError("leagues.odds_api_key UNIQUE ihlali")
+
+    now = datetime.now(UTC)
+    db = _db_due_for_seal(now)
+    _patch_main(monkeypatch, tmp_path, db, _seal_handler(now))
+    monkeypatch.setattr(collect, "upsert_leagues", exploding_upsert)
+
+    code = collect.main(["seal"])
+
+    out = capsys.readouterr().out
+    assert db.snapshots, f"lig aynası patladı diye mühür turu hiç koşmadı: {out!r}"
+    assert db.matches["evt1"]["sealed_at"] is not None, "maç mühürlenmeliydi"
+    assert "lig aynası tazelenemedi" in out, f"sessiz geçildi: {out!r}"
+    assert code == 4, f"arıza raporlandı ama çıkış kodu sessiz kaldı: {code}"
 
 
 def test_main_reports_a_missed_seal(

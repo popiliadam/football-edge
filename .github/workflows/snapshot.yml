@@ -48,6 +48,7 @@ jobs:
             0) echo "tur tamam" ;;
             2) echo "::error::kredi tükendi (exit 2) — aylık bütçe bitti, tur erken kapandı" ;;
             3) echo "::error::en az bir lig toplanamadı (exit 3) — diğer ligler yazıldı" ;;
+            4) echo "::error::lig aynası tazelenemedi (exit 4) — tur mevcut tabloyla koştu" ;;
             *) echo "::error::snapshot beklenmedik kodla düştü (exit $code)" ;;
           esac
           # Hiçbir kod yutulmaz: 2 de 3 de işi kırmızıya düşürür, yalnız adıyla.
