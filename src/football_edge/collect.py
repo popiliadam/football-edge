@@ -28,6 +28,7 @@ from football_edge.db import (
     upsert_leagues,
     upsert_matches,
 )
+from football_edge.jev import TypeSafeJev
 from football_edge.leagues import League, active_leagues, load_leagues
 from football_edge.ledger import (
     ChainResult,
@@ -36,6 +37,7 @@ from football_edge.ledger import (
     row_hash,
     verify_chain,
 )
+from football_edge.mapping import MappingReport, canonical_team_names, resolve_source_aliases
 from football_edge.odds_api import PriceRow, Quota, QuotaExhausted, fetch_odds, guard_quota
 from football_edge.sources import audit_offline, load_sources
 
@@ -603,6 +605,48 @@ def _exit_code(result: CollectResult) -> int:
 # taşındı — collect.py'yi 774/800'de bölme sınırına getiren tam olarak buydu (#M41).
 # `main()` onları GECİKMELİ (yerel) import ile çağırır — bkz. fetch.py'nin üst yorumu.
 
+# Task 11 — footystats bugün `entity_kind="team"` yayınlayan TEK kaynak (TFF şimdilik
+# yalnız `fixture_official` gözlemliyor, bkz. collectors/tff.py). `--source` yine de
+# parametredir: adı `map-entities` kalır, ikinci bir kaynak takım gözlemi yaymaya
+# başlarsa komut DEĞİŞMEZ.
+DEFAULT_MAPPING_SOURCE = "footystats"
+
+
+def _map_entities_command(
+    conn: psycopg.Connection[Any], source_id: str, league_id: str, now: datetime
+) -> int:
+    """Bir kaynağın bir ligdeki takım takma adlarını kanonik (The Odds API) ada eşler.
+
+    Gerçek iş `mapping.resolve_source_aliases`de (KOD aday çıkarır, JEV seçer — spec
+    §5.3): eşik altı/'hiçbiri' eşleşme YAZILMAZ ama HER İKİSİ de burada adıyla
+    raporlanır — atlanan bir eşleşme, farklı kılıktaki sessiz join hatasıdır. Bu
+    fonksiyon yalnız CLI camı: kanonik listeyi sorar, Jev istemcisini kurar, raporlar.
+
+    Lig PARAMETREDİR, taranmaz: aynı ad farklı ligde farklı kulüp olabilir
+    (`mapping.resolve` docstring'i) — komut bunu OPERATÖRDEN ister, tahmin etmez.
+    """
+    canonical = canonical_team_names(conn, league_id)
+    if not canonical:
+        sys.stdout.write(f"map-entities: {league_id} için matches tablosunda takım yok\n")
+        return 0
+    client = TypeSafeJev()
+    report: MappingReport | None = resolve_source_aliases(
+        conn, client, source_id, league_id, canonical, now
+    )
+    if report is None:
+        sys.stdout.write(f"map-entities: {source_id}/{league_id} için gözlem yok\n")
+        return 0
+    unresolved = tuple(entry for entry in report.resolutions if entry.canonical_id is None)
+    sys.stdout.write(
+        f"map-entities: {report.written} eşleşme yazıldı, {len(unresolved)} çözülmedi\n"
+    )
+    for entry in unresolved:
+        # Atlanan eşleşme raporlanmazsa Task 11'in önlemek için var olduğu tam o
+        # sessiz arızadır — bir eşleşmeyi atlamak yanlış eşlemekten iyidir, AMA
+        # yalnız GÖRÜNÜRSE.
+        sys.stdout.write(f"  çözülmedi: {entry.alias!r} — {entry.reason}\n")
+    return 0
+
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -620,12 +664,23 @@ def main(argv: list[str] | None = None) -> int:
             "fetch-venues",
             "fetch-news",
             "fetch-results",
+            "map-entities",
         ),
     )
     parser.add_argument(
         "--full",
         action="store_true",
         help="verify-chain: defteri GENESIS'ten yeniden hash'le ve HER çıpayı sor",
+    )
+    parser.add_argument(
+        "--source",
+        default=DEFAULT_MAPPING_SOURCE,
+        help="map-entities: eşlenecek kaynağın source_id'si (varsayılan: footystats)",
+    )
+    parser.add_argument(
+        "--league",
+        default=None,
+        help="map-entities: lig id'si (config/leagues.yaml) — ZORUNLU, tahmin edilmez",
     )
     args = parser.parse_args(argv)
 
@@ -635,12 +690,18 @@ def main(argv: list[str] | None = None) -> int:
     # `verify.sh`nin ağsız/secret'sız koşma sözleşmesiyle tutarlı.
     if args.command == "sources-audit":
         return _sources_audit_command(today=now.date())
+    if args.command == "map-entities" and not args.league:
+        parser.error(
+            "map-entities için --league zorunlu (aynı ad farklı ligde farklı kulüp olabilir)"
+        )
 
     with connect() as conn:
         if args.command == "verify-chain":
             return _verify_chain_command(conn, full=args.full)
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
+        if args.command == "map-entities":
+            return _map_entities_command(conn, args.source, args.league, now)
         if args.command in (
             "fetch-footystats",
             "fetch-tff",
