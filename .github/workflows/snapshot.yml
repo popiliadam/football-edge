@@ -1,0 +1,54 @@
+name: snapshot
+
+on:
+  schedule:
+    # Günde bir tur, 06:17 UTC — maç öncesi periyodik tarama.
+    #
+    # KREDİ ARİTMETİĞİ (ücretsiz katman: 500 kredi/ay, maliyet = markets × regions):
+    #   config/leagues.yaml → 6 aktif lig × 1 kredi = 6 kredi/tur
+    #   1 tur/gün × 31 gün                          = 186 kredi/ay
+    #   mühür turlarına + elle dispatch'e kalan pay ≈ 314 kredi/ay
+    # Brief'teki "0 3,9,15,21" dört tur/gün demekti: 24 kredi/gün = 744 kredi/ay,
+    # yani mühür turu hiç sayılmadan bütçenin bir buçuk katı. Sıklık artırılacaksa
+    # önce bu aritmetik yeniden yapılır — kredi sessizce tükenir, uyarı vermez.
+    #
+    # Dakika 0 değil: saat başı GitHub'ın en yoğun dilimidir, o dakikaya kurulan
+    # zamanlanmış koşular gecikir ya da tamamen düşer.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # seal.yml ile AYNI grup: iki tur defteri aynı anda yazamaz.
+  group: odds-collect
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Oranları çek
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.collect snapshot
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "tur tamam" ;;
+            2) echo "::error::kredi tükendi (exit 2) — aylık bütçe bitti, tur erken kapandı" ;;
+            3) echo "::error::en az bir lig toplanamadı (exit 3) — diğer ligler yazıldı" ;;
+            *) echo "::error::snapshot beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          # Hiçbir kod yutulmaz: 2 de 3 de işi kırmızıya düşürür, yalnız adıyla.
+          exit "$code"
