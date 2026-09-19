@@ -2608,18 +2608,35 @@ Her ajan **yalnız kendi tablosundaki dosyalara yazar**; `config/*`, `collector.
 
 ### Task 6: TFF toplayıcı — hakem ataması ve PFDK (windows-1254)
 
-**Ölçülen ve spec'i düzelten (2026-09-19):** spec §3.1 hakem atamasını `pageID=600`'e koyuyordu.
-`pageID=600` aslında **"Tüm Liglerin Fikstürleri"** — ASP.NET WebForms, RadComboBox lig seçicili,
-hakem verisi **sayfada yok**; içinde yalnız `pageID=433`'e bir bağlantı var.
-**`pageID=433` = "Haftanın Hakem, Gözlemci ve Temsilcileri"**, 89 KB, `charset=windows-1254`,
-9 tablo, `__VIEWSTATE` mevcut. Doğru sayfa budur.
+> **GERİ ALINDI (2026-09-19, Task 6 uygulaması + inceleme).** Bu bölüm aşağıda bir zamanlar
+> spec'i "düzeltiyordu": hakem atamasını `pageID=600`'den `pageID=433`'e taşıyordu. **O düzeltme
+> YANLIŞTI ve spec BAŞTAN BERİ DOĞRUYDU.** Ölçüm iki kez, birbirinden bağımsız biçimde yeniden
+> üretildi: `pageID=433`'ün varsayılan GET'i **BOŞ** — gönderilmemiş, üç katmanlı bir arama formu
+> döner ve engellenmiş bir POST olmadan asla hakem satırı vermez. `pageID=600` ise veriyi
+> taşıyor: **7 lig bloğu / 63 maç satırı, `<table>` değil `<div>` bloklarında** (420 KB'lık
+> sayfada yalnız 3 `<table>` var — `find_all("table")` hiçbir şey bulmuyor).
+>
+> **Yanlış sonucun sebebi yöntemdeydi, veride değil:** `pageID=600`'de "Hakem" 181 kez geçiyordu;
+> bir bağlam regex'i (`.{130}Hakem.{170}`) yalnız 1 eşleşme verdi, çünkü `finditer` ÖRTÜŞEN
+> eşleşmeleri yutar — 300 karakterlik pencere içindeki ardışık geçişler tek eşleşmeye düştü.
+> Üstüne veri `<table>` sanılarak arandı. **Ders:** doğrulanmamış bir ölçüm yönteminden çıkan
+> sonucu kural hâline getirmek, hiç ölçmemekten daha tehlikelidir — sonuç "ölçüldü" etiketiyle
+> dolaşır ve doğru olan kaydı devirir.
+>
+> Kodda geçerli olan `src/football_edge/collectors/tff.py` → `REFEREE_PATH =
+> "/Default.aspx?pageID=600"` ve `config/sources.yaml` → `tff.declared_paths`. Aşağıdaki
+> Step 1/Step 4 blokları TARİHSEL plan metnidir; `433` geçen her satır **yanlıştır**, düzeltilmiş
+> hâli için koda ve `docs/phases/01-toplayicilar/HANDOFF.md` §4'e bakın.
 
 **İki sınır, baştan yazılı:**
 1. `__VIEWSTATE` + RadComboBox ⇒ **yalnız varsayılan (bu hafta) görünüm GET ile adreslenebilir.**
    Başka hafta/lig postback ister; postback POST'tur ve `outward_action_gate` onu `net_post`
    olarak engeller. Toplayıcı haftalık koşar ve bu haftayı alır — ihtiyaç duyduğu tam budur.
-2. Sayfada **`VAR` dizesi hiç geçmiyor** (ölçüldü). Spec "Hakem/VAR ataması" diyordu; VAR
-   ataması bu yüzeyde yayınlanmıyor olabilir. Task 13'te DEFERRED'a yazılır.
+2. ~~Sayfada **`VAR` dizesi hiç geçmiyor** (ölçüldü).~~ **BU DA YANLIŞTI.** VAR/AVAR atamaları
+   sayfada VAR — ama düz "VAR" kelimesiyle değil, **rol işaretiyle: `(V)` ve `(A)`** (ölçüldü:
+   tek turda V=11, A=11). "VAR dizesini ara" ölçümü bu yüzden yanıltıcıydı. Toplanmıyor —
+   sözleşme tek bir `referee` alanı istiyor — ama **var olmadığı için değil, kapsam dışı
+   bırakıldığı için.** DEFERRED §9.7.
 
 **Files:**
 - Create: `src/football_edge/collectors/tff.py`, `tests/test_tff.py`, `tests/fixtures/tff/`
@@ -2638,17 +2655,22 @@ hakem verisi **sayfada yok**; içinde yalnız `pageID=433`'e bir bağlantı var.
 
 - [ ] **Step 1: Capture the fixture with the correct encoding**
 
+> **DÜZELTİLDİ:** aşağıdaki blok bir zamanlar `pageID=433` çekiyordu; o sayfa boş form döner.
+> Gerçekte çekilen ve teslim edilen fixture `haftanin-maclari-600.html`'dir. `hakem-433.html`
+> de repoda durur ama **negatif bulgu olarak sabitlenmiştir** (R37): ayrıştırıcının o sayfaya
+> karşı satır UYDURMADIĞINI, `ContractViolation` fırlattığını kanıtlayan bir test taşır.
+
 ```bash
 mkdir -p tests/fixtures/tff
 curl -sS -m 30 -A 'football-edge/0.1' \
-  'https://www.tff.org/Default.aspx?pageID=433' -o /tmp/tff433.html
+  'https://www.tff.org/Default.aspx?pageID=600' -o /tmp/tff600.html
 uv run python - <<'PY'
 from pathlib import Path
-raw = Path("/tmp/tff433.html").read_bytes()
+raw = Path("/tmp/tff600.html").read_bytes()
 text = raw.decode("windows-1254")          # charset YALNIZ HTTP başlığında; meta yok
 assert "Hakem" in text, "sayfa şekli değişti — ayrıştırıcıyı yazmadan bak"
 # Fixture UTF-8 saklanır: repo tek kodlama taşır, kod yolu ise windows-1254'ü fetch'te çözer.
-Path("tests/fixtures/tff/hakem-433.html").write_text(text, encoding="utf-8")
+Path("tests/fixtures/tff/haftanin-maclari-600.html").write_text(text, encoding="utf-8")
 print("bayt:", len(text), "| 'Hakem':", text.count("Hakem"))
 PY
 ```
@@ -2753,10 +2775,12 @@ from football_edge.sources import load_sources, robots_for
 
 LOGGER = logging.getLogger("football_edge.collectors.tff")
 SOURCE_ID = "tff"
-REFEREE_PATH = "/Default.aspx?pageID=433"
+REFEREE_PATH = "/Default.aspx?pageID=600"   # DÜZELTİLDİ: plan bir ara 433 diyordu, yanlıştı
 
 # Step 2'de ÖLÇÜLEN tablo işareti. Boş bırakılırsa tüm tablolar taranır; ölçüldüyse
 # doldurulur ve ayrıştırıcı yanlış tabloyu okumaz.
+# NOT (uygulamada geçersiz kaldı): sayfada veri `<table>` DEĞİL `<div>` bloklarında —
+# 420 KB içinde yalnız 3 `<table>` var. Teslim edilen ayrıştırıcı div gezinir.
 _REFEREE_TABLE_HINT = ""
 
 # TFF gövdesi windows-1254. Kodlama fetch tarafında AÇIKÇA verilir; httpx'in tahminine
@@ -2858,14 +2882,16 @@ with connect() as conn, httpx.Client() as client:
 git add src/football_edge/collectors/tff.py tests/test_tff.py tests/fixtures/tff
 git commit -m "feat: TFF hakem ataması toplayıcı (windows-1254)
 
-Spec pageID=600 diyordu; ölçüldü: 600 'Tüm Liglerin Fikstürleri' ve hakem verisi
-orada YOK. Doğru sayfa pageID=433 ('Haftanın Hakem, Gözlemci ve Temsilcileri').
+Spec pageID=600 diyordu ve DOĞRUYDU. Planın 'düzeltmesi' (433) yanlıştı: 433'ün
+varsayılan GET'i gönderilmemiş bir arama formu döndürüyor. 600 veriyi taşıyor —
+7 lig bloğu / 63 maç satırı, <table> değil <div> içinde.
 
 charset yalnız HTTP başlığında; kodlama fetch'te açıkça veriliyor. Tahmine
 bırakılırsa Türkçe adlar bozulur ve varlık eşleme hiçbir şey bulamaz.
 
 Bilinen sınır: __VIEWSTATE postback'i gerektiği için yalnız BU HAFTA GET ile
-alınabiliyor; VAR ataması sayfada hiç geçmiyor.
+alınabiliyor. VAR/AVAR atamaları sayfada VAR — (V)/(A) rol işaretiyle — ama
+sözleşme tek `referee` alanı istediği için toplanmıyor.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
@@ -4695,7 +4721,7 @@ Daha geniş bir tur için `/loop-kit:judge-selftest` (temiz çalışma ağacı i
 | F1-3 | **Google News lisans çatışması** | Feed'in copyright'ı ticari kullanımı yasaklıyor. MIT CSV ile aynı muamele: ticari lansman öncesi avukat. |
 | F1-4 | **Understat kapalı** | robots.txt `Disallow: /`. xG kapsamını FootyStats devraldı; **6 ligin xG'si artık tek kaynağa bağlı** — o kaynak düşerse yedek yok. |
 | F1-5 | **`source_observations` hash zincirsiz** | Bilinçli: zincir oran defteri içindir. Özellik girdisi kurcalanırsa dış çıpa bunu göstermez. |
-| F1-6 | **TFF yalnız BU HAFTA** | `__VIEWSTATE` postback'i gerekli; geçmiş hafta/lig alınamıyor. VAR ataması sayfada hiç geçmiyor. |
+| F1-6 | **TFF yalnız BU HAFTA** | `__VIEWSTATE` postback'i gerekli; geçmiş hafta/lig alınamıyor. ~~VAR ataması sayfada hiç geçmiyor.~~ **DÜZELTİLDİ:** VAR/AVAR sayfada VAR, `(V)`/`(A)` rol işaretiyle — toplanmıyor, çünkü sözleşme tek `referee` alanı istiyor. |
 | F1-7 | **Ajansspor yapısal sayfaları kapalı** | `/lineup/`, `/mac/`, `/oyuncu/`, `/lig/` Disallow — **muhtemel 11 ve sakat/cezalı listesi alınamıyor.** Spec §3.1 bunları bekliyordu. |
 | F1-8 | **Dil kalibrasyonu: yalnız ölçülen dil(ler)** | Ölçülmeyen her dil `production_enabled: false` kalır. Kapı bunu zorlar. |
 
