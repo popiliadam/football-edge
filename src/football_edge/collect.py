@@ -21,6 +21,7 @@ from football_edge.anchors import (
     expected_anchor_names,
     missing_anchors,
 )
+from football_edge.calibration import language_config_violations, run_calibration
 from football_edge.db import (
     chain_head,
     connect,
@@ -45,6 +46,8 @@ LOGGER = logging.getLogger("football_edge.collect")
 LEAGUES_PATH = Path("config/leagues.yaml")
 SOURCES_PATH = Path("config/sources.yaml")
 ROBOTS_DIR = Path("config/robots")
+LANGUAGES_PATH = Path("config/languages.yaml")
+CALIBRATION_DIR = Path("data/calibration")
 
 # db/migrations/0001_init.sql → check (price > 1.0). Şema kısıtının kod tarafındaki karşılığı.
 MIN_PRICE = 1.0
@@ -90,6 +93,10 @@ EXIT_SOURCE_POLICY = 6
 # `team_name` bulgusu) AYNI İSTİSNA, AYNI GEREKÇE — bir kaynağın veri sözleşmesi ihlali,
 # "lig" kavramına bağlı değil. `seal.yml`/`snapshot.yml` `map-entities`i de hiç çağırmaz.
 EXIT_SOURCE_FAILED = 7
+# Task 12 (spec §5.4): ölçülmemiş dil üretime alınamaz. AYNI İSTİSNA/GEREKÇE (yukarıdaki iki
+# yorum) — check-languages/calibrate `seal.yml`/`snapshot.yml`ce hiç çağrılmaz. 7 DEĞİL 8:
+# `EXIT_SOURCE_FAILED=7` bu brief YAZILDIKTAN SONRA, Task 11'de eklendi.
+EXIT_LANGUAGE_UNCALIBRATED = 8
 
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
@@ -660,6 +667,32 @@ def _map_entities_command(
     return 0
 
 
+def _check_languages_command(*, languages_path: Path = LANGUAGES_PATH) -> int:
+    """Rapor OLMADAN production_enabled olan dil var mı? Ağa/parayla dokunmaz (Ruling R4)."""
+    violations = language_config_violations(languages_path)
+    for text in violations:
+        sys.stdout.write(f"DİL KALİBRASYON İHLALİ: {text}\n")
+    if violations:
+        return EXIT_LANGUAGE_UNCALIBRATED
+    sys.stdout.write("dil kalibrasyonu: TEMİZ\n")
+    return 0
+
+
+def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR) -> int:
+    """Jev'i ELLE etiketlenmiş kümede koşturur; AĞA ÇIKAR, PARA HARCAR, kapı ÇAĞIRMAZ (R4).
+
+    Etiket yoksa Jev hiç KURULMAZ; anahtarsız `TypeSafeJev()` çıplak patlar (map-entities gibi).
+    """
+    labels_path = calibration_dir / f"{language}.jsonl"
+    if not labels_path.is_file():
+        sys.stdout.write(f"calibrate: {labels_path} yok — önce elle etiketlenmeli\n")
+        return EXIT_LANGUAGE_UNCALIBRATED
+    path, reason = run_calibration(language, calibration_dir, TypeSafeJev())
+    sys.stdout.write(f"calibrate: {reason}\n")
+    sys.stdout.write(f"rapor yazıldı: {path}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="football-edge")
@@ -677,6 +710,8 @@ def main(argv: list[str] | None = None) -> int:
             "fetch-news",
             "fetch-results",
             "map-entities",
+            "calibrate",
+            "check-languages",
         ),
     )
     parser.add_argument(
@@ -694,14 +729,21 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="map-entities: lig id'si (config/leagues.yaml) — ZORUNLU, tahmin edilmez",
     )
+    parser.add_argument("--language", default=None, help="calibrate: ISO dil kodu (örn. tr)")
     args = parser.parse_args(argv)
 
     now = datetime.now(UTC)
 
-    # `connect()` AÇILMADAN ÖNCE: veritabanına DOKUNMAZ — DATABASE_URL yokken de kırılmaz,
-    # `verify.sh`nin ağsız/secret'sız koşma sözleşmesiyle tutarlı.
+    # `connect()` AÇILMADAN ÖNCE: veritabanına DOKUNMAZ — DATABASE_URL yokken de kırılmaz.
+    # `check-languages`/`calibrate` de BURADA dallanır (Ruling R4), aynı gerekçeyle.
     if args.command == "sources-audit":
         return _sources_audit_command(today=now.date())
+    if args.command == "check-languages":
+        return _check_languages_command()
+    if args.command == "calibrate":
+        if not args.language:
+            parser.error("calibrate için --language zorunlu")
+        return _calibrate_command(args.language)
     if args.command == "map-entities" and not args.league:
         parser.error(
             "map-entities için --league zorunlu (aynı ad farklı ligde farklı kulüp olabilir)"

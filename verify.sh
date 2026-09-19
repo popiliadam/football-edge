@@ -101,6 +101,13 @@ step "veri-sözleşmesi" bash -c '
   exit "$code"
 '
 
+# Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
+# harcamaz: yalnız `config/languages.yaml`'daki `production_enabled` bayraklarının bir
+# kalibrasyon raporuyla desteklendiğini sorar (`calibration.language_config_violations`).
+# Rapor yoksa ya da `production_ready()`yi geçmiyorsa bayrak açık olamaz. `calibrate`
+# (gerçek Jev çağrısı, PARA HARCAR) kapının parçası DEĞİLDİR — Ruling R4, task-12-brief.
+step "dil-kalibrasyonu" uv run python -m football_edge.collect check-languages
+
 step "secrets"     ./scripts/check_secrets.sh
 
 if [ -n "${DATABASE_URL:-}" ]; then
