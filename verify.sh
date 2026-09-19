@@ -46,11 +46,29 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # FAIL DEĞİL, boş seçimdir. Ayrım burada AÇIKÇA yapılır — aksi hâlde exit 5 kapıyı yanlış
 # sebepten kırmızı yapar ve gerçek bir arıza gibi okunur (bkz. qa-loop "SKIP geçmek
 # değildir" ilkesi — burada tersi: BOŞ SEÇİM de arıza değildir, ama sessiz geçilmez).
+#
+# BU İZİN SÜRESİZ DEĞİL (review #7). "Bugün 0" iddiası SABİT KALIRSA, ileride marker
+# yeniden adlandırılır / typo yapılır / bir collection hatası her şeyi deselect ederse
+# yine exit 5 döner ve "boş seçim, hataya sayılmaz" YANLIŞ olur — kapı bakmayı bırakmış
+# olur (`~/.claude/rules/qa-loop.md` Vaka 1: bir ay boyunca kapı yeşildi çünkü bakmıyordu).
+# EXPECTED_MIN_CONTRACT bu iddianın kaydıdır: exit 5, "gerçekte toplanan test sayısı
+# BUNUN ALTINDAYSA" değil, "exit 5 = toplanan 0" pytest'in kendi tanımıdır (resmî exit
+# kodu belgesi) — yani 0 < EXPECTED_MIN_CONTRACT ancak biri bu sayıyı >0'a yükseltip
+# (Task 5+ contract test eklerken KENDİ commit'inde yapar) sonra bir regresyon toplananı
+# yeniden 0'a düşürürse doğru olur. O ana kadar (bugün) EXPECTED_MIN_CONTRACT=0 olduğu
+# için bu kontrol bir NO-OP'tur — ama artık İLERİYE dönük, sessizce eskimiyor.
 step "veri-sözleşmesi" bash -c '
+  EXPECTED_MIN_CONTRACT=0
+
   uv run pytest tests/ -q -m contract
   code=$?
+
   if [ "$code" -eq 5 ]; then
-    echo "NOT: contract etiketiyle eşleşen test yok (boş seçim) — henüz hiçbir toplayıcı yok, hataya sayılmaz"
+    if [ "0" -lt "$EXPECTED_MIN_CONTRACT" ]; then
+      echo "HATA: contract etiketli test sayısı (0) beklenen alt sınırın ($EXPECTED_MIN_CONTRACT) altında — boş seçim ARTIK GEÇERLİ DEĞİL, bir toplayıcı testi sessizce deselect ediliyor olabilir"
+      exit 1
+    fi
+    echo "NOT: contract etiketiyle eşleşen test yok (boş seçim, beklenen alt sınır=$EXPECTED_MIN_CONTRACT karşılandı) — henüz hiçbir toplayıcı yok, hataya sayılmaz"
     exit 0
   fi
   exit "$code"

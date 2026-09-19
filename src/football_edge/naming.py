@@ -28,6 +28,19 @@ def normalise_team(name: str) -> str:
     yapılmazsa aynı takım iki kaynakta FARKLI anahtar üretir ve join sessizce boş kalır —
     bu projenin 1 numaralı ölüm sebebi (spec §5.3).
 
+    SONDA `ı` → `i` KATLANIR (review #1, ölçüldü): yukarıdaki İ/I değişimi kaynaklar
+    ARASI TUTARLI görünse de kaynaklar KENDİ İÇİNDE tutarsızdır — TFF (windows-1254)
+    doğru Türkçe `İstanbulspor` (noktalı büyük İ) yayınlarken FootyStats ASCII
+    `Istanbulspor` (noktasız büyük I) yayınlıyor. Yalnız İ→i/I→ı ile bu ikisi FARKLI
+    anahtar üretirdi (`istanbulspor` / `ıstanbulspor`) — tam bu fonksiyonun önlemesi
+    gereken sınıf arıza, bir adım öteye taşınmış. `ı`/`i` ayrımının kulüp adları
+    arasında hiçbir ayırt edici gücü yok; bu yüzden pipeline'ın SONUNDA (ek/noktalama
+    temizliğinden SONRA) `ı` `i`ye katlanır ve iki yazım da AYNI anahtarda buluşur.
+    Ara adımdaki İ→i değişimi ayrıca gerekli: Python'ın varsayılan `"İ".lower()`'ı tek
+    bir `i` DEĞİL, `i` + BİRLEŞTİRİCİ NOKTA (U+0307, 2 kod noktası) üretir ve bu NFC'de
+    de tek koda inmez — İ önce açıkça `i`ye çevrilmezse aynı sorun başka bir yoldan geri
+    gelir (ölçüldü: `"İ".lower() == "i"` → `False`).
+
     Task 6 (TFF) ve Task 11 (varlık eşleme) bu TEK fonksiyonu paylaşır. İki kopya tutulursa
     biri diğerinden sessizce ayrışır ve eşleşme anahtarı iki farklı şey olur.
     """
@@ -35,4 +48,5 @@ def normalise_team(name: str) -> str:
     folded = unicodedata.normalize("NFC", folded)
     folded = _SUFFIXES.sub(" ", folded)
     folded = _NON_WORD.sub(" ", folded)
+    folded = folded.replace("ı", "i")
     return " ".join(folded.split())
