@@ -43,6 +43,19 @@ kaldırır.
 **Gereken:** beklenen çıpa kümesinin dışarıda tutulması (ör. git geçmişinden türetilen
 bir sayım) ve eksilme hâlinde adıyla kırmızı.
 
+**Faz 1 / Task 2 notu — yukarıdaki "Gereken" karşılandı, ama 15 dakikalık turda DEĞİL:**
+`expected_anchor_names`/`missing_anchors` artık var, ama `seal.yml` `actions/checkout@v4`i
+`fetch-depth` vermeden koşuyor (varsayılan: **SIĞ**, `fetch-depth: 1`). Bu yüzden sığ-klon
+koruması her seferinde devreye girip `None` döner ve `_verify_chain_command`
+"git geçmişi okunamadı — ÇIPA EKSİKLİĞİ KONTROLÜ ATLANDI" basar — **günde ~96 turun
+hiçbirinde** çıpa-eksikliği kontrolü gerçekten koşmaz. Silinen bir çıpa yalnız haftalık
+`full-scan.yml`de (o `fetch-depth: 0` çeker) yakalanır; tespit gecikmesi en fazla **7 gün**.
+
+Bu KASITLI bir maliyet ödünleşmesidir, gözden kaçmış değil: `seal.yml`in kendisi günde
+~96 çıpa commit'i üretiyor, 15 dakikada bir tam geçmiş çekmek bu sıklıkla bileşip gerçek
+ve büyüyen bir maliyete dönüşürdü. Geciken **ALARM**dır, **KANIT** değil — silinen
+çıpanın git geçmişindeki izi hâlâ durur, yalnız fark edilmesi haftaya kadar sürebilir.
+
 ### 1.4 `ON CONFLICT (row_hash) DO NOTHING` sahte bir zincir kopukluğu üretebilir
 
 Bir satır ON CONFLICT ile düşerse ondan sonraki satırlar düşen satırın hash'inden

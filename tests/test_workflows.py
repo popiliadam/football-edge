@@ -213,10 +213,48 @@ def test_full_scan_workflow_exists_and_is_scheduled() -> None:
     assert "schedule" in _triggers(FULL_SCAN), "full-scan.yml zamanlanmış koşmuyor"
 
 
+# ── I2: yalnız zarfı değil, YÜKÜ de sına ────────────────────────────────────
+# Önceki iki test dosyanın var olduğunu, zamanlanmış koştuğunu ve salt-okunur
+# olduğunu ölçüyordu — ama HİÇBİRİ `--full`ün ya da `fetch-depth: 0`ın gerçekten
+# orada olduğunu iddia etmiyordu. `--full` silinirse haftalık tarama sessizce
+# TAIL-ONLY'e döner (bu görevin kapattığı boşluk yeniden açılır); `fetch-depth: 0`
+# silinirse çıpa-eksikliği kontrolü HER haftalık koşuda kendini atlar — ikisi de
+# yeşil bir kapıyla olurdu.
+
+
+def test_full_scan_workflow_runs_full_verify_chain() -> None:
+    assert _index_of(_steps(FULL_SCAN), "verify-chain --full") is not None, (
+        "full-scan.yml --full'ü koşmuyor: haftalık tarama yalnız kuyruğu tarıyor olurdu"
+    )
+
+
+def test_full_scan_workflow_checks_out_full_history() -> None:
+    """`fetch-depth: 0` olmadan çıpa-eksikliği kontrolü kendini atlar (full-scan.yml'in
+    kendi yorumu bunu söylüyor: sığ klon geçmişi görmez)."""
+    steps = _steps(FULL_SCAN)
+    checkout = _index_of(steps, "actions/checkout", key="uses")
+
+    assert checkout is not None, "full-scan.yml checkout adımı yok"
+    assert steps[checkout].get("with", {}).get("fetch-depth") == 0, (
+        "full-scan.yml tam geçmiş çekmiyor: çıpa-eksikliği kontrolü ATLANDI basar"
+    )
+
+
 def test_full_scan_workflow_is_read_only() -> None:
-    """Deftere YAZMAZ, yalnız okur — `seal.yml`nin `contents: write` yetkisine gerek yok."""
+    """Deftere YAZMAZ, yalnız okur — `seal.yml`nin `contents: write` yetkisine gerek yok.
+
+    Yalnız iş akışı-seviyesi izne bakmak YETMEZ (I3): `seal.yml`deki gibi bir JOB kendi
+    `permissions:` bloğuyla bunu genişletebilir ve üst düzey `contents: read` görünürken
+    o job yine de yazabilir. İsim "salt-okunur" der; assertion yalnız üst düzeyi ölçerse
+    bu genişletmeyi göremez ve isim ölçtüğünden fazlasını vaat eder.
+    """
     document = yaml.safe_load(FULL_SCAN.read_text(encoding="utf-8"))
 
     assert document.get("permissions", {}).get("contents") == "read", (
         "full-scan.yml salt-okunur olmalı"
     )
+    for name, job in document["jobs"].items():
+        widened = (job.get("permissions") or {}).get("contents")
+        assert widened in (None, "read"), (
+            f"full-scan.yml: '{name}' job'ı contents iznini '{widened}'e genişletiyor"
+        )

@@ -489,7 +489,11 @@ def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
 
 
 def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ...]) -> str | None:
-    """En eski ve en yeni çıpayı ayrı ayrı sorar; ilk uyuşmazlığı dosya adıyla döner."""
+    """Verilen çıpaları SIRAYLA sorar, ilk uyuşmazlığı dosya adıyla döner.
+
+    Hangi çıpaların sorulacağına KENDİSİ karar vermez — çağıran (`_verify_chain_command`)
+    belirler: varsayılan modda yalnız en eski+en yeni, `--full` altında HER çıpa.
+    """
     for anchor in anchors:
         if anchor.last_id <= 0:
             continue  # Boş defterin çıpası: kesilecek kuyruk yok.
@@ -647,11 +651,14 @@ def _verify_chain_command(
             )
             return 1
     if not anchors:
+        # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
         sys.stdout.write("çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI\n")
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
-    # --full: HER çıpa sorulur ve defter GENESIS'ten yeniden hash'lenir. Varsayılan mod
-    # yalnız (en eski, en yeni) çifti sorar ve yalnız kuyruğu tarar — aradaki satırlar hiç
-    # yeniden hash'lenmez (DEFERRED §1.1, §1.2).
+    # En eski çıpa da sorulur: yalnız en yeniye bakmak, `ledger/`deki dosyayı da değiştiren
+    # bir saldırganın yeniden yazdığı öneki göremez (F2). --full altında HER çıpa sorulur ve
+    # defter GENESIS'ten yeniden hash'lenir; varsayılan mod yalnız (en eski, en yeni) çiftini
+    # sorar ve yalnız kuyruğu tarar — aradaki satırlar hiç yeniden hash'lenmez (DEFERRED
+    # §1.1, §1.2).
     asked = anchors if (full or len(anchors) == 1) else (anchors[0], anchors[-1])
     breakage = _first_anchor_break(conn, asked)
     if breakage is not None:
@@ -662,6 +669,7 @@ def _verify_chain_command(
         sys.stdout.write(f"tam tarama: {len(asked)} çıpa soruldu, defter GENESIS'ten taranıyor\n")
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
     if newest.last_id <= 0:
+        # Boş defterin çıpası: kesilecek kuyruk yok, defter GENESIS'ten doğrulanır.
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
     return _report_chain(verify_chain(_ledger_rows(conn, newest.last_id), start_hash=newest.head))
 

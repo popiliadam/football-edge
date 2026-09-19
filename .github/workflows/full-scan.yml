@@ -9,11 +9,15 @@ on:
     - cron: "23 4 * * 0"   # Pazar 04:23 UTC — mühür turlarının en seyrek olduğu saat
   workflow_dispatch:
 
-concurrency:
-  # Deftere YAZMAZ ama okuması uzun sürer; mühür turuyla yarıştırmaya gerek yok.
-  group: odds-collect
-  cancel-in-progress: false
-
+# concurrency: BİLİNÇLİ OLARAK YOK — `seal.yml`in `odds-collect` grubuna girmez.
+# Bu iş SALT OKUNUR: hiçbir advisory lock almaz (yalnız `insert_snapshots` alır) ve
+# eşzamanlı okuyucularla yazarlar Postgres MVCC altında çakışmaz. Önceki hâl bu işi
+# `odds-collect` grubuna sokuyordu ("mühür turuyla yarıştırmaya gerek yok" diye) — ama
+# GitHub aynı gruptaki bekleyen bir koşuyu, yenisi geldiğinde İPTAL EDER: 30 dakikalık
+# bir tam tarama `seal.yml`in 15 dakikalık turlarından birini kuyruğa dizip iptal
+# ederdi. Mühür penceresi 20 dakika ve kaçan mühür KALICI kayıp (`EXIT_MISSED_SEAL`,
+# bkz. seal.yml) — Faz 0'ın var olma sebebi tam da bunu önlemekti. Pazar 04:23 UTC
+# olasılığı azaltır, ortadan kaldırmaz; defter büyüdükçe tarama süresi de büyür.
 permissions:
   contents: read
 
