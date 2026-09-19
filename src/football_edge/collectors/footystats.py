@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from bs4 import BeautifulSoup, Tag
 from football_edge.collector import ContractViolation, Observation, assert_schema, fetch_text
 from football_edge.leagues import League
 from football_edge.observations import write_observations
-from football_edge.sources import load_sources, robots_for
+from football_edge.sources import Source, enabled_sources, load_sources, robots_for
 
 LOGGER = logging.getLogger("football_edge.collectors.footystats")
 
@@ -100,17 +101,31 @@ def parse_xg_table(
     değil — bkz. `_data_rows` docstring'i: aksi hâlde takım hücresinin gömülü mobil
     düzeni sahte satır/hücre ekler ve konum tabanlı okuma komşu (hatta rastgele iç içe)
     bir hücreyi okur.
+
+    `xg_per_match`/`xga_per_match`: FootyStats bu tabloda MAÇ BAŞINA ortalama veriyor,
+    SEZON TOPLAMI değil (review #1, task-5-report.md) — ölçüldü: Galatasaray MP=5, GF=2.60;
+    5 maçta 2.6 gol OLAMAZ, bu maç başına ortalamadır, ve `xG vs Actual` sütunu tam olarak
+    `GF - xG` formülünü doğruluyor (2.60 - 2.50 = +0.10). Alan adı birimi TAŞIR: yalnız
+    "xg" deseydi, FootyStats sezon toplamına geçtiğinde (her değer MP katına sıçrar) alan
+    adı DEĞİŞMEDEN geçerdi ve bir birim sıçraması model tarafından sinyal sanılırdı.
+
+    Satır sayısı ile ayrıştırılan takım sayısı AYNI OLMALI: aksi hâlde bir satır (kısa
+    satır, eşleşmeyen href, vb.) SESSİZCE atlanmış demektir. `assert_schema(minimum_rows=
+    10)` bunu YAKALAMAZ — 20 takımlık bir ligin yarısı sessizce kaybolup yine de eşiği
+    geçebilir (review #5). Bu yüzden eksik kalan her durum burada RAISE eder, yalnız
+    loglamaz: sessiz eksiklik, hiç veri olmamasından kötüdür.
     """
     soup = BeautifulSoup(html_text, "html.parser")
     table = soup.find("table", class_="xg-all")
     if not isinstance(table, Tag):
         raise ContractViolation(f"{SOURCE_ID}: 'xg-all' tablosu bulunamadı — sayfa şekli değişti")
     index = _columns(table)
+    rows = _data_rows(table)
     parsed: tuple[Observation, ...] = ()
-    for row in _data_rows(table):
+    for row in rows:
         cells = row.find_all("td", recursive=False)
         if len(cells) <= max(index.values()):
-            continue  # ara başlık / reklam satırı
+            continue  # şekli uymuyor — aşağıdaki sayım eksikliği yakalar, sessiz geçmez
         team_cell = cells[index["Team"]]
         link = team_cell.find("a", href=_CLUB_HREF)
         if not isinstance(link, Tag):
@@ -131,12 +146,48 @@ def parse_xg_table(
                     "team_name": name,
                     "footystats_id": club_id,
                     "matches_played": int(_number(cells[index["MP"]], "MP", name)),
-                    "xg": _number(cells[index["xG"]], "xG", name),
-                    "xga": _number(cells[index["xGA"]], "xGA", name),
+                    "xg_per_match": _number(cells[index["xG"]], "xG", name),
+                    "xga_per_match": _number(cells[index["xGA"]], "xGA", name),
                 },
             ),
         )
+    if len(parsed) < len(rows):
+        raise ContractViolation(
+            f"{SOURCE_ID}: {league_id} — {len(rows)} satır bulundu, yalnız {len(parsed)} takım "
+            "ayrıştırıldı; en az bir satır sessizce atlandı"
+        )
     return parsed
+
+
+def _enabled_source(sources_path: Path) -> Source:
+    """`enabled: false` kapatma anahtarıdır — sessizce yok sayılmamalı (review #2).
+
+    Eskiden `load_sources(...)` TÜM kayıtları (kapalılar dâhil) tarıyordu:
+    `sources-audit`in kullandığı `enabled_sources()` footystats'ı doğru biçimde dışlarken,
+    toplayıcı aynı yolu göz ardı edip fetch etmeye DEVAM ediyordu — operatörün kapatma
+    anahtarı yalnız DENETİMİ kapatıyordu, TOPLAMAYI değil. Robots koruması yine de her
+    yolu ayrı ayrı sınadığı için bu bir izinsiz-erişim açığı DEĞİLDİ, ama beş paralel
+    worktree'nin kopyalayacağı satırdı.
+
+    Kayıt yoksa/kapalıysa çıplak `next()`in adsız `StopIteration`i yerine ADLANDIRILMIŞ
+    bir `RuntimeError` fırlatılır.
+    """
+    for entry in enabled_sources(load_sources(sources_path)):
+        if entry.id == SOURCE_ID:
+            return entry
+    raise RuntimeError(
+        f"{SOURCE_ID}: kaynak kaydı yok ya da enabled=false ({sources_path}) — toplama durduruldu"
+    )
+
+
+@dataclass(frozen=True)
+class FootyStatsResult:
+    written: int
+    # Başarısız lig id'leri — boş demet "hepsi tamam" demektir. `collect.py`nin çağıranı
+    # bunu adıyla raporlayıp `EXIT_LEAGUE_FAILED` ile çıkmalı (review #3): eskiden bu bilgi
+    # atılıyordu ve ALTI LİGİN HEPSİ kırılsa bile "footystats: 0 yeni gözlem" ikinci turun
+    # idempotent 0'ıyla AYIRT EDİLEMEZ biçimde exit 0 veriyordu.
+    failed_leagues: tuple[str, ...] = ()
 
 
 def collect_footystats(
@@ -147,15 +198,17 @@ def collect_footystats(
     sources_path: Path,
     robots_dir: Path,
     now: datetime,
-) -> int:
-    """Etkin liglerin xG tablolarını toplar; YAZILAN yeni gözlem sayısını döner.
+) -> FootyStatsResult:
+    """Etkin liglerin xG tablolarını toplar.
 
     Lig başına arıza izolasyonu Faz 0'daki `_collect` ile aynı gerekçeyle: tek ligin
-    kırılması diğerlerini düşürmemeli.
+    kırılması diğerlerini düşürmemeli. Ama izolasyon SESSİZ olamaz (review #3) — bkz.
+    `FootyStatsResult.failed_leagues` docstring'i.
     """
-    source = next(entry for entry in load_sources(sources_path) if entry.id == SOURCE_ID)
+    source = _enabled_source(sources_path)
     parser = robots_for(source, robots_dir)
     written = 0
+    failed: tuple[str, ...] = ()
     for league in leagues:
         try:
             body = fetch_text(client, source, league.footystats_path, parser, expect="text/html")
@@ -163,7 +216,7 @@ def collect_footystats(
             assert_schema(
                 parsed,
                 source_id=SOURCE_ID,
-                required=frozenset({"team_name", "footystats_id", "xg", "xga"}),
+                required=frozenset({"team_name", "footystats_id", "xg_per_match", "xga_per_match"}),
                 minimum_rows=10,
             )
             written += write_observations(conn, parsed)
@@ -171,4 +224,5 @@ def collect_footystats(
         except Exception:
             conn.rollback()
             LOGGER.exception("lig=%s footystats toplanamadı, diğerlerine devam", league.id)
-    return written
+            failed = (*failed, league.id)
+    return FootyStatsResult(written=written, failed_leagues=failed)

@@ -618,8 +618,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
         if args.command == "fetch-footystats":
+            # Ayrı değişken adı BİLİNÇLİ: `result` aşağıda `CollectResult` için yeniden
+            # kullanılıyor; Python fonksiyon kapsamı blok değil, aynı adı iki farklı tipe
+            # atamak mypy --strict'i düşürür.
             with httpx.Client() as client:
-                written = collect_footystats(
+                footystats_result = collect_footystats(
                     conn,
                     client,
                     active_leagues(load_leagues(LEAGUES_PATH)),
@@ -627,7 +630,18 @@ def main(argv: list[str] | None = None) -> int:
                     robots_dir=ROBOTS_DIR,
                     now=now,
                 )
-            sys.stdout.write(f"footystats: {written} yeni gözlem\n")
+            sys.stdout.write(f"footystats: {footystats_result.written} yeni gözlem\n")
+            if footystats_result.failed_leagues:
+                # Diğer ligler toplandı ama bu sessizce geçilmemeli: CI kırmızı olmalı
+                # (aynı gerekçe collect.py:_report — F4). Sessiz kalırsa "footystats: 0
+                # yeni gözlem" hem başarılı ikinci turun hem ALTI LİGİN DE kırıldığı bir
+                # turun çıktısı olur (review #3).
+                sys.stdout.write(
+                    "footystats başarısız ligler: "
+                    + ", ".join(footystats_result.failed_leagues)
+                    + "\n"
+                )
+                return EXIT_LEAGUE_FAILED
             return 0
 
         api_key = _require_env("ODDS_API_KEY")

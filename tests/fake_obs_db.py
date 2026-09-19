@@ -13,12 +13,19 @@ OBS_COLUMNS = ("source_id", "entity_kind", "entity_key", "observed_at", "payload
 class FakeObservationDb:
     rows: list[dict[str, Any]] = field(default_factory=list)
     statements: list[str] = field(default_factory=list)
+    rollbacks: int = 0
 
     def cursor(self) -> _Cursor:
         return _Cursor(self)
 
     def commit(self) -> None:
         return None
+
+    def rollback(self) -> None:
+        # `collect_footystats` (Task 5) lig başına izolasyonda `except Exception: conn.
+        # rollback()` çağırıyor — sayaç, testin "arızalı lig rollback ETTİ mi" diye
+        # doğrulamasına izin verir (fake_db.py:FakeLedgerDb.rollback ile aynı desen).
+        self.rollbacks += 1
 
     def __enter__(self) -> FakeObservationDb:
         return self
