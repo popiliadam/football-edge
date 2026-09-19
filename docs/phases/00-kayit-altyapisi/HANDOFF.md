@@ -19,6 +19,7 @@ Yeşil bir kapı yalnız §2'yi kanıtlar; §3'teki hiçbir satır "test edildi"
 | CLI: `snapshot`/`seal`/`verify-chain`/`publish-head` | `collect.py` | birim testli |
 | Zamanlanmış işler | `.github/workflows/{snapshot,seal}.yml` | yazıldı, **hiç koşmadı** (§3.2) |
 | Kapı | `verify.sh` + `scripts/check_secrets.sh` | 7 adım, bu görevde 3 adım eklendi |
+| Operatör runbook'u | `docs/RUNBOOK.md` | çıpa kilitlenmesi: teşhis + arşivleme prosedürü |
 
 **Bu görevde (Task 8) eklenen üç adım:**
 
@@ -79,11 +80,13 @@ SKIP: zincir (DATABASE_URL yok)
    Defter boş olduğu sürece skip kalırlar. **Bu Faz 0'ın merkezî iddiasıdır ve test paketi
    şu an onu ölçmüyor.** (Tetikleyici canlıda bir kez elle kanıtlandı — geri alınan bir
    transaction içinde — ama bu kapının ölçümü değildir.)
-3. **`skipif` yanıltıcı olabilir.** Guard yalnız değişkenin **tanımlı olmasına** bakar;
-   veritabanına ulaşılabildiğine ya da defterin dolu olduğuna değil. Ölçüldü: sahte bir
-   `DATABASE_URL` ile bu iki test skip'ten çıkıp **FAIL** oldu (`2 failed, 69 passed`).
-   Yani `DATABASE_URL` set etmek kapının ölçüm şeklini değiştirir; gerçek URL + boş defter
-   hâlinde ise içerideki `pytest.skip("defter boş")` devreye girer ve yine ölçülmez.
+3. ~~**`skipif` yanıltıcı olabilir.**~~ **Round 3'te düzeltildi (G5).** Guard yalnız
+   değişkenin **tanımlı olmasına** bakıyordu: sahte bir `DATABASE_URL` ile bu iki test
+   skip'ten çıkıp **FAIL** ediyordu (`2 failed, 69 passed` — ölçüldü). Artık guard testin
+   gerçek ön koşulunu sorar: **ulaşılabilir veritabanı + en az bir defter satırı**
+   (`_live_ledger_row_id`). Sahte DSN ile ölçüldü → `2 skipped`, sebebi adıyla yazılıyor.
+   **Değişmeyen:** testler hâlâ ölçmüyor; bu maddenin asıl konusu (2 numara) duruyor.
+   Ulaşılamayan veritabanı burada yutulur ama kapıda yutulmaz — `zincir` adımı düşer.
 
 ### 3.2 Hiç koşmamış şeyler
 
@@ -122,6 +125,13 @@ SKIP: zincir (DATABASE_URL yok)
     de yeniden yazabilir; koruma yalnız **git geçmişine commit'lenmiş** eski çıpalardan gelir.
     Bu commit'lerin gerçekten push edildiği (yani dışarıdan doğrulanabilir olduğu) **ölçülmüyor.**
 
+> **Kilitlenme ve elle çıkışı.** `verify-chain` exit 1 verince `publish-head` atlanır:
+> yeni çıpa yazılmaz, en yeni çıpa da donar — sistem bu hâlden **kendi kendine çıkamaz**
+> ve meşru bir defter yeniden kurulumu da bunu tetikler. Kapalı düşmek kasıtlıdır;
+> **bypass bayrağı yok ve eklenmeyecek** (ilk ona uzanan saldırgan ve yorgun operatördür).
+> Elle çıkış yolu: **`docs/RUNBOOK.md` §1** — çıpalar `ledger/archive/` altına **taşınır**,
+> asla silinmez, ve taşınan çıpanın götürdüğü kanıt gerekçesiyle birlikte commit'lenir.
+
 ### 3.4 Secret taramasının kör noktaları
 
 11. **Git GEÇMİŞİ taranmıyor.** `git grep` yalnız **izlenen dosyaların çalışma ağacı hâlini**
@@ -136,9 +146,20 @@ SKIP: zincir (DATABASE_URL yok)
     dokümantasyon ağırlıklı; bir Markdown dosyasına yapıştırılan gerçek anahtar kapıya
     görünmez. Bilinçli bir ödünleşme (aksi hâlde plan/spec metinleri yanlış alarm verir),
     ama **bir boşluktur.**
-15. **Tarama CI'da koşmuyor.** Hiçbir workflow `verify.sh` ya da `check_secrets.sh` çağırmıyor;
-    pre-commit hook da yok. Tarama yalnız **kapıyı elle koşan** geliştiriciyi korur.
-    Push, tarama koşulmadan da yapılabilir.
+15. **Tarama CI'da koşmuyordu — Round 3'te eklendi (G6), ama boşluk tamamen kapanmadı.**
+    `scripts/check_secrets.sh` artık `snapshot.yml` ve `seal.yml`'de checkout'tan hemen
+    sonra koşuyor. **Kapanmayan kısım:** bu iki iş akışı yalnız `schedule` ve
+    `workflow_dispatch` ile tetikleniyor; **`push`/`pull_request` tetiği yok.** Yani
+    push'lanan bir secret CI'ı ANINDA kırmızıya düşürmez — en erken bir sonraki
+    zamanlanmış turda (varsayılan dalda `seal` ≈ 15 dakika) görünür, **dal merge edilene
+    kadar hiç görünmez** (cron yalnız varsayılan dalda koşar, §3.2). `snapshot.yml`'e
+    `push` tetiği EKLENMEDİ: o iş akışının kendisi ücretli çağrı yapıyor, her push'ta
+    kredi yakardı. Pre-commit hook hâlâ yok.
+    **Adımın getirdiği yeni bağ:** `seal.yml`'de tarama mühür adımından ÖNCE koşuyor;
+    tarama düşerse (gerçek bulgu ya da `git grep`in kendisi patlarsa) o turun mührü
+    de kaçar. Mühürle ilgisi olmayan bir kontrol artık kapanış fiyatına mal olabilir.
+    Kasıtlı: public depoda canlı bir anahtar varken `contents: write` taşıyan bir işin
+    koşmaya devam etmesi daha ağır. Geçici arızayı 15 dakikalık cron telafi eder.
 
 ### 3.5 Kapının hiç bakmadığı eksenler
 
@@ -157,6 +178,17 @@ SKIP: zincir (DATABASE_URL yok)
     yorumunda var (6 lig × 1 kredi × 31 gün ≈ 186/500) ama **tam bir ay boyunca ölçülmedi.**
 23. **GitHub deposundaki secret'ların (`ODDS_API_KEY`, `DATABASE_URL`) geçerliliği**
     kapı tarafından kontrol edilmiyor.
+24. **Ayna arızasında tur artık HİÇ koşmuyor — G3'ün ödünleşmesi.** `_mirror_leagues`
+    düşerse `main()` tek bir ücretli çağrı yapmadan exit 4 verir. Kazanç: kalıcı bir ayna
+    arızası 500 kredilik aylık katmanı ~2 günde bitiremez. **Bedeli:** ayna yalnız GEÇİCİ
+    bir sebeple tazelenemediyse (tablo bir önceki turun aynasını hâlâ taşıyor olabilir)
+    o turun mührü **kaçar** ve kapanış fiyatı geri gelmez — round 2'nin F3'te kapattığı
+    zararın küçük bir hâli, kredi güvenliği için **bilerek** geri alındı. Kapı bu seçimi
+    ölçmez: "ayna düştü ama leagues tablosu aslında sağlamdı" senaryosu üretilmedi.
+25. **Runbook hiç koşulmadı.** `docs/RUNBOOK.md` §1 prosedürü gerçek bir kilitlenmede
+    denenmedi; `ledger/archive/` dizini henüz yok, `git mv` adımı canlıda yürütülmedi.
+    Kapı yalnız runbook'un **varlığını** ve "sil" demediğini ölçer
+    (`tests/test_runbook.py`), **doğruluğunu değil.**
 
 ---
 

@@ -219,12 +219,17 @@ def _db_due_for_seal(now: datetime) -> FakeLedgerDb:
     )
 
 
-def test_main_still_seals_when_the_league_mirror_fails(
+def test_main_spends_no_credit_when_the_league_mirror_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """F3: `upsert_leagues` try dışındaydı; arızası TÜM mühür turunu atlatıyordu.
+    """G3: ayna düşünce her lig yine de ÜCRETLİ `fetch_odds`a gidiyordu.
 
-    Kaçan mühür kalıcı veri kaybıdır — lig aynasının tazelenememesi buna mal olamaz.
+    `upsert_matches` yabancı anahtarda patlayana kadar kredi çoktan harcanmış oluyordu:
+    lig başına 1 kredi × 6 lig × 15 dakikalık mühür cron'u → 500 kredilik aylık ücretsiz
+    katman iki günde biter. Ayna düşmüşse tur BAŞLAMADAN durur.
+
+    F3'ün (round 2) kazanımı korunuyor: `main()` hâlâ traceback'le düşmez, arıza adıyla
+    raporlanır, çıkış kodu 4'tür. Değişen tek şey, turun kredi harcamadan durması.
     """
 
     def exploding_upsert(conn: object, leagues: object) -> int:
@@ -232,14 +237,22 @@ def test_main_still_seals_when_the_league_mirror_fails(
 
     now = datetime.now(UTC)
     db = _db_due_for_seal(now)
-    _patch_main(monkeypatch, tmp_path, db, _seal_handler(now))
+    paid_calls: list[str] = []
+    inner = _seal_handler(now)
+
+    def counting_handler(request: httpx.Request) -> httpx.Response:
+        paid_calls.append(str(request.url))
+        return inner(request)
+
+    _patch_main(monkeypatch, tmp_path, db, counting_handler)
     monkeypatch.setattr(collect, "upsert_leagues", exploding_upsert)
 
     code = collect.main(["seal"])
 
     out = capsys.readouterr().out
-    assert db.snapshots, f"lig aynası patladı diye mühür turu hiç koşmadı: {out!r}"
-    assert db.matches["evt1"]["sealed_at"] is not None, "maç mühürlenmeliydi"
+    assert paid_calls == [], f"ayna düşmüşken ücretli çağrı yapıldı: {paid_calls}"
+    assert db.snapshots == [], "ayna düşmüşken satır yazılmamalı"
+    assert db.matches["evt1"]["sealed_at"] is None, "satır yazılmadan mühür basılmamalı"
     assert "lig aynası tazelenemedi" in out, f"sessiz geçildi: {out!r}"
     assert code == 4, f"arıza raporlandı ama çıkış kodu sessiz kaldı: {code}"
 

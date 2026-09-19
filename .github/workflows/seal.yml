@@ -31,6 +31,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Secret taraması
+        # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
+        # halka açılır ve geri alınamaz. Bu iş ayrıca `contents: write` taşıyor ve
+        # depoya commit atıyor — tarama, yazma yetkisi kullanılmadan ÖNCE koşar.
+        run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
@@ -50,7 +55,7 @@ jobs:
             0) echo "mühür turu tamam" ;;
             2) echo "::error::kredi tükendi (exit 2) — mühür turu erken kapandı" ;;
             3) echo "::error::en az bir lig mühürlenemedi (exit 3) — diğerleri mühürlendi" ;;
-            4) echo "::error::lig aynası tazelenemedi (exit 4) — mühür turu yine de koştu" ;;
+            4) echo "::error::lig aynası tazelenemedi (exit 4) — mühür turu hiç koşmadı, MÜHÜR KAÇTI" ;;
             *) echo "::error::mühür beklenmedik kodla düştü (exit $code)" ;;
           esac
           # BURADA EXIT EDİLMEZ — kasıtlı. Adım burada düşerse zincir doğrulaması,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import lru_cache
 
 import pytest
 
@@ -140,31 +141,59 @@ def test_upsert_matches_counts_only_rows_actually_written() -> None:
     assert written == 1, "zaten var olan maç yeniden yazılmış sayılmamalı"
 
 
-@pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL yok")
+@lru_cache(maxsize=1)
+def _live_ledger_row_id() -> int | None:
+    """Bu iki testin GERÇEK ön koşulu: ULAŞILABİLİR veritabanı + en az bir defter satırı.
+
+    Guard yalnız `DATABASE_URL`in TANIMLI olmasına bakıyordu (G5). Sahte bir DSN ile iki
+    test skip'ten çıkıp `psycopg.OperationalError` ile KIRMIZI veriyordu
+    (`2 failed, 69 passed`) — ortam yanlış kurulduğu için kırmızı veren test, insanlara
+    kırmızıyı görmezden gelmeyi öğretir.
+
+    Ulaşılamayan veritabanı BURADA yutulur ama kapıda yutulmaz: `verify.sh`'ın `zincir`
+    adımı `DATABASE_URL` tanımlıyken koşar ve bağlantı kurulamazsa adıyla kırmızı verir.
+    """
+    if not os.getenv("DATABASE_URL"):
+        return None
+    try:
+        from football_edge.db import connect
+
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM odds_snapshots LIMIT 1")
+            found = cur.fetchone()
+    except Exception:  # OperationalError, DNS, kapalı port, eksik tablo — hepsi "yok".
+        return None
+    return None if found is None else int(found[0])
+
+
+NO_LEDGER = "ulaşılabilir veritabanı + dolu defter yok (DATABASE_URL, bağlantı ya da satır)"
+
+
+@pytest.mark.skipif(_live_ledger_row_id() is None, reason=NO_LEDGER)
 def test_append_only_trigger_blocks_update() -> None:
     import psycopg
 
     from football_edge.db import connect
 
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM odds_snapshots LIMIT 1")
-        found = cur.fetchone()
-        if found is None:
-            pytest.skip("defter boş")
-        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
-            cur.execute("UPDATE odds_snapshots SET price = 9.99 WHERE id = %s", (found[0],))
+    row_id = _live_ledger_row_id()
+    with (
+        connect() as conn,
+        conn.cursor() as cur,
+        pytest.raises(psycopg.errors.RaiseException, match="append-only"),
+    ):
+        cur.execute("UPDATE odds_snapshots SET price = 9.99 WHERE id = %s", (row_id,))
 
 
-@pytest.mark.skipif(not os.getenv("DATABASE_URL"), reason="DATABASE_URL yok")
+@pytest.mark.skipif(_live_ledger_row_id() is None, reason=NO_LEDGER)
 def test_append_only_trigger_blocks_delete() -> None:
     import psycopg
 
     from football_edge.db import connect
 
-    with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM odds_snapshots LIMIT 1")
-        found = cur.fetchone()
-        if found is None:
-            pytest.skip("defter boş")
-        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
-            cur.execute("DELETE FROM odds_snapshots WHERE id = %s", (found[0],))
+    row_id = _live_ledger_row_id()
+    with (
+        connect() as conn,
+        conn.cursor() as cur,
+        pytest.raises(psycopg.errors.RaiseException, match="append-only"),
+    ):
+        cur.execute("DELETE FROM odds_snapshots WHERE id = %s", (row_id,))

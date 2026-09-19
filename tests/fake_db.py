@@ -8,6 +8,7 @@ temiz veritabanında patlayan kodu yeşil gösterir — tam da E1/E6'nın gizlen
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -36,6 +37,15 @@ class ForeignKeyViolation(Exception):
 
 class CheckViolation(Exception):
     """odds_snapshots.price > 1.0 kontrolü."""
+
+
+class CommitFailed(Exception):
+    """COMMIT'in kendisi düştü, bağlantı AYAKTA: statement timeout, serialization abort.
+
+    psycopg'de bu `psycopg.errors.OperationalError`/`SerializationFailure` olur; önemli
+    olan sınıf değil, `commit()`in patlayıp `rollback()`in BAŞARILI olmasıdır. Satırlar
+    gider, kod ise onları yazılmış sanmaya devam edebilir (G1).
+    """
 
 
 def _as_datetime(value: Any) -> datetime:
@@ -99,6 +109,11 @@ class FakeLedgerDb:
     snapshots: list[dict[str, Any]] = field(default_factory=list)
     commits: int = 0
     rollbacks: int = 0
+    # Commit'i patlatabilen kanca (varsayılan: hiç patlamaz). HİÇ patlayamayan bir
+    # `commit()`, "satırlar yazıldı ama commit düştü" hâlini sınayamaz — G1 tam oraya
+    # saklanmıştı: rollback satırları geri alır, kod ise match_id'leri yazılmış sayıp
+    # mühürler. Mühürlenen maç bir daha denenmez; kapanış fiyatı geri gelmez.
+    commit_fails: Callable[[FakeLedgerDb], bool] | None = None
 
     def __post_init__(self) -> None:
         self._committed = self._state()
@@ -110,6 +125,8 @@ class FakeLedgerDb:
         return _LedgerCursor(self)
 
     def commit(self) -> None:
+        if self.commit_fails is not None and self.commit_fails(self):
+            raise CommitFailed("COMMIT düştü, bağlantı ayakta")
         self.commits += 1
         self._committed = self._state()
 

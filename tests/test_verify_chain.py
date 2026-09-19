@@ -158,3 +158,29 @@ def test_publish_head_records_last_id(tmp_path: Path, capsys: pytest.CaptureFixt
     assert anchor.last_id == 3
     assert anchor.rows == 3
     assert anchor.head == db.rows[-1]["row_hash"]
+
+
+# ── G4: EN YENİ çıpa okunamayınca kontrol sessizce bir öncekine düşüyordu ────
+# `_anchors` okunamayan dosyayı eliyor; `anchors[-1]` en yeni OKUNABİLİR çıpa oluyor ve
+# stdout `zincir: SAĞLAM` diyor. Tek iz bir log uyarısı. Bu projenin kuralı: atlanan ya da
+# düşürülen kontrol geçmek değildir, adıyla raporlanır — round 2 öncesi de böyleydi.
+
+
+def test_corrupt_newest_anchor_is_reported_not_silently_downgraded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """G4: bozuk EN YENİ çıpa, sağlam bir eskisinin arkasına saklanamaz."""
+    genuine = chained_rows(3)
+    _write_anchor(
+        tmp_path, rows=3, last_id=3, head=str(genuine[-1]["row_hash"]), name="head-2026-09-18.txt"
+    )
+    (tmp_path / "head-2026-09-19.txt").write_text(
+        "2026-09-19\nrows=abc\nlast_id=xyz\nhead=deadbeef\n", encoding="utf-8"
+    )
+
+    code = _verify_chain_command(FakeChainDb(genuine), anchor_dir=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert "ATLANDI" in out, f"en yeni çıpa okunamadı ama çıktı bunu söylemedi: {out!r}"
+    assert "head-2026-09-19.txt" in out, f"hangi çıpanın okunamadığı yazılmalı: {out!r}"
+    assert code == 0, out

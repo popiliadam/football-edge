@@ -168,3 +168,40 @@ def test_seal_does_not_stamp_a_postponed_match_whose_db_time_is_stale() -> None:
     _run(db, handler)
 
     _assert_only_recorded_match_is_sealed(db, "evt_postponed")
+
+
+# ── G1: mührü süren kimlik listesi COMMIT'TEN ÖNCE birikiyordu ───────────────
+# `written` ataması `conn.commit()`ten bir satır ÖNCEDEYDİ. Commit, bağlantı AYAKTAYKEN
+# de düşer (statement timeout, serialization abort, sunucu tarafı abort): `rollback()`
+# başarılı olur, lig doğru biçimde arızalı sayılır, ama geri alınmış match_id'ler
+# `written` içinde kalır, `written_matches`e akar ve `sealed_at` damgasını yer.
+# Sonuç: kapanış satırı olmayan, bir daha hiç denenmeyecek bir maç — F1'in kapattığı
+# hasarın aynısı, yalnız daha ince bir yerde.
+
+
+def _commit_fails_once_rows_exist_for(match_id: str) -> Callable[[FakeLedgerDb], bool]:
+    """Satırlar yazıldıktan SONRA, tam commit anında patlar."""
+
+    def failing(db: FakeLedgerDb) -> bool:
+        return any(row["match_id"] == match_id for row in db.snapshots)
+
+    return failing
+
+
+def test_seal_does_not_stamp_a_match_whose_commit_failed() -> None:
+    """G1: commit düşerse satırlar gider — mühür o maça BASILAMAZ."""
+    db = FakeLedgerDb(
+        leagues={"good.1": ("good.1",)},
+        matches={"evt_near": _match(NOW + timedelta(minutes=10))},
+        commit_fails=_commit_fails_once_rows_exist_for("evt_near"),
+    )
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+
+    result = run_seal(db, client, "KEY", (LEAGUE,), NOW)  # type: ignore[arg-type]
+
+    assert db.snapshots == [], "commit düştü: satırlar geri alınmış olmalıydı"
+    assert db.matches["evt_near"]["sealed_at"] is None, (
+        "commit'i düşen maç mühürlendi — kapanış satırı yok, maç bir daha denenmeyecek"
+    )
+    assert result.failed_leagues == ("good.1",), "commit'i düşen lig arızalı sayılmalı"
+    assert result.written == 0, f"geri alınan satırlar yazılmış sayıldı: {result.written}"

@@ -31,6 +31,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Secret taraması
+        # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
+        # halka açılır ve geri alınamaz — push'lanmış anahtar yanmıştır, silmek yetmez.
+        # Tarama yalnız `./verify.sh` içinde, yalnız yerelde koşuyordu; kapıyı elle
+        # koşmayan bir push taramadan geçmeden iniyordu. Ucuz ve credential istemez,
+        # bu yüzden kurulumdan da ÖNCE: kaçak secret runner'ın geri kalanına ulaşmasın.
+        run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
@@ -48,7 +55,7 @@ jobs:
             0) echo "tur tamam" ;;
             2) echo "::error::kredi tükendi (exit 2) — aylık bütçe bitti, tur erken kapandı" ;;
             3) echo "::error::en az bir lig toplanamadı (exit 3) — diğer ligler yazıldı" ;;
-            4) echo "::error::lig aynası tazelenemedi (exit 4) — tur mevcut tabloyla koştu" ;;
+            4) echo "::error::lig aynası tazelenemedi (exit 4) — tur hiç başlatılmadı, kredi harcanmadı" ;;
             *) echo "::error::snapshot beklenmedik kodla düştü (exit $code)" ;;
           esac
           # Hiçbir kod yutulmaz: 2 de 3 de işi kırmızıya düşürür, yalnız adıyla.

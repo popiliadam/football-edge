@@ -75,6 +75,18 @@ class SealCandidates:
     missed: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class AnchorScan:
+    """Okunabilen çıpalar (eskiden yeniye) ve okunamayan EN YENİ dosyanın adı.
+
+    `downgraded` doluysa `readable[-1]` en yeni çıpa DEĞİLDİR: kontrol bir öncekine
+    düşmüştür. Bu, sessizce yapılabilecek bir indirgeme değildir (G4).
+    """
+
+    readable: tuple[Anchor, ...]
+    downgraded: Path | None
+
+
 def _anchor_values(target: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in target.read_text(encoding="utf-8").splitlines():
@@ -98,15 +110,23 @@ def _read_anchor(target: Path) -> Anchor | None:
     return Anchor(path=target, rows=rows, last_id=last_id, head=values["head"])
 
 
-def _anchors(directory: Path = ANCHOR_DIR) -> tuple[Anchor, ...]:
-    """Okunabilen tüm çıpalar, ESKİDEN YENİYE.
+def _scan_anchors(directory: Path = ANCHOR_DIR) -> AnchorScan:
+    """Çıpa dosyalarını ESKİDEN YENİYE okur; EN YENİSİ okunamadıysa adını ayrıca taşır.
 
     En yeni çıpa dosyası çalışma ağacındadır: defteri yeniden yazabilen biri onu da
     yeniden yazabilir. Eski dosyalar git geçmişine commit'lenmiştir; öneki yeniden
     yazılmış bir defteri gösteren tek kanıt onlardır. Bozuk dosya sessizce yutulmaz.
     """
-    found = tuple(_read_anchor(target) for target in sorted(directory.glob("head-*.txt")))
-    return tuple(anchor for anchor in found if anchor is not None)
+    targets = tuple(sorted(directory.glob("head-*.txt")))
+    found = tuple((target, _read_anchor(target)) for target in targets)
+    readable = tuple(anchor for _, anchor in found if anchor is not None)
+    newest_unreadable = bool(found) and found[-1][1] is None
+    return AnchorScan(readable=readable, downgraded=targets[-1] if newest_unreadable else None)
+
+
+def _anchors(directory: Path = ANCHOR_DIR) -> tuple[Anchor, ...]:
+    """Okunabilen tüm çıpalar, ESKİDEN YENİYE."""
+    return _scan_anchors(directory).readable
 
 
 def _latest_anchor(directory: Path = ANCHOR_DIR) -> Anchor | None:
@@ -217,10 +237,7 @@ def _collect(
                 client, api_key, league.odds_api_key, commence_time_to=commence_time_to
             )
             usable = _usable_rows(rows, league.id, row_filter)
-            written = (
-                *written,
-                *_write_league(conn, usable, league.id, now, is_closing=is_closing),
-            )
+            recorded = _write_league(conn, usable, league.id, now, is_closing=is_closing)
             conn.commit()
         except Exception:
             # Tek bir ligin arızası diğer liglerin kapanış oranını kaçırmasına yol açmamalı.
@@ -229,6 +246,13 @@ def _collect(
             LOGGER.exception("lig=%s toplanamadı, diğer liglere devam ediliyor", league.id)
             failed = (*failed, league.id)
             continue
+        # MÜHRÜ SÜREN LİSTE COMMIT'TEN SONRA BİRİKİR — `try` İÇİNE ALMAYIN (G1).
+        # `commit()` bağlantı AYAKTAYKEN de düşer: statement timeout, serialization
+        # abort, sunucu tarafı transaction abort. O hâlde `rollback()` başarılı olur,
+        # lig doğru biçimde arızalı sayılır, ama commit'ten ÖNCE biriktirilmiş
+        # match_id'ler `written_matches`e akıp geri alınmış maça `sealed_at` bastırır.
+        # Mühürlenen maç bir daha denenmez; kapanış fiyatı kalıcı olarak kaybolur.
+        written = (*written, *recorded)
         LOGGER.info("lig=%s satır=%d kalan_kredi=%d", league.id, len(usable), quota.remaining)
     return CollectResult(
         written=len(written),
@@ -337,20 +361,37 @@ def _stamp_sealed(conn: psycopg.Connection[Any], match_ids: tuple[str, ...], now
 
 
 def _mirror_leagues(conn: psycopg.Connection[Any], configured: tuple[League, ...]) -> bool:
-    """Lig aynasını tazeler; BAŞARISIZLIĞI turu götürmez, adıyla raporlanır.
+    """Lig aynasını tazeler; BAŞARISIZLIĞINI traceback'le değil, dönüş değeriyle bildirir.
 
     Bu çağrı `try` dışındaydı: `leagues.odds_api_key` UNIQUE ihlali ya da geçici bir
-    veritabanı arızası `main()`den dışarı düşüp TÜM mühür turunu atlatıyordu. Kaçan
-    mühür kalıcıdır — tablo zaten bir önceki turun aynasını taşıyor, tur sürebilir.
+    veritabanı arızası `main()`den dışarı düşüp turu traceback'le bitiriyordu (F3).
+    Arıza artık yakalanır, adıyla raporlanır ve çıkış kodu 4 olur — ama tur SÜRMEZ:
+    ücretli çağrıya girmenin bedeli `_mirror_failed()`te yazılı (G3).
     """
     try:
         upsert_leagues(conn, configured)
         conn.commit()
     except Exception:
         conn.rollback()
-        LOGGER.exception("lig aynası tazelenemedi, tur mevcut leagues tablosuyla sürdürülüyor")
+        LOGGER.exception("lig aynası tazelenemedi, tur başlatılmıyor (ücretli çağrı yapılmaz)")
         return False
     return True
+
+
+def _mirror_failed() -> CollectResult:
+    """Ayna düşmüşse tur BAŞLAMADAN durur: `fetch_odds` ücretlidir (G3).
+
+    Turu sürdürmek her ligi ücretli çağrıya sokuyor, satır yazılınca da yabancı anahtar
+    zaten patlıyordu: lig başına 1 kredi × 6 lig × 15 dakikalık mühür cron'u, 500
+    kredilik aylık ücretsiz katmanı iki günde bitirir. Önce kredi harcayıp sonra
+    yazamamak, hiç denememekten kötüdür.
+
+    ÖDÜNLEŞME AÇIKÇA KAYITLIDIR: ayna yalnız GEÇİCİ bir arızadan tazelenemediyse
+    (tablo bir önceki turun aynasını hâlâ taşıyor olabilir) bu tur mühürlenebilirdi.
+    O turun mührü artık kaçar ve kapanış fiyatı geri gelmez — kredi güvenliği bu
+    riskin üstünde tutuldu. Bkz. HANDOFF §3.5.
+    """
+    return CollectResult(written=0, quota=None, failed_leagues=(), leagues_mirrored=False)
 
 
 def _require_env(name: str) -> str:
@@ -451,7 +492,16 @@ def _report_chain(result: ChainResult) -> int:
 
 
 def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR) -> int:
-    anchors = _anchors(anchor_dir)
+    scan = _scan_anchors(anchor_dir)
+    anchors = scan.readable
+    if scan.downgraded is not None and anchors:
+        # Düşürülen kontrol de geçmek değildir: en yeni çıpanın kanıtı kullanılamadı,
+        # kuyruk yalnız daha ESKİ bir çıpadan doğrulandı. Tek iz bir log uyarısı olursa
+        # `zincir: SAĞLAM` satırını okuyan operatör hangi çıpaya bakıldığını bilemez (G4).
+        sys.stdout.write(
+            f"en yeni çıpa okunamadı ({scan.downgraded.name}) — kuyruk kesme kontrolü "
+            "bir önceki çıpaya düşürüldü, EN YENİ ÇIPA ATLANDI\n"
+        )
     if not anchors:
         # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
         sys.stdout.write("çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI\n")
@@ -495,7 +545,7 @@ def _report(result: CollectResult) -> int:
         # Kaçan mühür kalıcıdır; sessiz exit 0 arızayı gizler.
         sys.stdout.write("kaçan mühür: " + ", ".join(result.missed_seals) + "\n")
     if not result.leagues_mirrored:
-        sys.stdout.write("lig aynası tazelenemedi — tur mevcut leagues tablosuyla koştu\n")
+        sys.stdout.write("lig aynası tazelenemedi — tur hiç başlatılmadı, kredi harcanmadı\n")
     if result.quota_exhausted:
         sys.stdout.write("kredi tükendi — tur erken kapandı\n")
     if result.failed_leagues:
@@ -536,7 +586,8 @@ def main(argv: list[str] | None = None) -> int:
         api_key = _require_env("ODDS_API_KEY")
         configured = load_leagues(LEAGUES_PATH)
         # matches.league_id'nin yabancı anahtarı her turdan ÖNCE konfigürasyondan tazelenir.
-        mirrored = _mirror_leagues(conn, configured)
+        if not _mirror_leagues(conn, configured):
+            return _report(_mirror_failed())
         with httpx.Client() as client:
             # Ayrı if/else: run_snapshot ve run_seal farklı keyword argümanlara
             # sahip, tek değişkene atanınca mypy --strict uyumsuzluk bildirir.
@@ -544,7 +595,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = run_snapshot(conn, client, api_key, active_leagues(configured), now)
             else:
                 result = run_seal(conn, client, api_key, active_leagues(configured), now)
-        return _report(replace(result, leagues_mirrored=mirrored))
+        return _report(result)
 
 
 if __name__ == "__main__":
