@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -498,6 +499,81 @@ def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ..
     return None
 
 
+def expected_anchor_names(directory: Path = ANCHOR_DIR) -> tuple[str, ...] | None:
+    """Git geçmişine EKLENMİŞ çıpa dosyalarının adları; git yoksa None.
+
+    Silinen çıpa, bozulan çıpadan sessizdir: `_scan_anchors` yalnız diskte duranı görür ve
+    silme, RUNBOOK §1.4'teki meşru arşivlemeden ayırt edilemez (DEFERRED §1.3). Beklenen kümeyi
+    DIŞARIDA tutmak gerekir; dışarısı zaten var — defterin dış kanıtı olan aynı git geçmişi.
+
+    Komutlar `-C directory` ile SORULAN dizine bağlanır: `directory` argümanını yok sayıp
+    süreç kök dizinindeki depoya bakan bir uygulama, `tmp_path` ile çağrıldığında sessizce
+    GERÇEK depoyu ölçer ve test yanlış sebepten geçer.
+    """
+    try:
+        # SIĞ KLON SESSİZ BİR GEÇİŞTİR: `actions/checkout` varsayılanı `fetch-depth: 1` ve
+        # sığ bir depoda `git log` BAŞARILI olup boş liste döner. Boş liste "hiç çıpa
+        # yayınlanmamış" ile "geçmişi göremiyorum"u aynı şeye indirger ve kontrol hiçbir
+        # şey ölçmeden yeşil verir. Atlanan kontrol geçmek değildir — adıyla atlanır.
+        shallow = subprocess.run(
+            ["git", "-C", str(directory), "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+        if shallow.stdout.strip() == "true":
+            return None
+        # Hiç commit'i olmayan (unborn HEAD) bir depoda `git log` HEAD'i çözemediği için
+        # düşer — bu bir ATLAMA değil, GERÇEKTEN boş bir geçmiştir: depo sığ değil,
+        # geçmiş görülebiliyor, içinde henüz hiçbir şey yok. `--verify -q` bunu fatal
+        # basmadan, yalnız çıkış koduyla bildirir.
+        head_exists = subprocess.run(
+            ["git", "-C", str(directory), "rev-parse", "--verify", "-q", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if head_exists.returncode != 0:
+            return ()
+        found = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(directory),
+                "log",
+                "--diff-filter=A",
+                "--name-only",
+                "--format=",
+                "--",
+                ".",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    names = tuple(
+        Path(line).name
+        for line in found.stdout.splitlines()
+        if line.strip() and Path(line).name.startswith("head-")
+    )
+    return tuple(sorted(set(names)))
+
+
+def missing_anchors(
+    directory: Path = ANCHOR_DIR, *, recorded: tuple[str, ...] | None = None
+) -> tuple[str, ...]:
+    """Geçmişte yayınlanmış ama diskte OLMAYAN çıpalar."""
+    expected = expected_anchor_names(directory) if recorded is None else recorded
+    if expected is None:
+        return ()
+    present = {target.name for target in directory.glob("head-*.txt")}
+    return tuple(name for name in expected if name not in present)
+
+
 def _report_chain(result: ChainResult) -> int:
     sys.stdout.write(
         f"zincir: {'SAĞLAM' if result.ok else 'KIRIK'} "
@@ -506,7 +582,9 @@ def _report_chain(result: ChainResult) -> int:
     return 0 if result.ok else 1
 
 
-def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR) -> int:
+def _verify_chain_command(
+    conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR, full: bool = False
+) -> int:
     scan = _scan_anchors(anchor_dir)
     anchors = scan.readable
     if scan.downgraded is not None and anchors:
@@ -517,20 +595,32 @@ def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = A
             f"en yeni çıpa okunamadı ({scan.downgraded.name}) — kuyruk kesme kontrolü "
             "bir önceki çıpaya düşürüldü, EN YENİ ÇIPA ATLANDI\n"
         )
-    if not anchors:
+    if expected_anchor_names(anchor_dir) is None:
         # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
+        sys.stdout.write("git geçmişi okunamadı — ÇIPA EKSİKLİĞİ KONTROLÜ ATLANDI\n")
+    else:
+        gone = missing_anchors(anchor_dir)
+        if gone:
+            sys.stdout.write(
+                "ÇIPA EKSİK (git geçmişinde var, diskte yok): " + ", ".join(gone) + "\n"
+            )
+            return 1
+    if not anchors:
         sys.stdout.write("çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI\n")
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
-    # En eski çıpa da sorulur: yalnız en yeniye bakmak, `ledger/`deki dosyayı da
-    # değiştiren bir saldırganın yeniden yazdığı öneki göremez.
-    asked = anchors if len(anchors) == 1 else (anchors[0], anchors[-1])
+    # --full: HER çıpa sorulur ve defter GENESIS'ten yeniden hash'lenir. Varsayılan mod
+    # yalnız (en eski, en yeni) çifti sorar ve yalnız kuyruğu tarar — aradaki satırlar hiç
+    # yeniden hash'lenmez (DEFERRED §1.1, §1.2).
+    asked = anchors if (full or len(anchors) == 1) else (anchors[0], anchors[-1])
     breakage = _first_anchor_break(conn, asked)
     if breakage is not None:
         sys.stdout.write(f"ÇIPA UYUŞMAZLIĞI: {breakage}\n")
         return 1
     newest = anchors[-1]
+    if full:
+        sys.stdout.write(f"tam tarama: {len(asked)} çıpa soruldu, defter GENESIS'ten taranıyor\n")
+        return _report_chain(verify_chain(_ledger_rows(conn, None)))
     if newest.last_id <= 0:
-        # Boş defterin çıpası: kesilecek kuyruk yok, defter GENESIS'ten doğrulanır.
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
     return _report_chain(verify_chain(_ledger_rows(conn, newest.last_id), start_hash=newest.head))
 
@@ -597,13 +687,18 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="football-edge")
     parser.add_argument("command", choices=("snapshot", "seal", "verify-chain", "publish-head"))
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="verify-chain: defteri GENESIS'ten yeniden hash'le ve HER çıpayı sor",
+    )
     args = parser.parse_args(argv)
 
     now = datetime.now(UTC)
 
     with connect() as conn:
         if args.command == "verify-chain":
-            return _verify_chain_command(conn)
+            return _verify_chain_command(conn, full=args.full)
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
 

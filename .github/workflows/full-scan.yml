@@ -1,0 +1,37 @@
+name: full-scan
+
+# Defterin İÇİ hiçbir zamanlanmış koşuda yeniden hash'lenmiyordu: `seal.yml` yalnız en yeni
+# çıpadan SONRAKİ kuyruğu tarar ve çıpalar hep ileri gider (DEFERRED §1.1). Haftada bir tam
+# tarama, o boşluğu kapatan tek şeydir. Maliyeti gerçek ve büyüyor — 3 717 satır bugün ucuz,
+# 12 ayda değil; pahalılaştığında AYLIK yapılır, kapı gevşetilmez.
+on:
+  schedule:
+    - cron: "23 4 * * 0"   # Pazar 04:23 UTC — mühür turlarının en seyrek olduğu saat
+  workflow_dispatch:
+
+concurrency:
+  # Deftere YAZMAZ ama okuması uzun sürer; mühür turuyla yarıştırmaya gerek yok.
+  group: odds-collect
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  full-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Çıpa eksikliği kontrolü `git log` okur; sığ klon geçmişi görmez ve kontrol
+          # SESSİZCE atlanır. Atlanan kontrol geçmek değildir — bu yüzden tam geçmiş.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Tam zincir taraması
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python -m football_edge.collect verify-chain --full

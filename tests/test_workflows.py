@@ -196,3 +196,27 @@ def test_the_scanned_script_exists_and_is_executable() -> None:
 
     assert script.is_file(), f"{SCAN_SCRIPT} yok: iş akışı adımı ilk koşuda düşer"
     assert os.access(script, os.X_OK), f"{SCAN_SCRIPT} çalıştırılabilir değil"
+
+
+# ── DEFERRED §1.1/§1.2: çıpa varken defterin İÇİ bir daha hash'lenmiyordu ────
+# `seal.yml` yalnız en yeni çıpadan SONRAKİ kuyruğu tarar ve çıpalar hep ileri gider;
+# aradaki satırlar hiçbir zamanlanmış koşuda doğrulanmayacaktı. Haftalık `full-scan.yml`
+# bu boşluğu kapatır — `seal.yml`'e dokunulmadı, o hâlâ yalnız kuyruğu tarar (maliyet).
+
+FULL_SCAN = REPO / ".github/workflows/full-scan.yml"
+
+
+def test_full_scan_workflow_exists_and_is_scheduled() -> None:
+    assert FULL_SCAN.is_file(), (
+        "full-scan.yml yok: defterin içi hiçbir zamanlanmış turda yeniden hash'lenmiyor"
+    )
+    assert "schedule" in _triggers(FULL_SCAN), "full-scan.yml zamanlanmış koşmuyor"
+
+
+def test_full_scan_workflow_is_read_only() -> None:
+    """Deftere YAZMAZ, yalnız okur — `seal.yml`nin `contents: write` yetkisine gerek yok."""
+    document = yaml.safe_load(FULL_SCAN.read_text(encoding="utf-8"))
+
+    assert document.get("permissions", {}).get("contents") == "read", (
+        "full-scan.yml salt-okunur olmalı"
+    )
