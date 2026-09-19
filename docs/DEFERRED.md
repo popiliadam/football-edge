@@ -95,6 +95,41 @@ bir rolde ve o rolün kimlik bilgisi CI'da hiç bulunmasın.
 
 RUNBOOK §2.3 bunu açıkça yasaklıyor, ama yasağı zorlayan hiçbir şey yok — bkz. 2.1.
 
+### 2.3 İlk canlı sınama: iki kalıcı prob satırı (Task 4, 2026-09-19)
+
+2.1/2.2'nin tarif ettiği boşluk — tetikleyici SAHİBE karşı savunmasız, yasağı zorlayan
+tek şey RUNBOOK §2.3 — Task 4'ün migrasyon doğrulamasında GERÇEK yetkiyle (tablo sahibi
+`DATABASE_URL`) ilk kez fiilen sınandı: bir unit test değil, tam veritabanı yetkisine
+sahip bir aktör. **Prosedürel yasak tuttu** — `DISABLE TRIGGER` hiç denenmedi — ama
+bedeli iki kalıcı satır oldu.
+
+`source_observations`da şu iki satır KALICI olarak duruyor:
+
+- `source_id='migration-check', entity_kind='team', entity_key='probe'` — 0002
+  migrasyonunun uyguladığı tabloları/tetikleyiciyi doğrularken: satır INSERT + commit
+  edildi, sonra append-only tetikleyicinin UPDATE'i reddettiği ayrı sınandı (reddetti,
+  doğru), ardından DELETE'i de reddettiği sınanırken (o da reddetti, doğru) script
+  istisnayı yakalamadan düştü ve satır temizlenemeden kaldı.
+- `source_id='task4-verify', entity_kind='team', entity_key='probe-a'` — `latest_
+  observations`in taklide değil GERÇEK veritabanına karşı uçtan uca doğrulaması;
+  temizleme hiç denenmedi (aşağıdaki sebeple zaten mümkün değil).
+
+**Neden kalıcı:** tek kaldırma yolu `alter table source_observations disable trigger
+source_observations_append_only` — RUNBOOK §2.3 bunu açıkça yasaklıyor (bkz. 2.1/2.2).
+İki satırı temizlemek için ürünün bütünlük iddiasını taşıyan mekanizmayı kapatmak,
+satırların kendisinden daha kötü olurdu; denenmedi.
+
+**Neden zararsız:** `config/sources.yaml`'daki hiçbir gerçek kaynak (footystats, tff,
+ajansspor, openmeteo, wikidata, understat) bu `source_id` değerlerini üretmez;
+`latest_observations` her zaman `source_id`ye göre filtreler, yani bu satırlar hiçbir
+gerçek okuma yolunda GÖRÜNMEZ.
+
+**Doğru sıra buydu (ve bir dahaki sefere budur):** tek transaction içinde INSERT →
+UPDATE dene (reddedilir, transaction abort olur) → ROLLBACK; ayrı bir transaction'da
+yeniden INSERT → DELETE dene (reddedilir) → ROLLBACK. Hiçbir adım commit edilmez, tablo
+dokunulmamış kalır — tetikleyici transaction kapsamlı ateşlendiği için bu, korumayı
+KAPATMADAN aynı kanıtı verir. Bunun yerine satır erken commit'lendi; hata oradaydı.
+
 ---
 
 ## 3. Mühür ve veri bütünlüğü
@@ -177,10 +212,10 @@ C2'nin kilidi var ve **ifade sırası** test ediliyor (sahte bağlantıyla), ama
 oturumun serileştiği ölçülmedi. `pg_advisory_xact_lock`in gerçekten beklettiği, iki
 paralel `collect snapshot` ile doğrulanmalı.
 
-### 5.3 `mypy` yalnız `src`'yi görüyor; coverage ölçülmüyor
+### 5.3 `mypy` `tests/`i görmüyor; coverage ölçülmüyor
 
-`files = ["src"]` — `tests/` tip denetiminden geçmiyor. `pytest-cov` kurulu değil,
-kapıda eşik yok.
+`files = ["src", "scripts"]` (R15 `scripts/`i de kapsama aldı) — ama `tests/` hâlâ tip
+denetiminden geçmiyor. `pytest-cov` kurulu değil, kapıda eşik yok.
 
 ### 5.4 Workflow'ların hiçbiri bir runner'da koşmadı
 
