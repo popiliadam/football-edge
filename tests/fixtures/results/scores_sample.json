@@ -1,0 +1,64 @@
+[
+  {
+    "id": "evt-gs-fb",
+    "sport_key": "soccer_turkey_super_league",
+    "commence_time": "2026-09-18T18:00:00Z",
+    "completed": true,
+    "home_team": "Galatasaray",
+    "away_team": "Fenerbahce",
+    "scores": [
+      {"name": "Fenerbahce", "score": "1"},
+      {"name": "Galatasaray", "score": "2"}
+    ],
+    "last_update": "2026-09-18T20:05:00Z"
+  },
+  {
+    "id": "evt-bjk-tr",
+    "sport_key": "soccer_turkey_super_league",
+    "commence_time": "2026-09-18T15:00:00Z",
+    "completed": true,
+    "home_team": "Besiktas",
+    "away_team": "Trabzonspor",
+    "scores": [
+      {"name": "Besiktas", "score": "0"},
+      {"name": "Trabzonspor", "score": "0"}
+    ],
+    "last_update": "2026-09-18T17:10:00Z"
+  },
+  {
+    "id": "evt-kon-ka",
+    "sport_key": "soccer_turkey_super_league",
+    "commence_time": "2026-09-20T12:00:00Z",
+    "completed": false,
+    "home_team": "Konyaspor",
+    "away_team": "Kasimpasa",
+    "scores": null,
+    "last_update": "2026-09-19T09:00:00Z"
+  },
+  {
+    "id": "evt-siv-al",
+    "sport_key": "soccer_turkey_super_league",
+    "commence_time": "2026-09-18T18:00:00Z",
+    "completed": true,
+    "home_team": "Sivasspor",
+    "away_team": "Alanyaspor",
+    "scores": [
+      {"name": "Sivasspor", "score": "3"},
+      {"name": "Alanyaspor", "score": "2"}
+    ],
+    "last_update": "2026-09-18T20:00:00Z"
+  },
+  {
+    "id": "evt-anta-riz",
+    "sport_key": "soccer_turkey_super_league",
+    "commence_time": "2026-09-17T18:00:00Z",
+    "completed": true,
+    "home_team": "Antalyaspor",
+    "away_team": "Rizespor",
+    "scores": [
+      {"name": "Antalyaspor", "score": "4"},
+      {"name": "Rizespor", "score": "0"}
+    ],
+    "last_update": "2026-09-17T20:00:00Z"
+  }
+]
