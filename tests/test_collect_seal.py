@@ -23,6 +23,7 @@ LEAGUE = League(
     lang="en",
     gl="GB",
     active=True,
+    footystats_path="/good/xg",
 )
 
 

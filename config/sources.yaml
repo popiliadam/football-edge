@@ -21,7 +21,13 @@ sources:
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 5.0
     robots_verified_at: 2026-09-19
-    declared_paths: ['/turkey/super-lig/xg']
+    declared_paths:
+      - /england/premier-league/xg
+      - /spain/la-liga/xg
+      - /italy/serie-a/xg
+      - /germany/bundesliga/xg
+      - /france/ligue-1/xg
+      - /turkey/super-lig/xg
     enabled: true
     access_basis: robots
     terms_url: ''
@@ -41,7 +47,9 @@ sources:
       davranmadığımızı garanti eder. Bedeli: bir toplama turunda altı istek başına beş kat
       daha uzun süre — kabul edilebilir. Ölçüldü: altı lig xg yolu da bu grup
       altında izinli (/england/league-one ve /league-two hariç, onlar zaten kapalı) — dürüst
-      kimliğin bedeli sıfır. Yalnız Türkiye şu an toplanıyor, declared_paths bunu yansıtıyor.
+      kimliğin bedeli sıfır. Task 5: Understat robots.txt ile kapalı olduğundan (Disallow: /)
+      footystats artık altı ligin HEPSİ için xG kaynağı; declared_paths altısını da taşıyor
+      ve her biri canlıda 200 döndüğü doğrulanarak eklendi (task-5-report.md).
 
   - id: tff
     base_url: https://www.tff.org

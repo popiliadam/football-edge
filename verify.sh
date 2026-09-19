@@ -41,24 +41,33 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # Ağa çıkmaz — fixture'lar repoda. Canlı tazeliği snapshot turu ölçer; burada ölçülen,
 # AYRIŞTIRICININ hâlâ beklenen şekli ürettiğidir.
 #
-# Task 4 sonunda `contract` marker'ını taşıyan HİÇBİR test yok — toplayıcılar (Task 5-8)
-# ekleyecek. `pytest -m contract` eşleşme yokken exit 5 ("no tests collected") verir; bu
-# FAIL DEĞİL, boş seçimdir. Ayrım burada AÇIKÇA yapılır — aksi hâlde exit 5 kapıyı yanlış
-# sebepten kırmızı yapar ve gerçek bir arıza gibi okunur (bkz. qa-loop "SKIP geçmek
-# değildir" ilkesi — burada tersi: BOŞ SEÇİM de arıza değildir, ama sessiz geçilmez).
+# Task 4 sonunda `contract` marker'ını taşıyan HİÇBİR test yoktu; Task 5 (footystats)
+# `tests/test_footystats.py`de İLK ÜÇÜNÜ ekledi: test_parses_every_team_in_the_league,
+# test_payload_carries_the_required_fields_in_plausible_ranges,
+# test_entity_key_is_league_scoped_and_stable (ölçüldü: `pytest tests/ -q -m contract`
+# → "3 passed, 161 deselected", task-5-report.md). `pytest -m contract` eşleşme yokken
+# exit 5 ("no tests collected") verir; bu FAIL DEĞİL, boş seçimdir. Ayrım burada AÇIKÇA
+# yapılır — aksi hâlde exit 5 kapıyı yanlış sebepten kırmızı yapar ve gerçek bir arıza
+# gibi okunur (bkz. qa-loop "SKIP geçmek değildir" ilkesi — burada tersi: BOŞ SEÇİM de
+# arıza değildir, ama sessiz geçilmez).
 #
-# BU İZİN SÜRESİZ DEĞİL (review #7). "Bugün 0" iddiası SABİT KALIRSA, ileride marker
-# yeniden adlandırılır / typo yapılır / bir collection hatası her şeyi deselect ederse
-# yine exit 5 döner ve "boş seçim, hataya sayılmaz" YANLIŞ olur — kapı bakmayı bırakmış
-# olur (`~/.claude/rules/qa-loop.md` Vaka 1: bir ay boyunca kapı yeşildi çünkü bakmıyordu).
-# EXPECTED_MIN_CONTRACT bu iddianın kaydıdır: exit 5, "gerçekte toplanan test sayısı
-# BUNUN ALTINDAYSA" değil, "exit 5 = toplanan 0" pytest'in kendi tanımıdır (resmî exit
-# kodu belgesi) — yani 0 < EXPECTED_MIN_CONTRACT ancak biri bu sayıyı >0'a yükseltip
-# (Task 5+ contract test eklerken KENDİ commit'inde yapar) sonra bir regresyon toplananı
-# yeniden 0'a düşürürse doğru olur. O ana kadar (bugün) EXPECTED_MIN_CONTRACT=0 olduğu
-# için bu kontrol bir NO-OP'tur — ama artık İLERİYE dönük, sessizce eskimiyor.
+# BU İZİN SÜRESİZ DEĞİL (review #7). Task 4'te "bugün 0" iddiası SABİT KALSAYDI, ileride
+# marker yeniden adlandırılır / typo yapılır / bir collection hatası her şeyi deselect
+# ederse yine exit 5 döner ve "boş seçim, hataya sayılmaz" YANLIŞ olurdu — kapı bakmayı
+# bırakmış olurdu (`~/.claude/rules/qa-loop.md` Vaka 1: bir ay boyunca kapı yeşildi çünkü
+# bakmıyordu). EXPECTED_MIN_CONTRACT bu iddianın kaydıdır: exit 5, "gerçekte toplanan
+# test sayısı BUNUN ALTINDAYSA" değil, "exit 5 = toplanan 0" pytest'in kendi tanımıdır
+# (resmî exit kodu belgesi) — yani 0 < EXPECTED_MIN_CONTRACT ancak biri bu sayıyı >0'a
+# yükseltip (Task 5+ contract test eklerken KENDİ commit'inde yapar — R24) sonra bir
+# regresyon toplananı yeniden 0'a düşürürse doğru olur. Task 5 bu sayıyı GERÇEKTEN
+# EKLEDİĞİ test sayısına (3) yükseltiyor — kırılmadan koşup koşmadığı
+# `judge-selftest` tarzı bir kırma-geri-yükleme ile kanıtlandı (task-5-report.md):
+# marker geçici olarak `contractX`e yeniden adlandırıldı → bu adım KIRMIZI verdi
+# ("contract etiketli test sayısı (0) beklenen alt sınırın (3) altında") → marker geri
+# `contract`e alındı → adım tekrar YEŞİL verdi. Mekanizma doğrulanmadan "çalışıyor"
+# denmedi.
 step "veri-sözleşmesi" bash -c '
-  EXPECTED_MIN_CONTRACT=0
+  EXPECTED_MIN_CONTRACT=3
 
   uv run pytest tests/ -q -m contract
   code=$?

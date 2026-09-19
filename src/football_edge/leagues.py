@@ -16,9 +16,12 @@ class League:
     lang: str
     gl: str
     active: bool
+    footystats_path: str
 
 
-REQUIRED_FIELDS = frozenset({"id", "odds_api_key", "name", "country", "lang", "gl", "active"})
+REQUIRED_FIELDS = frozenset(
+    {"id", "odds_api_key", "name", "country", "lang", "gl", "active", "footystats_path"}
+)
 
 
 def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
@@ -35,6 +38,8 @@ def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
 
 def load_leagues(path: Path) -> tuple[League, ...]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "leagues" not in raw:
+        raise ValueError(f"{path}: kökte 'leagues' anahtarı yok")
     entries = raw["leagues"]
     leagues: tuple[League, ...] = ()
     seen: frozenset[str] = frozenset()

@@ -183,7 +183,14 @@ QUOTA_HEADERS = {
 
 def _league(league_id: str, key: str) -> League:
     return League(
-        id=league_id, odds_api_key=key, name=key, country="X", lang="en", gl="GB", active=True
+        id=league_id,
+        odds_api_key=key,
+        name=key,
+        country="X",
+        lang="en",
+        gl="GB",
+        active=True,
+        footystats_path=f"/{league_id}/xg",
     )
 
 

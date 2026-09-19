@@ -23,6 +23,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good/xg
   - id: bad.1
     odds_api_key: soccer_bad
     name: Bad
@@ -30,6 +31,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /bad/xg
 """
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -137,6 +139,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /bad/xg
   - id: good.1
     odds_api_key: soccer_good
     name: Good
@@ -144,6 +147,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good/xg
   - id: good.2
     odds_api_key: soccer_good_two
     name: Good Two
@@ -151,6 +155,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good-two/xg
 """
 
 

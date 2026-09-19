@@ -21,6 +21,7 @@ from football_edge.anchors import (
     expected_anchor_names,
     missing_anchors,
 )
+from football_edge.collectors.footystats import collect_footystats
 from football_edge.db import (
     chain_head,
     connect,
@@ -588,7 +589,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="football-edge")
     parser.add_argument(
         "command",
-        choices=("snapshot", "seal", "verify-chain", "publish-head", "sources-audit"),
+        choices=(
+            "snapshot",
+            "seal",
+            "verify-chain",
+            "publish-head",
+            "sources-audit",
+            "fetch-footystats",
+        ),
     )
     parser.add_argument(
         "--full",
@@ -609,6 +617,18 @@ def main(argv: list[str] | None = None) -> int:
             return _verify_chain_command(conn, full=args.full)
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
+        if args.command == "fetch-footystats":
+            with httpx.Client() as client:
+                written = collect_footystats(
+                    conn,
+                    client,
+                    active_leagues(load_leagues(LEAGUES_PATH)),
+                    sources_path=SOURCES_PATH,
+                    robots_dir=ROBOTS_DIR,
+                    now=now,
+                )
+            sys.stdout.write(f"footystats: {written} yeni gözlem\n")
+            return 0
 
         api_key = _require_env("ODDS_API_KEY")
         configured = load_leagues(LEAGUES_PATH)

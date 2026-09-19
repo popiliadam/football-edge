@@ -15,6 +15,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /england/premier-league/xg
   - id: tur.1
     odds_api_key: soccer_turkey_super_league
     name: Super Lig
@@ -22,6 +23,7 @@ leagues:
     lang: tr
     gl: TR
     active: false
+    footystats_path: /turkey/super-lig/xg
 """
 
 
@@ -42,6 +44,7 @@ def test_loads_all_leagues(tmp_path: Path) -> None:
         lang="en",
         gl="GB",
         active=True,
+        footystats_path="/england/premier-league/xg",
     )
 
 
