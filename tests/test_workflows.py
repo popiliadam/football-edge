@@ -71,6 +71,17 @@ def _seal_run_body() -> str:
     return str(step["run"])
 
 
+# BU LİSTE ELLE TUTULUR — `collect`'in TÜM `EXIT_*` sabitlerinden otomatik türetilmez.
+# Yalnız `football_edge.collect seal`in (yukarıdaki `_seal_run_body`) DÖNEBİLECEĞİ kodları
+# taşır. Yeni bir `EXIT_*` sabiti eklemek bu listeyi OTOMATİK genişletmez — adı olmayan bir
+# kod bunu sessizce geçer, kırmadan (bkz. Task 3 brief'in "Things the brief cannot know" §3).
+# `EXIT_SOURCE_POLICY = 6` KASITLI OLARAK YOKTUR: `sources-audit` `seal`den TAMAMEN AYRI bir
+# alt komuttur ve `seal.yml` onu hiç çağırmaz (yalnız `football_edge.collect seal` çalıştırır)
+# — yani `_seal_run_body()`nin döndürdüğü metin 6'yı üretecek bir case arm'ı ASLA taşımaz;
+# burada 6 için bir vaka eklemek var olmayan bir çağrıyı adlandırmış olurdu. `sources-audit`ı
+# gerçekten çalıştıran iki yer (`verify.sh`, `sources-audit.yml`) case arm'ı taşımaz; ikisi de
+# adımın çıkışını ham haliyle "adım başarılı/başarısız" diye okur — bkz. `collect.py`'deki
+# `EXIT_SOURCE_POLICY` yorumu.
 @pytest.mark.parametrize(
     ("code", "name"),
     [

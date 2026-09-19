@@ -29,6 +29,11 @@ step "pytest"      uv run pytest -q
 step "paket-kurulu" env PYTHONPATH= uv run python -c \
   "import football_edge, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
 
+# Kaynak politikası ÇEVRİMDIŞI sorulur: ağ yok, secret yok, her push'ta koşar. Canlı sapmayı
+# sources-audit.yml günde bir ölçer. Robots'u ölçmeden "izinli" demek, spec §3.2'yi prose'a
+# geri çevirir; bu adım onu kuralda tutar.
+step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect sources-audit
+
 step "secrets"     ./scripts/check_secrets.sh
 
 if [ -n "${DATABASE_URL:-}" ]; then

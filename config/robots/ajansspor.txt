@@ -1,0 +1,55 @@
+User-agent: *
+Content-Signal: ai-train=no, search=yes, ai-input=yes
+Disallow: /home/
+Disallow: /Partial/
+Disallow: /kvkk
+Disallow: /uyelik-sozlesmesi
+Disallow: /futbol/mac-puan-durumlari/*
+Disallow: /futbol/mac-bilgi/*
+Disallow: /giris-yap
+Disallow: /arama/
+Disallow: /basketbol/lig/*
+Disallow: /basketbol/takim/*
+Disallow: /basketbol/mac-ozeti/*
+Disallow: /voleybol/lig/*
+Disallow: /voleybol/takim/*
+Disallow: /euro/*
+Disallow: /*class=*
+Disallow: /*?pq*
+Disallow: /lineup/*
+Disallow: /*kyok*
+Disallow: *rsc=*
+# Spor sayfaları geçici olarak taramaya kapalı — hepsi noindex.
+Disallow: /lig/
+Disallow: /mac/
+Disallow: /oyuncu/
+Disallow: /takim/
+
+User-agent: Googlebot-News
+Disallow: /formula/*
+Disallow: /futbol/takim/*
+Disallow: /futbol/oyuncu/*
+Disallow: /futbol/lig/*
+Disallow: /futbol/mac-istatistik/*
+Disallow: /futbol/mac-bilgi/*
+Disallow: /futbol/mac-ozeti/*
+Disallow: /futbol/mac-puan-durumlari/*
+Disallow: /futbol/takim/puan-durumu/*
+Disallow: /basketbol/lig/*
+Disallow: /basketbol/takim/*
+Disallow: /basketbol/mac-ozeti/*
+Disallow: /voleybol/lig/*
+Disallow: /voleybol/takim/*
+Disallow: /euro2020/*
+Disallow: /mac-merkezi
+Disallow: /tum-maclar
+Disallow: /at-yarisi
+Disallow: /arama?ara*
+# Spor sayfaları geçici olarak taramaya kapalı — hepsi noindex.
+Disallow: /lig/
+Disallow: /mac/
+Disallow: /oyuncu/
+Disallow: /takim/
+
+Sitemap: https://ajansspor.com/sitemap
+Sitemap: https://ajansspor.com/sitemap/news

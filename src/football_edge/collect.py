@@ -7,7 +7,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +30,13 @@ from football_edge.ledger import (
     verify_chain,
 )
 from football_edge.odds_api import PriceRow, Quota, QuotaExhausted, fetch_odds, guard_quota
+from football_edge.sources import audit_offline, load_sources
 
 LOGGER = logging.getLogger("football_edge.collect")
 LEAGUES_PATH = Path("config/leagues.yaml")
 ANCHOR_DIR = Path("ledger")
+SOURCES_PATH = Path("config/sources.yaml")
+ROBOTS_DIR = Path("config/robots")
 
 # db/migrations/0001_init.sql → check (price > 1.0). Şema kısıtının kod tarafındaki karşılığı.
 MIN_PRICE = 1.0
@@ -52,6 +55,13 @@ EXIT_MIRROR_FAILED = 4
 # olamaz — 0, seal.yml'de "mühür turu tamam" diye okunur ve Faz 0'ın önlemek için
 # var olduğu TEK sonuç başarı olarak raporlanır.
 EXIT_MISSED_SEAL = 5
+# BİLİNÇLİ İSTİSNA: yukarıdaki "her kodun ADLANDIRILMIŞ case arm'ı vardır" kuralı buna
+# UYGULANMAZ. `sources-audit` `seal.yml`/`snapshot.yml`ce HİÇ çağrılmaz (case listesi
+# taşıyan tek yerler), o yüzden oraya bir arm eklemek var olmayan bir çağrıyı adlandırırdı.
+# Bunu gerçekten tüketen `verify.sh`/`sources-audit.yml` case arm'ı taşımaz — adımın çıkışını
+# ham "başarılı/başarısız" diye okurlar. `tests/test_workflows.py`'nin parametrize listesi
+# YALNIZ seal.yml'in case'lerini tutar ve bunu KASITLI dışarıda bırakır (o dosyadaki yorum).
+EXIT_SOURCE_POLICY = 6
 
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
@@ -610,6 +620,17 @@ def archived_anchors(
     return tuple(name for name in expected if name in present_anywhere and name not in top_level)
 
 
+def _sources_audit_command(*, today: date) -> int:
+    """`config/sources.yaml`'ı commit'lenmiş robots anlık görüntülerine karşı sorar — ağsız."""
+    violations = audit_offline(load_sources(SOURCES_PATH), ROBOTS_DIR, today)
+    if not violations:
+        sys.stdout.write("kaynak politikası: TEMİZ\n")
+        return 0
+    for text in violations:
+        sys.stdout.write(f"KAYNAK POLİTİKASI İHLALİ: {text}\n")
+    return EXIT_SOURCE_POLICY
+
+
 def _report_chain(result: ChainResult) -> int:
     sys.stdout.write(
         f"zincir: {'SAĞLAM' if result.ok else 'KIRIK'} "
@@ -735,7 +756,10 @@ def _exit_code(result: CollectResult) -> int:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="football-edge")
-    parser.add_argument("command", choices=("snapshot", "seal", "verify-chain", "publish-head"))
+    parser.add_argument(
+        "command",
+        choices=("snapshot", "seal", "verify-chain", "publish-head", "sources-audit"),
+    )
     parser.add_argument(
         "--full",
         action="store_true",
@@ -744,6 +768,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     now = datetime.now(UTC)
+
+    # `connect()` AÇILMADAN ÖNCE: veritabanına DOKUNMAZ — DATABASE_URL yokken de kırılmaz,
+    # `verify.sh`nin ağsız/secret'sız koşma sözleşmesiyle tutarlı.
+    if args.command == "sources-audit":
+        return _sources_audit_command(today=now.date())
 
     with connect() as conn:
         if args.command == "verify-chain":

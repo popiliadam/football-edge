@@ -1,0 +1,99 @@
+# Kaynak kayıt defteri. `declared_paths`, toplayıcının GERÇEKTEN istediği yollardır ve kapı
+# her push'ta bunları config/robots/<id>.txt'ye karşı sorar. Yeni bir yol eklemeden önce
+# robots'a bak; kapı zaten bakacak.
+#
+# Ölçüm tarihi 2026-09-19. `robots_verified_at` 30 günden eskiyse kapı kırmızı verir —
+# tazelemek için Task 3 Step 5'teki komutu yeniden koş ve tarihleri güncelle.
+#
+# BİLİNEN SINIR (bkz. src/football_edge/sources.py:allows): `urllib.robotparser` joker
+# karakter (`*`/`$`) DESTEKLEMEZ — yalnız düz önek eşleşir. `declared_paths`e joker
+# karakterli bir robots deseniyle "eşleşecek" bir yol eklemeyin; kapı onu sessizce
+# ATLAR (yakalamaz), engellemez.
+sources:
+  - id: footystats
+    base_url: https://footystats.org
+    user_agent: ClaudeBot/1.0 (+https://anthropic.com/claudebot)
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/turkey/super-lig/xg']
+    enabled: true
+    note: 'robots: User-agent ClaudeBot → Crawl-delay 1. Lig başına bir /xg yolu eklenir.'
+
+  - id: tff
+    base_url: https://www.tff.org
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/Default.aspx?pageID=600', '/Default.aspx?pageID=246']
+    enabled: true
+    note: 'robots.txt YOK (404). Gövde windows-1254; charset YALNIZ HTTP başlığında.'
+
+  - id: ajansspor
+    base_url: https://ajansspor.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/sitemap.xml']
+    enabled: true
+    note: >-
+      Content-Signal: ai-train=no, search=yes, ai-input=yes. /lineup/, /mac/, /oyuncu/,
+      /lig/ ve *rsc=* DISALLOW — muhtemel 11 ve yapısal sayfalar ALINMAZ, yalnız haber yolları.
+
+  - id: openmeteo
+    base_url: https://api.open-meteo.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 0.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    note: >-
+      KAPALI — PLANDAN SAPMA, Task 3 sırasında bulundu (bkz. task-3-report.md). Bu görev
+      açık varsaymıştı ama 2026-09-19 canlı ölçümü aksini gösterdi: robots.txt YALNIZ 25
+      bayt, "User-agent: * / Disallow: /" — Understat'la AYNI şekil, TÜM yolları kapatıyor.
+      Anahtarsız/ücretsiz API, `elevation` alanını doğrudan veriyor — ama spec §3.2
+      istisnasız: robots.txt kapalıysa taranmaz. Farklı bir ölçüm ya da bilinçli, dokümante
+      bir ToS-istisnası kararı olmadan enabled: true YAPILMAMALI.
+
+  - id: wikidata
+    base_url: https://www.wikidata.org
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    note: >-
+      KAPALI — PLANDAN SAPMA, Task 3 sırasında bulundu (bkz. task-3-report.md). Gerçek
+      robots.txt (MediaWiki standardı, ~15.9 KB), `User-agent: *` için düz önekle
+      "Disallow: /wiki/Special:" taşıyor — joker karaktere gerek yok, ölçüldü:
+      beyan edilecek /wiki/Special:EntityData bu önekle tam örtüşüyor ve `can_fetch`
+      False dönüyor. Dosyanın ilerisinde dar bir "Allow: /wiki/Special:EntityData/*."
+      var ama `Entry.allowance()` dosya SIRASINDAKİ İLK eşleşen kuralı kullanır — daha
+      erken ve daha geniş Disallow önce geliyor. SPARQL değil REST kullanma kararı hâlâ
+      geçerli ama robots bu haliyle kapatıyor; xG dışı kimlik verisi kaynağı ertelendi.
+
+  - id: googlenews
+    base_url: https://news.google.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    note: >-
+      KAPALI (Ruling B). Feed 200 dönüyor ve hl/gl/ceid çalışıyor, ama feed'in kendi
+      <copyright> metni: "solely for the purpose of rendering Google News results within a
+      personal feed reader for personal, non-commercial use. Any other use of the feed is
+      expressly prohibited." Adaptör yazıldı, varsayılan kapalı; ticari karar operatörde.
+      Ayrıca robots.txt ölçüldü: `*` bloğu genel Disallow: / taşıyor VE ayrıca CCBot,
+      GPTBot, ChatGPT-User, PerplexityBot, anthropic-ai, ClaudeBot, Claude-Web'i AÇIKÇA
+      isimle kapatıyor — ikinci, bağımsız bir kapanış nedeni.
+
+  - id: understat
+    base_url: https://understat.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    note: >-
+      KAPALI (Ruling A). robots.txt = "User-agent: * / Disallow: /" (26 bayt,
+      Last-Modified 2020-07-13). Spec §3.2/1 gereği taranmaz. xG kapsamını footystats devraldı.
