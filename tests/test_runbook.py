@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-RUNBOOK = Path(__file__).resolve().parent.parent / "docs/RUNBOOK.md"
-PHASE_HANDOFF = Path(__file__).resolve().parent.parent / "docs/phases/00-kayit-altyapisi/HANDOFF.md"
+REPO = Path(__file__).resolve().parent.parent
+RUNBOOK = REPO / "docs/RUNBOOK.md"
+PHASE_HANDOFF = REPO / "docs/phases/00-kayit-altyapisi/HANDOFF.md"
+DEFERRED = REPO / "docs/DEFERRED.md"
 
 
 def _runbook() -> str:
@@ -68,4 +70,17 @@ def test_phase_handoff_points_at_the_runbook() -> None:
     """Runbook, kimsenin bakmadığı bir dosyada durursa yok sayılır."""
     assert "RUNBOOK.md" in PHASE_HANDOFF.read_text(encoding="utf-8"), (
         "faz devir belgesi runbook'a hiç işaret etmiyor"
+    )
+
+
+def test_the_deferred_ledger_is_tracked_and_pointed_at() -> None:
+    """D2: karar kaydının tamamı `.superpowers/sdd/.gitignore` (`*`) altındaydı.
+
+    Ertelenen her bulgu, her ruling, her bilinen ödünleşme orada duruyordu ve
+    MERGE OLMAYACAKTI. İzlenen bir dosyaya taşındı; devir belgesi ona işaret
+    etmezse Faz 1 onu yine bulamaz.
+    """
+    assert DEFERRED.is_file(), "docs/DEFERRED.md yok: ertelenen bulgular merge olmuyor"
+    assert "DEFERRED.md" in PHASE_HANDOFF.read_text(encoding="utf-8"), (
+        "faz devir belgesi ertelenen bulgular listesine hiç işaret etmiyor"
     )
