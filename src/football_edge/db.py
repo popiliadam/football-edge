@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg
 
+from football_edge.leagues import League
 from football_edge.ledger import GENESIS, canonical_timestamp, chain
 from football_edge.odds_api import PriceRow
 
@@ -45,6 +46,42 @@ def chain_head(conn: psycopg.Connection[Any]) -> str:
         cur.execute("SELECT row_hash FROM odds_snapshots ORDER BY id DESC LIMIT 1")
         found = cur.fetchone()
     return GENESIS if found is None else str(found[0])
+
+
+def upsert_leagues(conn: psycopg.Connection[Any], leagues: tuple[League, ...]) -> int:
+    """config/leagues.yaml'ı leagues tablosuna yansıtır. Konfigürasyon kaynak, tablo aynadır.
+
+    matches.league_id bu tabloya yabancı anahtarla bağlı. Tablo elle doldurulursa temiz bir
+    veritabanında her lig ayrı ayrı ForeignKeyViolation verir ve toplayıcının lig izolasyonu
+    TEK sistemik sebebi altı bağımsız arıza gibi gösterir. Elle kurulan ön koşul değildir.
+    """
+    written = 0
+    with conn.cursor() as cur:
+        for league in leagues:
+            cur.execute(
+                """
+                INSERT INTO leagues (id, odds_api_key, name, country, lang, gl, active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                  odds_api_key = excluded.odds_api_key,
+                  name = excluded.name,
+                  country = excluded.country,
+                  lang = excluded.lang,
+                  gl = excluded.gl,
+                  active = excluded.active
+                """,
+                (
+                    league.id,
+                    league.odds_api_key,
+                    league.name,
+                    league.country,
+                    league.lang,
+                    league.gl,
+                    league.active,
+                ),
+            )
+            written += cur.rowcount
+    return written
 
 
 def upsert_matches(

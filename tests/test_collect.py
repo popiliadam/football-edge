@@ -9,6 +9,8 @@ import httpx
 from football_edge.collect import _latest_anchor, horizon_iso, run_snapshot, seal_window
 from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp, chain, verify_chain
+from tests.fake_db import FakeLedgerDb
+from tests.payloads import event, quota_headers
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 
@@ -35,14 +37,15 @@ def test_horizon_iso_formats_utc_with_z() -> None:
 
 def test_latest_anchor_reads_newest_file(tmp_path: Path) -> None:
     (tmp_path / "head-2026-09-18.txt").write_text(
-        "2026-09-18T00:00:00+00:00\nrows=10\nhead=aaa\n", encoding="utf-8"
+        "2026-09-18T00:00:00+00:00\nrows=10\nlast_id=10\nhead=aaa\n", encoding="utf-8"
     )
     (tmp_path / "head-2026-09-19.txt").write_text(
-        "2026-09-19T00:00:00+00:00\nrows=25\nhead=bbb\n", encoding="utf-8"
+        "2026-09-19T00:00:00+00:00\nrows=25\nlast_id=25\nhead=bbb\n", encoding="utf-8"
     )
     anchor = _latest_anchor(tmp_path)
     assert anchor is not None
     assert anchor.rows == 25
+    assert anchor.last_id == 25
     assert anchor.head == "bbb"
 
 
@@ -177,3 +180,20 @@ def test_collect_isolates_a_failing_league() -> None:
     assert result.written > 0, "sağlam lig yine de yazılmalıydı"
     assert conn.rollbacks == 1
     assert conn.commits == 1
+
+
+def test_one_invalid_price_does_not_cost_the_league_its_other_rows() -> None:
+    """E6: şemadaki check (price > 1.0) tek satır yüzünden tüm turu geri alıyordu."""
+    db = FakeLedgerDb(leagues={"good.1": ("good.1",)})
+    payload = [event("evt1", "2026-09-20T14:00:00Z", prices=(1.0, 2.5))]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload, headers=quota_headers(400))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    result = run_snapshot(db, client, "KEY", (_league("good.1", "soccer_good"),), NOW)  # type: ignore[arg-type]
+
+    assert result.failed_leagues == (), "bir bozuk fiyat ligin tamamını götürmemeli"
+    assert result.written == 1
+    assert [row["price"] for row in db.snapshots] == [2.5]
