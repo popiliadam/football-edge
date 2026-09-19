@@ -7,10 +7,17 @@ formu döner (Organizasyon → Grup → Hafta kademeli seçim + "Ara" düğmesi,
 postback/AJAX) — DataList1 konteyneri sıfır satır taşır. Gerçek veri pageID=600'de:
 `<div class="row haftaninMaclariMaclar">` ile tekrarlanan, GET'le doğrudan erişilebilir
 bir blok, 7 lig, 63 maç (bugünkü anlık görüntüde).
+
+FIXTURE_433 (`hakem-433.html`) bu ölçümün KANITIDIR — kendisi hiçbir pozitif testte
+kullanılmaz, yalnız `test_referee_search_page_433_yields_no_rows`de PİNLENİR: brief'in
+işaret ettiği sayfanın gerçekten sıfır satır ürettiğini ve `parse_referees`in o sayfada
+UYDURMA satır ÜRETMEDİĞİNİ birlikte kanıtlar. Fixture rotarsa ya da silinirse bu test
+kırmızı verir; aksi hâlde dosyanın varlığı yalnız bu docstring'e ve rapora güvenirdi.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,11 +31,32 @@ from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import write_robots
 
 FIXTURE = Path("tests/fixtures/tff/haftanin-maclari-600.html")
+FIXTURE_433 = Path("tests/fixtures/tff/hakem-433.html")
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
 
 
 def fixture_html() -> str:
     return FIXTURE.read_text(encoding="utf-8")
+
+
+def _drop_all_but_first_n_head_referees(html: str, *, keep: int) -> str:
+    """`(H) ` önekini ilk `keep` tanesi HARİÇ kaldırır.
+
+    Görevli hücresi hâlâ DOLU (Y/D/diğer roller duruyor), yalnız baş-hakem ETİKETİ
+    kayboluyor — review Important #1'in ölçtüğü arıza sınıfının kaynakta üretimi: bir
+    üst akış değişikliği hücreleri BOŞALTMAZ, yalnız etiketi taşıyan alt yapıyı
+    değiştirir. Bu, hücrenin TAMAMEN boş olduğu meşru "TFF henüz atamamış" durumundan
+    (bkz. `_officials_cell_is_empty`) kasıtlı olarak FARKLIDIR.
+    """
+    pattern = re.compile(r"\(H\) ")
+    seen = 0
+
+    def _replace(match: re.Match[str]) -> str:
+        nonlocal seen
+        seen += 1
+        return match.group(0) if seen <= keep else ""
+
+    return pattern.sub(_replace, html)
 
 
 @pytest.mark.contract
@@ -84,6 +112,31 @@ def test_match_missing_a_head_referee_is_skipped_not_crashed() -> None:
     """
     parsed = parse_referees(fixture_html(), observed_at=NOW)
     assert len(parsed) == 62
+
+
+def test_partial_referee_loss_raises_rather_than_undercounting() -> None:
+    """review Important #1 (ölçülerek kanıtlandı): 62 satırdan 56'sı `(H)` etiketini
+    kaybederse ESKİ davranış SESSİZCE 5 gözlem yazıp `assert_schema(minimum_rows=5)`i
+    geçiyordu — 62 yerine 5 "başarı" diye raporlanıyordu, hiçbir uyarı olmadan.
+
+    Bu satırların görevli hücresi hâlâ DOLU (yalnız `(H)` etiketi yok) — bu yüzden
+    `_officials_cell_is_empty` onları "meşru boşluk" SAYMAZ, `unassigned`e eklenmezler,
+    ve `len(parsed) + unassigned < total_rows` tutar: `ContractViolation` fırlamalı.
+    """
+    degraded = _drop_all_but_first_n_head_referees(fixture_html(), keep=6)
+    with pytest.raises(ContractViolation, match="görevlisiz"):
+        parse_referees(degraded, observed_at=NOW)
+
+
+@pytest.mark.contract
+def test_referee_search_page_433_yields_no_rows() -> None:
+    """`hakem-433.html`i PİNLER (bkz. modül docstring'i): brief'in işaret ettiği sayfa
+    gerçekten sıfır satır üretir VE `parse_referees` o sayfadan UYDURMA satır türetmez —
+    ikisi birden, fixture'ın kendisi çürüse/silinse kırmızı verecek TEK testte.
+    """
+    html = FIXTURE_433.read_text(encoding="utf-8")
+    with pytest.raises(ContractViolation):
+        parse_referees(html, observed_at=NOW)
 
 
 def test_empty_page_raises_rather_than_returning_empty() -> None:

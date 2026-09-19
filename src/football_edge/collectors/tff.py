@@ -99,6 +99,21 @@ def _head_referee(row: Tag) -> str:
     return ""
 
 
+def _officials_cell_is_empty(row: Tag) -> bool:
+    """Görevli hücresi VAR ama hiç `<a>` taşımıyor mu — bu, ÖLÇÜLEN, GERÇEK "TFF henüz
+    atamamış" durumudur (63 maçtan 1'i, `YENİ MALATYASPOR – NİĞDE BELEDİYESİ SPOR`:
+    hücre `<div class="...Hakemler">` olarak MEVCUT, içi tamamen boş — `find_all("a")`
+    boş liste döner). Hücrenin KENDİSİ hiç yoksa bu FARKLI bir arıza sınıfıdır (satır
+    şekli beklenenden de fazla değişmiş demektir); o durumda `False` döner ki çağıran
+    bunu meşru boşluk SAYMASIN — `parse_referees`teki sayım bunu bir kayıp olarak
+    işaretler.
+    """
+    officials_cell = row.find("div", class_=_OFFICIALS_CLASS)
+    if not isinstance(officials_cell, Tag):
+        return False
+    return not officials_cell.find_all("a")
+
+
 def _league_blocks(soup: BeautifulSoup) -> tuple[tuple[str, Tag], ...]:
     """Her lig bloğunu `(lig adı, o lige ait KONTEYNER)` çifti olarak döner.
 
@@ -127,19 +142,34 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
 
     Satır şekli TFF tarafından değiştirilebilir; bu yüzden hem lig eşlemesi hem de
     baş-hakem alanı İSİM/ETİKET ile bulunur, konumla değil (bkz. `_league_blocks`,
-    `_head_referee`). Bir maçın görevli listesi TAMAMEN boşsa (ölçüldü: 63 maçtan 1'i,
+    `_head_referee`). Bir maçın görevli hücresi TAMAMEN boşsa (ölçüldü: 63 maçtan 1'i,
     TFF henüz atamamış — GERÇEK bir durum, ayrıştırıcı arızası değil) o satır sessizce
-    atlanır. Ama HİÇ satır tanınmazsa `ContractViolation` fırlatılır: boş sonuç,
-    sayfa şekli değiştiğinde başarıdan ayırt edilemez olurdu.
+    atlanır ve `unassigned` sayacına eklenir.
+
+    Bunun DIŞINDA bir sebeple atlanan HER satır (review Important #1 — ölçülerek
+    kanıtlandı: 62 satırdan 56'sının `(H)` etiketi kaldırılınca eski kod SESSİZCE 5
+    gözlem yazıp `assert_schema(minimum_rows=5)`i geçiyordu, 62 yerine 5 "başarı" diye
+    raporlanıyordu) `ContractViolation` fırlatır — `len(parsed) + unassigned <
+    total_rows` bunu, HİÇBİR ek tahmin gerektirmeden, saf sayımla yakalar: meşru boşluk
+    (`unassigned`) ile ayrıştırıcı kaybı arasındaki TEK fark, görevli hücresinin VAR
+    ama boş mu, yoksa DOLU ama etiketsiz mi olduğudur (bkz. `_officials_cell_is_empty`).
+
+    HİÇ satır tanınmazsa da aynı istisna fırlar: boş sonuç, sayfa şekli tamamen
+    değiştiğinde başarıdan ayırt edilemez olurdu.
     """
     soup = BeautifulSoup(html_text, "html.parser")
     parsed: tuple[Observation, ...] = ()
+    total_rows = 0
+    unassigned = 0
     for league_name, container in _league_blocks(soup):
         for row in container.find_all("div", class_=_MATCH_ROW_CLASS):
+            total_rows += 1
             home = _team_name(row, _HOME_CLASS)
             away = _team_name(row, _AWAY_CLASS)
             referee = _head_referee(row)
             if not (home and away and referee):
+                if _officials_cell_is_empty(row):
+                    unassigned += 1
                 continue
             parsed = (
                 *parsed,
@@ -158,6 +188,13 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
             )
     if not parsed:
         raise ContractViolation(f"{SOURCE_ID}: hiç hakem ataması tanınmadı — sayfa şekli değişti")
+    if unassigned:
+        LOGGER.info("%s: %d maç için hakem ataması henüz yayınlanmamış", SOURCE_ID, unassigned)
+    if len(parsed) + unassigned < total_rows:
+        raise ContractViolation(
+            f"{SOURCE_ID}: {total_rows} satır bulundu, {len(parsed)} ayrıştırıldı, "
+            f"{unassigned} görevlisiz; en az bir satır sessizce atlandı"
+        )
     return parsed
 
 
