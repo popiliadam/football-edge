@@ -563,15 +563,47 @@ def expected_anchor_names(directory: Path = ANCHOR_DIR) -> tuple[str, ...] | Non
     return tuple(sorted(set(names)))
 
 
+def _anchor_names_anywhere(directory: Path) -> set[str]:
+    """`directory` altında (alt dizinler DÂHİL) bulunan çıpa dosyalarının adları.
+
+    RUNBOOK §1.4'ün MEŞRU kurtarma adımı `head-*.txt`i `directory/archive/`e TAŞIR:
+    üst düzeyden kalkar ama dizinin ALTINDA durmaya devam eder. Yalnız üst düzeye
+    bakan bir tarama (`directory.glob`), arşivlemeyi silmeden ayırt edemez — dokümante
+    edilmiş kurtarma adımının kendisi kapıyı kalıcı kırmızı yapardı.
+    """
+    return {target.name for target in directory.rglob("head-*.txt")}
+
+
 def missing_anchors(
     directory: Path = ANCHOR_DIR, *, recorded: tuple[str, ...] | None = None
 ) -> tuple[str, ...]:
-    """Geçmişte yayınlanmış ama diskte OLMAYAN çıpalar."""
+    """Geçmişte yayınlanmış, NE üst düzeyde NE DE arşivde (`directory` altında hiçbir
+    yerde) bulunan çıpalar. Arşivlenen çıpa burada YOKTUR — bkz. `archived_anchors`."""
     expected = expected_anchor_names(directory) if recorded is None else recorded
     if expected is None:
         return ()
-    present = {target.name for target in directory.glob("head-*.txt")}
-    return tuple(name for name in expected if name not in present)
+    present_anywhere = _anchor_names_anywhere(directory)
+    return tuple(name for name in expected if name not in present_anywhere)
+
+
+def archived_anchors(
+    directory: Path = ANCHOR_DIR, *, recorded: tuple[str, ...] | None = None
+) -> tuple[str, ...]:
+    """Geçmişte yayınlanmış, üst düzeyde YOK ama `directory` altında (RUNBOOK §1.4'teki
+    `archive/` gibi) bulunan çıpalar.
+
+    Bunları sessizce "var" saymak, bir saldırganın çıpayı SİLMEK yerine TAŞIYARAK
+    kontrolü atlatmasına izin verirdi. Bunun yerine adıyla raporlanır: RUNBOOK §1.4
+    zaten "arşivlenen çıpa kanıtı GÖTÜRÜR, bu bir kayıptır" diyor — bu fonksiyon o
+    kaybı görünür kılar, `_verify_chain_command` onu SESSİZ bırakmaz (ama kırmızı da
+    vermez: meşru bir prosedür kalıcı olarak kapıyı kilitlemez).
+    """
+    expected = expected_anchor_names(directory) if recorded is None else recorded
+    if expected is None:
+        return ()
+    top_level = {target.name for target in directory.glob("head-*.txt")}
+    present_anywhere = _anchor_names_anywhere(directory)
+    return tuple(name for name in expected if name in present_anywhere and name not in top_level)
 
 
 def _report_chain(result: ChainResult) -> int:
@@ -595,11 +627,20 @@ def _verify_chain_command(
             f"en yeni çıpa okunamadı ({scan.downgraded.name}) — kuyruk kesme kontrolü "
             "bir önceki çıpaya düşürüldü, EN YENİ ÇIPA ATLANDI\n"
         )
-    if expected_anchor_names(anchor_dir) is None:
+    expected = expected_anchor_names(anchor_dir)
+    if expected is None:
         # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
         sys.stdout.write("git geçmişi okunamadı — ÇIPA EKSİKLİĞİ KONTROLÜ ATLANDI\n")
     else:
-        gone = missing_anchors(anchor_dir)
+        archived = archived_anchors(anchor_dir, recorded=expected)
+        if archived:
+            # RUNBOOK §1.4: arşivleme (TAŞIMA) meşrudur ama kanıtı GÖTÜRÜR. Bu satır o
+            # kaybı sessiz bırakmaz — ama meşru bir prosedür kapıyı kalıcı kırmızı da
+            # yapmaz: yalnız SİLİNEN (hiçbir yerde bulunamayan) çıpa aşağıda exit 1 verir.
+            sys.stdout.write(
+                "ÇIPA ARŞİVLENDİ (kanıt kapsamı daraldı): " + ", ".join(archived) + "\n"
+            )
+        gone = missing_anchors(anchor_dir, recorded=expected)
         if gone:
             sys.stdout.write(
                 "ÇIPA EKSİK (git geçmişinde var, diskte yok): " + ", ".join(gone) + "\n"
