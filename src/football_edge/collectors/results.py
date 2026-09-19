@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -10,6 +11,8 @@ import psycopg
 from football_edge.collector import ContractViolation
 from football_edge.ledger import canonical_timestamp
 from football_edge.odds_api import BASE_URL, Quota, read_quota
+
+LOGGER = logging.getLogger("football_edge.collectors.results")
 
 SOURCE_ID = "oddsapi_scores"
 
@@ -24,6 +27,24 @@ class MatchOutcome:
     away_goals: int
     completed: bool
     observed_at: datetime
+
+
+@dataclass(frozen=True)
+class ParsedScores:
+    """`parse_scores`in sonucu: sonuçlar ve GÖRÜNÜR KILINMIŞ bir arıza sınıfı bir arada.
+
+    `scoreless_completed` (R34), `collectors.footystats.FootyStatsResult.failed_leagues`
+    ile AYNI gerekçeyle var: `completed=true` ama `scores` boş/yok bir olay sessizce
+    ATLANIR — uydurma bir 0-0 sonucu YAZILMAZ, bu davranış DEĞİŞMEDİ. Ama skip'in
+    KENDİSİ SESSİZ kalırsa "tamamlanmış ama skorsuz" ile "henüz oynanmadı" çıktıda
+    AYIRT EDİLEMEZ olur. Bugün nadir bir kenar durum; vantorun davranışı kayarsa
+    (alan adı değişir, `completed` ne zaman set edildiği değişir) sistematik hâle
+    gelebilir ve belirti "Elo sessizce açlık çeker, komut yine de başarı raporlar"
+    olur — Faz 0'ın dört düzeltme turu harcadığı kaçan-mühür sorunuyla AYNI şekil.
+    """
+
+    outcomes: tuple[MatchOutcome, ...]
+    scoreless_completed: tuple[str, ...] = ()
 
 
 def _goals(scores: list[dict[str, Any]], team: str, event_id: str) -> int:
@@ -45,7 +66,7 @@ def _goals(scores: list[dict[str, Any]], team: str, event_id: str) -> int:
     raise ContractViolation(f"{SOURCE_ID}: '{team}' skor listesiyle eşleşmedi ({event_id})")
 
 
-def parse_scores(payload: list[dict[str, Any]], observed_at: datetime) -> tuple[MatchOutcome, ...]:
+def parse_scores(payload: list[dict[str, Any]], observed_at: datetime) -> ParsedScores:
     """Tamamlanmış maçları sonuca çevirir; tamamlanmamışlar ATLANIR, 0-0 YAZILMAZ.
 
     `scores` dizisinin SIRASI belgelenmemiştir; ev/deplasman ADA göre eşlenir. Konuma göre
@@ -54,15 +75,29 @@ def parse_scores(payload: list[dict[str, Any]], observed_at: datetime) -> tuple[
 
     Sonuç yolu HİÇ varlık eşlemesi gerektirmez: `match_id` The Odds API'nin kendi
     `id`'sidir ve `matches` tablosunda zaten aynı kimlikle duruyor (Faz 0, snapshot/seal).
+
+    `completed=true` ama `scores` boş/yok olan olay da ATLANIR (R34) — ama bu ikinci skip
+    `completed=false` skip'inden FARKLI muameleye tabidir: WARNING'e loglanır VE
+    `ParsedScores.scoreless_completed`e event_id'siyle eklenir, çünkü "tamamlanmış ama
+    skorsuz" nadir ve beklenmedik bir vantor arızasıdır — "henüz oynanmadı" ise sıradan,
+    her turda beklenen bir durumdur. İkisini AYNI sessiz `continue`da bırakmak, bkz.
+    `ParsedScores` docstring'i.
     """
     outcomes: tuple[MatchOutcome, ...] = ()
+    scoreless: tuple[str, ...] = ()
     for entry in payload:
         if not entry.get("completed"):
             continue
+        event_id = str(entry["id"])
         scores = entry.get("scores")
         if not scores:
+            LOGGER.warning(
+                "lig=%s maç=%s tamamlanmış ama skor yok — sonuç atlandı (uydurma 0-0 yazılmadı)",
+                entry["sport_key"],
+                event_id,
+            )
+            scoreless = (*scoreless, event_id)
             continue
-        event_id = str(entry["id"])
         outcomes = (
             *outcomes,
             MatchOutcome(
@@ -73,7 +108,7 @@ def parse_scores(payload: list[dict[str, Any]], observed_at: datetime) -> tuple[
                 observed_at=observed_at,
             ),
         )
-    return outcomes
+    return ParsedScores(outcomes=outcomes, scoreless_completed=scoreless)
 
 
 def fetch_scores(
@@ -83,7 +118,7 @@ def fetch_scores(
     observed_at: datetime,
     *,
     days_from: int = 3,
-) -> tuple[tuple[MatchOutcome, ...], Quota]:
+) -> tuple[ParsedScores, Quota]:
     """`daysFrom` BELİRTİLİNCE maliyet 2 kredidir (1 değil) — vantor belgesinde açık.
 
     Geçerli aralık 1-3; dışına çıkmak API hatası verir (ve kredi HARCAR). Bu yüzden

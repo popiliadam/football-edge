@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,12 +47,12 @@ def test_maps_scores_to_home_and_away_by_name() -> None:
     reversed_order = event(
         scores=[{"name": "Fenerbahce", "score": "1"}, {"name": "Galatasaray", "score": "2"}]
     )
-    (outcome,) = parse_scores([reversed_order], NOW)
+    (outcome,) = parse_scores([reversed_order], NOW).outcomes
     assert (outcome.home_goals, outcome.away_goals) == (2, 1)
 
 
 def test_skips_events_that_have_not_completed() -> None:
-    assert parse_scores([event(completed=False, scores=None)], NOW) == ()
+    assert parse_scores([event(completed=False, scores=None)], NOW).outcomes == ()
 
 
 def test_skips_a_not_completed_event_even_when_it_already_carries_scores() -> None:
@@ -64,7 +65,7 @@ def test_skips_a_not_completed_event_even_when_it_already_carries_scores() -> No
     izole eder.
     """
     live_but_unfinished = event(completed=False)
-    assert parse_scores([live_but_unfinished], NOW) == ()
+    assert parse_scores([live_but_unfinished], NOW).outcomes == ()
 
 
 def test_unknown_team_name_in_scores_raises() -> None:
@@ -91,12 +92,12 @@ def test_non_numeric_score_raises() -> None:
 
 def test_match_id_is_the_odds_api_event_id() -> None:
     """Sonuç yolu varlık eşlemesi GEREKTİRMEZ: aynı event_id zaten matches tablosunda."""
-    (outcome,) = parse_scores([event()], NOW)
+    (outcome,) = parse_scores([event()], NOW).outcomes
     assert outcome.match_id == "evt1"
 
 
 def test_empty_payload_returns_empty_tuple() -> None:
-    assert parse_scores([], NOW) == ()
+    assert parse_scores([], NOW).outcomes == ()
 
 
 def test_parses_only_completed_events_from_a_mixed_payload() -> None:
@@ -107,22 +108,39 @@ def test_parses_only_completed_events_from_a_mixed_payload() -> None:
     değil — bkz. `test_skips_a_not_completed_event_even_when_it_already_carries_scores`.
     """
     incomplete = event(id="evt2", completed=False)
-    outcomes = parse_scores([event(), incomplete], NOW)
+    outcomes = parse_scores([event(), incomplete], NOW).outcomes
     assert [o.match_id for o in outcomes] == ["evt1"]
 
 
 def test_completed_event_with_null_scores_is_skipped_not_raised() -> None:
-    """BUGÜNKÜ davranış: completed=true + scores=None de sessizce atlanır (Adım 2 kodunun
-    aynen taşınmış hâli). Vantor sözleşmesi tamamlanmış bir maçın skor taşımasını ima eder;
-    bu test o varsayım kırılırsa (vantor bir gün completed=true + scores=null döndürürse)
-    davranışın SESSİZ KALDIĞINI görünür kılıp kilitliyor — bkz. task-9-report.md 'concerns'.
+    """R34: `completed=true` + `scores=None` hâlâ sessizce (satır yazmadan) atlanır — bu
+    davranış DEĞİŞMEDİ, uydurma bir 0-0 hâlâ yazılmaz. Değişen yalnız GÖRÜNÜRLÜK:
+    bkz. `test_scoreless_completed_event_is_counted_and_logged`.
     """
-    assert parse_scores([event(scores=None)], NOW) == ()
+    assert parse_scores([event(scores=None)], NOW).outcomes == ()
+
+
+def test_scoreless_completed_event_is_counted_and_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """R34: 'tamamlanmış ama skorsuz' ile 'henüz oynanmadı' çıktıda AYIRT EDİLEBİLİR
+    olmalı — aksi hâlde Elo sessizce açlık çeker, komut yine de başarı raporlar (Faz 0'ın
+    dört düzeltme turu harcadığı kaçan-mühür sorunuyla aynı şekil). Skip davranışının
+    KENDİSİ değişmiyor (üstteki test hâlâ 0 satır kanıtlıyor); yalnız artık WARNING'e
+    loglanıyor VE `event_id`siyle `scoreless_completed`e ekleniyor, çağıran adıyla
+    raporlayabilsin diye — `collect_footystats`in `failed_leagues`iyle aynı desen.
+    """
+    with caplog.at_level(logging.WARNING):
+        result = parse_scores([event(scores=None)], NOW)
+
+    assert result.scoreless_completed == ("evt1",)
+    assert "evt1" in caplog.text
+    assert "soccer_turkey_super_league" in caplog.text
 
 
 def test_observed_at_is_stamped_on_every_outcome() -> None:
     other_time = datetime(2026, 9, 19, 18, 30, tzinfo=UTC)
-    (outcome,) = parse_scores([event()], other_time)
+    (outcome,) = parse_scores([event()], other_time).outcomes
     assert outcome.observed_at == other_time
 
 
@@ -131,14 +149,14 @@ def test_observed_at_is_stamped_on_every_outcome() -> None:
 
 @pytest.mark.contract
 def test_parses_every_completed_event_in_the_fixture() -> None:
-    outcomes = parse_scores(fixture_payload(), NOW)
+    outcomes = parse_scores(fixture_payload(), NOW).outcomes
     assert len(outcomes) == 4, f"fixture 4 tamamlanmış maç taşıyor; {len(outcomes)} ayrıştırıldı"
 
 
 @pytest.mark.contract
 def test_contract_goals_are_within_a_plausible_range() -> None:
     """0-15 makul üst sınır: ayrıştırıcının yanlış alanı/sütunu okuduğunu yakalar."""
-    outcomes = parse_scores(fixture_payload(), NOW)
+    outcomes = parse_scores(fixture_payload(), NOW).outcomes
     for outcome in outcomes:
         assert 0 <= outcome.home_goals <= 15
         assert 0 <= outcome.away_goals <= 15
@@ -149,7 +167,7 @@ def test_contract_match_id_is_the_fixtures_event_id_with_no_translation() -> Non
     """Sonuç yolu varlık eşlemesi gerektirmez: match_id fixture'daki 'id' ile BİREBİR
     aynı kalmalı — hiçbir dönüşüm/normalizasyon geçmemeli."""
     fixture_ids = {str(entry["id"]) for entry in fixture_payload() if entry["completed"]}
-    outcomes = parse_scores(fixture_payload(), NOW)
+    outcomes = parse_scores(fixture_payload(), NOW).outcomes
     assert {outcome.match_id for outcome in outcomes} == fixture_ids
 
 
@@ -190,10 +208,10 @@ def test_fetch_scores_builds_request_and_returns_outcomes_and_quota() -> None:
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    outcomes, quota = fetch_scores(client, "KEY", "soccer_turkey_super_league", NOW, days_from=3)
+    parsed, quota = fetch_scores(client, "KEY", "soccer_turkey_super_league", NOW, days_from=3)
 
-    assert len(outcomes) == 1
-    assert outcomes[0].match_id == "evt1"
+    assert len(parsed.outcomes) == 1
+    assert parsed.outcomes[0].match_id == "evt1"
     assert quota.remaining == 480
     assert quota.last_cost == 2, "daysFrom belirtilince maliyet 2 kredidir (belgelenmiş)"
 
