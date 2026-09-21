@@ -372,3 +372,37 @@ def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -
         "aynı gruptaki bekleyen bir run'ı yenisi geldiğinde İPTAL EDER; bir mühür turu kuyruktan "
         "düşerse kapanış fiyatı KALICI olarak kaybolur (EXIT_MISSED_SEAL)"
     )
+
+
+# ── Mühürün asıl tetiği pg_cron'da (db/migrations/0003_seal_dispatch.sql) ────────────────────
+# GitHub'ın `schedule`ı 51 saatte ~203 tur yerine 16 tur koştu ve 47 maçın kapanış mührü kaçtı.
+# Asıl tetik artık pg_cron → `workflow_dispatch`. İki uç birbirine yalnız bir dosya adıyla ve bir
+# tetik adıyla bağlı: `seal.yml` yeniden adlandırılırsa ya da `workflow_dispatch` kaldırılırsa
+# GitHub her çağrıyı reddeder ve geriye yalnız seyrek yedek `schedule` kalır.
+
+SEAL_DISPATCH_MIGRATION = REPO / "db/migrations/0003_seal_dispatch.sql"
+
+
+def test_pg_cron_dispatch_targets_the_seal_workflow_on_main() -> None:
+    sql = SEAL_DISPATCH_MIGRATION.read_text(encoding="utf-8")
+    targets = re.findall(r"/actions/workflows/([\w.-]+)/dispatches", sql)
+
+    assert targets == [SEAL.name], f"pg_cron {targets} tetikliyor, {SEAL.name} değil"
+    assert "jsonb_build_object('ref', 'main')" in sql, "dispatch varsayılan dala gitmiyor"
+
+
+def test_seal_workflow_accepts_a_dispatch_without_inputs() -> None:
+    triggers = _triggers(SEAL)
+
+    assert "workflow_dispatch" in triggers, "pg_cron'un çağırdığı tetik seal.yml'den kaldırılmış"
+    inputs = (triggers["workflow_dispatch"] or {}).get("inputs") or {}
+    required = sorted(name for name, spec in inputs.items() if (spec or {}).get("required"))
+    assert required == [], f"dispatch yalnız `ref` gönderiyor, zorunlu girdi reddedilir: {required}"
+
+
+def test_pg_cron_dispatch_reads_the_token_from_vault_not_from_the_file() -> None:
+    """Depo public ve `check_secrets.sh` GitHub token biçimini tanımıyor: bu dosyanın bekçisi."""
+    sql = SEAL_DISPATCH_MIGRATION.read_text(encoding="utf-8")
+
+    assert "vault.decrypted_secrets" in sql
+    assert re.search(r"github_pat_|gh[pousr]_[A-Za-z0-9]{20,}", sql) is None, "migration'da token"

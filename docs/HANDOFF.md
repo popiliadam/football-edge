@@ -1,10 +1,8 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-21 · **Durum:** **Faz 1 TAMAM — `faz-1-toplayicilar` merge'e HAZIR**
-**Dal:** `faz-1-toplayicilar` · **365 test** (+18 contract) · kapı **9 adım yeşil +
-`zincir` adıyla SKIP** · **push edilmedi, CI hiç koşmadı**
-· commit sayısı: `git log --oneline main..HEAD | wc -l` (donmuş bir sayı burada tutulmaz —
-bu belgenin kendisi onu bir commit sonra yanlışlıyordu)
+**Son güncelleme:** 2026-09-21 · **Durum:** **Faz 1 `main`'e merge edildi ve push'landı
+(`668ec61`), CI yeşil** · **AÇIK ACİL İŞ: mühür tetiği (§1/1)**
+**Dal:** `main` · **368 test** (18'i contract) · kapı **9 adım yeşil + `zincir` adıyla SKIP**
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -15,31 +13,19 @@ bu belgenin kendisi onu bir commit sonra yanlışlıyordu)
 
 ## 1. Senin yapacağın şeyler
 
-**1. Dalı push et.** `outward_action_gate` asistanın push'unu kapatıyor; push senin
-terminalinden gelir.
+**1. ACİL — mühür tetiğini kur (tek sefer, ~5 dakika).** GitHub `seal.yml`in `*/15`
+cron'unu 51 saatte ~203 tur yerine 16 kez koşturdu; 47 maçın kapanış fiyatı kalıcı olarak
+kaçtı (DEFERRED §10). Düzeltme hazır: pg_cron her 15 dakikada `seal.yml`i API'den tetikler
+(`db/migrations/0003_seal_dispatch.sql`). Kalan üç adım **RUNBOOK §3.2**'de: fine-grained
+GitHub tokenı, Vault'a `github_seal_dispatch` adıyla koymak, migration'ı SQL editöründe bir
+kez çalıştırmak. Token ve üretimde kalıcı zamanlanmış iş asistanın yapamadığı adımlar. Kurulana
+kadar mühür kaçmaya devam eder.
 
-```bash
-git push -u origin faz-1-toplayicilar
-```
+**2. Push'lar senin terminalinden.** `outward_action_gate` asistanın push'unu kapatıyor.
+**Asla `--force`:** `seal.yml`in bot commit'leri zincir çıpalarıdır, force push onları siler.
+Push reddedilirse önce `git pull --no-rebase origin main`.
 
-**Merge `--no-ff` OLMALI.** `squash`/`rebase` gitleaks parmak izlerini geçersiz kılar
-(Faz 0 Ruling 15) — ve bu dalda Task 8'in `--amend`'le geçmişten çıkardığı bir fixture var.
-
-**2. Push'tan sonra CI'ı izle.** Faz 1'in dört yeni kapı adımı (`kaynak-politikası`,
-`veri-sözleşmesi`, `dil-kalibrasyonu`, genişletilmiş `scripts/` kapsamı) ve iki yeni
-workflow (`sources-audit.yml`, `full-scan.yml`) **bir runner'da hiç koşmadı.**
-
-```bash
-gh run list --repo popiliadam/football-edge --limit 10
-```
-
-Kırmızı gelirse ilk bakılacak yer runner'da `uv sync --frozen`: bu dal üç yeni bağımlılık
-getirdi (`protego`, `beautifulsoup4`, `typesafe-sdk`).
-
-**3. Faz 0'ın cron'larını da kontrol et.** `snapshot.yml` ve `seal.yml` Faz 0'dan beri
-varsayılan dalda koşuyor olmalı; `ledger/` altına düzenli çıpa commit'i düşüyor mu bak.
-
-**4. Bunu bil: ~2026-10-19'da kapı KENDİLİĞİNDEN kırmızı verecek.** `config/sources.yaml`
+**3. Bunu bil: ~2026-10-19'da kapı KENDİLİĞİNDEN kırmızı verecek.** `config/sources.yaml`
 içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politikası` adımı
 **30 günlük** tazelik istiyor. Bu tasarım, arıza değil: robots anlık görüntüleri yeniden
 çekilir ve tarihler güncellenir. **Kapı gevşetilerek yeşil alınmaz.**
@@ -66,7 +52,9 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP | `28cbd4f` ağacında, log dosyasından okundu |
+| Kapı | 9 adım PASS + `zincir` SKIP | Birleşik `main` (`668ec61`) taze klonda + CI push koşusu |
+| **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
+| Mühür tetiği | pg_cron → `workflow_dispatch`; migration depoda, **veritabanına UYGULANMADI** | Token + onay bekliyor (§1/1) |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
 `.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` YOK.**

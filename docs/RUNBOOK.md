@@ -248,3 +248,60 @@ yazılmıyordur → §1.1.
 
 **Kesit bedava değildir:** CLV kapanış fiyatını eski defterden okumak isteyen Faz 1
 kodu artık iki tabloya bakmak zorundadır. Bu borç `docs/DEFERRED.md`'ye yazılır.
+
+---
+
+## 3. Mühür tetiği — pg_cron → `workflow_dispatch`
+
+### 3.1 Neden var
+GitHub zamanlanmış workflow'ları garanti etmez. 2026-09-19 → 21 arasında `seal.yml`in `*/15`
+cron'u ~203 tur yerine 16 tur koştu; 20 dakikalık mühür penceresi yüzünden 47 maçın kapanış
+fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron: her 15 dakikada
+`ops.dispatch_seal()` GitHub API'si üzerinden `seal.yml`i çalıştırır
+(`db/migrations/0003_seal_dispatch.sql`). `seal.yml`in kendi `schedule`ı yedek olarak durur.
+
+### 3.2 Kurulum (tek sefer)
+1. **Token (GitHub):** Settings → Developer settings → Fine-grained tokens → Generate.
+   Repository access: *Only select repositories* → `popiliadam/football-edge`.
+   Permissions → Repository → **Actions: Read and write** (başka izin yok). Süre: izin verilen
+   en uzun süre; bitiş tarihini §3.4 için not et.
+2. **Vault (Supabase):** panelde Vault sayfasında *Add new secret* → adı tam olarak
+   `github_seal_dispatch`, değeri token. SQL editörü de olur ama token sorgu geçmişinde kalır:
+   `select vault.create_secret('<token>', 'github_seal_dispatch');`
+3. **Migration:** `db/migrations/0003_seal_dispatch.sql`in tamamı SQL editöründe bir kez
+   çalıştırılır. Yeniden çalıştırmak güvenlidir: iş adıyla güncellenir, ikinci iş açılmaz.
+
+Secret yokken iş her 15 dakikada `ops.dispatch_seal: Vault secret github_seal_dispatch yok`
+hatası verir; secret eklendiği an kendiliğinden çalışmaya başlar.
+
+### 3.3 Doğrulama
+```sql
+select status, return_message, start_time from cron.job_run_details
+where jobid = (select jobid from cron.job where jobname = 'seal-dispatch')
+order by start_time desc limit 5;
+
+select status_code, error_msg, created from net._http_response order by created desc limit 5;
+```
+`204` = GitHub turu başlattı. `401` = token geçersiz ya da süresi dolmuş (§3.4). `403`/`404` =
+token bu depoya ya da Actions'a yetkili değil. `422` = `seal.yml`de `workflow_dispatch` yok.
+GitHub tarafı: `gh run list --workflow seal.yml --event workflow_dispatch --limit 5`.
+
+**Beklenen kırmızı:** kaçmış bir maç, başlama saatinden sonra 24 saat boyunca her turda
+"kaçan mühür" olarak raporlanır (`rounds._seal_candidates`: `commence_time > now - 1 gün`).
+Tetik düzeldikten sonra da turlar son kaçan maçın üstünden 24 saat geçene kadar `exit 5` verir.
+O turlarda yeni maçların mühürlenip mühürlenmediğine logdan bakılır; kırmızı kendiliğinden
+biter.
+
+### 3.4 Token yenileme
+Token süresi dolunca dispatch `401` alır ve yalnız seyrek yedek `schedule` kalır. Yeni tokenı
+§3.2/1'deki gibi oluştur, sonra:
+```sql
+select vault.update_secret((select id from vault.secrets where name = 'github_seal_dispatch'),
+                           '<yeni token>');
+```
+
+### 3.5 Durdurma / yeniden başlatma
+```sql
+select cron.unschedule('seal-dispatch');   -- durdur
+select cron.schedule('seal-dispatch', '*/15 * * * *', 'select ops.dispatch_seal()');  -- başlat
+```
