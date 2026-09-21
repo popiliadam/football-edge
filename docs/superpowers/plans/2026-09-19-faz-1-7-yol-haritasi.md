@@ -56,6 +56,24 @@ sınırı bozulmasıyla bedeli görüldü).
 - **Jev'in çok dilli doğruluğu ölçülmedi.** Kötü çıkarsa mimarinin en global parçası çöker —
   o yüzden Faz 1'in sonunda değil, ölçüm biter bitmez karar verilir.
 
+> **FAZ 1 BİTTİ — YUKARIDAKİ TASK TABLOSU ARTIK TARİHSELDİR (2026-09-19).**
+> Gerçekleşen: 13 task, `faz-1-toplayicilar` dalı. Devir belgesi:
+> `docs/phases/01-toplayicilar/HANDOFF.md` (**§3 kapının ÖLÇMEDİĞİNİ yazar — en önemli bölüm**).
+> Tablonun neresi tutmadı:
+>
+> | Tablo diyordu | Ölçüm ne dedi |
+> |---|---|
+> | Task 2 **Understat** toplayıcı | **YAZILMADI** — `robots.txt` `Disallow: /`. xG'yi FootyStats devraldı, yedek yok. |
+> | Task 4 **FBref** toplayıcı (hakem + seyirci) | **YAZILMADI** — içerik VE robots.txt 403 Cloudflare. **Global hakem/seyirci verisi yok**; Faz 3 baz modeli hakem özelliği olmadan kurulur. |
+> | Task 5 **ClubElo** ("en kolay kaynak") | **YAZILMADI** — API deactivated + 502. Yerine saf Elo motoru (`elo.py`); `k`, `home_advantage` ve marj eğrisi FİT EDİLMEMİŞ iskele → Faz 2'nin işi. |
+> | Task 6 **Google News RSS** | Adaptör yazıldı, **`enabled: false`** — robots her ajana kapalı + feed `<copyright>`'ı ticari dışı kullanımı yasaklıyor. |
+> | Task 7 **TFF** `pageID=600` | **DOĞRUYDU, aynen kaldı.** Faz 1 planı bunu `433`'e "düzeltmeye" çalıştı; ölçüm planı çürüttü, spec'i doğruladı. |
+> | Task 10 **Dil kalibrasyonu** | **HARNESS var, ÖLÇÜM YOK** — `TYPESAFE_API_KEY` yok, insan etiketi yok. Her dil `production_enabled: false`; spec §5.4'ün Faz 1 şartı **KARŞILANMADI**. |
+>
+> Tabloda hiç olmayan ve gerçekleşen: maç sonucu toplayıcı (`fetch-results`), stadyum
+> koordinatı + maç saati havası (`fetch-venues`), kaynak kayıt defteri + robots'un kodla
+> zorlanması, `verify-chain --full` + çıpa eksikliği kontrolü, oran defterine toplu yazma.
+
 ---
 
 ## Faz 2 — Tarihsel taban, backtest harness, piyasa verimliliği, sızıntı denetimi

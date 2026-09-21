@@ -1,0 +1,19 @@
+# Task 12 (spec §5.4, açık soru #4) — Jev'in çok dilli doğruluğu HİÇ ÖLÇÜLMEMİŞTİ.
+# Mimarinin en global iddiası (yabancı bahisçilerin yerel-dil haberini geç fiyatladığı)
+# bu ölçülmemiş doğruluğun üstünde duruyor. Bir dil, kalibrasyon raporu OLMADAN
+# production_enabled olamaz. Kapı bunu zorlar: `verify.sh`nin `dil-kalibrasyonu` adımı
+# (`check-languages`) her push'ta bunu sorar — rapor dosyası yoksa ya da
+# `calibration.production_ready()`yi geçmiyorsa kapı kırmızı verir.
+#
+# BUGÜN: bu ortamda TYPESAFE_API_KEY yok, canlı Jev çağrısı yapılamadı. `data/calibration/
+# tr.jsonl` yalnız BİÇİM örnekleri taşıyor (10 satır, insan onaylı GERÇEK etiket değil —
+# bkz. data/calibration/README.md). Bu yüzden HER dil hâlâ false: ölçülmedi, ölçülene
+# kadar da açılmaz. Doğruluk eşiğin altında çıksa bile bu bir başarısızlık değildir —
+# Faz 1'in ölçmek için var olduğu şeyin cevabıdır.
+languages:
+  - code: tr
+    production_enabled: false # ölçülene kadar false
+    calibration_report: data/calibration/tr.report.json
+  - code: en
+    production_enabled: false
+    calibration_report: data/calibration/en.report.json

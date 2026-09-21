@@ -6,15 +6,11 @@ from pathlib import Path
 
 import httpx
 
-from football_edge.collect import (
-    _latest_anchor,
-    _ledger_rows,
-    horizon_iso,
-    run_snapshot,
-    seal_window,
-)
+from football_edge.anchors import _latest_anchor
+from football_edge.collect import _ledger_rows
 from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp, chain, verify_chain
+from football_edge.rounds import horizon_iso, run_snapshot, seal_window
 from tests.fake_db import FakeChainDb, FakeLedgerDb
 from tests.payloads import event, quota_headers
 
@@ -101,6 +97,7 @@ class _FakeCursor:
         # psycopg imleci her execute'tan sonra rowcount verir; öncesinde -1'dir.
         # db.insert_snapshots/upsert_matches bu sayıyı topluyor, taklit de vermeli.
         self.rowcount = -1
+        self._result: list[tuple[object, ...]] = []
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -111,13 +108,28 @@ class _FakeCursor:
     def execute(self, sql: str, params: object = None) -> None:
         verb = sql.strip().split()[0].upper()
         self._recorder.append(verb)
-        self.rowcount = 1 if verb == "INSERT" else 0
+        if verb == "INSERT" and isinstance(params, dict):
+            # db.INSERT_SNAPSHOTS: kolon-dizisi + RETURNING match_id, TEK ifade.
+            # Taklit de `fetchall()`e batch'teki kimlikleri vermeli, yoksa sağlam
+            # lig hiç satır yazmamış görünür (result.written sıfırda kalır).
+            match_ids = list(params.get("match_id", ()))
+            self.rowcount = len(match_ids)
+            self._result = [(match_id,) for match_id in match_ids]
+        else:
+            self.rowcount = 1 if verb == "INSERT" else 0
+            self._result = []
+
+    def executemany(self, sql: str, params_seq: list[tuple[object, ...]]) -> None:
+        verb = sql.strip().split()[0].upper()
+        self._recorder.append(verb)
+        self.rowcount = len(params_seq) if verb == "INSERT" else 0
+        self._result = []
 
     def fetchone(self) -> None:
         return None
 
-    def fetchall(self) -> list[object]:
-        return []
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return self._result
 
 
 class _FakeConn:
@@ -167,7 +179,14 @@ QUOTA_HEADERS = {
 
 def _league(league_id: str, key: str) -> League:
     return League(
-        id=league_id, odds_api_key=key, name=key, country="X", lang="en", gl="GB", active=True
+        id=league_id,
+        odds_api_key=key,
+        name=key,
+        country="X",
+        lang="en",
+        gl="GB",
+        active=True,
+        footystats_path=f"/{league_id}/xg",
     )
 
 

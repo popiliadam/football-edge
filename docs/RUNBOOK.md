@@ -92,20 +92,35 @@ git add ledger/archive/2026-09-19-defter-yeniden-kuruldu.md
 git commit -m "chore: çıpalar arşivlendi — defter yeniden kuruldu (kanıt kaybı notu ekte)"
 ```
 
-`ledger/archive/` altındaki dosyalar **hiçbir kontrol tarafından okunmaz**
-(`_scan_anchors` yalnız `ledger/head-*.txt` glob'una bakar, alt dizine inmez).
-Arşiv, kanıt için değil, **neyin neden kaybedildiğini okuyabilmek** için durur.
+`ledger/archive/` altındaki dosyalar zincir doğrulaması için **okunmaz**
+(`_scan_anchors` yalnız `ledger/head-*.txt` glob'una bakar, alt dizine inmez — kuyruk
+kesme kontrolü arşivlenmiş bir çıpadan asla kurulmaz). Arşiv, kanıt için değil,
+**neyin neden kaybedildiğini okuyabilmek** için durur.
+
+Bununla birlikte `verify-chain` HER turda arşivi de tarar (yalnız isim eşleştirmesi
+için, hash yeniden hesaplamaz): git geçmişinde adı geçen ama üst düzeyde artık olmayan
+bir çıpa `ledger/archive/`de bulunursa çıktıya "ÇIPA ARŞİVLENDİ (kanıt kapsamı
+daraldı): <ad>" satırı basılır. Bu **beklenen** bir çıktıdır, alarm değildir —
+yukarıdaki prosedür meşru olduğu için kapıyı kırmızı yapmaz; yalnızca git geçmişinde
+olup NE üst düzeyde NE DE arşivde bulunamayan bir çıpa `ÇIPA EKSİK` ile exit 1 verir.
 
 ### 1.5 Kurtarma sonrası — kapı ne demeli
 
 ```bash
 uv run python -m football_edge.collect verify-chain
-# beklenen: "çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI"
+# beklenen: "ÇIPA ARŞİVLENDİ (kanıt kapsamı daraldı): head-YYYY-MM-DD.txt"
+#           + "çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI"
 #           + "zincir: SAĞLAM kontrol=<tüm defter>"
 
 uv run python -m football_edge.collect publish-head
 # beklenen: "zincir başı yazıldı: ledger/head-YYYY-MM-DD.txt"
 ```
+
+**`ÇIPA ARŞİVLENDİ` satırı beklenen çıktıdır ve kaybolmaz.** Arşivlenmiş bir çıpa
+"hesaba katılmış" sayılır — yani §1.4'ün prosedürü kapıyı KALICI kırmızıya düşürmez —
+ama daralan kanıt kapsamı her turda ADIYLA raporlanır. Silmek yerine arşive taşıyan biri
+bu satırı üretir; sessiz geçmez. Satır git geçmişindeki taşıma commit'iyle birlikte
+okunmalıdır (§1.4 adım 3: gerekçe ve taşıma AYNI commit'te).
 
 Yeni çıpa commit'lenip **push edilmeden** koruma geri gelmez: çalışma ağacındaki çıpa,
 defteri yeniden yazabilen birinin ayrıca yazabileceği bir dosyadır. Dış kanıt ancak

@@ -1,0 +1,172 @@
+# Kaynak kayıt defteri. `declared_paths`, toplayıcının GERÇEKTEN istediği yollardır ve kapı
+# her push'ta bunları config/robots/<id>.txt'ye karşı sorar. Yeni bir yol eklemeden önce
+# robots'a bak; kapı zaten bakacak. `declared_paths` GERÇEKTEN FETCH EDİLEN URL'ler olmalı,
+# önek DEĞİL (R7): bir önek, kapının hiç istenmeyecek bir yolu sınamasına yol açar — izinli
+# bir kaynağı yanlışlıkla kapatabilir ya da (daha kötü) izinsiz bir yolu yanlışlıkla geçirebilir.
+#
+# Ölçüm tarihi 2026-09-19. `robots_verified_at` 30 günden eskiyse kapı kırmızı verir —
+# tazelemek için Task 3 Step 5'teki komutu yeniden koş ve tarihleri güncelle.
+#
+# access_basis: `robots` (varsayılan) ya da `api_terms`. Spec §3.2 kendi içinde ayırıyor:
+# madde 1 robots.txt'i TARAYICILAR için tanımlar, madde 3 ise ToS'u AYRI bir sınama olarak ele
+# alır (R8). `api_terms` kaynaklarda robots.txt hiç sorulmaz — `terms_url` ZORUNLUDUR ve kapı
+# onun varlığını zorlar (bkz. sources.audit_offline).
+#
+# Ayrıştırıcı `protego`dur (Scrapy ekibi, RFC 9309: joker karakter + en-uzun-eşleşme —
+# R10). Eski `urllib.robotparser` sınırı (joker karakter yok, dosya-sırası önceliği) KAPANDI;
+# bkz. docs/DEFERRED.md geçmişi ve src/football_edge/sources.py:allows() docstring'i.
+sources:
+  - id: footystats
+    base_url: https://footystats.org
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 5.0
+    robots_verified_at: 2026-09-19
+    declared_paths:
+      - /england/premier-league/xg
+      - /spain/la-liga/xg
+      - /italy/serie-a/xg
+      - /germany/bundesliga/xg
+      - /france/ligue-1/xg
+      - /turkey/super-lig/xg
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      KULLANICI-ETKENİ DEĞİŞTİ (R9 — plan hatası düzeltildi, en ciddi olanı). Plan
+      `User-agent: ClaudeBot` kullanıyordu çünkü footystats'ın gerçek robots.txt'i ona
+      Disallow'suz, yalnız `Crawl-delay: 1` veren kendi grubunu ayırıyor — ama ClaudeBot
+      Anthropic'in tarayıcısı, biz Anthropic değiliz. O kimliği takınıp Anthropic'e verilen
+      izni almak user-agent sahtekârlığıdır; doğrulanabilir dürüstlük iddia eden bir üründe
+      savunulamaz. Artık dürüstçe KENDİ kimliğimizle tanımlanıyoruz ve `User-agent: *`
+      grubuna uyuyoruz. O grup kendisi Crawl-delay bildirmiyor — bağlayıcı bir kural yok,
+      yalnız bir seçim var. crawl_delay_seconds 5.0 (R13 — review): site isimli üçüncü
+      taraf tarayıcılara 5, 10, 10, 20 ve 20 saniyelik Crawl-delay veriyor (ölçüldü:
+      SeznamBot 5, meta-externalagent/PerplexityBot 10, Applebot/Applebot-Extended 20);
+      5.0 bunların EN HIZLISI — daha hızlısı yalnız R9'un almamızı yasakladığı ClaudeBot
+      izni (1). Bu, site herhangi bir isimlendirilmiş üçüncü tarafa verdiğinden hızlı
+      davranmadığımızı garanti eder. Bedeli: bir toplama turunda altı istek başına beş kat
+      daha uzun süre — kabul edilebilir. Ölçüldü: altı lig xg yolu da bu grup
+      altında izinli (/england/league-one ve /league-two hariç, onlar zaten kapalı) — dürüst
+      kimliğin bedeli sıfır. Task 5: Understat robots.txt ile kapalı olduğundan (Disallow: /)
+      footystats artık altı ligin HEPSİ için xG kaynağı; declared_paths altısını da taşıyor
+      ve her biri canlıda 200 döndüğü doğrulanarak eklendi (task-5-report.md).
+
+  - id: tff
+    base_url: https://www.tff.org
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/Default.aspx?pageID=600']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      robots.txt YOK (404). Gövde windows-1254; charset YALNIZ HTTP başlığında.
+      `pageID=246` KALDIRILDI (#M28/M-1, Faz 1 son inceleme): hiçbir kod onu fetch etmiyordu
+      (R7: beyan = gerçek istek). tests/test_sources.py'deki bağlayıcı test yalnız öbür yönü
+      korur (her fetch edilen yol beyanlı). PFDK (spec §3.1 satır 81, plan Task 6 başlığı) HİÇ
+      uygulanmadı → HANDOFF §3 madde 30 / DEFERRED §9.
+
+  - id: ajansspor
+    base_url: https://ajansspor.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/sitemap', '/sitemap/news']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      Content-Signal: ai-train=no, search=yes, ai-input=yes. /lineup/, /mac/, /oyuncu/,
+      /lig/ ve *rsc=* DISALLOW — muhtemel 11 ve yapısal sayfalar ALINMAZ, yalnız haber yolları.
+      /lineup/ gerçek robots'ta joker karakterli ("/lineup/*"); protego (R10) bunu doğru
+      zorluyor (ölçüldü: /lineup/galatasaray artık kapı tarafından da engellenir) — eski not
+      burada "kapı yakalamaz" diyordu, stdlib döneminde doğruydu, artık değil.
+      MERGE DÜZELTMESİ (M4, 2026-09-19): eski declared_paths (`/sitemap.xml`) canlıda 404
+      veriyordu (ölçüldü) — robots.txt hiç böyle bir yol beyan etmiyor. robots.txt'in KENDİ
+      `Sitemap:` satırları `/sitemap` (bir INDEX döner, ölçüldü: content-type application/xml,
+      200) ve `/sitemap/news` (gerçek makale urlset'i, ölçüldü: content-type application/xml,
+      200) — ikisi de canlıda ayrı ayrı doğrulandı. Toplayıcı (`collect_news`) şu an yalnız
+      `/sitemap/news`i fetch ediyor (urlset, `AjansporAdapter.parse` bunu doğrudan tüketir);
+      `/sitemap` index'i de burada beyan edilir çünkü robots.txt'in GERÇEKTEN adlandırdığı bir
+      giriş noktasıdır (R7: beyan edilen yol önek değil, GERÇEK bir istek olmalı — ikisi de
+      öyle), ileride alt-sitemap keşfi gerekirse kod tarafı hazır bulur.
+
+  - id: openmeteo
+    base_url: https://api.open-meteo.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/v1/forecast']
+    enabled: true
+    access_basis: api_terms
+    terms_url: https://open-meteo.com/en/terms
+    note: >-
+      AÇILDI (R8 — plan hatası düzeltildi). api.open-meteo.com/robots.txt gerçekten
+      "User-agent: * / Disallow: /" (25 bayt, ölçüldü) — ama bu bir API SUNUCUSU, insan
+      için sayfa sunan bir web sitesi değil. Robots Exclusion Protocol TARAYICILARI hedefler
+      (spec §3.2/1); belgelenmiş, anahtarsız bir API'nin istemcisi ayrı bir sınamaya tabidir
+      (§3.2/3, ToS). Understat emsali BURAYA taşınmaz: Understat insan için HTML sayfası
+      sunuyor, Open-Meteo programatik kullanım için API yayınlıyor. access_basis=api_terms bu
+      ayrımı koda taşır — robots.txt bu kaynak için hiç sorulmaz, terms_url ZORUNLUDUR ve
+      audit_offline onun varlığını zorlar (yoksa kapı kırmızı verir). Crawl-delay 1.0 kendi
+      seçtiğimiz nezaket payı (robots'ta bildirilmiyor, önceki 0.0 artık uygun değil).
+
+  - id: wikidata
+    base_url: https://www.wikidata.org
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: ['/wiki/Special:EntityData/Q81492.json']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      YENİDEN AÇILDI (R7 + R10, iki aşamalı düzeltme — bkz. task-3-report.md).
+      R7: eski declared_paths (/wiki/Special:EntityData, çıplak önek) hiç fetch EDİLMEYEN
+      bir yoldu; düzeltildi — gerçekte fetch edilen yol /wiki/Special:EntityData/<QID>.json.
+      R10: stdlib `urllib.robotparser` bu tam yol için False dönüyordu — ÖLÇÜLDÜ: dosya-sırası
+      önceliği (geniş, erken bir Disallow, özgül, geç bir Allow'u örtüyordu) VE joker `*`
+      desteği yoktu, birlikte satır 436'daki "Allow: /wiki/Special:EntityData/*."ı görünmez
+      kılıyordu. `protego`ya geçilince (RFC 9309: en-uzun-eşleşme + joker karakter) aynı yol
+      True ölçüldü — koordinatörün ilk ölçümü DOĞRUYDU, stdlib'in DEĞİL. SPARQL değil REST
+      kullanma kararı hâlâ geçerli.
+      MERGE DÜZELTMESİ (M3, 2026-09-19): QID Q170980'den Q81492'ye değişti. Q170980 bir
+      "obelisk" kavram-öğesiymiş (Task 7'de ölçüldü) — P625 (koordinat) TAŞIMIYOR; fixture'ı
+      hâlâ commit'te ama testlerde kullanılmıyor. Q81492 = Rams Park (Galatasaray SK'nin
+      stadyumu, eski adıyla Türk Telekom Stadyumu/Arena), P625 doğrulandı — bkz.
+      tests/fixtures/venue/wikidata-Q81492.json. İkisi de AYNI joker robots deseniyle
+      ("Allow: /wiki/Special:EntityData/*.") eşleşir; kapının kaynak-politikası verdiği
+      sonuç değişmedi, yalnız beyan edilen yol artık `collect_venues`in GERÇEKTEN fetch
+      ettiği QID'yi adlandırıyor.
+
+  - id: googlenews
+    base_url: https://news.google.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      KAPALI (Ruling B). Feed 200 dönüyor ve hl/gl/ceid çalışıyor, ama feed'in kendi
+      <copyright> metni: "solely for the purpose of rendering Google News results within a
+      personal feed reader for personal, non-commercial use. Any other use of the feed is
+      expressly prohibited." Adaptör yazıldı, varsayılan kapalı; ticari karar operatörde.
+      Ayrıca robots.txt ölçüldü: `*` bloğu genel Disallow: / taşıyor VE ayrıca CCBot,
+      GPTBot, ChatGPT-User, PerplexityBot, anthropic-ai, ClaudeBot, Claude-Web'i AÇIKÇA
+      isimle kapatıyor — ikinci, bağımsız bir kapanış nedeni.
+
+  - id: understat
+    base_url: https://understat.com
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 1.0
+    robots_verified_at: 2026-09-19
+    declared_paths: []
+    enabled: false
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      KAPALI (Ruling A). robots.txt = "User-agent: * / Disallow: /" (26 bayt,
+      Last-Modified 2020-07-13). Spec §3.2/1 gereği taranmaz. xG kapsamını footystats devraldı.

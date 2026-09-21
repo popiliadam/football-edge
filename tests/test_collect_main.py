@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from football_edge import collect
+from football_edge import collect, rounds
 from football_edge.odds_api import Quota
 from tests.fake_db import FakeLedgerDb
 from tests.payloads import event, quota_headers
@@ -23,6 +23,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good/xg
   - id: bad.1
     odds_api_key: soccer_bad
     name: Bad
@@ -30,6 +31,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /bad/xg
 """
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -137,6 +139,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /bad/xg
   - id: good.1
     odds_api_key: soccer_good
     name: Good
@@ -144,6 +147,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good/xg
   - id: good.2
     odds_api_key: soccer_good_two
     name: Good Two
@@ -151,6 +155,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /good-two/xg
 """
 
 
@@ -158,7 +163,7 @@ def test_report_names_the_failed_leagues_even_when_credit_ran_out(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """F4: iki arıza aynı turda olabilir; ikisi de RAPORLANIR, sonra exit 2."""
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=2,
         quota=Quota(remaining=3, used=497, last_cost=1),
         failed_leagues=("bad.1",),
@@ -245,7 +250,7 @@ def test_main_spends_no_credit_when_the_league_mirror_fails(
         return inner(request)
 
     _patch_main(monkeypatch, tmp_path, db, counting_handler)
-    monkeypatch.setattr(collect, "upsert_leagues", exploding_upsert)
+    monkeypatch.setattr(rounds, "upsert_leagues", exploding_upsert)
 
     code = collect.main(["seal"])
 
@@ -291,7 +296,7 @@ def test_main_reports_a_missed_seal(
 
 
 def test_exit_code_is_non_zero_when_a_seal_was_permanently_missed() -> None:
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=0, quota=None, failed_leagues=(), missed_seals=("evt_past",)
     )
 
@@ -312,11 +317,34 @@ def test_the_missed_seal_code_does_not_collide_with_the_other_failures() -> None
     assert 0 not in codes, "0 yalnız arızasız tur demektir"
 
 
+def test_every_exit_code_constant_is_unique_and_outside_the_reserved_range() -> None:
+    """I-4 (Faz 1 SON inceleme) — bu fazda ZATEN bir çakışma oldu: planın Task 12 metni (ve
+    onu kopyalayan brief) `EXIT_LANGUAGE_UNCALIBRATED = 7` diyordu, ama 7'yi merge adımı
+    (M1–M8, `658c7b7`) `EXIT_SOURCE_FAILED`e çoktan vermişti. Planın numarası o
+    numaralandırmadan ÖNCE yazılmıştı ve benzersizliği hiçbir şey ZORLAMIYORDU — çakışma elle
+    yakalanıp 8'e kaydırıldı (Task 11 ve 12 ardışıktı, paralel değil). Yukarıdaki test yalnız
+    DÖRT sabiti (seal'in döndürebildiklerini) sayıyor; bu test `vars(collect)`teki HER
+    `EXIT_*` adını TOPLAR — yeni bir sabit eklenince listeye elle eklenmeyi BEKLEMEZ — ve
+    hepsinin birbirinden VE 0/1'den farklı olduğunu doğrular.
+    """
+    exit_codes = {
+        name: value
+        for name, value in vars(collect).items()
+        if name.startswith("EXIT_") and isinstance(value, int)
+    }
+
+    assert len(exit_codes) >= 7, f"collect modülünde beklenenden az EXIT_* sabiti var: {exit_codes}"
+    values = tuple(exit_codes.values())
+    assert len(set(values)) == len(values), f"EXIT_* sabitleri çakışıyor: {exit_codes}"
+    assert 0 not in values, f"0 yalnız arızasız tur demektir: {exit_codes}"
+    assert 1 not in values, f"1 zincir kırığına/beklenmedik arızaya ayrılmıştır: {exit_codes}"
+
+
 def test_a_missed_seal_does_not_mask_a_louder_failure_in_the_same_round(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """İki arıza aynı turda olabilir: kod TEK değer taşır, rapor İKİSİNİ de yazar."""
-    result = collect.CollectResult(
+    result = rounds.CollectResult(
         written=0,
         quota=None,
         failed_leagues=("bad.1",),

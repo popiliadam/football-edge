@@ -83,6 +83,33 @@ tek başına en iyi tahmindir. Dolayısıyla model **mutlak olasılık** değil,
 | Hava | Open-Meteo | Global, anahtarsız | Ücretsiz |
 | Erken sinyal | DataForSEO trends (mevcut MCP) | Oyuncu adı arama sıçraması | Mevcut bakiye |
 
+> **FAZ 1 ÖLÇÜMÜ BU TABLONUN DÖRT SATIRINI GEÇERSİZ KILDI (2026-09-19).** Tablonun başlığı
+> "doğrulanmış" diyor; doğrulanan şey kaynağın VARLIĞIydı, otomatik erişime AÇIK olduğu değil.
+> Ayrıntı ve ölçüm kanıtı: `docs/phases/01-toplayicilar/HANDOFF.md` §3.
+>
+> - **Understat — KAPALI.** `robots.txt` = `User-agent: * / Disallow: /` (26 bayt). §3.2/1
+>   gereği taranmaz. Altı ligin xG'si tamamen **FootyStats'a** devredildi; yedek kaynak YOK.
+> - **FBref — KAPALI.** İçerik sayfası VE `robots.txt`'in kendisi 403 Cloudflare; politikayı
+>   OKUMAK bile bot korumasını aşmayı gerektiriyor (§3.2/2, SofaScore'u eleyen kuralın aynısı).
+>   Sonuç: **global hakem ve seyirci verisi YOK.** Faz 3'ün baz modeli hakem özelliği olmadan
+>   kurulmalı — "zaten vardı" sanılmamalı.
+> - **ClubElo — KULLANILAMAZ.** `api.clubelo.com/Fixtures` → 200 `text/csv`: *"Fixtures API
+>   deactivated"*; tarih ve kulüp uçları ısrarlı 502. Yerine kendi saf Elo motorumuz
+>   (`src/football_edge/elo.py`) yazıldı; katsayıları FİT EDİLMEMİŞ iskeledir (§4/1'in
+>   "ClubElo önseli" ifadesi bu yüzden Faz 2'ye kadar karşılıksızdır).
+> - **Google News RSS — LİSANS ÇATIŞMASI + robots.** Feed teknik olarak 200 dönüyor, ama
+>   `robots.txt` `/rss/search` yolunu HER user-agent için kapatıyor (ve `ClaudeBot`,
+>   `anthropic-ai`, `GPTBot`, `CCBot` vb. adıyla ayrıca), üstüne feed'in kendi `<copyright>`'ı
+>   kişisel olmayan her kullanımı açıkça yasaklıyor. Adaptör yazıldı, **`enabled: false`**
+>   olarak teslim edildi; §3.2/1'in "yalnız Google News RSS üzerinden bakılır" kaçış yolu
+>   **fiilen kapalıdır.**
+>
+> **TFF satırı ise DOĞRUDUR ve yeniden "düzeltilmemelidir."** Faz 1 planı hakem atamasını
+> `pageID=433`'e taşımayı önerdi; ölçüm bunu çürüttü — `433` gönderilmemiş boş bir arama formu
+> döner, veri `pageID=600`'de ve `<div>` bloklarındadır (7 lig / 63 maç satırı). "Hakem/VAR
+> ataması" ifadesi de doğrudur: VAR/AVAR sayfada `(V)`/`(A)` rol işaretiyle yayınlanır — ama
+> Faz 1 toplayıcısı yalnız `referee` alanını yazar, VAR/AVAR **toplanmaz** (DEFERRED §9.7).
+
 ### 3.2 Kaynak seçim politikası
 
 1. **robots.txt'i AI/otomatik erişime kapalı olan kaynak taranmaz.** Bu kaynaklara

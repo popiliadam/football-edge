@@ -8,6 +8,7 @@ leagues:
     lang: en
     gl: GB
     active: true
+    footystats_path: /england/premier-league/xg
   - id: esp.1
     odds_api_key: soccer_spain_la_liga
     name: La Liga
@@ -15,6 +16,7 @@ leagues:
     lang: es
     gl: ES
     active: true
+    footystats_path: /spain/la-liga/xg
   - id: ita.1
     odds_api_key: soccer_italy_serie_a
     name: Serie A
@@ -22,6 +24,7 @@ leagues:
     lang: it
     gl: IT
     active: true
+    footystats_path: /italy/serie-a/xg
   - id: ger.1
     odds_api_key: soccer_germany_bundesliga
     name: Bundesliga
@@ -29,6 +32,7 @@ leagues:
     lang: de
     gl: DE
     active: true
+    footystats_path: /germany/bundesliga/xg
   - id: fra.1
     odds_api_key: soccer_france_ligue_one
     name: Ligue 1
@@ -36,6 +40,7 @@ leagues:
     lang: fr
     gl: FR
     active: true
+    footystats_path: /france/ligue-1/xg
   - id: tur.1
     odds_api_key: soccer_turkey_super_league
     name: Super Lig
@@ -43,3 +48,4 @@ leagues:
     lang: tr
     gl: TR
     active: true
+    footystats_path: /turkey/super-lig/xg

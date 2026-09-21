@@ -1,0 +1,49 @@
+name: sources-audit
+
+# Kapanan kaynak kadar AÇILAN kaynak da olaydır: FBref'in 403'ü ve ClubElo'nun 502'si bu
+# makineden (TR) ölçüldü; runner ABD/AB'de. Bu iş her gün runner'dan ölçer ve commit'lenmiş
+# anlık görüntüyle diff'ler. Politika değişirse kırmızı verir — iki yönde de.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Çevrimdışı sözleşme
+        run: uv run python -m football_edge.collect sources-audit
+      - name: Canlı robots.txt sapması
+        run: uv run python scripts/robots_drift.py
+      - name: FBref ve ClubElo yeniden ölçümü
+        # Bilgilendirme: bu iki kaynak TR'den kapalı ölçüldü ve plan onları kapsam dışı
+        # bıraktı (Ruling A). Runner'dan AÇIK çıkarlarsa bu adım bunu görünür kılar; kararı
+        # değiştirmez, kararın dayanağını tazeler. `|| true`: bu adım işi düşürmez.
+        #
+        # `-o /dev/null` HER İKİ satırda da ŞART: bu iş PUBLIC bir depoda, günlük koşuyor.
+        # `-o` olmadan üçüncü tarafın YANITI (ClubElo'nun tüm Fixtures CSV'si) olduğu gibi
+        # CI log'una basılır — spec §3.2/3'ün "ham içerik yeniden yayınlanmaz" kuralını,
+        # tam da o kuralı zorlayan görevde ihlal eder. Yalnız durum kodu ölçülür, gövde değil.
+        run: |
+          curl -sS -m 25 -o /dev/null -w 'fbref robots HTTP %{http_code}\n' \
+            https://fbref.com/robots.txt || true
+          # http:// KASITLI (R14): api.clubelo.com'un ÇALIŞAN bir HTTPS dinleyicisi yok —
+          # ölçüldü 2026-09-19, https:// 3/3 timeout, http:// aynı istekte HTTP 200 dönüyor.
+          # football-data.co.uk'nin apex'i için spec §7'de kayıtlı olanla AYNI tuzak. Burada
+          # düz metin KABUL EDİLEBİLİR çünkü bu istek kimlik bilgisi TAŞIMAZ, veri
+          # GÖNDERMEZ, yalnız bir durum kodu OKUR (-o /dev/null — gövde hiç kaydedilmez);
+          # araya girmenin en kötü sonucu log'da YANLIŞ TEK SATIRLIK bilgidir. Bu gerekçe
+          # BAŞKA hiçbir kaynağa genellenmez — her biri kendi robots.txt'i/ToS'una göre
+          # ayrı değerlendirilir.
+          curl -sS -m 25 -o /dev/null -w 'clubelo /Fixtures HTTP %{http_code}\n' \
+            http://api.clubelo.com/Fixtures || true

@@ -4,23 +4,25 @@ import argparse
 import logging
 import os
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 import psycopg
 
-from football_edge.db import (
-    chain_head,
-    connect,
-    insert_snapshots,
-    upsert_leagues,
-    upsert_matches,
+from football_edge.anchors import (
+    ANCHOR_DIR,
+    Anchor,
+    _scan_anchors,
+    archived_anchors,
+    expected_anchor_names,
+    missing_anchors,
 )
-from football_edge.leagues import League, active_leagues, load_leagues
+from football_edge.calibration import language_config_violations, run_calibration
+from football_edge.db import chain_head, connect
+from football_edge.jev import TypeSafeJev
+from football_edge.leagues import active_leagues, load_leagues
 from football_edge.ledger import (
     ChainResult,
     canonical_timestamp,
@@ -28,14 +30,21 @@ from football_edge.ledger import (
     row_hash,
     verify_chain,
 )
-from football_edge.odds_api import PriceRow, Quota, QuotaExhausted, fetch_odds, guard_quota
+from football_edge.mapping import MappingReport, canonical_team_names, resolve_source_aliases
+from football_edge.rounds import (
+    CollectResult,
+    _mirror_failed,
+    _mirror_leagues,
+    run_seal,
+    run_snapshot,
+)
+from football_edge.sources import audit_offline, load_sources
 
-LOGGER = logging.getLogger("football_edge.collect")
 LEAGUES_PATH = Path("config/leagues.yaml")
-ANCHOR_DIR = Path("ledger")
-
-# db/migrations/0001_init.sql → check (price > 1.0). Şema kısıtının kod tarafındaki karşılığı.
-MIN_PRICE = 1.0
+SOURCES_PATH = Path("config/sources.yaml")
+ROBOTS_DIR = Path("config/robots")
+LANGUAGES_PATH = Path("config/languages.yaml")
+CALIBRATION_DIR = Path("data/calibration")
 
 # ── ÇIKIŞ KODLARI ───────────────────────────────────────────────────────────
 # Her kodun `.github/workflows/*.yml` içinde ADLANDIRILMIŞ bir `case` arm'ı vardır;
@@ -51,6 +60,41 @@ EXIT_MIRROR_FAILED = 4
 # olamaz — 0, seal.yml'de "mühür turu tamam" diye okunur ve Faz 0'ın önlemek için
 # var olduğu TEK sonuç başarı olarak raporlanır.
 EXIT_MISSED_SEAL = 5
+# BİLİNÇLİ İSTİSNA: yukarıdaki "her kodun ADLANDIRILMIŞ case arm'ı vardır" kuralı buna
+# UYGULANMAZ. `sources-audit` `seal.yml`/`snapshot.yml`ce HİÇ çağrılmaz (case listesi
+# taşıyan tek yerler), o yüzden oraya bir arm eklemek var olmayan bir çağrıyı adlandırırdı.
+# Bunu gerçekten tüketen `verify.sh`/`sources-audit.yml` case arm'ı taşımaz — adımın çıkışını
+# ham "başarılı/başarısız" diye okurlar. `tests/test_workflows.py`'nin parametrize listesi
+# YALNIZ seal.yml'in case'lerini tutar ve bunu KASITLI dışarıda bırakır (o dosyadaki yorum).
+EXIT_SOURCE_POLICY = 6
+# M7 (2026-09-19 merge) — AYNI İSTİSNA, AYNI GEREKÇE, EXIT_SOURCE_POLICY emsalini izler:
+# `fetch-tff`/`fetch-venues`/`fetch-news`nin arıza kodu. `EXIT_LEAGUE_FAILED` KASITLI
+# yeniden kullanılmadı: o kod "lig" kavramına bağlı (run_snapshot/run_seal/fetch-footystats/
+# fetch-results'ın döngülediği şey) — TFF ulusal TEK sayfa, haber KAYNAK'a (adaptöre) göre,
+# stadyum/hava VARLIK'a (stadyum QID'si) göre döngüleniyor; "lig" onların hiçbirini
+# adlandırmaz. Var olan bir kodu yanlış kavrama yeniden bağlamak, bu kod tabanının
+# tekrarlayan dersiyle (bkz. footystats.py, tff.py: "isimle bul, konumla değil") aynı
+# sınıf arızadır — yalnız isimlendirme yüzeyinde.
+# `fetch-results` bu kodu ALMAZ: o gerçekten LİG döngüler (aynı `League.odds_api_key`
+# kümesi, aynı per-lig izolasyon deseni) ve `EXIT_LEAGUE_FAILED`ı DOĞRU biçimde yeniden
+# kullanır — bkz. `collectors.results.collect_results` docstring'i.
+# Bu kod da (EXIT_SOURCE_POLICY gibi) `seal.yml`nin case listesinde YOKTUR: M8 bu görevde
+# hiçbir yeni workflow/cron eklenmesini yasaklıyor, dört yeni alt komuttan hiçbiri
+# `seal.yml`/`snapshot.yml` tarafından hiç çağrılmıyor — `tests/test_workflows.py`deki
+# "BU LİSTE ELLE TUTULUR" yorumu bu kararı da adıyla taşır.
+# Task 11 (review fix, Minor #3 promoted) — `map-entities` de BU kodu alır: `mapping.
+# resolve_source_aliases`in fırlattığı `RuntimeError` (örn. `_alias_text`in eksik
+# `team_name` bulgusu) AYNI İSTİSNA, AYNI GEREKÇE — bir kaynağın veri sözleşmesi ihlali,
+# "lig" kavramına bağlı değil. `seal.yml`/`snapshot.yml` `map-entities`i de hiç çağırmaz.
+EXIT_SOURCE_FAILED = 7
+# Task 12 (spec §5.4): ölçülmemiş dil üretime alınamaz. AYNI İSTİSNA/GEREKÇE (yukarıdaki iki
+# yorum) — check-languages/calibrate `seal.yml`/`snapshot.yml`ce hiç çağrılmaz. 7 DEĞİL 8:
+# planın Task 12 metni (ve onu kopyalayan brief) 7 diyordu, ama 7'yi merge adımı (M1–M8,
+# `658c7b7`) `EXIT_SOURCE_FAILED`e çoktan vermişti — planın numarası o numaralandırmadan ÖNCE
+# yazılmıştı ve benzersizliği hiçbir şey zorlamıyordu; elle 8'e kaydırıldı. Artık
+# `tests/test_collect_main.py::test_every_exit_code_constant_is_unique_and_outside_the_
+# reserved_range` zorluyor.
+EXIT_LANGUAGE_UNCALIBRATED = 8
 
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
@@ -60,353 +104,6 @@ _LEDGER_COLUMNS = """
 _LEDGER_ALL = _LEDGER_COLUMNS + " ORDER BY id"
 _LEDGER_AFTER = _LEDGER_COLUMNS + " WHERE id > %s ORDER BY id"
 _LEDGER_AT = _LEDGER_COLUMNS + " WHERE id = %s"
-_ANCHOR_FIELDS = ("rows", "last_id", "head")
-
-
-@dataclass(frozen=True)
-class CollectResult:
-    written: int
-    quota: Quota | None
-    failed_leagues: tuple[str, ...]
-    # Hakkında GERÇEKTEN satır yazılan maçlar. Mühür bu kümeye basılır; "ligi
-    # toplayabildik" mühür için yeterli değildir (F1).
-    written_matches: tuple[str, ...] = ()
-    missed_seals: tuple[str, ...] = ()
-    quota_exhausted: bool = False
-    leagues_mirrored: bool = True
-
-
-@dataclass(frozen=True)
-class Anchor:
-    path: Path
-    rows: int
-    last_id: int
-    head: str
-
-
-@dataclass(frozen=True)
-class SealCandidates:
-    due: tuple[League, ...]
-    missed: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class AnchorScan:
-    """Okunabilen çıpalar (eskiden yeniye) ve okunamayan EN YENİ dosyanın adı.
-
-    `downgraded` doluysa `readable[-1]` en yeni çıpa DEĞİLDİR: kontrol bir öncekine
-    düşmüştür. Bu, sessizce yapılabilecek bir indirgeme değildir (G4).
-    """
-
-    readable: tuple[Anchor, ...]
-    downgraded: Path | None
-
-
-def _anchor_values(target: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for line in target.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            values[key] = value
-    return values
-
-
-def _read_anchor(target: Path) -> Anchor | None:
-    """Tek çıpa dosyasını okur; bozuksa traceback yerine adıyla uyarı verip None döner."""
-    values = _anchor_values(target)
-    if any(field not in values for field in _ANCHOR_FIELDS):
-        LOGGER.warning("çıpa dosyası eksik alanlı (%s bekleniyor): %s", _ANCHOR_FIELDS, target)
-        return None
-    try:
-        rows, last_id = int(values["rows"]), int(values["last_id"])
-    except ValueError:
-        LOGGER.warning("çıpa dosyasındaki sayılar okunamadı: %s", target)
-        return None
-    return Anchor(path=target, rows=rows, last_id=last_id, head=values["head"])
-
-
-def _scan_anchors(directory: Path = ANCHOR_DIR) -> AnchorScan:
-    """Çıpa dosyalarını ESKİDEN YENİYE okur; EN YENİSİ okunamadıysa adını ayrıca taşır.
-
-    En yeni çıpa dosyası çalışma ağacındadır: defteri yeniden yazabilen biri onu da
-    yeniden yazabilir. Eski dosyalar git geçmişine commit'lenmiştir; öneki yeniden
-    yazılmış bir defteri gösteren tek kanıt onlardır. Bozuk dosya sessizce yutulmaz.
-    """
-    targets = tuple(sorted(directory.glob("head-*.txt")))
-    found = tuple((target, _read_anchor(target)) for target in targets)
-    readable = tuple(anchor for _, anchor in found if anchor is not None)
-    newest_unreadable = bool(found) and found[-1][1] is None
-    return AnchorScan(readable=readable, downgraded=targets[-1] if newest_unreadable else None)
-
-
-def _anchors(directory: Path = ANCHOR_DIR) -> tuple[Anchor, ...]:
-    """Okunabilen tüm çıpalar, ESKİDEN YENİYE."""
-    return _scan_anchors(directory).readable
-
-
-def _latest_anchor(directory: Path = ANCHOR_DIR) -> Anchor | None:
-    """En son yayınlanmış zincir çıpası; yoksa ya da okunamıyorsa None."""
-    anchors = _anchors(directory)
-    return anchors[-1] if anchors else None
-
-
-def horizon_iso(now: datetime, days: int) -> str:
-    return (now + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def seal_window(commence_time: datetime, now: datetime, minutes: int) -> bool:
-    delta = commence_time - now
-    return timedelta(0) <= delta <= timedelta(minutes=minutes)
-
-
-def _commence_at(row: PriceRow) -> datetime:
-    """API'den gelen metni tek kanonik yoldan datetime'a çevirir."""
-    return datetime.fromisoformat(canonical_timestamp(row.commence_time))
-
-
-def _seal_row_filter(now: datetime, window_minutes: int) -> Callable[[PriceRow], bool]:
-    """Mühür turu 24 saatlik ufuk çeker; kapanış damgasını YALNIZ penceredeki maç hak eder."""
-
-    def in_window(row: PriceRow) -> bool:
-        return seal_window(_commence_at(row), now, window_minutes)
-
-    return in_window
-
-
-def _priced_rows(rows: tuple[PriceRow, ...], league_id: str) -> tuple[PriceRow, ...]:
-    """Şema kısıtını ihlal eden satırları ayıklar — ama adıyla loglayarak."""
-    valid: tuple[PriceRow, ...] = ()
-    for row in rows:
-        if row.price > MIN_PRICE:
-            valid = (*valid, row)
-        else:
-            LOGGER.warning(
-                "lig=%s maç=%s bahisçi=%s piyasa=%s sonuç=%s geçersiz fiyat=%s — satır atlandı",
-                league_id,
-                row.event_id,
-                row.bookmaker,
-                row.market,
-                row.outcome,
-                row.price,
-            )
-    return valid
-
-
-def _usable_rows(
-    rows: tuple[PriceRow, ...], league_id: str, row_filter: Callable[[PriceRow], bool] | None
-) -> tuple[PriceRow, ...]:
-    windowed = rows if row_filter is None else tuple(row for row in rows if row_filter(row))
-    return _priced_rows(windowed, league_id)
-
-
-def _quota_spent(quota: Quota, min_remaining: int) -> bool:
-    """guard_quota'nın eşiği tek kaynaktır; tur erken kapanır ama toplanan iş kaybolmaz."""
-    try:
-        guard_quota(quota, min_remaining)
-    except QuotaExhausted:
-        LOGGER.warning(
-            "kalan kredi %d < eşik %d — tur erken kapatıldı", quota.remaining, min_remaining
-        )
-        return True
-    return False
-
-
-def _write_league(
-    conn: psycopg.Connection[Any],
-    rows: tuple[PriceRow, ...],
-    league_id: str,
-    now: datetime,
-    *,
-    is_closing: bool,
-) -> tuple[str, ...]:
-    """Yazılan satırların match_id'lerini döner — mühür bu listeden basılır."""
-    if not rows:
-        LOGGER.info("lig=%s yazılacak satır yok", league_id)
-        return ()
-    upsert_matches(conn, rows, league_id)
-    return insert_snapshots(conn, rows, now, is_closing=is_closing)
-
-
-def _collect(
-    conn: psycopg.Connection[Any],
-    client: httpx.Client,
-    api_key: str,
-    leagues: tuple[League, ...],
-    now: datetime,
-    *,
-    commence_time_to: str,
-    is_closing: bool,
-    min_remaining: int,
-    row_filter: Callable[[PriceRow], bool] | None = None,
-) -> CollectResult:
-    written: tuple[str, ...] = ()
-    quota: Quota | None = None
-    failed: tuple[str, ...] = ()
-    spent = False
-    for league in leagues:
-        if quota is not None and _quota_spent(quota, min_remaining):
-            spent = True
-            break
-        try:
-            rows, quota = fetch_odds(
-                client, api_key, league.odds_api_key, commence_time_to=commence_time_to
-            )
-            usable = _usable_rows(rows, league.id, row_filter)
-            recorded = _write_league(conn, usable, league.id, now, is_closing=is_closing)
-            conn.commit()
-        except Exception:
-            # Tek bir ligin arızası diğer liglerin kapanış oranını kaçırmasına yol açmamalı.
-            # Kapanış oranı kaçarsa geri gelmez; bozuk bir lig ise sonraki turda tekrar denenir.
-            conn.rollback()
-            LOGGER.exception("lig=%s toplanamadı, diğer liglere devam ediliyor", league.id)
-            failed = (*failed, league.id)
-            continue
-        # MÜHRÜ SÜREN LİSTE COMMIT'TEN SONRA BİRİKİR — `try` İÇİNE ALMAYIN (G1).
-        # `commit()` bağlantı AYAKTAYKEN de düşer: statement timeout, serialization
-        # abort, sunucu tarafı transaction abort. O hâlde `rollback()` başarılı olur,
-        # lig doğru biçimde arızalı sayılır, ama commit'ten ÖNCE biriktirilmiş
-        # match_id'ler `written_matches`e akıp geri alınmış maça `sealed_at` bastırır.
-        # Mühürlenen maç bir daha denenmez; kapanış fiyatı kalıcı olarak kaybolur.
-        written = (*written, *recorded)
-        LOGGER.info("lig=%s satır=%d kalan_kredi=%d", league.id, len(usable), quota.remaining)
-    return CollectResult(
-        written=len(written),
-        quota=quota,
-        failed_leagues=failed,
-        written_matches=tuple(dict.fromkeys(written)),
-        quota_exhausted=spent,
-    )
-
-
-def run_snapshot(
-    conn: psycopg.Connection[Any],
-    client: httpx.Client,
-    api_key: str,
-    leagues: tuple[League, ...],
-    now: datetime,
-    *,
-    horizon_days: int = 7,
-    min_remaining: int = 10,
-) -> CollectResult:
-    return _collect(
-        conn,
-        client,
-        api_key,
-        leagues,
-        now,
-        commence_time_to=horizon_iso(now, horizon_days),
-        is_closing=False,
-        min_remaining=min_remaining,
-    )
-
-
-def _seal_candidates(
-    conn: psycopg.Connection[Any], leagues: tuple[League, ...], now: datetime, window_minutes: int
-) -> SealCandidates:
-    """Mühürlenecek ligleri ve mührü KAÇMIŞ maçları aynı sorgudan çıkarır."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, league_id, commence_time FROM matches
-            WHERE sealed_at IS NULL AND commence_time > %s - interval '1 day'
-            """,
-            (now,),
-        )
-        candidates = tuple((str(record[0]), str(record[1]), record[2]) for record in cur.fetchall())
-    due = {
-        league_id
-        for _, league_id, commence_time in candidates
-        if seal_window(commence_time, now, window_minutes)
-    }
-    # Başlama saati geçmiş ve hâlâ mühürsüz: cron kaydı, bir daha da gelmeyecek.
-    missed = tuple(match_id for match_id, _, commence_time in candidates if commence_time < now)
-    return SealCandidates(
-        due=tuple(league for league in leagues if league.id in due), missed=missed
-    )
-
-
-def run_seal(
-    conn: psycopg.Connection[Any],
-    client: httpx.Client,
-    api_key: str,
-    leagues: tuple[League, ...],
-    now: datetime,
-    *,
-    window_minutes: int = 20,
-    min_remaining: int = 5,
-) -> CollectResult:
-    candidates = _seal_candidates(conn, leagues, now, window_minutes)
-    if not candidates.due:
-        LOGGER.info("mühürlenecek maç yok")
-        return CollectResult(
-            written=0, quota=None, failed_leagues=(), missed_seals=candidates.missed
-        )
-    result = _collect(
-        conn,
-        client,
-        api_key,
-        candidates.due,
-        now,
-        commence_time_to=horizon_iso(now, 1),
-        is_closing=True,
-        min_remaining=min_remaining,
-        # 24 saatlik çekimin tamamı "kapanış" değildir: pencere dışı satır yazılmaz.
-        row_filter=_seal_row_filter(now, window_minutes),
-    )
-    _stamp_sealed(conn, result.written_matches, now)
-    return replace(result, missed_seals=candidates.missed)
-
-
-def _stamp_sealed(conn: psycopg.Connection[Any], match_ids: tuple[str, ...], now: datetime) -> None:
-    """Mühür MAÇ bazındadır: yalnız kapanış satırı gerçekten yazılan maç damgalanır.
-
-    Lig bazında damgalamak, ligin HTTP çekimi başarılı olduğu için o ligin penceredeki
-    her maçını mühürlüyordu — fiyatı kayda geçmemiş maçlar dâhil. Mühürlenen maç bir
-    daha denenmez; kapanış fiyatı geri gelmez.
-    """
-    if not match_ids:
-        LOGGER.info("mühürlenecek maç yok: bu turda kapanış satırı yazılmadı")
-        return
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE matches SET sealed_at = %s WHERE sealed_at IS NULL AND id = ANY(%s)",
-            (now, list(match_ids)),
-        )
-    conn.commit()
-
-
-def _mirror_leagues(conn: psycopg.Connection[Any], configured: tuple[League, ...]) -> bool:
-    """Lig aynasını tazeler; BAŞARISIZLIĞINI traceback'le değil, dönüş değeriyle bildirir.
-
-    Bu çağrı `try` dışındaydı: `leagues.odds_api_key` UNIQUE ihlali ya da geçici bir
-    veritabanı arızası `main()`den dışarı düşüp turu traceback'le bitiriyordu (F3).
-    Arıza artık yakalanır, adıyla raporlanır ve çıkış kodu 4 olur — ama tur SÜRMEZ:
-    ücretli çağrıya girmenin bedeli `_mirror_failed()`te yazılı (G3).
-    """
-    try:
-        upsert_leagues(conn, configured)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        LOGGER.exception("lig aynası tazelenemedi, tur başlatılmıyor (ücretli çağrı yapılmaz)")
-        return False
-    return True
-
-
-def _mirror_failed() -> CollectResult:
-    """Ayna düşmüşse tur BAŞLAMADAN durur: `fetch_odds` ücretlidir (G3).
-
-    Turu sürdürmek her ligi ücretli çağrıya sokuyor, satır yazılınca da yabancı anahtar
-    zaten patlıyordu: lig başına 1 kredi × 6 lig × 15 dakikalık mühür cron'u, 500
-    kredilik aylık ücretsiz katmanı iki günde bitirir. Önce kredi harcayıp sonra
-    yazamamak, hiç denememekten kötüdür.
-
-    ÖDÜNLEŞME AÇIKÇA KAYITLIDIR: ayna yalnız GEÇİCİ bir arızadan tazelenemediyse
-    (tablo bir önceki turun aynasını hâlâ taşıyor olabilir) bu tur mühürlenebilirdi.
-    O turun mührü artık kaçar ve kapanış fiyatı geri gelmez — kredi güvenliği bu
-    riskin üstünde tutuldu. Bkz. HANDOFF §3.5.
-    """
-    return CollectResult(written=0, quota=None, failed_leagues=(), leagues_mirrored=False)
 
 
 def _require_env(name: str) -> str:
@@ -488,7 +185,11 @@ def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
 
 
 def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ...]) -> str | None:
-    """En eski ve en yeni çıpayı ayrı ayrı sorar; ilk uyuşmazlığı dosya adıyla döner."""
+    """Verilen çıpaları SIRAYLA sorar, ilk uyuşmazlığı dosya adıyla döner.
+
+    Hangi çıpaların sorulacağına KENDİSİ karar vermez — çağıran (`_verify_chain_command`)
+    belirler: varsayılan modda yalnız en eski+en yeni, `--full` altında HER çıpa.
+    """
     for anchor in anchors:
         if anchor.last_id <= 0:
             continue  # Boş defterin çıpası: kesilecek kuyruk yok.
@@ -496,6 +197,17 @@ def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ..
         if breakage is not None:
             return f"{breakage} ({anchor.path.name})"
     return None
+
+
+def _sources_audit_command(*, today: date) -> int:
+    """`config/sources.yaml`'ı commit'lenmiş robots anlık görüntülerine karşı sorar — ağsız."""
+    violations = audit_offline(load_sources(SOURCES_PATH), ROBOTS_DIR, today)
+    if not violations:
+        sys.stdout.write("kaynak politikası: TEMİZ\n")
+        return 0
+    for text in violations:
+        sys.stdout.write(f"KAYNAK POLİTİKASI İHLALİ: {text}\n")
+    return EXIT_SOURCE_POLICY
 
 
 def _report_chain(result: ChainResult) -> int:
@@ -506,7 +218,9 @@ def _report_chain(result: ChainResult) -> int:
     return 0 if result.ok else 1
 
 
-def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR) -> int:
+def _verify_chain_command(
+    conn: psycopg.Connection[Any], *, anchor_dir: Path = ANCHOR_DIR, full: bool = False
+) -> int:
     scan = _scan_anchors(anchor_dir)
     anchors = scan.readable
     if scan.downgraded is not None and anchors:
@@ -517,18 +231,43 @@ def _verify_chain_command(conn: psycopg.Connection[Any], *, anchor_dir: Path = A
             f"en yeni çıpa okunamadı ({scan.downgraded.name}) — kuyruk kesme kontrolü "
             "bir önceki çıpaya düşürüldü, EN YENİ ÇIPA ATLANDI\n"
         )
+    expected = expected_anchor_names(anchor_dir)
+    if expected is None:
+        # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
+        sys.stdout.write("git geçmişi okunamadı — ÇIPA EKSİKLİĞİ KONTROLÜ ATLANDI\n")
+    else:
+        archived = archived_anchors(anchor_dir, recorded=expected)
+        if archived:
+            # RUNBOOK §1.4: arşivleme (TAŞIMA) meşrudur ama kanıtı GÖTÜRÜR. Bu satır o
+            # kaybı sessiz bırakmaz — ama meşru bir prosedür kapıyı kalıcı kırmızı da
+            # yapmaz: yalnız SİLİNEN (hiçbir yerde bulunamayan) çıpa aşağıda exit 1 verir.
+            sys.stdout.write(
+                "ÇIPA ARŞİVLENDİ (kanıt kapsamı daraldı): " + ", ".join(archived) + "\n"
+            )
+        gone = missing_anchors(anchor_dir, recorded=expected)
+        if gone:
+            sys.stdout.write(
+                "ÇIPA EKSİK (git geçmişinde var, diskte yok): " + ", ".join(gone) + "\n"
+            )
+            return 1
     if not anchors:
         # Atlanan kontrol geçmek değildir: sessiz kalınmaz, adıyla yazılır.
         sys.stdout.write("çıpa yok ya da okunamadı — kuyruk kesme kontrolü ATLANDI\n")
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
-    # En eski çıpa da sorulur: yalnız en yeniye bakmak, `ledger/`deki dosyayı da
-    # değiştiren bir saldırganın yeniden yazdığı öneki göremez.
-    asked = anchors if len(anchors) == 1 else (anchors[0], anchors[-1])
+    # En eski çıpa da sorulur: yalnız en yeniye bakmak, `ledger/`deki dosyayı da değiştiren
+    # bir saldırganın yeniden yazdığı öneki göremez (F2). --full altında HER çıpa sorulur ve
+    # defter GENESIS'ten yeniden hash'lenir; varsayılan mod yalnız (en eski, en yeni) çiftini
+    # sorar ve yalnız kuyruğu tarar — aradaki satırlar hiç yeniden hash'lenmez (DEFERRED
+    # §1.1, §1.2).
+    asked = anchors if (full or len(anchors) == 1) else (anchors[0], anchors[-1])
     breakage = _first_anchor_break(conn, asked)
     if breakage is not None:
         sys.stdout.write(f"ÇIPA UYUŞMAZLIĞI: {breakage}\n")
         return 1
     newest = anchors[-1]
+    if full:
+        sys.stdout.write(f"tam tarama: {len(asked)} çıpa soruldu, defter GENESIS'ten taranıyor\n")
+        return _report_chain(verify_chain(_ledger_rows(conn, None)))
     if newest.last_id <= 0:
         # Boş defterin çıpası: kesilecek kuyruk yok, defter GENESIS'ten doğrulanır.
         return _report_chain(verify_chain(_ledger_rows(conn, None)))
@@ -593,19 +332,173 @@ def _exit_code(result: CollectResult) -> int:
     return 0
 
 
+# R50 (Task 11): dört `_fetch_*_command` (+ footystats) `src/football_edge/fetch.py`ye
+# taşındı — collect.py'yi 774/800'de bölme sınırına getiren tam olarak buydu (#M41).
+# `main()` onları GECİKMELİ (yerel) import ile çağırır — bkz. fetch.py'nin üst yorumu.
+
+# Task 11 — footystats bugün `entity_kind="team"` yayınlayan TEK kaynak (TFF şimdilik
+# yalnız `fixture_official` gözlemliyor, bkz. collectors/tff.py). `--source` yine de
+# parametredir: adı `map-entities` kalır, ikinci bir kaynak takım gözlemi yaymaya
+# başlarsa komut DEĞİŞMEZ.
+DEFAULT_MAPPING_SOURCE = "footystats"
+
+
+def _map_entities_command(
+    conn: psycopg.Connection[Any], source_id: str, league_id: str, now: datetime
+) -> int:
+    """Bir kaynağın bir ligdeki takım takma adlarını kanonik (The Odds API) ada eşler.
+
+    Gerçek iş `mapping.resolve_source_aliases`de (KOD aday çıkarır, JEV seçer — spec
+    §5.3): eşik altı/'hiçbiri' eşleşme YAZILMAZ ama HER İKİSİ de burada adıyla
+    raporlanır — atlanan bir eşleşme, farklı kılıktaki sessiz join hatasıdır. Bu
+    fonksiyon yalnız CLI camı: kanonik listeyi sorar, Jev istemcisini kurar, raporlar.
+
+    Lig PARAMETREDİR, taranmaz: aynı ad farklı ligde farklı kulüp olabilir
+    (`mapping.resolve` docstring'i) — komut bunu OPERATÖRDEN ister, tahmin etmez.
+    """
+    canonical = canonical_team_names(conn, league_id)
+    if not canonical:
+        sys.stdout.write(f"map-entities: {league_id} için matches tablosunda takım yok\n")
+        return 0
+    client = TypeSafeJev()
+    try:
+        report: MappingReport | None = resolve_source_aliases(
+            conn, client, source_id, league_id, canonical, now
+        )
+    except RuntimeError as exc:
+        # Kardeşleriyle AYNI şekil: adıyla stdout satırı + EXIT_SOURCE_FAILED — çıplak
+        # traceback değil (review, Minor #3 promoted). `TypeSafeJev()`in KENDİ
+        # RuntimeError'ı (anahtar eksik) buraya GİRMEZ: try bloğu yalnız `resolve_
+        # source_aliases`i sarıyor, o kurulum hatası hâlâ adıyla, yukarıda, patlıyor.
+        sys.stdout.write(f"map-entities: {source_id}/{league_id} eşlenemedi — {exc}\n")
+        return EXIT_SOURCE_FAILED
+    if report is None:
+        sys.stdout.write(f"map-entities: {source_id}/{league_id} için gözlem yok\n")
+        return 0
+    unresolved = tuple(entry for entry in report.resolutions if entry.canonical_id is None)
+    sys.stdout.write(
+        f"map-entities: {report.written} eşleşme yazıldı, {len(unresolved)} çözülmedi\n"
+    )
+    for entry in unresolved:
+        # Atlanan eşleşme raporlanmazsa Task 11'in önlemek için var olduğu tam o
+        # sessiz arızadır — bir eşleşmeyi atlamak yanlış eşlemekten iyidir, AMA
+        # yalnız GÖRÜNÜRSE.
+        sys.stdout.write(f"  çözülmedi: {entry.alias!r} — {entry.reason}\n")
+    return 0
+
+
+def _check_languages_command(*, languages_path: Path = LANGUAGES_PATH) -> int:
+    """Rapor OLMADAN production_enabled olan dil var mı? Ağa/parayla dokunmaz (Ruling R4)."""
+    violations = language_config_violations(languages_path)
+    for text in violations:
+        sys.stdout.write(f"DİL KALİBRASYON İHLALİ: {text}\n")
+    if violations:
+        return EXIT_LANGUAGE_UNCALIBRATED
+    sys.stdout.write("dil kalibrasyonu: TEMİZ\n")
+    return 0
+
+
+def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR) -> int:
+    """Jev'i ELLE etiketlenmiş kümede koşturur; AĞA ÇIKAR, PARA HARCAR, kapı ÇAĞIRMAZ (R4).
+
+    Etiket yoksa Jev hiç KURULMAZ; anahtarsız `TypeSafeJev()` çıplak patlar (map-entities gibi).
+    """
+    labels_path = calibration_dir / f"{language}.jsonl"
+    if not labels_path.is_file():
+        sys.stdout.write(f"calibrate: {labels_path} yok — önce elle etiketlenmeli\n")
+        return EXIT_LANGUAGE_UNCALIBRATED
+    path, reason = run_calibration(language, calibration_dir, TypeSafeJev())
+    sys.stdout.write(f"calibrate: {reason}\n")
+    sys.stdout.write(f"rapor yazıldı: {path}\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(prog="football-edge")
-    parser.add_argument("command", choices=("snapshot", "seal", "verify-chain", "publish-head"))
+    parser.add_argument(
+        "command",
+        choices=(
+            "snapshot",
+            "seal",
+            "verify-chain",
+            "publish-head",
+            "sources-audit",
+            "fetch-footystats",
+            "fetch-tff",
+            "fetch-venues",
+            "fetch-news",
+            "fetch-results",
+            "map-entities",
+            "calibrate",
+            "check-languages",
+        ),
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="verify-chain: defteri GENESIS'ten yeniden hash'le ve HER çıpayı sor",
+    )
+    parser.add_argument(
+        "--source",
+        default=DEFAULT_MAPPING_SOURCE,
+        help="map-entities: eşlenecek kaynağın source_id'si (varsayılan: footystats)",
+    )
+    parser.add_argument(
+        "--league",
+        default=None,
+        help="map-entities: lig id'si (config/leagues.yaml) — ZORUNLU, tahmin edilmez",
+    )
+    parser.add_argument("--language", default=None, help="calibrate: ISO dil kodu (örn. tr)")
     args = parser.parse_args(argv)
 
     now = datetime.now(UTC)
 
+    # `connect()` AÇILMADAN ÖNCE: veritabanına DOKUNMAZ — DATABASE_URL yokken de kırılmaz.
+    # `check-languages`/`calibrate` de BURADA dallanır (Ruling R4), aynı gerekçeyle.
+    if args.command == "sources-audit":
+        return _sources_audit_command(today=now.date())
+    if args.command == "check-languages":
+        return _check_languages_command()
+    if args.command == "calibrate":
+        if not args.language:
+            parser.error("calibrate için --language zorunlu")
+        return _calibrate_command(args.language)
+    if args.command == "map-entities" and not args.league:
+        parser.error(
+            "map-entities için --league zorunlu (aynı ad farklı ligde farklı kulüp olabilir)"
+        )
+
     with connect() as conn:
         if args.command == "verify-chain":
-            return _verify_chain_command(conn)
+            return _verify_chain_command(conn, full=args.full)
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
+        if args.command == "map-entities":
+            return _map_entities_command(conn, args.source, args.league, now)
+        if args.command in (
+            "fetch-footystats",
+            "fetch-tff",
+            "fetch-venues",
+            "fetch-news",
+            "fetch-results",
+        ):
+            # Gecikmeli (yerel) import: `fetch.py` üst düzeyde `collect.py`den sabit/
+            # yardımcı içe aktarır (EXIT_*, yol sabitleri, `_require_env`) — modül
+            # seviyesinde İKİ YÖNLÜ bir import döngüsel olurdu. Bu satır yalnız `main()`
+            # ÇAĞRILDIĞINDA çalışır, o ana kadar iki modül de tam yüklenmiş olur.
+            import football_edge.fetch as fetch
+
+            with httpx.Client() as client:
+                if args.command == "fetch-footystats":
+                    return fetch._fetch_footystats_command(conn, client, now)
+                if args.command == "fetch-tff":
+                    return fetch._fetch_tff_command(conn, client, now)
+                if args.command == "fetch-venues":
+                    return fetch._fetch_venues_command(conn, client, now)
+                if args.command == "fetch-news":
+                    return fetch._fetch_news_command(conn, client, now)
+                return fetch._fetch_results_command(conn, client, now)
 
         api_key = _require_env("ODDS_API_KEY")
         configured = load_leagues(LEAGUES_PATH)
