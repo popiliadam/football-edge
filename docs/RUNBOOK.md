@@ -261,10 +261,12 @@ fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron: her 1
 (`db/migrations/0003_seal_dispatch.sql`). `seal.yml`in kendi `schedule`ı yedek olarak durur.
 
 ### 3.2 Kurulum (tek sefer)
-1. **Token (GitHub):** Settings → Developer settings → Fine-grained tokens → Generate.
-   Repository access: *Only select repositories* → `popiliadam/football-edge`.
-   Permissions → Repository → **Actions: Read and write** (başka izin yok). Süre: izin verilen
-   en uzun süre; bitiş tarihini §3.4 için not et.
+1. **Token (GitHub):** hazır doldurulmuş form (ad, açıklama, sahip, süre ve **Actions: Read and
+   write** gelir; başka izin yok):
+   <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
+   Elle seçilen tek alan: Repository access → *Only select repositories* → `football-edge`.
+   `expires_in=none` bilinçli: yıllık yenileme bir el işidir. Yetki tek depoda yalnız Actions;
+   süreli token istenirse tarih seçilir ve §3.4 devreye girer.
 2. **Vault (Supabase):** panelde Vault sayfasında *Add new secret* → adı tam olarak
    `github_seal_dispatch`, değeri token. SQL editörü de olur ama token sorgu geçmişinde kalır:
    `select vault.create_secret('<token>', 'github_seal_dispatch');`
@@ -293,7 +295,7 @@ O turlarda yeni maçların mühürlenip mühürlenmediğine logdan bakılır; k�
 biter.
 
 ### 3.4 Token yenileme
-Token süresi dolunca dispatch `401` alır ve yalnız seyrek yedek `schedule` kalır. Yeni tokenı
+Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) dispatch `401` alır ve yalnız seyrek yedek `schedule` kalır. Yeni tokenı
 §3.2/1'deki gibi oluştur, sonra:
 ```sql
 select vault.update_secret((select id from vault.secrets where name = 'github_seal_dispatch'),

@@ -566,5 +566,5 @@ kayıp. Düzeltme: pg_cron → `workflow_dispatch` (`db/migrations/0003_seal_dis
 |---|---|---|
 | 10a | **Kırmızı bir tura bakan kimse yoktu.** 15 kırmızı tur iki gün fark edilmedi | Kaçan mühür kalıcı veri kaybıdır; bildirim kanalı (e-posta/webhook) bağlanmalı |
 | 10b | Kaçan maç 24 saat boyunca her turda yeniden raporlanıyor | Tek bir kayıp, bir gün boyunca her 15 dakikada bir kırmızı üretir; gerçek yeni kaybı gürültüde saklar. "Yalnız YENİ kayıp" ayrımı şema değişikliği ister (raporlandı damgası) |
-| 10c | Dispatch tokenının süresi dolar | Dolduğunda tek sinyal yedek `schedule`ın seyrek kırmızısıdır; bitiş tarihi RUNBOOK §3.2'ye göre not edilmeli |
+| 10c | Dispatch tokenı iptal edilebilir (süreli seçilirse süresi de dolar) | O durumda tek sinyal yedek `schedule`ın seyrek kırmızısıdır; varsayılan süresiz token (RUNBOOK §3.2) |
 | 10d | Kredi bütçesi ilk kez gerçekten kullanılacak | Mühürler bugüne kadar çoğunlukla kaçtığı için ayda ~314 kredilik mühür payı hiç tüketilmedi; güvenilir tetikle ay sonuna doğru `EXIT_QUOTA_EXHAUSTED` görülebilir |
