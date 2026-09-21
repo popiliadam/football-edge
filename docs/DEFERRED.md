@@ -207,8 +207,9 @@ konfigürasyonun aynası olduğunu iddia ediyor ve bu iddia yanlış.
 > **İKİNCİ seçenek uygulanmadı:** mühür turu hâlâ `snapshot` ile aynı `odds-collect`
 > concurrency grubunda. Aşağıdaki "Etkileşim" paragrafı bu yüzden GEÇERLİLİĞİNİ KORUYOR,
 > yalnız tetikleyici süre kısaldı. (Faz 1'in `full-scan.yml`i bilerek `odds-collect`
-> grubunun DIŞINDA — hiç concurrency bloğu yok; ~~o ayrımı sabitleyen bir test YOK~~ o ayrımı
-> artık bir test sabitliyor, bkz. §9.2a.)
+> grubunun DIŞINDA — ne üst düzeyde ne bir job'da concurrency bloğu var; ~~o ayrımı sabitleyen
+> bir test YOK~~ artık bir test, `seal.yml`/`snapshot.yml` dışında hiçbir workflow'un bu grubu
+> üst düzeyde ya da bir job'da bildirmediğini sabitliyor — kapsamı §9.2a'da.)
 
 `insert_snapshots` her satır için ayrı bir `cur.execute` atıyordu: 3 717 satır =
 3 717 pooler gidiş-dönüşü, ölçülen süre ~4 dakika (120 saniyelik beklentinin çok
@@ -371,7 +372,8 @@ Kapanmış olanlar burada yeniden açılmasın diye tek satırda: `collect.py`'n
 sınırı üç bölmeyle kapandı (R11/R50/R53 → 515 satır); `scripts/` kapı kapsamına alındı
 (R15); §5.3'teki bayat `mypy` kapsamı düzeltildi; `tff.py`'deki ölü `LOGGER` R36'nın
 uygulamasıyla gitti; son bütün-dal incelemesinin düzeltme turunda (`4158f81`) §9.1b (#M13),
-§9.1e (#M20), §9.2a (#M11), §9.2b (#M10) ve §9.3j'nin fetched ⊆ declared yarısı (#M28) kapandı
+§9.1e (#M20), §9.2a (#M11; kapsamı `28cbd4f`'de tamamlandı), §9.2b (#M10) ve §9.3j'nin
+fetched ⊆ declared yarısı (#M28) kapandı
 — onlar aşağıda satırlarında KAPANDI diye işaretli, tarihi kayıt olarak duruyor.
 
 ### 9.1 Kaynak kayıt defteri ve `kaynak-politikası` adımının delikleri
@@ -394,10 +396,14 @@ uygulamasıyla gitti; son bütün-dal incelemesinin düzeltme turunda (`4158f81`
 
 > **Bu madde artık ERTELENMİŞ bir sorun DEĞİL — tarihi bir kayıt olarak tutuluyor.**
 > `tests/test_workflows.py::test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group`
-> `seal.yml`in grubunu okur, `.github/workflows/*.yml`i dinamik tarar ve `seal.yml` /
-> `snapshot.yml` DIŞINDA o grubu paylaşan her workflow'da kırmızı verir — mapping
-> (`{group: odds-collect}`) ve skaler (`concurrency: odds-collect`) biçimin ikisinde de;
-> ikisi de mutasyonla kırmızı kanıtlandı.
+> `seal.yml`in grubunu okur, `.github/workflows/` altındaki `*.yml` VE `*.yaml` dosyalarını
+> dinamik tarar ve `seal.yml`/`snapshot.yml` DIŞINDA o grubu üst düzeyde YA DA herhangi bir
+> job'da — mapping (`{group: odds-collect}`) ya da skaler (`concurrency: odds-collect`)
+> biçimde — bildiren her workflow'da kırmızı verir. Grup adı dize olarak karşılaştırılır:
+> `${{ }}` ifadesiyle üretilen bir ad değerlendirilmez. İlk sürüm (`4158f81`) yalnız üst
+> düzeyi ve `*.yml`i okuyordu; yeniden inceleme job düzeyindeki ve `.yaml` dosyasındaki grubun
+> kaçtığını gösterdi, `28cbd4f` kapattı (R62). Beş durum da mutasyonla kırmızı kanıtlandı:
+> üst düzey ve job düzeyinde iki biçim, artı atılabilir bir klonda bir `.yaml` workflow'u.
 
 Hiçbir test `full-scan.yml`in
 **concurrency bloğunun YOKLUĞUNU** sabitlemiyor. Dosyada yalnız bir yorum var

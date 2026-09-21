@@ -66,7 +66,7 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP | `4158f81` ağacında, log dosyasından okundu |
+| Kapı | 9 adım PASS + `zincir` SKIP | `28cbd4f` ağacında, log dosyasından okundu |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
 `.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` YOK.**
@@ -175,6 +175,10 @@ Bir sonraki fazın üstüne inşa etmemesi gerekenler:
     kez bile ölçülmedi.
 15. Faz 0'dan devreden ve kapanmayan: en az yetkili rol yok · `shellcheck`/`actionlint` yok ·
     `mypy` `tests/`i görmüyor · coverage yok · secret taraması git geçmişini taramıyor.
+16. **`latest_observations` güncel durumu DEĞİL, içerik başına İLK görüleni döner.** Bir değer
+    geri dönerse (X → Y → X) "en yeni" **Y** çıkar, hatasız. Faz 2 gözlem deposunun "en
+    yeni"sini güncel durum sanmamalı; düzeltme migrasyon ister —
+    `docs/phases/01-toplayicilar/HANDOFF.md` §3.9/31.
 
 ---
 

@@ -27,7 +27,7 @@ kaynaklardan, append-only ve `observed_at` damgalı biçimde toplayan katmanı k
 
 | Parça | Dosya | Durum |
 |---|---|---|
-| Kaynak kayıt defteri | `config/sources.yaml`, `sources.py` | 7 kaynak; 4 açık, 3 kapalı |
+| Kaynak kayıt defteri | `config/sources.yaml`, `sources.py` | 7 kaynak; 5 açık, 2 kapalı (`googlenews`, `understat`) |
 | robots.txt zorlaması (RFC 9309) | `sources.py` → `protego` | kapı adımı: `kaynak-politikası` |
 | robots anlık görüntüleri | `config/robots/*.txt` | 7 dosya, ölçüm tarihi 2026-09-19 |
 | Canlı robots sapma ölçümü | `scripts/robots_drift.py`, `.github/workflows/sources-audit.yml` | günlük cron — **hiç koşmadı** (§3.2) |
@@ -46,9 +46,9 @@ kaynaklardan, append-only ve `observed_at` damgalı biçimde toplayan katmanı k
 | TFF | `collectors/tff.py` | `fetch-tff` | bu haftanın hakem atamaları (windows-1254) | **çalışıyor** |
 | Ajansspor | `collectors/news.py` | `fetch-news` | sitemap/news urlset → haber öğeleri | **çalışıyor** |
 | Google News | `collectors/news.py` (adaptör) | `fetch-news` | RSS — **`enabled: false`** | kapalı (lisans + robots) |
-| Wikidata + Open-Meteo | `collectors/venues.py`, `weather.py` | `fetch-venues` | stadyum koordinatı + maç saati havası | **kısmen** (§3.3/12) |
+| Wikidata + Open-Meteo | `collectors/venues.py`, `weather.py` | `fetch-venues` | stadyum koordinatı + maç saati havası | **kısmen** (§3.2/4, §3.7/23) |
 | The Odds API `/scores` | `collectors/results.py` | `fetch-results` | tamamlanmış maç skorları | **hiç koşmadı** (§3.2/3) |
-| (kaynak yok) | `elo.py` | — | saf Elo motoru, ClubElo'nun yerine | iskele (§3.5/8) |
+| (kaynak yok) | `elo.py` | — | saf Elo motoru, ClubElo'nun yerine | iskele (§3.5/15) |
 
 ### 1.3 Varlık eşleme ve dil
 
@@ -80,7 +80,7 @@ yıkmaktır.
 
 Kapı çıktısı özet değil, **log dosyasından** (`$TMPDIR/football-edge-verify.log`).
 
-### 2.1 Taze koşu — `4158f81` ağacı (ve bunu izleyen dokümantasyon commit'leri)
+### 2.1 Taze koşu — `28cbd4f` ağacı (ve bunu izleyen dokümantasyon commit'leri)
 
 ```
 === ruff-check ===          PASS  (All checks passed!)
@@ -174,10 +174,10 @@ komut zaten 25 testle fixture'a karşı kapsamlı sınandı. İlk gerçek koşud
 yazım hatası çıkabilir; kod yolu `collect_footystats`in kanıtlanmış desenini izliyor.
 
 **4. `fetch-venues`'in HAVA ve UTC dönüşüm yolu bir kez bile koşmadı (R46).** Sebebi
-yapısal: mekân kaydı yalnız Galatasaray'ı tanıyor (madde 12) ve Faz 0'ın 51 maçlık anlık
+yapısal: mekân kaydı yalnız Galatasaray'ı tanıyor (madde 23) ve Faz 0'ın 51 maçlık anlık
 görüntüsünde Galatasaray'ın ev sahibi maçı YOK — yani `fetch-venues` bir koordinat yazıp
 duruyor, hava yarısı ATIL. Zorlamak için veritabanına sahte maç yazmak append-only tabloya
-kirlilik sokardı (madde 13'ün dersi). **Bu, diff'teki tek hiç çalışmamış kod yoluydu** ve
+kirlilik sokardı (madde 24'ün dersi). **Bu, diff'teki tek hiç çalışmamış kod yoluydu** ve
 inceleme tam orada yanıt tarafında (`timezone=GMT` gönderilmiyordu) gerçek bir açık buldu.
 
 **5. Faz 1'in eklediği hiçbir workflow bir runner'da koşmadı.** `sources-audit.yml` (günlük
@@ -480,8 +480,9 @@ içinden **Faz 2'yi bağlayanlardır.**
     değil TÜM dalgayı (`7b5158d`'den itibaren) kapsar.
 25. **#M10 GERÇEKTEN kapatıldı (R56).** `test_full_scan_workflow_is_read_only` skaler
     `permissions: read-all`/`write-all` kısayolunda artık çıplak `AttributeError` değil temiz
-    bir assertion veriyor (RED→GREEN kanıtlı); `_concurrency_group` docstring'i kendini #M10
-    sanan yanlış iddiadan arındırıldı. **Yanlışsa bedeli:** birkaç satır test kodu.
+    bir assertion veriyor (RED→GREEN kanıtlı); `_concurrency_group` (R62'den beri
+    `_group_of`) docstring'i kendini #M10 sanan yanlış iddiadan arındırıldı. **Yanlışsa
+    bedeli:** birkaç satır test kodu.
 26. **PFDK boşluğu KAYDA geçer, UYGULANMAZ (R57).** Yeni bir toplayıcı bir düzeltme dalgasının
     işi değildir (yeni yetenek); kayıt §3.9/30'da, §3.1'deki işarette ve DEFERRED §9.7'de.
     **Yanlışsa bedeli:** Faz 2 PFDK verisi var sanabilirdi — kayıt tam bunu önler.
@@ -529,9 +530,12 @@ içinden **Faz 2'yi bağlayanlardır.**
    için hakem verisi gelmiyor. Baz model bu özellik olmadan kurulmalı.
 7. **`docs/DEFERRED.md` OKUNMUŞ OLMALI.** Faz 1 o listeyi tek tek kapatmak zorunda değildi ve
    kapatmadı; Faz 2 de zorunda değil, ama **okumadan** başlamamalı. Özellikle §2.1 (en az
-   yetkili rol yok — Faz 1 tablo sayısını üçe çıkardı) ve §9.4 (jev `probabilities` atılıyor)
-   Faz 2'nin tasarımını etkiler. §9.2'nin en önemli maddesi (`full-scan.yml`in concurrency
-   YOKLUĞUNU sabitleyen test) son bütün-dal incelemesinde kapandı.
+   yetkili rol yok — Faz 1 tablo sayısını üçe çıkardı), §9.4 (jev `probabilities` atılıyor) ve
+   §9.6e (**`latest_observations` güncel durumu DEĞİL, içerik başına İLK görüleni döner** —
+   §3.9/31) Faz 2'nin tasarımını etkiler. §9.2'nin en önemli maddesi son bütün-dal
+   incelemesinde kapandı: `seal.yml`/`snapshot.yml` DIŞINDA hiçbir workflow'un (`*.yml` ya da
+   `*.yaml`) `odds-collect` grubunu üst düzeyde ya da bir job'da bildirmediğini artık bir test
+   sabitliyor.
 8. **Dalın merge'i.** Faz 1'in beş workflow'unun hiçbiri koşmadı (§3.2/5). GitHub `schedule`
    yalnız varsayılan dalda çalışır.
 
