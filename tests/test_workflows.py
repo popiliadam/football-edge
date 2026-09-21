@@ -311,8 +311,8 @@ def test_full_scan_workflow_is_read_only() -> None:
 # kalıcı veri kaybına giden yol (DEFERRED §9.2a).
 
 
-def _concurrency_group(path: Path) -> str | None:
-    """Bir workflow'un concurrency GRUBUNU döner; grup yoksa `None`.
+def _group_of(concurrency: Any) -> str | None:
+    """Bir `concurrency:` değerinin grup adını döner; blok yoksa `None`.
 
     `concurrency:` MAPPING (`{group: ..., cancel-in-progress: ...}`) olarak da, skaler
     kısayol olarak da (`concurrency: <grup adı>`) GEÇERLİDİR. Yalnız mapping varsayan bir
@@ -320,8 +320,6 @@ def _concurrency_group(path: Path) -> str | None:
     permissions kısayolunda verdiği hatayla (`_contents_permission`, yukarıda) AYNI ŞEKİL,
     temiz bir assertion değil. Bu fonksiyon iki biçimi de okur.
     """
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    concurrency = document.get("concurrency")
     if concurrency is None:
         return None
     if isinstance(concurrency, dict):
@@ -330,27 +328,47 @@ def _concurrency_group(path: Path) -> str | None:
     return str(concurrency)  # skaler kısayol: değerin KENDİSİ grup adıdır
 
 
+def _concurrency_groups(path: Path) -> frozenset[str]:
+    """Bir workflow'un TÜM concurrency gruplarını döner: üst düzeydekini VE her job'unkini.
+
+    GitHub `concurrency:`yi `jobs.<id>.concurrency` olarak da kabul eder ve iki düzeyin
+    grupları AYNI depo-geneli ad uzayındadır: `odds-collect`i job düzeyinde bildiren bir
+    workflow da bekleyen bir mühür turunu iptal ettirir. İlk sürüm yalnız üst düzeyi
+    okuyordu ve bu biçim ondan kaçıyordu (yeniden inceleme, R62).
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    jobs = document.get("jobs") or {}
+    blocks = (
+        document.get("concurrency"),
+        *(job.get("concurrency") for job in jobs.values() if isinstance(job, dict)),
+    )
+    return frozenset(group for group in map(_group_of, blocks) if group is not None)
+
+
 def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -> None:
     """`seal.yml`in kendi grubunu (`odds-collect`) `snapshot.yml` DIŞINDA hiçbir workflow
     paylaşmamalı. Yeni bir workflow (ör. `full-scan.yml`) bu gruba GİRERSE, bekleyen bir
     mühür turu sessizce iptal edilebilir — kapanış fiyatı bir daha OLUŞMAZ.
 
-    Liste `.github/workflows/*.yml` üzerinde DİNAMİK kurulur (sabit bir tuple DEĞİL): yeni
-    bir workflow dosyası eklenip grup paylaşılırsa bu test onu OTOMATİK görür, listeye elle
-    eklenmesini beklemez.
+    Liste `.github/workflows/` altındaki `*.yml` VE `*.yaml` dosyalarından (GitHub ikisini
+    de workflow sayar) DİNAMİK kurulur, sabit bir tuple DEĞİL: yeni bir workflow dosyası
+    eklenip grup paylaşılırsa bu test onu OTOMATİK görür. Grup üst düzeyde YA DA herhangi bir
+    job'da, mapping ya da skaler biçimde bildirilse yakalanır. Grup adı DİZE olarak
+    karşılaştırılır: `${{ }}` ifadesiyle üretilen bir ad değerlendirilmez.
     """
-    seal_group = _concurrency_group(SEAL)
-    assert seal_group is not None, "seal.yml artık concurrency grubu taşımıyor — test bayatladı"
+    seal_groups = _concurrency_groups(SEAL)
+    assert seal_groups, "seal.yml artık concurrency grubu taşımıyor — test bayatladı"
 
-    all_workflows = sorted((REPO / ".github/workflows").glob("*.yml"))
+    directory = REPO / ".github/workflows"
+    all_workflows = sorted((*directory.glob("*.yml"), *directory.glob("*.yaml")))
     sharing = tuple(
         path.name
         for path in all_workflows
-        if path.name not in {"seal.yml", "snapshot.yml"} and _concurrency_group(path) == seal_group
+        if path.name not in {"seal.yml", "snapshot.yml"} and _concurrency_groups(path) & seal_groups
     )
 
     assert sharing == (), (
-        f"{sharing} seal.yml'in {seal_group!r} concurrency grubunu paylaşıyor — GitHub aynı "
-        "gruptaki bekleyen bir run'ı yenisi geldiğinde İPTAL EDER; bir mühür turu kuyruktan "
+        f"{sharing} seal.yml'in {sorted(seal_groups)} concurrency grubunu paylaşıyor — GitHub "
+        "aynı gruptaki bekleyen bir run'ı yenisi geldiğinde İPTAL EDER; bir mühür turu kuyruktan "
         "düşerse kapanış fiyatı KALICI olarak kaybolur (EXIT_MISSED_SEAL)"
     )

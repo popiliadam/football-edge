@@ -89,9 +89,12 @@ def latest_observations(
     Bugün blast radius SIFIRDIR: tek okuyucu `mapping.resolve_source_aliases`dir ve
     footystats yükleri monoton `matches_played` taşır (geri DÖNEMEZ). Ama hakem yeniden
     atamaları ve yeniden yayınlanan özdeş tahminler geri dönebilir. **Şema BURADA
-    DEĞİŞTİRİLMEDİ** — asıl düzeltme bir migrasyon ister (ör. UNIQUE kısıtına
-    `observed_at`i de katmak) ve Faz 2'ye bırakıldı; bkz.
-    `docs/phases/01-toplayicilar/HANDOFF.md` §3.
+    DEĞİŞTİRİLMEDİ** — asıl düzeltme bir migrasyon ister ve Faz 2'ye bırakıldı: anahtar
+    başına SON hash'e karşı tekilleştirmek. O zaman X → Y → X'in üçüncü yazımı YAZILIR,
+    değişmemiş bir tekrar ise yine tekilleşir. `observed_at`i UNIQUE kısıtına katmak çözüm
+    DEĞİLDİR: içerik tekilleştirmesini tamamen kaldırır (bkz. `Observation.content_hash`
+    docstring'i). Bkz. `docs/phases/01-toplayicilar/HANDOFF.md` §3.9/31 ve
+    `docs/DEFERRED.md` §9.6e.
     """
     with conn.cursor() as cur:
         cur.execute(SELECT_LATEST_OBSERVATIONS, (source_id, entity_kind))

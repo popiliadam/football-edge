@@ -89,7 +89,11 @@ EXIT_SOURCE_POLICY = 6
 EXIT_SOURCE_FAILED = 7
 # Task 12 (spec §5.4): ölçülmemiş dil üretime alınamaz. AYNI İSTİSNA/GEREKÇE (yukarıdaki iki
 # yorum) — check-languages/calibrate `seal.yml`/`snapshot.yml`ce hiç çağrılmaz. 7 DEĞİL 8:
-# `EXIT_SOURCE_FAILED=7` bu brief YAZILDIKTAN SONRA, Task 11'de eklendi.
+# planın Task 12 metni (ve onu kopyalayan brief) 7 diyordu, ama 7'yi merge adımı (M1–M8,
+# `658c7b7`) `EXIT_SOURCE_FAILED`e çoktan vermişti — planın numarası o numaralandırmadan ÖNCE
+# yazılmıştı ve benzersizliği hiçbir şey zorlamıyordu; elle 8'e kaydırıldı. Artık
+# `tests/test_collect_main.py::test_every_exit_code_constant_is_unique_and_outside_the_
+# reserved_range` zorluyor.
 EXIT_LANGUAGE_UNCALIBRATED = 8
 
 _LEDGER_COLUMNS = """

@@ -318,13 +318,14 @@ def test_the_missed_seal_code_does_not_collide_with_the_other_failures() -> None
 
 
 def test_every_exit_code_constant_is_unique_and_outside_the_reserved_range() -> None:
-    """I-4 (Faz 1 SON inceleme) — bu fazda ZATEN bir çakışma oldu: Task 12'nin brief'i
-    `EXIT_LANGUAGE_UNCALIBRATED` için 7 diyordu, Task 11 onu ÇOKTAN `EXIT_SOURCE_FAILED`e
-    almıştı (paralel worktree'ler birbirini GÖREMEZ) — elle yakalanıp 8'e kaydırıldı,
-    hiçbir test bunu ZORLAMIYORDU. Yukarıdaki test yalnız DÖRT sabiti (seal'in
-    döndürebildiklerini) sayıyor; bu test `vars(collect)`teki HER `EXIT_*` adını TOPLAR —
-    yeni bir sabit eklenince listeye elle eklenmeyi BEKLEMEZ — ve hepsinin birbirinden VE
-    0/1'den farklı olduğunu doğrular.
+    """I-4 (Faz 1 SON inceleme) — bu fazda ZATEN bir çakışma oldu: planın Task 12 metni (ve
+    onu kopyalayan brief) `EXIT_LANGUAGE_UNCALIBRATED = 7` diyordu, ama 7'yi merge adımı
+    (M1–M8, `658c7b7`) `EXIT_SOURCE_FAILED`e çoktan vermişti. Planın numarası o
+    numaralandırmadan ÖNCE yazılmıştı ve benzersizliği hiçbir şey ZORLAMIYORDU — çakışma elle
+    yakalanıp 8'e kaydırıldı (Task 11 ve 12 ardışıktı, paralel değil). Yukarıdaki test yalnız
+    DÖRT sabiti (seal'in döndürebildiklerini) sayıyor; bu test `vars(collect)`teki HER
+    `EXIT_*` adını TOPLAR — yeni bir sabit eklenince listeye elle eklenmeyi BEKLEMEZ — ve
+    hepsinin birbirinden VE 0/1'den farklı olduğunu doğrular.
     """
     exit_codes = {
         name: value
