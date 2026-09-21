@@ -56,11 +56,16 @@ sources:
     user_agent: football-edge/0.1
     crawl_delay_seconds: 2.0
     robots_verified_at: 2026-09-19
-    declared_paths: ['/Default.aspx?pageID=600', '/Default.aspx?pageID=246']
+    declared_paths: ['/Default.aspx?pageID=600']
     enabled: true
     access_basis: robots
     terms_url: ''
-    note: 'robots.txt YOK (404). Gövde windows-1254; charset YALNIZ HTTP başlığında.'
+    note: >-
+      robots.txt YOK (404). Gövde windows-1254; charset YALNIZ HTTP başlığında.
+      `pageID=246` KALDIRILDI (#M28/M-1, Faz 1 son inceleme): hiçbir kod onu fetch etmiyordu
+      (R7: beyan = gerçek istek). tests/test_sources.py'deki bağlayıcı test yalnız öbür yönü
+      korur (her fetch edilen yol beyanlı). PFDK (spec §3.1 satır 81, plan Task 6 başlığı) HİÇ
+      uygulanmadı → HANDOFF §3 madde 30 / DEFERRED §9.
 
   - id: ajansspor
     base_url: https://ajansspor.com

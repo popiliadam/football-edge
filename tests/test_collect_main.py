@@ -317,6 +317,28 @@ def test_the_missed_seal_code_does_not_collide_with_the_other_failures() -> None
     assert 0 not in codes, "0 yalnız arızasız tur demektir"
 
 
+def test_every_exit_code_constant_is_unique_and_outside_the_reserved_range() -> None:
+    """I-4 (Faz 1 SON inceleme) — bu fazda ZATEN bir çakışma oldu: Task 12'nin brief'i
+    `EXIT_LANGUAGE_UNCALIBRATED` için 7 diyordu, Task 11 onu ÇOKTAN `EXIT_SOURCE_FAILED`e
+    almıştı (paralel worktree'ler birbirini GÖREMEZ) — elle yakalanıp 8'e kaydırıldı,
+    hiçbir test bunu ZORLAMIYORDU. Yukarıdaki test yalnız DÖRT sabiti (seal'in
+    döndürebildiklerini) sayıyor; bu test `vars(collect)`teki HER `EXIT_*` adını TOPLAR —
+    yeni bir sabit eklenince listeye elle eklenmeyi BEKLEMEZ — ve hepsinin birbirinden VE
+    0/1'den farklı olduğunu doğrular.
+    """
+    exit_codes = {
+        name: value
+        for name, value in vars(collect).items()
+        if name.startswith("EXIT_") and isinstance(value, int)
+    }
+
+    assert len(exit_codes) >= 7, f"collect modülünde beklenenden az EXIT_* sabiti var: {exit_codes}"
+    values = tuple(exit_codes.values())
+    assert len(set(values)) == len(values), f"EXIT_* sabitleri çakışıyor: {exit_codes}"
+    assert 0 not in values, f"0 yalnız arızasız tur demektir: {exit_codes}"
+    assert 1 not in values, f"1 zincir kırığına/beklenmedik arızaya ayrılmıştır: {exit_codes}"
+
+
 def test_a_missed_seal_does_not_mask_a_louder_failure_in_the_same_round(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

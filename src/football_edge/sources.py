@@ -75,6 +75,16 @@ def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
         raise ValueError(
             f"kaynak kaydında geçersiz access_basis: {entry['access_basis']!r} ({entry['id']})"
         )
+    # #M13 (deferred, Faz 1 SON inceleme'de kapatıldı): `declared_paths` bir LİSTE olmalı.
+    # YAML'da skaler bir dize yazılırsa (`declared_paths: /foo/xg`, tırnaksız liste yerine)
+    # `load_sources`teki `tuple(entry["declared_paths"])` onu KARAKTERLERE böler — `/`, `f`,
+    # `o`, `o`, ... — ve kapı bu "yolları" robots'a karşı sessizce, anlamsızca sorar. Liste
+    # DIŞINDA (dict, int, None, ...) her tip de aynı şekilde reddedilir.
+    if not isinstance(entry["declared_paths"], list):
+        raise ValueError(
+            f"kaynak kaydında declared_paths LİSTE olmalı, "
+            f"{type(entry['declared_paths']).__name__} değil ({entry['id']})"
+        )
 
 
 def load_sources(path: Path) -> tuple[Source, ...]:
@@ -225,6 +235,17 @@ def audit_offline(
             violations = (
                 *violations,
                 f"{source.id}: access_basis=api_terms ama terms_url yok — istisna gerekçesiz",
+            )
+        # #M20 (deferred, Faz 1 SON inceleme'de kapatıldı): `enabled: true` + boş
+        # `declared_paths` bugüne kadar bu denetimden HİÇBİR ŞEY ÖLÇMEDEN geçiyordu —
+        # aşağıdaki `for path in source.declared_paths` döngüsü boş demette no-op'tur, yani
+        # "TEMİZ" raporu hiçbir yolu robots'a karşı sınamadan verilirdi. Yalnız
+        # `access_basis=robots` kaynaklarda: `api_terms` kaynaklarda `declared_paths` zaten
+        # robots kararını etkilemiyor (`allows()`), boşluğu ayrı bir ihlal SAYMAZ.
+        if source.access_basis == ACCESS_BASIS_ROBOTS and not source.declared_paths:
+            violations = (
+                *violations,
+                f"{source.id}: enabled ama declared_paths boş — hiçbir yol denetlenmiyor",
             )
         snapshot = robots_snapshot(source, robots_dir)
         if not snapshot.is_file():

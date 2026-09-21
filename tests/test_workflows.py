@@ -89,6 +89,11 @@ def _seal_run_body() -> str:
 # bir case arm'ı ASLA taşımaz; `fetch-results` ise `EXIT_LEAGUE_FAILED`ı (3, zaten listede)
 # yeniden kullanıyor — bkz. `collect.py`'deki `EXIT_SOURCE_FAILED` yorumu ve
 # `collectors.results.collect_results` docstring'i.
+# `EXIT_LANGUAGE_UNCALIBRATED = 8` (Task 12, spec §5.4) AYNI GEREKÇEYLE KASITLI OLARAK
+# YOKTUR (M-6, Faz 1 SON inceleme — bu yorum 8 eklendiğinde GÜNCELLENMEMİŞTİ, yalnız 6 ve 7'yi
+# adlandırıyordu): `check-languages`/`calibrate` de `seal.yml`/`snapshot.yml` tarafından HİÇ
+# çağrılmaz. `_seal_run_body()`nin döndürdüğü metin bu yüzden 8'i üretecek bir case arm'ı da
+# ASLA taşımaz — bkz. `collect.py`'deki `EXIT_LANGUAGE_UNCALIBRATED` yorumu.
 @pytest.mark.parametrize(
     ("code", "name"),
     [
@@ -258,6 +263,23 @@ def test_full_scan_workflow_checks_out_full_history() -> None:
     )
 
 
+def _contents_permission(value: Any) -> str | None:
+    """Bir `permissions:` değerindeki `contents` düzeyini döner; blok yoksa `None`.
+
+    #M10 (DEFERRED §9.2b, R56 ile kapatıldı): GitHub Actions `permissions:`i MAPPING
+    (`{contents: read, ...}`) olarak da, skaler kısayol olarak da (`read-all`/`write-all` —
+    her kapsama aynı düzey) kabul eder. Eski okuma yalnız mapping varsayıyordu; kısayol
+    gelince `.get` ÇIPLAK bir `AttributeError` veriyordu, temiz bir assertion değil.
+    Tanınmayan bir skaler olduğu gibi (dize olarak) döner — assertion onu adıyla raporlar.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        contents = value.get("contents")
+        return None if contents is None else str(contents)
+    return {"read-all": "read", "write-all": "write"}.get(str(value), str(value))
+
+
 def test_full_scan_workflow_is_read_only() -> None:
     """Deftere YAZMAZ, yalnız okur — `seal.yml`nin `contents: write` yetkisine gerek yok.
 
@@ -268,11 +290,67 @@ def test_full_scan_workflow_is_read_only() -> None:
     """
     document = yaml.safe_load(FULL_SCAN.read_text(encoding="utf-8"))
 
-    assert document.get("permissions", {}).get("contents") == "read", (
+    assert _contents_permission(document.get("permissions")) == "read", (
         "full-scan.yml salt-okunur olmalı"
     )
     for name, job in document["jobs"].items():
-        widened = (job.get("permissions") or {}).get("contents")
+        widened = _contents_permission(job.get("permissions"))
         assert widened in (None, "read"), (
             f"full-scan.yml: '{name}' job'ı contents iznini '{widened}'e genişletiyor"
         )
+
+
+# ── Faz 1 SON inceleme, I-3: full-scan.yml'in concurrency YOKLUĞU tek koruma yorumdu ────────
+# `full-scan.yml`deki `# concurrency: BİLİNÇLİ OLARAK YOK` yalnız bir YORUM: kod hiçbir şeyi
+# ZORLAMIYORdu. Reviewer bunu dışa aktarılmış bir kopyada mutasyonla kanıtladı:
+# `concurrency: {group: odds-collect}` eklenince 18 workflow testinin 18'i de YEŞİL kaldı.
+# Grup paylaşılırsa GitHub, aynı gruptaki BEKLEYEN bir run'ı yenisi geldiğinde İPTAL EDER
+# (bkz. full-scan.yml'in üst yorumu) — 30 dakikalık full-scan, 15 dakikada bir koşan mühür
+# turlarından birini kuyruğa dizip iptal eder → `EXIT_MISSED_SEAL` → kapanış fiyatı KALICI
+# kayıp (Faz 0'ın önlemek için var olduğu TEK sonuç). Bu, ertelenmiş bulgular içindeki TEK
+# kalıcı veri kaybına giden yol (DEFERRED §9.2a).
+
+
+def _concurrency_group(path: Path) -> str | None:
+    """Bir workflow'un concurrency GRUBUNU döner; grup yoksa `None`.
+
+    `concurrency:` MAPPING (`{group: ..., cancel-in-progress: ...}`) olarak da, skaler
+    kısayol olarak da (`concurrency: <grup adı>`) GEÇERLİDİR. Yalnız mapping varsayan bir
+    okuma kısayolda `.get` çağırırken ÇIPLAK bir `AttributeError` verir — #M10'un
+    permissions kısayolunda verdiği hatayla (`_contents_permission`, yukarıda) AYNI ŞEKİL,
+    temiz bir assertion değil. Bu fonksiyon iki biçimi de okur.
+    """
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    concurrency = document.get("concurrency")
+    if concurrency is None:
+        return None
+    if isinstance(concurrency, dict):
+        group = concurrency.get("group")
+        return None if group is None else str(group)
+    return str(concurrency)  # skaler kısayol: değerin KENDİSİ grup adıdır
+
+
+def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -> None:
+    """`seal.yml`in kendi grubunu (`odds-collect`) `snapshot.yml` DIŞINDA hiçbir workflow
+    paylaşmamalı. Yeni bir workflow (ör. `full-scan.yml`) bu gruba GİRERSE, bekleyen bir
+    mühür turu sessizce iptal edilebilir — kapanış fiyatı bir daha OLUŞMAZ.
+
+    Liste `.github/workflows/*.yml` üzerinde DİNAMİK kurulur (sabit bir tuple DEĞİL): yeni
+    bir workflow dosyası eklenip grup paylaşılırsa bu test onu OTOMATİK görür, listeye elle
+    eklenmesini beklemez.
+    """
+    seal_group = _concurrency_group(SEAL)
+    assert seal_group is not None, "seal.yml artık concurrency grubu taşımıyor — test bayatladı"
+
+    all_workflows = sorted((REPO / ".github/workflows").glob("*.yml"))
+    sharing = tuple(
+        path.name
+        for path in all_workflows
+        if path.name not in {"seal.yml", "snapshot.yml"} and _concurrency_group(path) == seal_group
+    )
+
+    assert sharing == (), (
+        f"{sharing} seal.yml'in {seal_group!r} concurrency grubunu paylaşıyor — GitHub aynı "
+        "gruptaki bekleyen bir run'ı yenisi geldiğinde İPTAL EDER; bir mühür turu kuyruktan "
+        "düşerse kapanış fiyatı KALICI olarak kaybolur (EXIT_MISSED_SEAL)"
+    )

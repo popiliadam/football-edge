@@ -219,8 +219,17 @@ def collect_footystats(
                 required=frozenset({"team_name", "footystats_id", "xg_per_match", "xga_per_match"}),
                 minimum_rows=10,
             )
-            written += write_observations(conn, parsed)
+            new_rows = write_observations(conn, parsed)
             conn.commit()
+            # Minor #4 (review, promoted) — G1 ile aynı gerekçe: commit() kendisi düşerse
+            # satırlar geri alınır ama sayaç ÖNCEDEN artmış olurdu, "N yeni gözlem" hiç
+            # kalıcı olmamış veri için basılırdı. I-1 (Faz 1 SON inceleme, 2026-09-19):
+            # R48 bu düzeltmeyi venues.py/news.py/results.py'a taşıdı ama bu REFERANS
+            # toplayıcıya (Task 5, R48'den ÖNCEYDİ) geri süpürülmedi — üç kardeşi
+            # kopyalandığı orijinal hâlâ yanlıştı. Sondalandı: commit düşünce
+            # `FootyStatsResult(written=18, ...)`, `commits=0` — 18 satır hiç kalıcı
+            # olmadan "yazıldı" diye raporlanıyordu.
+            written += new_rows
         except Exception:
             conn.rollback()
             LOGGER.exception("lig=%s footystats toplanamadı, diğerlerine devam", league.id)

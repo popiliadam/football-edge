@@ -194,3 +194,36 @@ def test_collect_isolates_a_failing_league_but_still_reports_it(tmp_path: Path) 
     assert result.written > 0, "sağlam lig yine de yazılmalıydı"
     assert result.failed_leagues == ("bad.1",), f"arızalı lig raporlanmadı: {result.failed_leagues}"
     assert db.rollbacks == 1, "arızalı ligin transaction'ı geri alınmalıydı"
+
+
+def test_collect_does_not_count_a_league_whose_commit_fails(tmp_path: Path) -> None:
+    """I-1 (Faz 1 SON inceleme, 2026-09-19) — Minor #4/G1 ile AYNI sınıf arıza, bu REFERANS
+    toplayıcıda: "not failed" ile "durably written" aynı şey değildir. `commit()` düşerse
+    satır kalıcı DEĞİLDİR; `written`i önceden artırmak hiç kalıcı olmamış veri için "N yeni
+    gözlem" basmak demektir. R48 bu düzeltmeyi venues.py/news.py/results.py'a taşıdı ama
+    Task 5 (bu dosya) R48'DEN ÖNCEYDİ ve geri süpürülmedi — `FakeObservationDb.commit_fails`
+    kardeşleriyle AYNI desen, tam bunun için var.
+    """
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "footystats", "")
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, text=fixture_html(), headers={"content-type": "text/html"}
+            )
+        )
+    )
+    db = FakeObservationDb(commit_fails=lambda _db: True)
+
+    result = collect_footystats(
+        db,  # type: ignore[arg-type]
+        client,
+        (_league("good.1", "/good/xg"),),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert result.written == 0, f"commit düştü ama written sayıldı: {result}"
+    assert result.failed_leagues == ("good.1",)
+    assert db.rollbacks == 1

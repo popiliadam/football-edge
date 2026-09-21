@@ -75,6 +75,23 @@ def latest_observations(
     YENİDEN HESAPLANIR. Bu güvenlidir: hash zaten `observed_at`i dışarıda bırakıyor
     (bkz. `Observation.content_hash` docstring'i), yani entity_kind/entity_key/payload/
     source_id'den yeniden hesaplamak yazma anındaki değerle birebir eşleşir.
+
+    **BİLİNEN SINIRLAMA (I-5, Faz 1 SON inceleme, 2026-09-19) — bir değer GERİ DÖNERSE bu
+    fonksiyon ESKİ satırı döner, hatasız.** UNIQUE kısıtı `(source_id, entity_kind,
+    entity_key, content_hash)` üzerindedir ve `content_hash` `observed_at`i DIŞARIDA
+    bırakır (yukarıdaki paragraf). Bir değer X → Y → X sırasıyla gözlemlenirse: üçüncü
+    yazım (X'in TEKRARI) content_hash'i İLK X yazımıyla ÇAKIŞIR, `ON CONFLICT DO NOTHING`
+    onu sessizce reddeder — depoda üçüncü satır hiç OLUŞMAZ, yalnız (t1, X) ve (t2, Y)
+    kalır. `ORDER BY observed_at DESC` bu yüzden en yeni GERÇEK gözlemi değil (üçüncü,
+    t3'teki X), ARADAKİ Y'yi döner — X şu an güncel değer olsa bile. Sondalandı: TFF hakemi
+    X → Y → X atandığında `latest` **Y** raporluyor.
+
+    Bugün blast radius SIFIRDIR: tek okuyucu `mapping.resolve_source_aliases`dir ve
+    footystats yükleri monoton `matches_played` taşır (geri DÖNEMEZ). Ama hakem yeniden
+    atamaları ve yeniden yayınlanan özdeş tahminler geri dönebilir. **Şema BURADA
+    DEĞİŞTİRİLMEDİ** — asıl düzeltme bir migrasyon ister (ör. UNIQUE kısıtına
+    `observed_at`i de katmak) ve Faz 2'ye bırakıldı; bkz.
+    `docs/phases/01-toplayicilar/HANDOFF.md` §3.
     """
     with conn.cursor() as cur:
         cur.execute(SELECT_LATEST_OBSERVATIONS, (source_id, entity_kind))

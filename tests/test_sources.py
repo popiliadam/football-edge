@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from football_edge.collectors import news, tff, venues
+from football_edge.collectors.weather import FORECAST_PATH
+from football_edge.leagues import active_leagues, load_leagues
 from football_edge.sources import (
     ACCESS_BASIS_API_TERMS,
     Source,
@@ -17,6 +20,8 @@ from football_edge.sources import (
     robots_for,
     snapshot_from_status,
 )
+
+REPO = Path(__file__).resolve().parent.parent
 
 UNDERSTAT_ROBOTS = "User-agent: *\nDisallow: /\n"
 # footystats' REAL robots.txt (measured 2026-09-19): "Disallow: /api/club*" / "/*.php" /
@@ -321,6 +326,63 @@ def test_registry_rejects_an_unrecognised_access_basis(tmp_path: Path) -> None:
         load_sources(target)
 
 
+# ── #M13 (deferred, kapatıldı Faz 1 SON inceleme) — declared_paths TİPİ doğrulanmalı ────────
+
+
+def test_registry_rejects_a_scalar_declared_paths(tmp_path: Path) -> None:
+    """`declared_paths: /turkey/super-lig/xg` (tırnaksız, listesiz) GEÇERLİ YAML'dır — bir
+    LİSTE değil, DÜZ BİR DİZEDİR. Doğrulama olmadan `load_sources`teki `tuple(entry[
+    "declared_paths"])` bunu karakterlere böler: `('/', 't', 'u', 'r', ...)`. Kapı sonra bu
+    "yolları" robots'a karşı harf harf, sessizce ve anlamsızca sorar — kırmızı da vermez,
+    doğru da ölçmez."""
+    target = tmp_path / "sources.yaml"
+    target.write_text(
+        "sources:\n"
+        "  - id: footystats\n"
+        "    base_url: https://footystats.org\n"
+        "    user_agent: football-edge/0.1\n"
+        "    crawl_delay_seconds: 1.0\n"
+        "    robots_verified_at: 2026-09-19\n"
+        "    declared_paths: /turkey/super-lig/xg\n"  # skaler, liste DEĞİL
+        "    enabled: true\n"
+        "    note: ''\n"
+        "    access_basis: robots\n"
+        "    terms_url: ''\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="declared_paths"):
+        load_sources(target)
+
+
+# ── #M20 (deferred, kapatıldı Faz 1 SON inceleme) — boş declared_paths hiçbir şey ölçmez ────
+
+
+def test_enabled_robots_source_with_empty_declared_paths_is_a_violation(tmp_path: Path) -> None:
+    """`enabled: true` + `declared_paths: []` eskiden bu denetimden HİÇBİR YOL sınanmadan
+    TEMİZ çıkıyordu — döngü boş demette no-op. Anlık görüntü VARSA (aşağıda öyle) ve
+    tazelikse, TEK eksik sinyal declared_paths'in boşluğuydu; artık bu da adıyla kırmızı."""
+    write_robots(tmp_path, "footystats", FOOTYSTATS_ROBOTS)
+    violations = audit_offline((source(declared_paths=()),), tmp_path, date(2026, 9, 19))
+    assert any("declared_paths boş" in text for text in violations), violations
+
+
+def test_enabled_api_terms_source_with_empty_declared_paths_is_not_flagged(tmp_path: Path) -> None:
+    """`access_basis=api_terms` kaynaklarda `declared_paths` zaten robots kararını
+    etkilemiyor (`allows()` onu hiç sormuyor) — M20'nin boşluk kontrolü bu kaynak sınıfını
+    KAPSAMAZ, yanlış alarm vermez."""
+    write_robots(tmp_path, "openmeteo", "User-agent: *\nDisallow: /\n")
+    api_source = source(
+        id="openmeteo",
+        base_url="https://api.open-meteo.com",
+        declared_paths=(),
+        access_basis=ACCESS_BASIS_API_TERMS,
+        terms_url="https://open-meteo.com/en/terms",
+    )
+    violations = audit_offline((api_source,), tmp_path, date(2026, 9, 19))
+
+    assert not any("declared_paths boş" in text for text in violations), violations
+
+
 # ── R15: what an HTTP status means for a live robots.txt check — moved here from
 # scripts/robots_drift.py because it is source-policy logic, not script plumbing, and
 # because it is the newest safety-relevant branch this project has (review Important #1
@@ -349,3 +411,48 @@ def test_snapshot_from_status_distinguishes_no_policy_from_unmeasured(
     be blocking us), a genuinely different outcome from 404's "" that a caller must treat
     differently (scripts/robots_drift.py fails the run on None; it does not on "")."""
     assert snapshot_from_status(status_code, body) == expected
+
+
+# ── #M28 / M-1 (deferred, kapatıldı Faz 1 SON inceleme) — declared_paths'i toplayıcının
+# GERÇEKTEN fetch ettiği yollara bağlayan hiçbir test yoktu. `sources.audit_offline`
+# yalnız `declared_paths`in robots'a UYUP UYMADIĞINI denetler; beyan edilmemiş bir fetch'i
+# hiç görmez. Bu test YALNIZ o yönü bağlar: fetch edilen ⊆ declared. Ters yön — declared
+# ama hiç fetch edilmeyen; `pageID=246` böyle yaşadı (artık kaldırıldı), ajansspor'un
+# `/sitemap`i bilinçli — HİÇBİR testle bağlı DEĞİL; HANDOFF §3 madde 32'de adıyla yazılı
+# (Ruling R59).
+#
+# openmeteo yalnız BAZ yolunu taşır (`FORECAST_PATH`, sorgu dizesiz): `_forecast_path`nin
+# ürettiği GERÇEK istek zorunlu `latitude`/`longitude` sorgu parametreleri taşır ve
+# `declared_paths` bunu hiç ifade edemez (DEFERRED §9.1d, ayrı ve bilinçli bir boşluk) —
+# ama `access_basis=api_terms` olduğu için robots.txt zaten hiç sorulmuyor (R8); burada
+# sınanan yalnız kayıt defterinin bu kaynağı BAZ yoluyla tanıdığıdır.
+
+
+def _collector_fetched_paths() -> tuple[tuple[str, str], ...]:
+    leagues = active_leagues(load_leagues(REPO / "config/leagues.yaml"))
+    pairs: tuple[tuple[str, str], ...] = tuple(
+        ("footystats", league.footystats_path) for league in leagues
+    )
+    pairs += (("tff", tff.REFEREE_PATH),)
+    pairs += tuple(("wikidata", venues.ENTITY_PATH.format(qid=spec.qid)) for spec in venues.VENUES)
+    pairs += (("openmeteo", FORECAST_PATH),)
+    pairs += tuple(("ajansspor", path) for path in news._ARTICLE_PATHS.values())
+    return pairs
+
+
+@pytest.mark.parametrize(
+    ("source_id", "path"),
+    _collector_fetched_paths(),
+    ids=[f"{s}:{p}" for s, p in _collector_fetched_paths()],
+)
+def test_each_collectors_fetched_path_is_declared(source_id: str, path: str) -> None:
+    """Gerçek `config/sources.yaml` + `config/leagues.yaml`e karşı: her toplayıcının
+    GERÇEKTEN istediği yol, o kaynağın `declared_paths`inde OLMALI — aksi hâlde
+    `kaynak-politikası` adımı o yolu robots'a karşı HİÇ sormaz, sessizce."""
+    registry = load_sources(REPO / "config/sources.yaml")
+    source_entry = next(entry for entry in registry if entry.id == source_id)
+
+    assert path in source_entry.declared_paths, (
+        f"{source_id}: {path!r} fetch ediliyor ama declared_paths'te YOK — "
+        "kaynak-politikası kapısı bu yolu hiç denetlemiyor"
+    )
