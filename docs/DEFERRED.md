@@ -554,3 +554,17 @@ toplayıcısı yeni bir iştir, sayfa şekli ölçülerek başlar. HANDOFF §3.9
 | `tests/test_verify_chain.py` | İki testte ~15 satır aynı git-repo kurulumu tekrar ediyor; test gövdelerinde yerel `import subprocess` (4 yer); kullanılmayan `capsys: Any` parametresi |
 | `tests/test_sources.py` (satır 174/184) | YAML loader testinde hâlâ `user_agent: ClaudeBot/1.0` dizesi var. **HTTP isteği değil**, yalnız loader kurgusu; R9'un asıl konusu (satır 28-36, 80-87) artık açıkça belgelenmiş durumda — bu ikisi kalan kozmetik artık |
 | `tests/test_venues.py` | Takas edilmiş lat/lon testi sentetik payload'da `latitude`u önce yazıyor, yani saf konumsal okumayı ayırt etmiyor (gerçek risk olan dönüş sırası takasını yakalıyor — çerçeveleme notu) |
+
+## 10. İşletme — mühür olayı (2026-09-21, Faz 1 merge'ünden sonra bulundu)
+
+`seal.yml` 2026-09-19 14:39'dan 09-21 14:15'e kadar 16 kez koştu (`*/15` cron'u ~203 tur
+beklerdi) ve bu turların 15'i `EXIT_MISSED_SEAL` verdi: 47 maçın kapanış fiyatı kalıcı olarak
+kayıp. Düzeltme: pg_cron → `workflow_dispatch` (`db/migrations/0003_seal_dispatch.sql`,
+`docs/RUNBOOK.md` §3). Açık kalanlar:
+
+| # | Ne | Neden önemli |
+|---|---|---|
+| 10a | **Kırmızı bir tura bakan kimse yoktu.** 15 kırmızı tur iki gün fark edilmedi | Kaçan mühür kalıcı veri kaybıdır; bildirim kanalı (e-posta/webhook) bağlanmalı |
+| 10b | Kaçan maç 24 saat boyunca her turda yeniden raporlanıyor | Tek bir kayıp, bir gün boyunca her 15 dakikada bir kırmızı üretir; gerçek yeni kaybı gürültüde saklar. "Yalnız YENİ kayıp" ayrımı şema değişikliği ister (raporlandı damgası) |
+| 10c | Dispatch tokenının süresi dolar | Dolduğunda tek sinyal yedek `schedule`ın seyrek kırmızısıdır; bitiş tarihi RUNBOOK §3.2'ye göre not edilmeli |
+| 10d | Kredi bütçesi ilk kez gerçekten kullanılacak | Mühürler bugüne kadar çoğunlukla kaçtığı için ayda ~314 kredilik mühür payı hiç tüketilmedi; güvenilir tetikle ay sonuna doğru `EXIT_QUOTA_EXHAUSTED` görülebilir |
