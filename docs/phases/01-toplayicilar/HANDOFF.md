@@ -1,7 +1,7 @@
 # Faz 1 — Toplayıcılar, Varlık Eşleme, Dil Kalibrasyonu · Devir Belgesi (HANDOFF)
 
 **Tarih:** 2026-09-19 · **Dal:** `faz-1-toplayicilar` · **Kapı:** `./verify.sh` → `KAPI YEŞİL`
-(9 adım PASS + `zincir` adımı ADIYLA SKIP) · **Test:** 349 passed / 2 skipped · **contract:** 18
+(9 adım PASS + `zincir` adımı ADIYLA SKIP) · **Test:** 365 passed / 2 skipped · **contract:** 18
 
 > **Bu belgenin en önemli bölümü §3'tür.** §2 kapının **ne ölçtüğünü**, §3 **ölçmediğini**
 > yazar. Yeşil bir kapı yalnız §2'yi kanıtlar; §3'teki hiçbir satır "test edildi" sayılamaz.
@@ -80,16 +80,16 @@ yıkmaktır.
 
 Kapı çıktısı özet değil, **log dosyasından** (`$TMPDIR/football-edge-verify.log`).
 
-### 2.1 Taze koşu — `bce4aa8` ağacı (ve bunu izleyen dokümantasyon commit'leri)
+### 2.1 Taze koşu — `4158f81` ağacı (ve bunu izleyen dokümantasyon commit'leri)
 
 ```
 === ruff-check ===          PASS  (All checks passed!)
 === ruff-format ===         PASS  (59 files already formatted)
 === mypy ===                PASS  (Success: no issues found in 25 source files)
-=== pytest ===              PASS  (349 passed, 2 skipped)
+=== pytest ===              PASS  (365 passed, 2 skipped)
 === paket-kurulu ===        PASS  (kurulu paket import edildi, PYTHONPATH boş)
 === kaynak-politikası ===   PASS  (kaynak politikası: TEMİZ)
-=== veri-sözleşmesi ===     PASS  (18 passed, 333 deselected — EXPECTED_MIN_CONTRACT=18)
+=== veri-sözleşmesi ===     PASS  (18 passed, 349 deselected — EXPECTED_MIN_CONTRACT=18)
 === dil-kalibrasyonu ===    PASS  (dil kalibrasyonu: TEMİZ)
 === secrets ===             PASS  (secret taraması temiz)
 SKIP: zincir (DATABASE_URL yok)
@@ -140,9 +140,9 @@ ile ölçümü ayrı tutmanın tek yoludur.**
 > Yol haritasının faz geçiş kuralı üç şey ister: her task kapıdan geçsin, critical/high bulgu
 > kalmasın, ve **kapının kör noktaları ADIYLA yazılsın.** Üçüncüsü en sık atlanan ve en pahalı
 > olandır: yazılmayan bir boşluk, bir sonraki fazda "doğrulanmıştı" varsayımıyla üstüne inşa
-> edilir. Aşağıdaki 22 maddenin hiçbiri "belki"dir; hepsi bu faz boyunca ADIYLA görüldü.
+> edilir. Aşağıdaki maddelerin hiçbiri "belki"dir; hepsi bu faz boyunca ADIYLA görüldü.
 
-### 3.1 Fazın kendi hedefini karşılamayan iki şey
+### 3.1 Fazın kendi hedefini karşılamayan şeyler
 
 **1. TOPLAYICILAR HİÇBİR YERDE KOŞMUYOR.** Zamanlama yok, cron yok, workflow yok. Beş
 `fetch-*` komutu kütüphane + CLI olarak teslim edildi; onları `.github/workflows/` altına
@@ -163,6 +163,9 @@ Yani "Jev'in çok dilli doğruluğu" — spec §10'un 4 numaralı açık sorusu,
 için var olduğu soru — **hâlâ açık.** Kapı YEŞİL, çünkü kapının ölçtüğü şey "ölçülmemiş bir
 dil açık mı" sorusudur ve cevap "hayır"dır. **Yeşil kapı, ölçümün yapıldığı anlamına
 GELMİYOR.** Anahtar ve etiketler geldiğinde tek komut yeter: `calibrate --language tr`.
+
+Aynı sınıftan bir madde daha son bütün-dal incelemesinde bulundu: **PFDK hiç uygulanmadı** —
+§3.9/30.
 
 ### 3.2 Hiç koşmamış kod yolları
 
@@ -316,10 +319,53 @@ noktası olduğu için beyan edildi, ama kodda tüketicisi yok.
 **26.** `shellcheck` / `actionlint` / `yamllint` hâlâ **yok** — `verify.sh`, `check_secrets.sh`
 ve **beş** workflow YAML'ı kapının parçası ama kapı onları ölçmüyor.
 **27.** `mypy` `tests/`i hâlâ görmüyor (`files = ["src", "scripts"]`); **coverage ölçülmüyor.**
-**28.** Secret taraması hâlâ **git GEÇMİŞİNİ taramıyor** ve yalnız üç isim kalıbı biliyor
-(DEFERRED §5 / Faz 0 §3.4).
+**28.** Secret taraması hâlâ **git GEÇMİŞİNİ taramıyor** (DEFERRED §5 / Faz 0 §3.4). Tarayıcı
+artık DÖRT isim kalıbı biliyor — `ODDS_API_KEY`, `DATABASE_URL`, `SUPABASE_*KEY` ve bu fazın
+`TYPESAFE_API_KEY`i (son bütün-dal incelemesinin I-2'si; ondan önce tanımıyordu). **Liste ELLE
+tutuluyor:** hiçbir şey onu `.env.example`ten türetmiyor, yani bir sonraki yeni secret adı
+I-2'yi tekrarlar (R60) — DEFERRED §9.6i.
 **29.** En az yetkili veritabanı rolü hâlâ **YOK** — toplayıcı tablo SAHİBİ olarak bağlanıyor
 (DEFERRED §2.1). Faz 1 bu tabloyu üçe çıkardı, yani boşluğun yüzeyi büyüdü.
+
+### 3.9 Son bütün-dal incelemesinin eklediği
+
+Numaralar kararlı kalsın diye sona eklendi (R58): 1–29 değişmedi, başka belgeler onlara
+"§3.7/25" biçiminde atıf yapıyor. Parantezdeki I-n/M-n o incelemenin bulgu numaralarıdır.
+
+**30. PFDK HİÇ UYGULANMADI.** Spec §3.1'in "Hakem + ceza (TR)" satırı (satır 81) TFF'den
+"PFDK kararları" bekliyor; plan Task 6'nın başlığı "hakem ataması ve PFDK". Ama Task 6
+brief'inin gövdesi PFDK'yı hiç tanımlamadı, implementer "kapsam dışı" dedi ve kimse
+kaydetmedi. `pageID=246` beyanlıydı ama hiçbir kod onu fetch etmiyordu; son inceleme turunda
+kaldırıldı (M-1). **Kod yok, beyanlı yol yok, veri yok.** "Fazın kendi hedefi" sınıfındandır
+(§3.1). Kaydedildi, uygulanmadı (R57) — DEFERRED §9.7.
+
+**31. `latest_observations` bir değer GERİ DÖNÜNCE ARADAKİ satırı döner** (X → Y → X gözlenirse
+"en yeni" **Y** çıkar). UNIQUE kısıtı `content_hash` üzerinde ve hash `observed_at`i dışlıyor;
+üçüncü yazım ilk X ile çakışır, `ON CONFLICT DO NOTHING` onu sessizce düşürür — hatasız,
+makul görünen yanlış değer. **Bugün etki sıfır:** tek okuyucu `mapping.resolve_source_aliases`
+ve footystats yükleri monoton `matches_played` taşıyor. Ama hakem yeniden atamaları ve özdeş
+yeniden yayınlar geri dönebilir. Şema değişmedi, sınırlama docstring'de yazılı; düzeltme
+migrasyon ister (Faz 2): anahtar başına SON hash'e karşı tekilleştir (I-5) — DEFERRED §9.6e.
+
+**32. Kaynak kapısı declared → robots'u ve (yeni test) fetched ⊆ declared'ı bağlar;
+declared-ama-fetch-edilmeyen yön bağlı DEĞİL.** `kaynak-politikası` her beyanlı yolu robots'a
+sorar; `test_each_collectors_fetched_path_is_declared` toplayıcıların gerçekten istediği her
+yolun beyanlı olduğunu sabitler. Ters yönü hiçbir test bağlamıyor: `pageID=246` bu fazın
+sonuna kadar böyle yaşadı; ajansspor `/sitemap` bilinçli (madde 25). R7'nin "beyan = gerçek
+istek" sözleşmesi o yönde hâlâ prose (M-1, R59) — DEFERRED §9.1h.
+
+**33. `EXPECTED_MIN_CONTRACT` bir TABAN, eşitlik değil** (`verify.sh`, `-lt` karşılaştırması).
+Sayıyı artırmadan eklenen contract testleri görünmez; sonra o kadar test kaldırılırsa o da fark
+edilmez — taban sessizce aşınır. Bugün ölçülen 18 (M-2) — DEFERRED §9.6g.
+
+**34. `dil-kalibrasyonu` provenance'sız bir raporu kabul eder.** `CalibrationReport` ne
+`measured_at` ne etiket dosyasının hash'ini taşıyor: `tr.jsonl` değişse bile bayat bir rapor bir
+dili açık tutabilir. Bugün etkisiz (rapor yok, her dil `production_enabled: false`); **ilk gerçek
+kalibrasyondan ÖNCE** düzeltilmeli (M-5) — DEFERRED §9.6h.
+
+**35. Haberde kısmî kayıp SESSİZ.** `_sitemap_item` `<loc>`suz bir `<url>` için `None` döner ve
+bunları kimse saymaz; yalnız TOPLAM kayıp hata verir. footystats (R31) ve tff (R36) kısa-düşüş
+korumasına sahip, news değil: §4.2/8'in kuralı ona uygulanmadı (M-4) — DEFERRED §9.3o.
 
 ---
 
@@ -327,8 +373,8 @@ ve **beş** workflow YAML'ı kapının parçası ama kapı onları ölçmüyor.
 
 Tam gerekçeler `.superpowers/sdd/2026-09-19-faz1-toplayicilar/progress.md` içinde — **o dizin
 gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması gerekenler buraya,
-`docs/DEFERRED.md`'ye ve `docs/RUNBOOK.md`'ye taşındı. Aşağıdakiler 53 ruling'in içinden
-**Faz 2'yi bağlayanlardır.**
+`docs/DEFERRED.md`'ye ve `docs/RUNBOOK.md`'ye taşındı. Aşağıdakiler defterdeki ruling'lerin
+içinden **Faz 2'yi bağlayanlardır.**
 
 ### 4.1 Kaynak politikası ve dürüstlük
 
@@ -374,10 +420,13 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması ge
 10. **`enabled: false` toplayıcıyı da durdurmalı (R28).** Toplayıcı `load_sources`tan
     seçiyordu, `enabled_sources`tan değil: operatörün kill switch'i denetimden çıkarıyor ama
     çekmeyi sürdürüyordu — sessizce silahsızlanmış bir anahtar.
-11. **`written` COMMIT'TEN SONRA sayılır (R48).** Üç toplayıcıda commit'ten ÖNCE sayılıyordu:
+11. **`written` COMMIT'TEN SONRA sayılır (R48).** Dört toplayıcıda commit'ten ÖNCE sayılıyordu:
     commit düşerse satırlar geri alınır ama sayılmış olur ve tur "N yeni gözlem" basar. Bu
     Faz 0'ın **dört düzeltme turuna mal olan** G1 hatasının aynısıdır: *"başarısız değil" ≠
-    "kalıcı olarak yazıldı."*
+    "kalıcı olarak yazıldı."* R48 venues/news/results'ı düzeltti; REFERANS toplayıcı
+    footystats ancak son bütün-dal incelemesinde düzeldi (I-1) — testi
+    `test_collect_does_not_count_a_league_whose_commit_fails`. tff'de `written` commit'ten
+    önce atanır ama yalnız commit başarılıysa DÖNER (tek sayfa, döngü ve toplam sayaç yok).
 12. **Saat dilimi İKİ TARAFTA da zorlanır (R41 + R47).** İstek tarafı: `parse_forecast` artık
     UTC olmayan/naive bir kickoff'u REDDEDİYOR (TRT duvar saati UTC sanılırsa 3 saatlik kayma
     BAŞKA AMA GEÇERLİ bir saatlik dilime düşüyor ve `_MAX_GAP` yakalamıyor — ölçüldü:
@@ -418,6 +467,42 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması ge
     `canonical_id` olarak YAZDIRIYORDU. **Tipli bir arayüz cevabın ŞEKLİNİ garanti eder,
     DOĞRULUĞUNU asla.**
 22. **`collect.py` 800 satır sınırında teslim edilmez (R53).** Bkz. §1.4.
+23. **Fonksiyon uzunluğunda kodu değil KURALI değiştir (R54).** `parse_referees` (59),
+    `collect_venues` (105) ve `resolve` (52) 50 satırı aşıyor; aşan her satır bir incelemenin
+    TALEP ETTİĞİ düzeltme (R36 kısa-düşüş koruması, R49 izolasyon, R51 üyelik kontrolü) ve
+    fonksiyonlar tutarlı. Kapı bunu zaten ölçmüyor (ruff'ta fonksiyon uzunluğu kuralı yok):
+    50 satır bir KILAVUZDUR (DEFERRED §9.5). **Yanlışsa bedeli:** üç fonksiyon uzun kalır.
+24. **Yarıda kalan düzeltme dalgasının diff'i KORUNDU, yeniden yapılmadı (R55).** Son bütün-dal
+    incelemesinin düzeltme turu API limitine takılıp dokuz dosyada commit'lenmemiş iş bıraktı;
+    sekiz kod maddesi dokuz mutasyon + bir klon kanıtıyla doğrulandı, yalnız biçim ve atıf
+    hataları düzeltildi — doğrulanmış işi yeniden yaptırmak bir tur yakardı. **Yanlışsa
+    bedeli:** korunan diff'te ince bir kusur; bu yüzden yeniden inceleme tamamlama commit'ini
+    değil TÜM dalgayı (`7b5158d`'den itibaren) kapsar.
+25. **#M10 GERÇEKTEN kapatıldı (R56).** `test_full_scan_workflow_is_read_only` skaler
+    `permissions: read-all`/`write-all` kısayolunda artık çıplak `AttributeError` değil temiz
+    bir assertion veriyor (RED→GREEN kanıtlı); `_concurrency_group` docstring'i kendini #M10
+    sanan yanlış iddiadan arındırıldı. **Yanlışsa bedeli:** birkaç satır test kodu.
+26. **PFDK boşluğu KAYDA geçer, UYGULANMAZ (R57).** Yeni bir toplayıcı bir düzeltme dalgasının
+    işi değildir (yeni yetenek); kayıt §3.9/30'da, §3.1'deki işarette ve DEFERRED §9.7'de.
+    **Yanlışsa bedeli:** Faz 2 PFDK verisi var sanabilirdi — kayıt tam bunu önler.
+27. **Yeni §3 maddeleri §3.9'a, 30'dan numaralanarak girer; 1–29 DEĞİŞMEZ (R58).** Belgeler ve
+    inceleme raporları "§3.7/25", "§3.8/28" biçiminde atıf yapıyor; araya ekleme bu atıfları
+    sessizce kaydırırdı. Metni artık YANLIŞ olan madde (28) yerinde düzeltildi. Aynı gerekçeyle
+    R54–R61 de §4'ün sonuna, 23'ten numaralanarak girdi. **Yanlışsa bedeli:** konu gruplaması
+    biraz zayıflar.
+28. **Kaynak bağlayıcı testi TEK yönlüdür: fetched ⊆ declared (R59).** Tehlikeli yön, kapının
+    HİÇ denetlemediği bir fetch'tir; o bağlandı. Ters yön (beyanlı ama fetch edilmeyen)
+    bağlanmadı, §3.9/32'de adıyla yazıldı; aksini ima eden iki metin (test yorumu ve
+    `sources.yaml`ın tff notu) düzeltildi. **Yanlışsa bedeli:** fazla beyan edilmiş bir yol
+    fark edilmeden geri gelebilir; robots açısından zararsız.
+29. **Secret deseni asgari düzeltildi (R60).** `TYPESAFE_API_KEY` desene eklendi. Secret
+    adlarını `.env.example`ten türeten bir test SONRAKİ unutmayı yakalardı ama yeni yetenek;
+    ölçülmeyen eksen olarak §3.8/28'de yazılı. **Yanlışsa bedeli:** bir sonraki yeni secret adı
+    aynı boşluğu tekrarlar.
+30. **Devir belgelerindeki DONMUŞ sayılar güncellenmez, KALDIRILIR (R61).** "22 madde",
+    "48 minor", §3.1'in "iki şey"i. Depo donmuş commit sayısını zaten komutla değiştirmişti
+    (`7b5158d`); minor bulgu sayısının kaynağı gitignore'lu bir dosya, okur için yeniden
+    üretilebilir bir komut yok. **Yanlışsa bedeli:** okur boyut hissini kaybeder.
 
 ---
 
@@ -444,9 +529,9 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Kalıcı olması ge
    için hakem verisi gelmiyor. Baz model bu özellik olmadan kurulmalı.
 7. **`docs/DEFERRED.md` OKUNMUŞ OLMALI.** Faz 1 o listeyi tek tek kapatmak zorunda değildi ve
    kapatmadı; Faz 2 de zorunda değil, ama **okumadan** başlamamalı. Özellikle §2.1 (en az
-   yetkili rol yok — Faz 1 tablo sayısını üçe çıkardı), §9.2 (`full-scan.yml`in concurrency
-   YOKLUĞUNU sabitleyen test yok) ve §9.4 (jev `probabilities` atılıyor) Faz 2'nin tasarımını
-   etkiler.
+   yetkili rol yok — Faz 1 tablo sayısını üçe çıkardı) ve §9.4 (jev `probabilities` atılıyor)
+   Faz 2'nin tasarımını etkiler. §9.2'nin en önemli maddesi (`full-scan.yml`in concurrency
+   YOKLUĞUNU sabitleyen test) son bütün-dal incelemesinde kapandı.
 8. **Dalın merge'i.** Faz 1'in beş workflow'unun hiçbiri koşmadı (§3.2/5). GitHub `schedule`
    yalnız varsayılan dalda çalışır.
 
@@ -545,5 +630,5 @@ kapattığı ve açtığı:
 
 ### Faz 1'den devreden ertelenmiş bulgular → **`docs/DEFERRED.md` §9**
 
-48 minor bulgu bu faz boyunca ADIYLA kaydedildi ve bilerek ertelendi. Tam liste orada;
-burada ikinci kez tutulmuyor — **iki kopya, biri diğerinden sessizce ayrışır.**
+Minor bulgular bu faz boyunca ADIYLA kaydedildi ve bilerek ertelendi. Okur-yüzlü tam liste
+orada (§9); burada ikinci kez tutulmuyor — **iki kopya, biri diğerinden sessizce ayrışır.**

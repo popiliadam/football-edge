@@ -206,8 +206,9 @@ konfigürasyonun aynası olduğunu iddia ediyor ve bu iddia yanlış.
 > `match_id` döner" özelliği (Faz 0'ın F1'i) korunuyor.
 > **İKİNCİ seçenek uygulanmadı:** mühür turu hâlâ `snapshot` ile aynı `odds-collect`
 > concurrency grubunda. Aşağıdaki "Etkileşim" paragrafı bu yüzden GEÇERLİLİĞİNİ KORUYOR,
-> yalnız tetikleyici süre kısaldı. (Faz 1'in `full-scan.yml`i bilerek KENDİ grubunda —
-> bkz. §9.2a: o ayrımı sabitleyen bir test YOK.)
+> yalnız tetikleyici süre kısaldı. (Faz 1'in `full-scan.yml`i bilerek `odds-collect`
+> grubunun DIŞINDA — hiç concurrency bloğu yok; ~~o ayrımı sabitleyen bir test YOK~~ o ayrımı
+> artık bir test sabitliyor, bkz. §9.2a.)
 
 `insert_snapshots` her satır için ayrı bir `cur.execute` atıyordu: 3 717 satır =
 3 717 pooler gidiş-dönüşü, ölçülen süre ~4 dakika (120 saniyelik beklentinin çok
@@ -369,23 +370,36 @@ gereken somut borcu** taşır. Hepsi görüldü ve adıyla ertelendi.
 Kapanmış olanlar burada yeniden açılmasın diye tek satırda: `collect.py`'nin 800 satır
 sınırı üç bölmeyle kapandı (R11/R50/R53 → 515 satır); `scripts/` kapı kapsamına alındı
 (R15); §5.3'teki bayat `mypy` kapsamı düzeltildi; `tff.py`'deki ölü `LOGGER` R36'nın
-uygulamasıyla gitti.
+uygulamasıyla gitti; son bütün-dal incelemesinin düzeltme turunda (`4158f81`) §9.1b (#M13),
+§9.1e (#M20), §9.2a (#M11), §9.2b (#M10) ve §9.3j'nin fetched ⊆ declared yarısı (#M28) kapandı
+— onlar aşağıda satırlarında KAPANDI diye işaretli, tarihi kayıt olarak duruyor.
 
 ### 9.1 Kaynak kayıt defteri ve `kaynak-politikası` adımının delikleri
 
 | # | Nerede | Ne |
 |---|---|---|
 | 9.1a | `sources.audit_offline` | `terms_url` yalnız **boş-değil** diye kontrol ediliyor; URL şekli ya da erişilebilirliği değil. `access_basis: api_terms` kaynakların tek kanıtı bu alan |
-| 9.1b | `sources.load_sources` | **Tip doğrulaması yok.** `declared_paths` skaler bir dize yazılırsa Python onu KARAKTERLERE böler ve kapı harf harf yol sorar — sessiz ve anlamsız bir "ölçüm" |
+| 9.1b | `sources.load_sources` | **KAPANDI (son inceleme, #M13):** `sources._validate` liste olmayan `declared_paths`i adıyla reddediyor (`test_registry_rejects_a_scalar_declared_paths`). ~~**Tip doğrulaması yok.** `declared_paths` skaler bir dize yazılırsa Python onu KARAKTERLERE böler ve kapı harf harf yol sorar — sessiz ve anlamsız bir "ölçüm"~~ |
 | 9.1c | `access_basis: api_terms` | Bypass **host genişliğindedir**: o kaynakta `declared_paths` atıl kalır ve bunun testi yok. Bugün tek `api_terms` kaynak Open-Meteo |
 | 9.1d | `openmeteo` kaydı | `/v1/forecast` zorunlu query parametresi taşıyor; çıplak yol "ölçülmüş" sayılmamalı |
-| 9.1e | `sources.audit_offline` | `enabled: true` ama `declared_paths: []` olan bir kaynak denetimden **hiçbir şey ölçmeden** geçer |
+| 9.1e | `sources.audit_offline` | **KAPANDI (son inceleme, #M20):** `enabled` + `access_basis: robots` + boş `declared_paths` artık adıyla bir ihlal (`test_enabled_robots_source_with_empty_declared_paths_is_a_violation`; `api_terms` kaynakta yanlış alarm vermediği de sınanıyor). ~~`enabled: true` ama `declared_paths: []` olan bir kaynak denetimden **hiçbir şey ölçmeden** geçer~~ |
 | 9.1f | `collect.py` + `scripts/robots_drift.py` | `SOURCES_PATH` / `ROBOTS_DIR` iki yerde ayrı ayrı hardcoded — biri değişirse diğeri sessizce ayrışır |
 | 9.1g | `sources.allows` | `bool(parser.can_fetch(...))` artık gereksiz sarmalayıcı (`protego` zaten `bool` döner) |
+| 9.1h | `declared_paths` ↔ toplayıcılar | Yalnız **fetched ⊆ declared** bağlı (#M28, `test_each_collectors_fetched_path_is_declared`). Ters yön — beyanlı ama hiç fetch edilmeyen yol — **hiçbir testle bağlı değil**: `pageID=246` bu fazın sonuna kadar böyle yaşadı, ajansspor `/sitemap` bilinçli. Robots açısından zararsız yön, ama R7'nin "beyan = gerçek istek" sözleşmesi o yönde prose (R59; HANDOFF §3.9/32) |
+| 9.1i | `scripts/robots_drift.py` → `main` | Anlık görüntüsü OLMAYAN bir kaynağı **sessizce atlıyor** (`continue`, satır basılmıyor). `enabled` kaynaklarda `audit_offline` eksik anlık görüntüyü zaten ihlal sayıyor; kapalı ve anlık görüntüsüz bir kaynak ise ölçülmüyor ve bu hiçbir yerde yazılmıyor. Bugün gizli: yedi kaynağın yedisinin de anlık görüntüsü var (son inceleme M-9) |
 
-### 9.2 Workflow regresyon yolları — **en önemlisi burada**
+### 9.2 Workflow regresyon yolları — ~~en önemlisi burada~~ **en önemlisi (9.2a) KAPANDI**
 
-**9.2a (ÖNEMLİ, kalıcı veri kaybına giden yol).** Hiçbir test `full-scan.yml`in
+**9.2a (KAPANDI — son inceleme, I-3/#M11; ÖNEMLİ, kalıcı veri kaybına giden yoldu).**
+
+> **Bu madde artık ERTELENMİŞ bir sorun DEĞİL — tarihi bir kayıt olarak tutuluyor.**
+> `tests/test_workflows.py::test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group`
+> `seal.yml`in grubunu okur, `.github/workflows/*.yml`i dinamik tarar ve `seal.yml` /
+> `snapshot.yml` DIŞINDA o grubu paylaşan her workflow'da kırmızı verir — mapping
+> (`{group: odds-collect}`) ve skaler (`concurrency: odds-collect`) biçimin ikisinde de;
+> ikisi de mutasyonla kırmızı kanıtlandı.
+
+Hiçbir test `full-scan.yml`in
 **concurrency bloğunun YOKLUĞUNU** sabitlemiyor. Dosyada yalnız bir yorum var
 (`# concurrency: BİLİNÇLİ OLARAK YOK`). İleride biri `group: odds-collect`i sessizce geri
 eklerse GitHub, aynı gruptaki bekleyen run'ı yenisi geldiğinde **İPTAL EDER**: 30 dakikalık
@@ -393,7 +407,14 @@ tam tarama, 15 dakikada bir koşan mühür turlarını düşürür → `EXIT_MIS
 **kapanış fiyatı KALICI kayıp.** Faz 0'ın önlemek için var olduğu tek sonuç. Bugün yalnız
 elle inceleme yakalar.
 
-**9.2b.** `tests/test_workflows.py`'nin job-permission kontrolü, YAML skaler kısayolu
+**9.2b (KAPANDI — son inceleme, #M10, R56).**
+
+> **Tarihi kayıt.** `_contents_permission` hem mapping'i hem `read-all`/`write-all`
+> kısayolunu okuyor. Aynı mutasyon (`permissions: write-all`) artık çıplak `AttributeError`
+> değil temiz bir `AssertionError` veriyor — job seviyesinde job'u adıyla anarak, üst düzeyde
+> "salt-okunur olmalı" diyerek (RED → GREEN kanıtlı).
+
+`tests/test_workflows.py`'nin job-permission kontrolü, YAML skaler kısayolu
 (`permissions: write-all`) karşısında temiz bir assertion yerine `AttributeError` veriyor.
 
 **9.2c.** `full-scan.yml`in `WORKFLOWS` demetinden çıkarılma gerekçesi yalnız görev
@@ -412,10 +433,12 @@ raporunda; tuple'a bir yorum satırı gerekiyor.
 | 9.3g | `collectors/venues.py` | `except` mesajı artık `_due_matches` arızasında da "koordinat toplanamadı" diyor. Tanısal olarak yanıltıcı; **sayaçlar doğru** |
 | 9.3h | `tests/test_footystats.py` | Fixture yolu **CWD-bağımlı**; deponun diğer iki fixture testi `__file__` tabanlı |
 | 9.3i | `leagues.py` | Kök anahtar `ValueError` dalı testsiz |
-| 9.3j | (test boşluğu) | `leagues.yaml`ın `footystats_path`i ile `sources.yaml`ın `declared_paths`ini **bağlayan hiçbir test yok** — ikisi sessizce ayrışabilir |
+| 9.3j | (test boşluğu) | **YARISI KAPANDI (son inceleme, #M28):** etkin liglerin `footystats_path`inin `declared_paths`te olduğunu artık `test_each_collectors_fetched_path_is_declared` sabitliyor; ters yön (beyanlı ama hiçbir etkin ligin istemediği yol) açık — §9.1h. ~~`leagues.yaml`ın `footystats_path`i ile `sources.yaml`ın `declared_paths`ini **bağlayan hiçbir test yok** — ikisi sessizce ayrışabilir~~ |
 | 9.3k | (test boşluğu) | `main(["fetch-footystats"])` CLI seviyesinde `EXIT_LEAGUE_FAILED` testi yok; kapsam fonksiyon seviyesinde duruyor |
 | 9.3l | `collectors/tff.py` | `_text(node: Any)` `mypy --strict`i o noktada fiilen devre dışı bırakıyor |
 | 9.3m | `tests/test_tff.py` | `test_parses_this_weeks_fixtures` (`>=5`) artık `==62` testi tarafından kapsanıyor; **bağımsız olarak kırmızı veremez** |
+| 9.3n | `fetch.py` | CLI arıza izolasyonu **tekdüze değil**: yalnız `_fetch_tff_command` toplayıcısını `try/except → EXIT_SOURCE_FAILED` ile sarıyor. footystats/venues/news/results'ta kurulum düzeyindeki bir arıza (bozuk bir YAML kaydı; footystats/venues'ta kapalı kaynak ya da eksik robots anlık görüntüsü; results'ta eksik `ODDS_API_KEY`) lig/kaynak izolasyonunun DIŞINDA kalır ve `main()`e çıplak traceback olarak çıkar, exit 1. Hepsi gürültülü; tutarsız olan operatör deneyimi (son inceleme M-3) |
+| 9.3o | `collectors/news.py` → `_sitemap_item` | **Kısmî kayıp sessiz:** `<loc>`suz bir `<url>` için `None` döner ve bunları kimse saymaz; yalnız TOPLAM kayıp hata verir. footystats (R31) ve tff (R36) kısa-düşüş korumasına sahip, news değil. Düzeltme, robots filtresinin BİLEREK düşürdüğü URL'leri kayıptan ayırarak saymalı (son inceleme M-4; HANDOFF §3.9/35) |
 
 ### 9.4 Varlık eşleme ve Jev
 
@@ -425,6 +448,7 @@ raporunda; tuple'a bir yorum satırı gerekiyor.
 | 9.4b | `mapping.py` | **`--threshold` bayrağı yok** — politika değişikliği kod düzenlemesi gerektiriyor (`DEFAULT_THRESHOLD = 0.75`) |
 | 9.4c | `mapping.py` | `LOGGER` tanımlı, hiç kullanılmıyor (brief'ten miras) |
 | 9.4d | `entity_aliases` | **Üretimde hiçbir şey OKUMUYOR.** Yazan var (`write_aliases`), tüketen yok — yani yanlış bir eşleme bugün hiçbir çıktıyı etkilemiyor ve tam bu yüzden fark edilmez |
+| 9.4e | `collect.py` → `map-entities` | `--source tff` "gözlem yok" ile **exit 0** veriyor — "bu kaynak `team` türü hiç üretmiyor"dan ayırt edilemez (TFF `fixture_official` yazıyor). İkinci bir takım kaynağı gelene kadar kozmetik (son inceleme M-8) |
 
 ### 9.5 Boyut kılavuzunu aşan yerler
 
@@ -438,8 +462,14 @@ Proje kuralı: fonksiyon <50 satır, dosya 200-400 normal / 800 sert sınır.
 | `mapping.py` → `resolve` | 52 | Eklenen 13 satır R51'in birebir istediği düzeltme |
 | `collectors/news.py` | 489 | 200-400 bandının üstünde, 800 sert sınırının altında |
 
-**Kural koddaki birden çok yerde çiğneniyorsa ya kural ya kod değişmeli** — bu karar Faz 2'ye
-bırakıldı, sessizce görmezden gelinmedi.
+**Karar (R54): kod değil KURAL değişir.** 50 satır, kapının ölçmediği bir KILAVUZDUR:
+`pyproject.toml`daki ruff seçimi `select = ["E", "F", "I", "UP", "B", "SIM", "T20"]` ve
+bunların hiçbiri fonksiyon uzunluğu ölçmüyor (satır uzunluğu E501 ölçülüyor, fonksiyon uzunluğu
+değil). Gerekçe (son incelemenin önerisi): `parse_referees`, `collect_venues` ve `resolve`daki
+aşım bir incelemenin TALEP ETTİĞİ düzeltmedir (R36 kısa-düşüş koruması, R49 izolasyon, R51
+üyelik kontrolü) ve fonksiyonlar tutarlı. İleride bölünmeye değer tek fonksiyon
+`collect_venues`: maç başına hava döngüsü ayrı bir fonksiyona çıkarılır. `news.py`nin 489
+satırı kabul (#M40): 800'ün altında, adaptör/bağlama dikişi büyürse bölünmeye hazır.
 
 ### 9.6 Ölçülmeyen eksenler (Faz 2'nin tasarımını etkiler)
 
@@ -460,7 +490,36 @@ boşluğu bu tabloları da kapsıyor ve Faz 1 tablo sayısını üçe çıkardı
 adaptörünün **hiç contract testi yok**: sentetik fixture canlı gerçekliğe karşı yeniden
 ölçülemediği için marker bilerek kaldırıldı.
 
-### 9.7 TFF: VAR/AVAR görünür ama toplanmıyor
+**9.6e — `latest_observations` geri dönen bir değerde ARADAKİ satırı döner (son inceleme
+I-5).** UNIQUE kısıtı `(source_id, entity_kind, entity_key, content_hash)` ve hash `observed_at`i
+dışlıyor: X → Y → X'in üçüncü yazımı `ON CONFLICT DO NOTHING` ile düşer, "en yeni" **Y** çıkar.
+Bugün etki sıfır (tek okuyucu `mapping.resolve_source_aliases`), ama Faz 2 bu deponun "en
+yeni"sini güncel durum sanmamalı. **Düzeltme migrasyon ister:** anahtar başına SON hash'e karşı
+tekilleştir. Son incelemenin önerisi: 9.4a'yla (`probabilities`i saklamak da migrasyon) birlikte
+karar verilsin. Sınırlama `latest_observations` docstring'inde ve HANDOFF §3.9/31'de yazılı.
+
+**9.6f — `match_results`in içerik tekilleştirmesi yok (son inceleme M-7).** Birincil anahtar
+`(match_id, observed_at)` ve her koşu kendi `now`unu basıyor; `daysFrom=3` tamamlanmış bir maçı
+üç gün boyunca döndürdüğü için günde bir koşuda maç başına ~3 özdeş satır birikir. "Gözlem"
+semantiği olarak bilinçli — ama Faz 2'nin okuyucusu maç başına EN YENİSİNİ almalı.
+
+**9.6g — `EXPECTED_MIN_CONTRACT` bir TABAN ve zamanla aşınır (son inceleme M-2).** `verify.sh`
+toplanan contract sayısını `-lt` ile karşılaştırıyor: sayıyı artırmadan eklenen testler görünmez,
+sonra aynı sayıda kaldırma da fark edilmez. Ayrıştırma bugün doğru (18) ve biçim değişirse 0'a
+düşüp kırmızı verir (doğru yönde kapanır). Seçenek: `-ne` ile tam eşitlik + zorunlu bump, ya da
+aşınmayı sabitin yorumuna yazmak. HANDOFF §3.9/33.
+
+**9.6h — Kalibrasyon raporu provenance taşımıyor (son inceleme M-5).** `CalibrationReport`ta
+`measured_at` de etiket dosyasının hash'i de yok; `check-languages` raporun VAR olduğunu ve
+`production_ready()`yi geçtiğini sorar, hangi etiketlere karşı ne zaman ölçüldüğünü sormaz. Bugün
+etkisiz (rapor yok, her dil `false`) — ilk gerçek `calibrate`ten ÖNCE eklenmeli. HANDOFF §3.9/34.
+
+**9.6i — Secret tarayıcısının isim listesi ELLE tutuluyor (R60).** `scripts/check_secrets.sh`
+dört isim kalıbı biliyor (`TYPESAFE_API_KEY` son incelemede eklendi, I-2); hiçbir şey listeyi
+`.env.example`ten türetmiyor. `.env.example`teki adları desene karşı sınayan bir test SONRAKİ
+unutmayı yakalardı — yeni yetenek olduğu için düzeltme turunda yapılmadı. HANDOFF §3.8/28.
+
+### 9.7 TFF: VAR/AVAR görünür ama toplanmıyor — PFDK hiç uygulanmadı
 
 `pageID=600` hakem atamalarını **rol işaretleriyle** yayınlıyor: `(H)` hakem, `(Y)` yardımcı,
 `(D)` dördüncü, **`(V)` VAR, `(A)` AVAR** (ölçüldü: tek turda V=11, A=11). Toplayıcı yalnız
@@ -473,6 +532,12 @@ adaptörünün **hiç contract testi yok**: sentetik fixture canlı gerçekliğe
 
 Ayrıca: `__VIEWSTATE` postback'i engellendiği için **yalnız BU HAFTA** alınabiliyor; geçmiş
 hafta ve diğer ligler kapalı.
+
+**PFDK hiç uygulanmadı (R57).** Spec §3.1'in "Hakem + ceza (TR)" satırı TFF'den "PFDK
+kararları" bekliyor ve plan Task 6'nın başlığı onu adlandırıyor; ama toplayıcı yok, beyanlı yol
+yok, veri yok. `pageID=246` beyanlıydı ama hiç fetch edilmiyordu ve son incelemede kaldırıldı —
+PFDK sayfası olduğu bile doğrulanmadı (Task 6 raporu "muhtemelen PFDK" diyor). Bir PFDK
+toplayıcısı yeni bir iştir, sayfa şekli ölçülerek başlar. HANDOFF §3.9/30.
 
 ### 9.8 Küçük artıklar
 

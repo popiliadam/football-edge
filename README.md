@@ -181,7 +181,7 @@ gerçekten koştuğu tek yer, `DATABASE_URL` bağlıyken koşulan yerel kapıdı
 
 | Dosya | Ne için |
 |---|---|
-| [`docs/phases/01-toplayicilar/HANDOFF.md`](docs/phases/01-toplayicilar/HANDOFF.md) | **Faz 1 devir belgesi. §3 kapının ÖLÇMEDİĞİNİ yazar (22 madde) — en önemli bölüm.** §6 bu fazın yöntem dersleri. |
+| [`docs/phases/01-toplayicilar/HANDOFF.md`](docs/phases/01-toplayicilar/HANDOFF.md) | **Faz 1 devir belgesi. §3 kapının ÖLÇMEDİĞİNİ yazar — en önemli bölüm.** §6 bu fazın yöntem dersleri. |
 | [`docs/phases/00-kayit-altyapisi/HANDOFF.md`](docs/phases/00-kayit-altyapisi/HANDOFF.md) | Faz 0 devir belgesi. **§3 kapının ÖLÇMEDİĞİNİ yazar.** |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Operatör prosedürleri: çıpa kilitlenmesi (§1), zincir çatalı (§2). |
 | [`docs/DEFERRED.md`](docs/DEFERRED.md) | Bilerek ertelenen bulgular ve ödünleşmeler. §1-§7 Faz 0, §8-§9 Faz 1. Bir sonraki faz bunu okumadan başlamamalı. |

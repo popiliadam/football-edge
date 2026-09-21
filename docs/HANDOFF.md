@@ -1,7 +1,7 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-19 · **Durum:** **Faz 1 TAMAM — `faz-1-toplayicilar` merge'e HAZIR**
-**Dal:** `faz-1-toplayicilar` · **349 test** (+18 contract) · kapı **9 adım yeşil +
+**Son güncelleme:** 2026-09-21 · **Durum:** **Faz 1 TAMAM — `faz-1-toplayicilar` merge'e HAZIR**
+**Dal:** `faz-1-toplayicilar` · **365 test** (+18 contract) · kapı **9 adım yeşil +
 `zincir` adıyla SKIP** · **push edilmedi, CI hiç koşmadı**
 · commit sayısı: `git log --oneline main..HEAD | wc -l` (donmuş bir sayı burada tutulmaz —
 bu belgenin kendisi onu bir commit sonra yanlışlıyordu)
@@ -66,7 +66,7 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP | `bce4aa8` ağacında, log dosyasından okundu |
+| Kapı | 9 adım PASS + `zincir` SKIP | `4158f81` ağacında, log dosyasından okundu |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
 `.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` YOK.**
@@ -77,7 +77,7 @@ Repoda hiçbir yerde geçmiyor.
 ## 3. Faz 1 ne üretti
 
 13 görev · 5 paralel worktree · **0 Critical** bulgu · **40'tan fazla Important**, hepsi
-kapatıldı · 98 → **349 test** (+18 `contract` etiketli).
+kapatıldı · 98 → **365 test** (+18 `contract` etiketli).
 
 Her görev ayrı bir inceleme ajanından geçti; her düzeltme turu kendi re-review'ünü aldı.
 İncelemeciler rapora güvenmedi: mutasyonları izole klonlarda (`git archive`) canlı uygulayıp
@@ -106,8 +106,8 @@ dil kalibrasyon harness'ı ve üretim kapısı. Ayrıca Faz 0'ın iki borcu kapa
 ## 4. Verilen kararlar (Ruling listesi)
 
 Tam gerekçeler `.superpowers/sdd/2026-09-19-faz1-toplayicilar/progress.md` içinde — **o dizin
-gitignored, yani merge etmez ve yalnız bu makinede durur.** 53 ruling'in Faz 2'yi bağlayan
-22'si `docs/phases/01-toplayicilar/HANDOFF.md` **§4**'te; ertelenen 48 minor bulgu
+gitignored, yani merge etmez ve yalnız bu makinede durur.** Faz 2'yi bağlayan ruling'ler
+`docs/phases/01-toplayicilar/HANDOFF.md` **§4**'te; ertelenen minor bulgular
 `docs/DEFERRED.md` **§9**'da. Başlıcaları:
 
 1. **`declared_paths` GERÇEKTEN ÇEKİLEBİLİR URL olmalı, temsilî önek değil.** Önek, kapının
@@ -120,7 +120,10 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** 53 ruling'in Faz 2'
    `api_terms` kaynaklar `terms_url` taşımak zorunda ve kapı denetliyor.
 6. **Kısmî kayıp sessiz geçemez** — bulunandan az yazan bir tur "başarı" raporlayamaz.
 7. **`written` COMMIT'TEN SONRA sayılır.** Faz 0'ın dört düzeltme turuna mal olan hata:
-   *"başarısız değil" ≠ "kalıcı olarak yazıldı."*
+   *"başarısız değil" ≠ "kalıcı olarak yazıldı."* R48 venues/news/results'ta düzeltti;
+   footystats ancak son bütün-dal incelemesinde düzeldi (I-1,
+   `test_collect_does_not_count_a_league_whose_commit_fails`). tff sayıyı yalnız commit
+   başarılıysa döndürür.
 8. **Saat dilimi iki tarafta da zorlanır** — istek tarafında UTC guard, yanıt tarafında
    `timezone=GMT`. *200, doğru veriyi aldığımızın kanıtı değildir.*
 9. **`assert_fresh` yalnız KAYNAĞIN verdiği `observed_at` üzerinde çağrılır** — toplayıcı
@@ -136,7 +139,7 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** 53 ruling'in Faz 2'
 
 ## 5. Kapının ÖLÇMEDİĞİ şeyler
 
-**Tam liste: `docs/phases/01-toplayicilar/HANDOFF.md` §3 — 22 madde, hepsi adıyla.**
+**Tam liste: `docs/phases/01-toplayicilar/HANDOFF.md` §3 — hepsi adıyla.**
 Bir sonraki fazın üstüne inşa etmemesi gerekenler:
 
 1. **TOPLAYICILAR HİÇBİR YERDE KOŞMUYOR.** Zamanlama yok, cron yok, workflow yok.
