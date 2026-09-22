@@ -57,6 +57,28 @@ adıyla SKIP** (ölçüm §2)
 - **İz B — Faz 6 iskeleti:** Netlify hesabı bağlı ama "football" adlı bir proje yok. Site ve
   alan adı kullanıcı kararı.
 
+**Taze oturumda çalışma sırası ve paralellik** — başlatmak için: "`docs/HANDOFF.md` §0'dan devam et".
+Kurallar yol haritası v2 §4'ten: aynı anda en çok 4 implementer, her biri izole worktree'de; her
+dalgadan önce tek-yazar taraması; ortak dosyalar (`collect.py` CLI kaydı, `verify.sh`,
+`pyproject.toml`/`uv.lock`) yalnız dalga sonu birleştirmede ya da dalgadan önce tek bir controller
+commit'inde değişir.
+
+| Adım | Ne | Paralellik | Onay |
+|---|---|---|---|
+| 0a | R77 kural testi (`tests/` altında yeni dosya) | 0b, 0c ile aynı anda | verildi (09-22) |
+| 0b | Runner ölçümü: `notes.txt`in tamamı, `disclaimer.php`, `HxG/AxG` doluluğu (tek kullanımlık dal) | 0a, 0c ile aynı anda | gerekmez |
+| 0c | Scrapling denemesi (TFF ayrıştırıcısı, atılabilir kod, worktree) | 0a, 0b ile aynı anda | kısa "tamam" |
+| 1 | Faz 2 tasarım belgesi (0b'nin sonucuyla) → kullanıcıya | controller, tek yazar | **onay kapısı** |
+| 2 | Tam TDD planı → bağımsız plan incelemesi (fable) → kullanıcıya | sıralı | **onay kapısı** |
+| 3 | Dalga 0: Faz 2'nin bütün yeni bağımlılıkları (numpy/scipy …) TEK controller commit'inde | — | plan onayı |
+| 4 | Dalga 1: T1 yükleyici ∥ T3 vig ∥ T5 holdout ∥ T2 harness iskeleti | 4 worktree | plan onayı |
+| 5 | Dalga 2: T4 verimlilik ∥ T2 bütünleşik (T7 canlı veri birikince) · Dalga 3: T6 sızıntı denetimi | worktree | — |
+| İz B | Faz 6 iskeleti (ayrı dizin; Python tarafıyla ortak dosya yok) | Faz 2'nin her adımıyla aynı anda | Netlify + alan adı |
+
+Her iş aynı yoldan geçer: brief → implementer → bağımsız inceleme (kabuğu olan ajan; K1 işlerde
+fable) → düzeltme turu → controller mutasyonu (`PYTHONDONTWRITEBYTECODE=1`) → **her commit'ten sonra
+`verify.sh`'ın tamamı** → `main`e `--no-ff` → taze klon kapısı → push.
+
 **Kullanıcıdan beklenenler**
 1. Depoyu GitHub'da **Watch** etmek (All Activity ya da Custom → Issues): alarm e-postaları buna
    bağlı. Bu oturumda ölçülemedi — `gh` token'ında `notifications` yetkisi yok.
