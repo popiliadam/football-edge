@@ -6,10 +6,10 @@
     ok   --workflow <ad> --run-url <url>   açık alarmı "yeşile döndü" yorumuyla kapatır
     watchdog --run-url <url> [--min-credits N]
                                            `TRIGGERS`teki bir tetik bayatsa ya da Odds API
-                                           kredisi N'nin (varsayılan 60) altındaysa ya da
-                                           ölçülemediyse `🔴 bekçi kırmızı`yı açar ya da
-                                           günceller, hepsi yolundaysa kapatır; iki durumda
-                                           da exit 0
+                                           kredisi N'nin (varsayılan 60) altında, ölçülemez
+                                           ya da ölçümü ücretliyse `🔴 bekçi kırmızı`yı açar
+                                           ya da günceller, hepsi yolundaysa kapatır; iki
+                                           durumda da exit 0
 
 Her komut yalnız kendi başlığındaki alarma dokunur. GitHub API'nin kendisi düşerse exit 1.
 `GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur; bekçi `ODDS_API_KEY`i de okur ve onu
@@ -19,6 +19,7 @@ hiçbir çıktıya yazmaz. Prosedür: docs/RUNBOOK.md §3.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import re
 import sys
@@ -200,27 +201,31 @@ def watchdog(client: httpx.Client, now: datetime) -> list[str]:
 
 
 def _redact(text: str, api_key: str) -> str:
-    """Anahtarı düz hâliyle de, URL sorgusunda nasıl kodlandıysa (`%0A` gibi) öyle de gizler."""
-    return re.sub(r"apiKey=[^&\s'\"]+", "apiKey=***", text.replace(api_key, "***"))
+    """Anahtarı düz ve kırpılmış hâliyle, bir de URL sorgusundaki `apikey=` değeri olarak —
+    harf büyüklüğü ve kodlaması ne olursa olsun — gizler.
 
-
-def odds_credits(client: httpx.Client, api_key: str, min_credits: int) -> str | None:
-    """Kredi eşiğin altındaysa ya da ölçülemediyse adlandırılmış satır, yeterliyse None.
-
-    `/v4/sports` kota harcamaz. Satır PUBLIC issue'ya yazılır ve GitHub'ın secret maskelemesi
-    issue'yu kapsamaz; httpx'in hata mesajı ise isteğin URL'sini, yani anahtarı taşır.
+    Satır sonuyla dolgulu secret'ın çıplak hâli durum satırında, kodlanmış hâli bir
+    yönlendirmenin küçük harfli yankısında görünebilir. Boşluk dizesi gizlenmez: raporu bozardı.
     """
-    if not api_key:
-        return "Odds API: kredi ÖLÇÜLEMEDİ — ODDS_API_KEY ortamda yok"
+    for secret in (api_key, api_key.strip()):
+        if secret.strip():
+            text = text.replace(secret, "***")
+    return re.sub(r"(?i)(apikey=)[^&\s'\"]+", r"\1***", text)
+
+
+def _cost(headers: httpx.Headers) -> str | None:
+    """Ölçümün kendi bedeli: ücretsiz sanılan uç kredi yiyorsa bekçi onu her turda tüketir."""
+    last = headers.get("x-requests-last")
+    if last is None or last == "0":
+        return None
+    return (
+        f"Odds API: kredi ölçümü ücretli: x-requests-last={last} — /v4/sports ücretsiz sanılıyordu"
+    )
+
+
+def _remaining(headers: httpx.Headers, min_credits: int) -> str | None:
     try:
-        response = client.get(f"{ODDS_API}/sports", params={"apiKey": api_key})
-        response.raise_for_status()
-    except httpx.HTTPError as error:
-        # Tek satır: `::warning::` ve gövdedeki madde ilk satır sonunda biter.
-        reason = " ".join(_redact(f"{type(error).__name__}: {error}", api_key).split())
-        return f"Odds API: kredi ÖLÇÜLEMEDİ — {reason}"
-    try:
-        remaining = int(response.headers["x-requests-remaining"])
+        remaining = int(headers["x-requests-remaining"])
     except (KeyError, ValueError):
         return "Odds API: kredi ÖLÇÜLEMEDİ — x-requests-remaining başlığı yok ya da sayı değil"
     if remaining >= min_credits:
@@ -231,25 +236,47 @@ def odds_credits(client: httpx.Client, api_key: str, min_credits: int) -> str | 
     )
 
 
+def odds_credits(client: httpx.Client, api_key: str, min_credits: int) -> list[str]:
+    """Kredi sorunlarının satırları: az, ölçülemeyen ya da ücretli ölçülen kredi. Boş liste:
+    kredi ölçüldü, yeterli ve ölçüm ücretli görünmüyor.
+
+    Satırlar PUBLIC issue'ya yazılır ve GitHub'ın secret maskelemesi issue'yu kapsamaz;
+    httpx'in hata mesajı ise isteğin URL'sini, yani anahtarı taşır. İstekteki anahtar
+    kırpılmaz: bekçi, seal'in düşeceği gibi düşmeli.
+    """
+    if not api_key:
+        return ["Odds API: kredi ÖLÇÜLEMEDİ — ODDS_API_KEY ortamda yok"]
+    try:
+        response = client.get(f"{ODDS_API}/sports", params={"apiKey": api_key})
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        # Tek satır: `::warning::` ve gövdedeki madde ilk satır sonunda biter.
+        reason = " ".join(_redact(f"{type(error).__name__}: {error}", api_key).split())
+        return [f"Odds API: kredi ÖLÇÜLEMEDİ — {reason}"]
+    lines = (_cost(response.headers), _remaining(response.headers, min_credits))
+    return [line for line in lines if line is not None]
+
+
 def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
     diagnosis = "".join(f"- {line}\n" for line in problems)
     return (
         f"Teşhis:\n{diagnosis}\n"
         f"Bekçi turu: {run_url}\n"
         f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
-        "Bu issue'yu yalnız tüm tetikleri taze ve Odds API kredisini eşikte ya da üstünde ölçen\n"
-        "bir bekçi turu kapatır; seal'in yeşil turu kapatmaz. Prosedür: docs/RUNBOOK.md §3.6.\n"
+        "Bu issue'yu yalnız teşhisi boş bir bekçi turu kapatır: tetikler taze, kredi eşikte\n"
+        "ya da üstünde, ölçüm ücretli görünmüyor. Seal'in yeşil turu kapatmaz.\n"
+        "Prosedür: docs/RUNBOOK.md §3.6.\n"
     )
 
 
-def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: str | None) -> str:
+def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: list[str]) -> str:
     """Sorun varsa bekçinin KENDİ alarmını açar ya da günceller, yoksa onu kapatır.
 
-    Sorun: bayat tetik ya da eşiğin altında/ölçülemeyen kredi (`credit`). Seal alarmına
-    dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı
-    geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
+    Sorun: bayat tetik ya da `credit` satırı (az, ölçülemeyen ya da ücretli ölçülen kredi).
+    Seal alarmına dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu
+    (≤15 dk) alarmı geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
     """
-    problems = [line for line in (*watchdog(client, now), credit) if line is not None]
+    problems = [*watchdog(client, now), *credit]
     if not problems:
         healthy = "bekçi: tüm tetikler taze, Odds API kredisi yeterli\n"
         return healthy + clear_alarm(client, WATCHDOG, run_url)
@@ -288,6 +315,10 @@ def main(
     transport: httpx.BaseTransport | None = None,
     now: datetime | None = None,
 ) -> int:
+    # httpx her isteği INFO'da URL'siyle, yani sorgudaki anahtarla loglar: log yapılandırılırsa
+    # sızmasın. httpcore'un DEBUG ayrıntısı da aynı sebeple kısılır.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     args = _parser().parse_args(argv)
     env = {name: os.environ.get(name, "") for name in ("GITHUB_TOKEN", "GITHUB_REPOSITORY")}
     missing = [name for name, value in env.items() if not value]

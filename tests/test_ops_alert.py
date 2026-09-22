@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,8 @@ REPO = Path(__file__).resolve().parent.parent
 REPOSITORY = "sahip/football-edge"
 TOKEN = "test-token"
 ODDS_KEY = "sahte-odds-anahtari-c5-0123456789"
+# URL'de kodlanan karakter taşır (`+` → `%2B`): istekte düz ya da kırpılmış hâli hiç görünmez.
+SYMBOL_KEY = "sahte+odds+anahtari+c5"
 NOW = datetime(2026, 9, 22, 8, 15, tzinfo=UTC)
 RUN_URL = "https://github.com/sahip/football-edge/actions/runs/42"
 SEAL_ALARM = "🔴 seal kırmızı"
@@ -156,13 +159,15 @@ class FakeGitHub:
 
 @dataclass
 class FakeOddsApi:
-    """Kota harcamayan `GET /v4/sports`un taklidi: kalan kredi `x-requests-remaining`dadır.
+    """Kota harcamayan `GET /v4/sports`un taklidi: kalan kredi `x-requests-remaining`da, bu
+    çağrının bedeli `x-requests-last`tedir (gerçek uçta 0).
 
-    `remaining=None` başlığı hiç göndermez; `failure` verilirse her istek o yoldan düşer.
+    `None` verilen başlık hiç gönderilmez; `failure` verilirse her istek o yoldan düşer.
     Yanlış uç ya da anahtar, gerçek API gibi 401 alır — sessiz geçmez.
     """
 
     remaining: str | None = "200"
+    last: str | None = "0"
     failure: Callable[[httpx.Request], httpx.Response] | None = None
     requests: list[httpx.Request] = field(default_factory=list)
 
@@ -173,7 +178,8 @@ class FakeOddsApi:
         endpoint = (request.method, request.url.path) == ("GET", "/v4/sports")
         if not endpoint or request.url.params.get("apiKey") != ODDS_KEY:
             return httpx.Response(401, json={"message": "API key is not valid"})
-        headers = {} if self.remaining is None else {"x-requests-remaining": self.remaining}
+        quota = {"x-requests-remaining": self.remaining, "x-requests-last": self.last}
+        headers = {name: value for name, value in quota.items() if value is not None}
         return httpx.Response(200, headers=headers, json=[])
 
 
@@ -193,6 +199,16 @@ def _step_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setenv("ODDS_API_KEY", ODDS_KEY)
+
+
+@pytest.fixture(autouse=True)
+def _http_log_levels() -> Iterator[None]:
+    """`main` httpx/httpcore loglarını süreç genelinde kısar: bu, başka testlere taşmasın."""
+    loggers = [logging.getLogger(name) for name in ("httpx", "httpcore")]
+    levels = [logger.level for logger in loggers]
+    yield
+    for logger, level in zip(loggers, levels, strict=True):
+        logger.setLevel(level)
 
 
 def _main(handler: Callable[[httpx.Request], httpx.Response], *argv: str) -> int:
@@ -534,6 +550,24 @@ def _echoes_the_key(request: httpx.Request) -> httpx.Response:
     raise httpx.ProxyError(f"vekil reddetti: {request.url.params['apiKey']}", request=request)
 
 
+def _key_in_reason_phrase(request: httpx.Request) -> httpx.Response:
+    # Sunucu anahtarı durum satırında yankılar; durum satırı satır sonu taşıyamaz.
+    echoed = request.url.params["apiKey"].strip()
+    return httpx.Response(401, extensions={"reason_phrase": f"Invalid key {echoed}".encode()})
+
+
+def _redirect_with_lowercase_apikey(request: httpx.Request) -> httpx.Response:
+    # httpx yönlendirmeyi izlemez ama `Location`ı hata mesajına koyar.
+    query = request.url.query.decode().replace("apiKey=", "apikey=")
+    location = f"https://api.the-odds-api.com/v4/sports/?{query}"
+    return httpx.Response(302, headers={"Location": location})
+
+
+def _url_form(secret: str) -> str:
+    """Anahtarın istek sorgusundaki hâli — httpx'in kendi kodlaması."""
+    return str(httpx.QueryParams({"apiKey": secret})).partition("=")[2]
+
+
 @pytest.mark.parametrize(
     ("secret", "failure", "reason"),
     [
@@ -541,8 +575,19 @@ def _echoes_the_key(request: httpx.Request) -> httpx.Response:
         (ODDS_KEY, _connection_lost, "ConnectError"),
         (f"{ODDS_KEY}\n", _unauthorized, "401 Unauthorized"),
         (ODDS_KEY, _echoes_the_key, "ProxyError"),
+        (f"{ODDS_KEY}\n", _key_in_reason_phrase, "401 Invalid key"),
+        (f"{SYMBOL_KEY}\n", _redirect_with_lowercase_apikey, "302 Found"),
+        (" ", _unauthorized, "401 Unauthorized"),
     ],
-    ids=["http-401", "ag-hatasi", "satir-sonlu-secret", "duz-anahtar"],
+    ids=[
+        "http-401",
+        "ag-hatasi",
+        "satir-sonlu-secret",
+        "duz-anahtar",
+        "durum-satirinda-kirpilmis-anahtar",
+        "yonlendirmede-kucuk-harf-apikey",
+        "yalniz-bosluk-secret",
+    ],
 )
 def test_a_failed_credit_request_is_named_without_leaking_the_key(
     secret: str,
@@ -550,25 +595,63 @@ def test_a_failed_credit_request_is_named_without_leaking_the_key(
     reason: str,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """httpx'in hata mesajı isteğin URL'sini, yani sorgudaki anahtarı taşır; satır sonuyla
-    yapıştırılmış bir secret URL'de kodlanır (`%0A`) ve düz eşleşmeden kaçar. Teşhis PUBLIC
-    issue'ya yazılır ve GitHub'ın secret maskelemesi issue'yu kapsamaz: anahtar hiçbir yoldan
-    çıkmamalı. Hata yine de adıyla raporlanır; `::warning::` yalnız ilk satırı taşır."""
+    """httpx'in hata mesajı isteğin URL'sini, yani sorgudaki anahtarı taşır ve httpx her isteği
+    INFO'da URL'siyle loglar. Satır sonuyla yapıştırılmış secret URL'de `%0A` olur, çıplak hâli
+    durum satırında görünebilir; kodlanan karakter taşıyan anahtar yönlendirmenin küçük harfli
+    `apikey=` yankısına düşer. Teşhis PUBLIC issue'ya yazılır ve GitHub'ın secret maskelemesi
+    issue'yu kapsamaz: anahtar hiçbir yoldan — log dâhil — çıkmamalı. İstekteki anahtar
+    KIRPILMAZ: bekçi seal'in düşeceği gibi düşmeli. Hata yine adıyla, tek satırda raporlanır;
+    yalnız boşluktan oluşan secret raporu bozmaz."""
+    caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("ODDS_API_KEY", secret)
-    fake = FakeGitHub(runs=FRESH)
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(failure=failure)
 
-    assert _watchdog(fake, FakeOddsApi(failure=failure)) == 0, "kredi hatası job'ı düşürdü"
+    assert _watchdog(fake, odds) == 0, "kredi hatası job'ı düşürdü"
 
+    (request,) = odds.requests
+    assert request.url.params["apiKey"] == secret, "istekteki anahtar kırpıldı"
     out = capsys.readouterr()
     written = json.dumps([fake.issues, fake.comments], ensure_ascii=False)
-    for channel, text in {"stdout": out.out, "stderr": out.err, "GitHub": written}.items():
-        assert ODDS_KEY not in text, f"anahtar {channel} yoluyla sızdı"
+    channels = {"stdout": out.out, "stderr": out.err, "GitHub": written, "log": caplog.text}
+    bare = secret.strip()
+    for form in {form for form in (bare, _url_form(bare)) if form}:
+        for channel, text in channels.items():
+            assert form not in text, f"anahtar {channel} yoluyla sızdı: {form!r}"
+    for name in ("httpx", "httpcore"):
+        level = logging.getLogger(name).getEffectiveLevel()
+        assert level >= logging.WARNING, f"{name} INFO/DEBUG loglar: istek URL'si anahtarı taşır"
     (alarm,) = fake.issues
     for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", reason):
         assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
     for printed in out.out.splitlines():
         assert printed.startswith(("::warning::", "alarm ")), f"uyarı satırı bölündü: {printed!r}"
+
+
+@pytest.mark.parametrize("last", ["0", None], ids=["ucretsiz", "baslik-yok"])
+def test_a_free_or_unreported_measurement_stays_out_of_the_diagnosis(last: str | None) -> None:
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(last=last)
+
+    assert _watchdog(fake, odds) == 0
+
+    assert len(odds.requests) == 1, "kredi ölçülmedi"
+    assert fake.writes == [], "ücretsiz ölçüm alarm yazdı"
+
+
+def test_a_charged_measurement_is_named_in_the_watchdog_alarm(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Her yanıt kendi bedelini `x-requests-last`te taşır. Ücretsiz sanılan uç kredi yiyorsa
+    bekçi her turda sessizce kredi tüketirdi: ölçümün bedeli teşhise girer."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(last="1")) == 0
+
+    line = "kredi ölçümü ücretli: x-requests-last=1 — /v4/sports ücretsiz sanılıyordu"
+    (alarm,) = fake.issues
+    assert f"Odds API: {line}" in alarm["body"], "gövdede ölçümün bedeli yok"
+    assert f"::warning::Odds API: {line}" in capsys.readouterr().out, "tur özetinde uyarı yok"
 
 
 # ── Hata yolları: alarm düşerse adım da düşer, sessizce "tamam" demez ──────────────────────
