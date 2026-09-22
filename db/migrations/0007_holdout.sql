@@ -4,12 +4,16 @@
 -- açılış buraya bir satır yazar: an, git SHA'sı, amaç. Faz kapıları açılış sayısını bu tablodan
 -- okur (Faz 2 sonunda sıfır). Kayıt append-only'dir: bir açılış silinemez, değiştirilemez, tablo
 -- boşaltılamaz — sayım ancak böyle kanıt olur. Kısıtlar kodun doğrulamasının ikinci katmanıdır.
+--
+-- `opened_at` çağıranın bildirdiği andır. `recorded_at`i veritabanı saati yazar (INSERT onu
+-- geçmez): kayıt, çağıranın saatinden bağımsız bir an da taşır.
 
 create table if not exists holdout_access_log (
-  id         bigserial primary key,
-  opened_at  timestamptz not null,
-  git_sha    text not null check (git_sha ~ '^[0-9a-f]{40}$'),
-  purpose    text not null check (length(purpose) > 0)
+  id           bigserial primary key,
+  opened_at    timestamptz not null,
+  recorded_at  timestamptz not null default now(),
+  git_sha      text not null check (git_sha ~ '^[0-9a-f]{40}$'),
+  purpose      text not null check (length(purpose) > 0)
 );
 
 -- API rolleri (anon, authenticated) tabloya hiç erişemez: RLS açık, politika YOK (R90). Hat

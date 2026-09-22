@@ -343,6 +343,7 @@ def test_dumped_lock_carries_no_match_content() -> None:
         ("leagues:\n", "locked_by: x\nleagues:\n", "bilinmeyen"),
         ("holdout_end: 2026-07-01\n", "", "eksik alan ['holdout_end']"),
         ("leagues:\n", "leagues: [\n", "okunamıyor"),
+        ("rows: 5", "rows: !!python/object/apply:builtins.int ['5']", "okunamıyor"),
     ],
     ids=[
         "version",
@@ -357,13 +358,15 @@ def test_dumped_lock_carries_no_match_content() -> None:
         "unknown-key",
         "missing-key",
         "broken-yaml",
+        "python-tag",
     ],
 )
 def test_load_lock_rejects_malformed_files(
     tmp_path: Path, old: str, new: str, message: str
 ) -> None:
     """R99: her yapı ve biçim hatası dosyayı adıyla anan TEK farklı bir LockViolation'dır —
-    kilidi okuyan CLI'lar veri farkıyla aynı çıkışı (9) verir, traceback değil."""
+    kilidi okuyan CLI'lar veri farkıyla aynı çıkışı (9) verir, traceback değil. Python etiketi
+    de biçim hatasıdır: kilit güvenli yükleyiciyle okunur, dosya nesne kurup kod çalıştıramaz."""
     text = dump_lock(LOCK)
     assert old in text, "değişiklik metne uymuyor — test kurgusu bayatlamış"
     path = tmp_path / "history_lock.yaml"

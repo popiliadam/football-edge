@@ -13,10 +13,12 @@ Taranan: `src/` ve `scripts/` altındaki her `.py`, özyinelemeli (`tests/` tara
 holdout'u taklit bağlantıyla açar).
 
 Anma biçimleri: ad (çağrı, atama), öznitelik (`holdout.open_holdout`), `from … import` (takma adlı
-da), `getattr(x, "open_holdout")`, holdout modülünden `*`. Docstring, yorum ve düz dize anma
-sayılmaz. Bilinen sınırlar: hesaplanmış adlar (`"open_" + "holdout"`), `operator.attrgetter`,
-`exec`/`eval` görünmez — bu test kazara girişi durdurur, kasıtlı kaçışı kırmızı takım denetimi
-(Task 11) arar.
+da), holdout modülünden `*` ve adı TAM taşıyan her dize sabiti: `getattr(x, "open_holdout")`,
+`holdout.__dict__["open_holdout"]`, `f.__globals__["_HOLDOUT_SEAL"]`, `vars(m)["_HOLDOUT_SEAL"]`,
+`__import__(…, fromlist=["open_holdout"])`. Docstring, yorum ve adı başka metinle birlikte taşıyan
+dize anma sayılmaz. Bilinen sınırlar: hesaplanmış adlar (`"open_" + "holdout"`) ve adı daha uzun
+bir metnin içinde taşıyan dizeler (`exec("open_holdout(c)")`, `attrgetter("h.open_holdout")`)
+görünmez — bu test kazara girişi durdurur, kasıtlı kaçışı kırmızı takım denetimi (Task 11) arar.
 """
 
 from __future__ import annotations
@@ -71,8 +73,8 @@ def _findings(tree: ast.AST) -> Iterator[Finding]:
             yield node.lineno, node.attr, f".{node.attr} erişimi"
         elif isinstance(node, ast.ImportFrom):
             yield from _import_findings(node)
-        elif isinstance(node, ast.Call):
-            yield from _getattr_findings(node)
+        elif isinstance(node, ast.Constant):
+            yield from _constant_findings(node)
 
 
 def _import_findings(node: ast.ImportFrom) -> Iterator[Finding]:
@@ -85,11 +87,11 @@ def _import_findings(node: ast.ImportFrom) -> Iterator[Finding]:
             yield node.lineno, "open_holdout", f"from {module} import *"
 
 
-def _getattr_findings(node: ast.Call) -> Iterator[Finding]:
-    is_getattr = isinstance(node.func, ast.Name) and node.func.id == "getattr"
-    name = node.args[1] if is_getattr and len(node.args) > 1 else None
-    if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value in GUARDED:
-        yield node.lineno, name.value, f"getattr(..., {name.value!r})"
+def _constant_findings(node: ast.Constant) -> Iterator[Finding]:
+    # Adı TAM taşıyan dize anmadır: `getattr(m, "…")`, `m.__dict__["…"]`, `f.__globals__["…"]`,
+    # `vars(m)["…"]`, `fromlist=["…"]` adı hep böyle taşır. Adı başka metinle taşıyan dize değil.
+    if isinstance(node.value, str) and node.value in GUARDED:
+        yield node.lineno, node.value, f"{node.value!r} dizesi"
 
 
 def _python_files(root: Path) -> list[Path]:
@@ -118,13 +120,18 @@ REFERENCES = [
     "key = holdout.open_holdout(conn, purpose='x', git_sha=sha, now=now)",
     "opener = holdout.open_holdout",
     'getattr(holdout, "open_holdout")',
+    'holdout.__dict__["open_holdout"]',
+    '__import__("football_edge.history.holdout", fromlist=["open_holdout"])',
     "from football_edge.history.holdout import *",
     "from football_edge.history.holdout import _HOLDOUT_SEAL",
     "HoldoutKey(opened_at=t, purpose='x', git_sha=s, _seal=holdout._HOLDOUT_SEAL)",
+    'select_periods.__globals__["_HOLDOUT_SEAL"]',
+    'vars(holdout)["_HOLDOUT_SEAL"]',
     "from football_edge.history.sync import _load_all",
     "rows = sync._load_all(conn, catalog)",
     "_load_all(conn, catalog)",
     'getattr(sync, "_load_all")',
+    'sync.__dict__["_load_all"]',
 ]
 MENTIONS = [
     '"""open_holdout yalnız final_eval.py\'de çağrılır."""',

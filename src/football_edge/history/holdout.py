@@ -53,8 +53,9 @@ class HoldoutKey:
 class Window:
     """Maçın kaynak tarihine göre [start, end); `start` None ise alt sınır yoktur.
 
-    Pencere holdout'a uzanamaz (R89): `in_window` anahtar sormaz, bu yüzden sınır kurulurken
-    konur — `end` en çok `DEV_END`. Boş pencere de reddedilir: sessizce hiçbir şey seçmesin.
+    Kurulum iki durumda `ValueError` verir (R89). `end > DEV_END`: `in_window` anahtar sormaz,
+    bu yüzden pencere holdout'a uzanamaz. `start >= end`: boş ya da ters pencere sessizce hiçbir
+    şey seçmesin.
     """
 
     start: date | None

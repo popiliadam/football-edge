@@ -96,6 +96,14 @@ class _AccessCursor:
         self._db.pending = [*self._db.pending, params]
 
 
+class _OffsetlessZone(dt.tzinfo):
+    """`tzinfo` taşır ama ofset vermez: Python'un tanımıyla an yine saat dilimsizdir. Yalnız
+    `tzinfo is None` denetimi onu kabul ederdi."""
+
+    def utcoffset(self, when: dt.datetime | None) -> dt.timedelta | None:
+        return None
+
+
 def _match(day: dt.date, *, kickoff: dt.datetime | None = None, home: str = "Ev A") -> HistMatch:
     return HistMatch(
         league="E0",
@@ -204,6 +212,13 @@ def test_window_reaching_past_dev_end_is_rejected(start: dt.date | None, end: dt
 def test_window_with_start_not_before_end_is_rejected(start: dt.date, end: dt.date) -> None:
     with pytest.raises(ValueError, match="boş pencere"):
         Window(start, end)
+
+
+@pytest.mark.leakage
+def test_window_is_immutable() -> None:
+    """R89 sınırı yalnız kurulurken denetler: sonradan `end`i kaydırılabilen pencere onu aşardı."""
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        MAIN_WINDOW.end = HOLDOUT_END  # type: ignore[misc]
 
 
 # Dönem sınırları, çevreleri ve iki uç: kurulabilen ve kurulamayan pencereleri birlikte üretir.
@@ -353,8 +368,9 @@ def test_open_holdout_returns_no_key_when_the_commit_fails() -> None:
         ({"git_sha": SHA + "0"}, "git_sha"),
         ({"git_sha": SHA + "\n"}, "git_sha"),
         ({"now": NOW.replace(tzinfo=None)}, "saat dilimli"),
+        ({"now": NOW.replace(tzinfo=_OffsetlessZone())}, "saat dilimli"),
     ],
-    ids=["empty", "blank", "upper", "short", "long", "newline", "naive-now"],
+    ids=["empty", "blank", "upper", "short", "long", "newline", "naive-now", "offsetless-tzinfo"],
 )
 def test_open_holdout_rejects_bad_openings_before_writing(
     changes: dict[str, Any], message: str
@@ -393,9 +409,12 @@ def _table_columns(sql: str) -> tuple[str, ...]:
 
 @pytest.mark.leakage
 def test_access_log_migration_defines_checked_columns() -> None:
+    """`opened_at`i çağıran verir; `recorded_at`i veritabanı saati yazar — kayıt çağıranın
+    saatinden bağımsız bir an da taşır."""
     assert _table_columns(_migration_sql()) == (
         "id bigserial primary key",
         "opened_at timestamptz not null",
+        "recorded_at timestamptz not null default now()",
         "git_sha text not null check (git_sha ~ '^[0-9a-f]{40}$')",
         "purpose text not null check (length(purpose) > 0)",
     )
@@ -437,7 +456,8 @@ def test_access_log_migration_closes_the_table_to_api_roles() -> None:
 @pytest.mark.leakage
 def test_open_holdout_writes_exactly_the_migration_columns() -> None:
     """Taklit sütun adını denetlemez: yazım hatasını gerçek veritabanına gitmeden bu yakalar.
-    `id` dışındaki her sütun NOT NULL ve varsayılansızdır; hepsi yazılmalı."""
+    `id` ve `recorded_at` dışındaki her sütun NOT NULL ve varsayılansızdır; hepsi yazılmalı. O
+    ikisini veritabanı doldurur: `recorded_at` yazılırsa çağıranın saatini taşırdı."""
     db = FakeAccessLogDb()
     open_holdout(db, purpose=PURPOSE, git_sha=SHA, now=NOW)
     ((sql, _),) = db.statements
@@ -445,5 +465,8 @@ def test_open_holdout_writes_exactly_the_migration_columns() -> None:
     assert written is not None, sql
 
     defined = [column.split()[0] for column in _table_columns(_migration_sql())]
+    filled_by_database = ("id", "recorded_at")
 
-    assert written.group(1).split(", ") == [name for name in defined if name != "id"]
+    assert written.group(1).split(", ") == [
+        name for name in defined if name not in filled_by_database
+    ]
