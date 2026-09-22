@@ -1,9 +1,10 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 · **Durum:** **Faz 1 `main`'de; İz C (işletme) C1–C5 tamam** — mühür, snapshot ve toplayıcılar
-pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor, robots doğrulaması otomatik
-(RUNBOOK §3); loglarda sır yok; çıpa push'u yarışa dayanıklı · **Dal:** `main` · kapı **9 adım
-yeşil + `zincir` adıyla SKIP** (ölçüm §2)
+**Son güncelleme:** 2026-09-22 (oturum 2) · **Durum:** **İz C canlıda doğrulandı** — push'landı,
+0005 uygulandı; mühür, snapshot ve toplayıcılar pg_cron'dan tetikleniyor (cron → `204` → yeşil tur
+uçtan uca ölçüldü); footystats Mac'te launchd ile koşuyor (GitHub runner'ları 403); ilk canlı alarm
+açıldı ve yeşil turla kapandı · **Dal:** `main` = `origin/main` · kapı **9 adım yeşil + `zincir`
+adıyla SKIP** (ölçüm §2)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -12,47 +13,45 @@ yeşil + `zincir` adıyla SKIP** (ölçüm §2)
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-22'de yazıldı)
-
-**Neden yeni oturum:** bu oturumda SEO eklentisinin `outward_action_gate` hook'u oturum başında
-yüklendiği için push engellendi. Eklenti bu projede `.claude/settings.local.json` ile kapatıldı;
-yeni oturumda yüklenmez ve push'u asistan yapar. (Aynı dosya Supabase `apply_migration` /
-`execute_sql` araçlarına izin verir.)
+## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 2 sonunda yazıldı)
 
 **Başlangıç durumu**
-- Yerel `main` `origin/main`in ~40 commit önünde ve push'lanmadı; `origin/main`de ise
-  `seal.yml` botunun çıpa commit'leri birikiyor (her 15 dakikada bir, push gidene kadar).
-- Son kapı: `d086d4f` taze klon — 9 adım PASS, 542 passed / 2 skipped, contract 18,
-  `SKIP: zincir` (DATABASE_URL yok; zincir yalnız `seal.yml`de koşar).
-- Veritabanında canlı: migration 0003 + 0004 — `seal` her 15 dakikada, `snapshot` 06:22 UTC,
-  ikisi de 2026-09-22'de `204` + success ile doğrulandı. **0005 UYGULANMADI.**
-- Açık worktree yok. SDD defterleri (gitignored, yalnız bu makinede):
-  `.superpowers/sdd/2026-09-19-faz1-toplayicilar/`, `.superpowers/sdd/2026-09-22-isletme/`.
+- `main` origin'de, CI yeşil (kod `6dccfa8`; bu devir onun üstünde). Açık dal ve worktree yok.
+  Defter (gitignored): `.superpowers/sdd/2026-09-22-isletme/progress.md` — bu oturumun kararları
+  R72–R76.
+- Canlı tetikler (hepsi pg_cron → `workflow_dispatch`, `204`): `seal` 15 dk, `snapshot` 06:22 UTC,
+  `collect-daily` 07:10 UTC (tff, venues), `collect-news` 2 saatte bir :07. İlk cron'lu toplayıcı
+  turu 10:07 UTC'de koştu ve yeşildi.
+- **footystats GitHub'da koşmuyor:** runner'lar 403 alıyor (Cloudflare), Mac 200. İş Mac'te
+  launchd ile koşar ve sonucu `footystats-local.yml`e bildirir; alarmı o workflow açar, bekçi
+  raporların yaşını 72 sa eşikle `footystats-local` başlığında izler (RUNBOOK §3.9, R73–R76).
+  Kuruldu 2026-09-22 10:57 UTC: ilk tur `main` `6dccfa8` ile **114 yeni gözlem**, exit 0; rapor →
+  `footystats-local.yml` yeşil (`açık alarm yok`).
+- İlk canlı alarm döngüsü: `🔴 collect-daily kırmızı` (#1) 09:29'da açıldı, 10:57:58'de yeşil
+  `collect-daily` turuyla (run 35718803834) "yeşile döndü" yorumuyla kapandı.
+- Son kapı (`6dccfa8`, taze klon): 9 adım PASS + `zincir` SKIP · 593 passed, 2 skipped ·
+  contract 18.
 
-**Sırayla yapılacaklar**
-1. `git fetch origin` → `git merge --no-ff origin/main` (**asla rebase, asla force**: bot
-   commit'leri zincir çıpalarıdır) → `git push origin main`. Reddedilirse fetch + merge'i tekrarla.
-2. Push'tan SONRA `db/migrations/0005_collect_dispatch.sql`i Supabase aracıyla uygula. Sıra
-   önemli: GitHub `main`de olmayan bir workflow'u tetiklemez (404).
-3. `select ops.dispatch_collect_daily();` ve `select ops.dispatch_collect_news();` bir kez →
-   `net._http_response` `204` → `gh run list --workflow collect-daily.yml` / `collect-news.yml`.
-   Bu toplayıcılar hiçbir runner'da koşmadı: ilk turlar kırmızı olabilir; `🔴 collect-* kırmızı`
-   issue'sundaki tur loguna bak, kök nedeni düzelt.
-4. Doğrula: RUNBOOK §3.3 sorgusu (bütün `*-dispatch` işleri `succeeded` + `204`); zaman damgası
-   çıpa commit'leri durdu mu (`git log origin/main` — artık yalnız baş değişince ya da yeni günde);
-   bekçinin "hiç tur yok" alarmı toplayıcılar koşunca kapanmalı.
-5. İzle: 2026-09-27 05:41 UTC `sources-audit` turu — ilk otomatik robots tarihi ilerletmesi ve bot
-   push'u; ilk canlı `ops-alert` kırmızı→yeşil döngüsü (DEFERRED 10a).
-6. Hafızadaki `pending-push-deadline` notunu sil.
-7. Sonra yol haritası v2 (`docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`):
-   İz A — Faz 2'nin tam TDD planı (dalga 1: MIT yükleyici ∥ vig temizleme ∥ holdout ∥ harness
-   iskeleti) ve İz B — Faz 6 iskeleti, paralel. İz B için Netlify hesabı ve alan adı kullanıcı kararı.
+**İzlenecekler (kendiliğinden olmalı; olmazsa RUNBOOK §3)**
+1. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:
+   ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72);
+   hakemler açıklandığı gün sayı sıfırdan büyük olmalı.
+2. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
+3. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir ve
+   bot commit'i push'lar. Runner'ın footystats robots.txt'ini okuyabildiği ölçüldü (09-22).
 
-**Son tarih: 2026-10-02.** 0004 canlı ve eski `snapshot.yml` (GitHub `schedule`lı) origin'de
-durdukça snapshot günde iki kez koşabilir; milli maç arasında bedeli 0, maçlar 7 günlük pencereye
-girince (~10-02) Odds API kredisi iki kat harcanır.
+**Sıradaki iş: yol haritası v2 (`docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`)**
+- **İz A — Faz 2'nin tam TDD planı** (dalga 1: MIT yükleyici ∥ vig temizleme ∥ holdout ∥ harness
+  iskeleti). Bu oturumda ölçülen girdiler §6'da.
+- **İz B — Faz 6 iskeleti:** Netlify hesabı bağlı ama "football" adlı bir proje yok. Site ve
+  alan adı kullanıcı kararı.
 
-**Kullanıcıdan beklenen tek şey:** depoyu GitHub'da **Watch** etmek (alarm e-postaları için).
+**Kullanıcıdan beklenenler**
+1. Depoyu GitHub'da **Watch** etmek (All Activity ya da Custom → Issues): alarm e-postaları buna
+   bağlı. Bu oturumda ölçülemedi — `gh` token'ında `notifications` yetkisi yok.
+2. DEFERRED 10t'ye karar: yerel işi yetkisiz ayrı bir macOS kullanıcısında koşturmak ister misin
+   (yönetici yetkisi gerekir)? Şimdilik kabul edildi.
+3. İz B için Netlify sitesi ve alan adı.
 
 ---
 
@@ -62,7 +61,8 @@ girince (~10-02) Odds API kredisi iki kat harcanır.
 (06:22 UTC) Supabase pg_cron'dan `workflow_dispatch` ile tetikleniyor (0003/0004, RUNBOOK §3);
 token Vault'ta `github_seal_dispatch` adıyla, süresiz. Kırmızı bir tur `ops-alert` etiketli bir
 issue açar, yeşil tur kapatır; tetikler durursa bekçi `🔴 bekçi kırmızı` açar. Toplayıcılar da aynı
-yolla koşar: `collect-daily` (footystats, tff, venues; 07:10 UTC) ve `collect-news` (2 saatte bir);
+yolla koşar: `collect-daily` (tff, venues; 07:10 UTC) ve `collect-news` (2 saatte bir); footystats
+senin Mac'inde launchd ile koşar (RUNBOOK §3.9 — Mac'in gün içinde bir kez açık olması yeter);
 `fetch-results` kredi harcadığı için elle (R67). Bekçi kalan Odds API kredisini de izler. Haber
 almak için depoyu GitHub'da **Watch** etmen yeterli. (GitHub'ın `schedule`ı 51 saatte ~203 mühür turunun
 16'sını koşturmuş, 47 maçın kapanış fiyatı kalıcı kaçmıştı — DEFERRED §10.)
@@ -92,26 +92,28 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Yeni şema** | `source_observations` · `match_results` · `entity_aliases` | Task 4: canlı migrasyon, tablo listesi doğrulandı |
 | Append-only (gözlem) | UPDATE ve DELETE **reddedildi** | Task 4: gerçek veritabanında, **tam yetkili rolle** denendi |
 | Toplu yazma | 200 satır yazıldı → zincir bağı geri okundu → geri alındı | Task 1: canlı Postgres sondası |
-| FootyStats | 6 lig 200; tur 1 **114 gözlem**, tur 2 **0** | Task 5: canlı ×2, CLI + doğrudan DB sorgusu |
-| TFF | `pageID=600`: 7 lig / **63 satır**; tur 1 **62 gözlem**, tur 2 **0** | Task 6 + bağımsız inceleme, canlı site + canlı DB |
-| Ajansspor haber | **1000 yeni gözlem**, exit 0 | Task M: `fetch-news` canlı |
+| FootyStats | 6 lig 200; tur 1 **114 gözlem**, tur 2 **0** · 09-22: runner'dan 6/6 **403**, Mac'ten 200 → iş Mac'te (R73) | Task 5: canlı ×2 · 09-22: run 35710579845 + yerel tanı |
+| TFF | `pageID=600`: 7 lig / **63 satır**; tur 1 **62 gözlem**, tur 2 **0** · 09-22: 63/63 hücre boş (hakemler açıklanmamış) → 0 gözlem, hata değil (R72) | Task 6 + bağımsız inceleme · 09-22: yerel tanı, sayfa şekli sağlam |
+| Ajansspor haber | **1000 yeni gözlem**, exit 0 · runner: **193** (09-22 09:28, elle) + **3** (10:07, cron) | Task M: `fetch-news` canlı · 09-22: `collect-news` turları |
 | Stadyum koordinatı | **1 yeni** (Rams Park, `Q81492`) | Task M: `fetch-venues` canlı |
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP · 542 passed, 2 skipped | `d086d4f` ağacı, taze klon, secret'sız, log dosyasından okundu (09-22) |
+| Kapı | 9 adım PASS + `zincir` SKIP · 593 passed, 2 skipped · contract 18 — `6dccfa8` | taze klon, `TMPDIR` klon dışında, secret'sız, log dosyasından okundu |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
-| Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 **veritabanına UYGULANMADI** | `collect-*.yml` `main`e push'lanınca uygulanacak (GitHub `main`de olmayan workflow'u tetiklemez) |
-| Alarm ve bekçi | `ops-alert` issue'ları; bekçi tetikleri ve Odds API kredisini izler | kod `main`de, testli; hiçbir runner'da henüz koşmadı |
-| robots doğrulaması | otomatik (`sources-audit.yml`, RUNBOOK §3.7) | ilk otomatik ilerletme 2026-09-27 05:41 UTC turunda bekleniyor |
-| Loglarda sır | Odds/TypeSafe anahtarı, `DATABASE_URL` ve parolası redakte; yakalanmayan istisna da (C7) | uçtan uca bozuk DSN `verify-chain` → parola parçası stdout/stderr'de 0 (controller, 09-22) |
-| Çıpa push'u | yalnız commit varsa, merge ile en çok 3 deneme, checkout güncel uç (C6) | gerçek git sığ klon senaryoları; runner'da henüz koşmadı |
-| Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | Yalnız MockTransport testleri — runner'da ve gerçek GitHub'da **henüz koşmadı** |
+| Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 09-22 09:27 UTC uygulandı | elle 09:28 → `204`/`204`; cron 10:07 → `succeeded` + `204` → `collect-news` yeşil |
+| Alarm ve bekçi | `ops-alert` issue'ları; bekçi tetikleri, Odds API kredisini ve Mac'in kalp atışını (72 sa) izler | #1 `🔴 collect-daily kırmızı` 09:29 açıldı (github-actions, etiketli) — 10:57:58'de yeşil `collect-daily` turuyla (run 35718803834) "yeşile döndü" yorumuyla kapandı; bekçi yeni kodla henüz koşmadı |
+| robots doğrulaması | otomatik (`sources-audit.yml`, RUNBOOK §3.7) | elle tur 09-22 (35715215485): 7/7 kaynak sapma yok, runner footystats robots'unu okuyor; ilk otomatik ilerletme 09-26'dan itibaren |
+| Loglarda sır | Odds/TypeSafe anahtarı, `DATABASE_URL` ve parolası redakte; yakalanmayan istisna da (C7) | uçtan uca bozuk DSN → parola parçası 0; runner turlarında (daily/news/seal) sır sayımı 0/0/0 — maskeleme sınanmadı (10n) |
+| Çıpa push'u | yalnız commit varsa, merge ile en çok 3 deneme, checkout güncel uç (C6) | 09:30 turu `zincir başı değişmedi — commit ve push yok`: gürültü durdu; ret→merge yolu henüz koşmadı |
+| Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | runner'da ve gerçek GitHub'da koştu: #1 açıldı, 10:57:58'de yeşil `collect-daily` turuyla (run 35718803834) "yeşile döndü" yorumuyla kapandı |
+| footystats yerel işi (Mac) | launchd, 4 dilim + oturum açılışı, UTC günü başına bir tur; rapor `footystats-local.yml`; kalp atışı 72 sa, kendi alarmı (R73–R76) | Kuruldu 2026-09-22 10:57 UTC: ilk tur `main` `6dccfa8` ile **114 yeni gözlem**, exit 0; rapor → `footystats-local.yml` yeşil (`açık alarm yok`) |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
-`.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` YOK.**
-Repoda hiçbir yerde geçmiyor.
+`.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` `.env`de ve
+repoda YOK** — ama kullanıcının kabuk ortamında tanımlı (09-22 ölçüldü, değer okunmadı). Dil
+kalibrasyonu (`calibrate`, PARA HARCAR) bununla koşulabilir; karar kullanıcıda.
 
 ---
 
@@ -183,8 +185,9 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Faz 2'yi bağlayan 
 **Tam liste: `docs/phases/01-toplayicilar/HANDOFF.md` §3 — hepsi adıyla.**
 Bir sonraki fazın üstüne inşa etmemesi gerekenler:
 
-1. **TOPLAYICILAR HİÇBİR YERDE KOŞMUYOR.** Zamanlama yok, cron yok, workflow yok.
-   Kütüphane + CLI olarak teslim edildiler. **Hiç koşmayan toplayıcı hiçbir şey toplamaz.**
+1. ~~**TOPLAYICILAR HİÇBİR YERDE KOŞMUYOR.**~~ **09-22'den beri koşuyor:** `collect-daily`
+   (tff, venues) ve `collect-news` pg_cron'dan, footystats Mac'te launchd ile (R73). Kapsam hâlâ
+   dar: TFF yalnız bu haftayı, venues tek stadyumu veriyor (madde 9, 10).
 2. **DİL KALİBRASYONU HİÇBİR ŞEY ÖLÇMEDİ** ve spec §5.4'ün Faz 1 şartı **KARŞILANMADI.**
    Kapı yeşil, çünkü ölçtüğü soru "ölçülmemiş bir dil açık mı" ve cevap "hayır". **Yeşil
    kapı, ölçümün yapıldığı anlamına gelmiyor.**
@@ -212,8 +215,10 @@ Bir sonraki fazın üstüne inşa etmemesi gerekenler:
     haftalık `full-scan.yml`de: gecikme **en fazla 7 gün**.
 13. **`cur.rowcount`un `executemany` sonrası davranışı canlı Postgres'e karşı doğrulanmadı**
     — etkilenen raporlanan SAYI, yazılan satırlar değil.
-14. **Faz 1'in beş workflow'unun hiçbiri bir runner'da koşmadı**; canlı robots sapması bir
-    kez bile ölçülmedi.
+14. ~~**Faz 1'in beş workflow'unun hiçbiri bir runner'da koşmadı**~~ 09-22'de `collect-daily`,
+    `collect-news` ve `sources-audit` koştu (canlı robots sapması: 7/7 kaynak yok). `full-scan`
+    henüz koşmadı; `collect-daily`nin ilk turu footystats 403'ü ve TFF'nin atanmamış haftasını
+    buldu (R72, R73).
 15. Faz 0'dan devreden ve kapanmayan: en az yetkili rol yok · `shellcheck`/`actionlint` yok ·
     `mypy` `tests/`i görmüyor · coverage yok · secret taraması git geçmişini taramıyor.
 16. **`latest_observations` güncel durumu DEĞİL, içerik başına İLK görüleni döner.** Bir değer
@@ -234,6 +239,11 @@ Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı 
 **Faz 1'in zamanlama borcu İz C'de ödendi:** dört `fetch-*` komutu `collect-daily` /
 `collect-news` ile pg_cron'dan tetikleniyor (0005 push'tan sonra uygulanacak — §0); `fetch-results`
 kredi harcadığı için elle (R67). Sıra ve paralellik: yol haritası v2 (§0/7).
+
+**2026-09-22'de ölçülen Faz 2 girdileri** (planın §0'ına girer):
+- `xgabora/Club-Football-Match-Data` (MIT, `main` 2026-09-06): `Matches.csv` 238.858 maç, `EloRatings.csv` 273.972 kayıt. Oranlar Bet365 (`OddHome/Draw/Away`, O/U 2.5, AH) ve `Max*`: **kapanış sütunu yok** — spec §1.4'ün tarihsel CLV referansı `AvgC*`/`BFEC*` yalnız football-data.co.uk'ta.
+- **football-data.co.uk bu makineden erişilemiyor:** `robots.txt` bile TLS `Connection reset by peer` (TR SNI engeli, spec §7). Kapanış yükleyicisi ve o kaynağın ilk ölçümü runner'da yapılmalı — footystats'ın tam tersi.
+- Sızıntı adayları (Task 6'nın ilk maddeleri): `C_*` küme olasılıkları maçın kendi istatistiklerinden türetilmiş görünüyor; 2025-06-15 sonrası Elo, yazarın "provisional continuation"ı (maçın kendisini içerip içermediği bilinmiyor); `MatchTime` "CET-1" etiketli (saat dilimi ölçülmeli). Veri seti periyodik güncelleniyor: yükleyici bir commit SHA'sına sabitlenmeli.
 
 **Faz 2'nin birincil girdisi `xgabora/Club-Football-Match-Data`dır ve lisans zinciri hâlâ
 açık bir sorudur** (MIT ilan ediyor, verisi football-data.co.uk'tan türemiş, o kaynağın
@@ -320,3 +330,31 @@ rebase değil merge · R65 A'nın iki bulgusu düzeltildi · R66 bekçinin kendi
 `fetch-results` zamanlanmadı (kredi) · R68 C3 Minor'ları + `persist-credentials` · R69 C4 Minor'ları;
 seal push'u ayrı iş (C6) · R70 C7: excepthook + libpq + bütün kök handler'lar · R71 seal checkout
 güncel uç + test dosyası bölme.
+
+### 8.4 2026-09-22 oturum 2 (HANDOFF §0'dan devam)
+**Operasyon (controller):** 13 bot çıpa commit'i `--no-ff` birleşti (`646e4d8`), taze klon kapısı,
+push; 0005 uygulandı; toplayıcılar elle ve cron'la tetiklendi; ilk `collect-daily` turunun iki
+kırmızısı teşhis edildi (yerel tanı, kaynak başına tek istek, veritabanına yazmadan).
+
+**Ajanlara verilen görevler**
+1. **T1 — TFF atanmamış hafta (K2):** controller TDD + 5/5 mutasyon → `063e0b6`; inceleme
+   (feature-dev:code-reviewer) APPROVED + 1 Important (ayırt edilemeyen durum adıyla, `76739f2`)
+   → `c715e01`. Not: bu ajan tipinin kabuğu yok, mutasyonları elle izledi.
+2. **T2 — footystats yerel işi (K2):** `c5489b1` (collect-daily'den çıkar) + `cce76f7` (launchd
+   işi, 16/16 mutasyon); inceleme (general-purpose, kabuklu) CHANGES REQUESTED: 4 Important,
+   20 mutasyonun 12'si kaçtı. Düzeltme turu `e1e3054` (R74, R75; 35/35 mutasyon) → yeniden
+   inceleme CHANGES REQUESTED: **Critical** — test dosyasının sahte `.env` satırları kapının
+   `secrets` adımını düşürüyordu (birleşseydi mühür turları ilk adımda düşerdi; dalda
+   `verify.sh`'ın tamamı koşulmamıştı) + 2 Important → `19a921c` (R76; taze klonda kapı yeşil,
+   12/12 mutasyon) → son kontrol APPROVED.
+
+**Kullanıcıya verilen görev:** FootyStats kararı (AskUserQuestion) — **"Mac'te günlük iş"** seçildi.
+
+**Kararlar (gerekçe ve bedel defterde):** R72 TFF: sıfır maç satırı fırlatır, hepsi meşru
+görevlisizse boş sonuç; "boş hücre" = `<a>` yok VE metin yok · R73 footystats GitHub-hosted
+runner'da koşmaz (test sabitliyor), Mac'te launchd · R74 sonuç `footystats-local.yml`e raporlanır:
+alarmı github-actions açar (kendi token'ınla açılan issue bildirim üretmez), raporlar bekçinin kalp
+atışı (72 sa) · R75 dört dilim + oturum açılışı + UTC-gün damgası, fetch yeniden denemesi, klon
+yoksa yeniden klon, betik `main`den kendini günceller, kurucu atomik yazar ve `bootstrap`ı yeniden
+dener · R76 Mac'in kalp atışı bekçi alarmını paylaşmaz (`footystats-local` başlığı, bekçi yalnız
+açar); bir deponun kendi `scripts/` kopyası kendini güncellemez.
