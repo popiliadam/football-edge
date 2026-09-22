@@ -264,15 +264,18 @@ fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron:
 |---|---|---|---|
 | `seal-dispatch` | her 15 dakikada | `ops.dispatch_seal()` | `seal.yml` |
 | `snapshot-dispatch` | her gün 06:22 UTC | `ops.dispatch_snapshot()` | `snapshot.yml` |
-| `collect-daily-dispatch` | her gün 07:10 UTC | `ops.dispatch_collect_daily()` | `collect-daily.yml` (`fetch-footystats`, `fetch-tff`, `fetch-venues`) |
+| `collect-daily-dispatch` | her gün 07:10 UTC | `ops.dispatch_collect_daily()` | `collect-daily.yml` (`fetch-tff`, `fetch-venues`) |
 | `collect-news-dispatch` | 2 saatte bir, :07'de | `ops.dispatch_collect_news()` | `collect-news.yml` (`fetch-news`) |
+| launchd (Mac), pg_cron değil | her gün 10:40 yerel (07:40 UTC) | `scripts/footystats_daily.sh` | `fetch-footystats` — §3.9 |
 
 Hepsi `ops.dispatch_workflow()`a delege eder; o yalnız izinli listedeki bir adı GitHub API'si
 üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`,
 `0005_collect_dispatch.sql`). `seal.yml`in kendi `schedule`ı yedektir ve bekçiyi koşturur (§3.6);
 diğerlerinin `schedule`ı **yok**: iki tetik iki tur demektir, snapshot'ta iki kat kredi.
 `fetch-results` zamanlanmadı: `/scores` kredi harcar ve ayda 500 kredilik bütçe snapshot ile
-mühüre ayrılmış (R67) — elle koşulur.
+mühüre ayrılmış (R67) — elle koşulur. `fetch-footystats` GitHub'da koşmaz: runner'lar footystats'tan
+403 alıyor (Cloudflare veri merkezi IP'lerini geri çeviriyor; aynı kod ve kimlik Mac'ten 200), iş
+Mac'te launchd ile koşar (§3.9, R73).
 
 ### 3.2 Kurulum (tek sefer)
 1. **Token (GitHub):** hazır doldurulmuş form (ad, açıklama, sahip, süre ve **Actions: Read and
@@ -350,6 +353,7 @@ yalnız kendi başlığına dokunur:
 | `🔴 collect-daily kırmızı` | kırmızı ya da koşarken iptal edilen `collect-daily.yml` turu | yeşil `collect-daily.yml` turu |
 | `🔴 collect-news kırmızı` | kırmızı ya da koşarken iptal edilen `collect-news.yml` turu | yeşil `collect-news.yml` turu |
 | `🔴 sources-audit kırmızı` | `main`deki kırmızı ya da iptal edilen `sources-audit.yml` turu (§3.7) | `main`deki yeşil tur |
+| `🔴 footystats-local kırmızı` | Mac'teki launchd işinin kırmızı turu (§3.9) | aynı işin yeşil turu |
 | `🔴 bekçi kırmızı` | bayat tetik, az ya da ölçülemeyen kredi, ya da ücretli ölçüm bulan bekçi | hepsini temiz bulan bekçi |
 
 - Açık alarm varsa yenisi açılmaz, yalnız gövdesi güncellenir — gövde düzenlemesi bildirim
@@ -393,3 +397,41 @@ Yakalanmayan istisna da `sys.excepthook` ile aynı yoldan geçer; httpx istek sa
 Depo public olduğu için Actions logları herkese açıktır: GitHub'ın maskesi yalnız secret'ın
 TAMAMINI tanır, bu katman parçaları da kapsar. Yeni bir kimlik bilgisi eklenirse
 `_log_secrets`e de eklenmeli (DEFERRED 10o).
+
+### 3.9 FootyStats yerel işi (Mac, launchd)
+GitHub'ın barındırdığı runner'lar footystats'tan 403 alıyor (2026-09-22, run 35710579845: 6/6
+lig); aynı kod, kimlik ve istek yolu Mac'ten 200 alıyor: Cloudflare veri merkezi IP'lerini geri
+çeviriyor. Kimliği değiştirmek (R2) ya da bot korumasını aşmak seçenek değil (R73). İş bu yüzden
+Mac'te koşar: `scripts/footystats_daily.sh`, launchd ile her gün 10:40 yerel saatte.
+
+1. İşin kendi temiz klonunda (`~/.local/share/football-edge/collector`) `origin/main`i çeker ve
+   ayrık HEAD'e geçer. Çekemezse eski kodla toplamaz; alarm açar.
+2. `uv sync --frozen`, ardından `.env`den YALNIZ `DATABASE_URL`i okuyup `fetch-footystats`i koşar.
+3. Kırmızı turda `🔴 footystats-local kırmızı` issue'sunu açar, yeşil tur kapatır (§3.6). Token
+   `gh` oturumundan gelir ve yalnız alarm sürecinin ortamına verilir.
+
+Günlük: `~/Library/Logs/football-edge/footystats.log` (launchd stdout ve stderr'i ekler, döndürmez).
+
+Kurulum (yeniden koşmak betiği ve plist'i yeniler, işi yeniden yükler):
+```bash
+uv run python scripts/install_footystats_agent.py --dry-run
+uv run python scripts/install_footystats_agent.py
+```
+launchd, betiğin klonun DIŞINDAKİ kopyasını (`~/.local/share/football-edge/bin/`) koşar: klondaki
+dosya, betiğin kendi `git checkout`u ile koşarken değişebilirdi. Bu yüzden `footystats_daily.sh`
+değişince kurulum yeniden koşulur; toplayıcı kodu ise her tur `main`den gelir.
+
+Denetim ve elle tur:
+```bash
+launchctl print gui/$(id -u)/com.popiliadam.football-edge.footystats | grep -E 'state|last exit'
+tail -n 20 ~/Library/Logs/football-edge/footystats.log
+launchctl kickstart -k gui/$(id -u)/com.popiliadam.football-edge.footystats
+```
+Kaldırma: `launchctl bootout gui/$(id -u)/com.popiliadam.football-edge.footystats`, sonra
+`~/Library/LaunchAgents/com.popiliadam.football-edge.footystats.plist` silinir.
+
+Kör noktalar (DEFERRED 10r): Mac o saatte uykudaysa tur uyanınca bir kez koşar, KAPALIYSA o gün
+hiç koşmaz. Mac günlerce kapalı kalırsa alarm çalmaz: bekçi (§3.6) yalnız GitHub workflow'larını
+izler. `gh` oturumu düşerse ya da anahtar zinciri kilitliyse alarm iletilemez; günlüğe
+`gh oturumu yok` yazılır. `DATABASE_URL` değişirse yalnız `.env` güncellenir: plist sırrı değil,
+dosyanın yolunu taşır.
