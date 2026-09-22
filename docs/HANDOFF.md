@@ -12,6 +12,50 @@ yeşil + `zincir` adıyla SKIP** (ölçüm §2)
 
 ---
 
+## 0. Sonraki oturum — buradan başla (2026-09-22'de yazıldı)
+
+**Neden yeni oturum:** bu oturumda SEO eklentisinin `outward_action_gate` hook'u oturum başında
+yüklendiği için push engellendi. Eklenti bu projede `.claude/settings.local.json` ile kapatıldı;
+yeni oturumda yüklenmez ve push'u asistan yapar. (Aynı dosya Supabase `apply_migration` /
+`execute_sql` araçlarına izin verir.)
+
+**Başlangıç durumu**
+- Yerel `main` `origin/main`in ~40 commit önünde ve push'lanmadı; `origin/main`de ise
+  `seal.yml` botunun çıpa commit'leri birikiyor (her 15 dakikada bir, push gidene kadar).
+- Son kapı: `d086d4f` taze klon — 9 adım PASS, 542 passed / 2 skipped, contract 18,
+  `SKIP: zincir` (DATABASE_URL yok; zincir yalnız `seal.yml`de koşar).
+- Veritabanında canlı: migration 0003 + 0004 — `seal` her 15 dakikada, `snapshot` 06:22 UTC,
+  ikisi de 2026-09-22'de `204` + success ile doğrulandı. **0005 UYGULANMADI.**
+- Açık worktree yok. SDD defterleri (gitignored, yalnız bu makinede):
+  `.superpowers/sdd/2026-09-19-faz1-toplayicilar/`, `.superpowers/sdd/2026-09-22-isletme/`.
+
+**Sırayla yapılacaklar**
+1. `git fetch origin` → `git merge --no-ff origin/main` (**asla rebase, asla force**: bot
+   commit'leri zincir çıpalarıdır) → `git push origin main`. Reddedilirse fetch + merge'i tekrarla.
+2. Push'tan SONRA `db/migrations/0005_collect_dispatch.sql`i Supabase aracıyla uygula. Sıra
+   önemli: GitHub `main`de olmayan bir workflow'u tetiklemez (404).
+3. `select ops.dispatch_collect_daily();` ve `select ops.dispatch_collect_news();` bir kez →
+   `net._http_response` `204` → `gh run list --workflow collect-daily.yml` / `collect-news.yml`.
+   Bu toplayıcılar hiçbir runner'da koşmadı: ilk turlar kırmızı olabilir; `🔴 collect-* kırmızı`
+   issue'sundaki tur loguna bak, kök nedeni düzelt.
+4. Doğrula: RUNBOOK §3.3 sorgusu (bütün `*-dispatch` işleri `succeeded` + `204`); zaman damgası
+   çıpa commit'leri durdu mu (`git log origin/main` — artık yalnız baş değişince ya da yeni günde);
+   bekçinin "hiç tur yok" alarmı toplayıcılar koşunca kapanmalı.
+5. İzle: 2026-09-27 05:41 UTC `sources-audit` turu — ilk otomatik robots tarihi ilerletmesi ve bot
+   push'u; ilk canlı `ops-alert` kırmızı→yeşil döngüsü (DEFERRED 10a).
+6. Hafızadaki `pending-push-deadline` notunu sil.
+7. Sonra yol haritası v2 (`docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`):
+   İz A — Faz 2'nin tam TDD planı (dalga 1: MIT yükleyici ∥ vig temizleme ∥ holdout ∥ harness
+   iskeleti) ve İz B — Faz 6 iskeleti, paralel. İz B için Netlify hesabı ve alan adı kullanıcı kararı.
+
+**Son tarih: 2026-10-02.** 0004 canlı ve eski `snapshot.yml` (GitHub `schedule`lı) origin'de
+durdukça snapshot günde iki kez koşabilir; milli maç arasında bedeli 0, maçlar 7 günlük pencereye
+girince (~10-02) Odds API kredisi iki kat harcanır.
+
+**Kullanıcıdan beklenen tek şey:** depoyu GitHub'da **Watch** etmek (alarm e-postaları için).
+
+---
+
 ## 1. Senin yapacağın şeyler
 
 **1. Tetikler canlı — yapman gereken bir şey yok.** `seal` (15 dakikada bir) ve `snapshot`
@@ -187,9 +231,9 @@ Bir sonraki fazın üstüne inşa etmemesi gerekenler:
 
 Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı denetimi.
 
-**Faz 2'nin ilk işi Faz 1'in borcu olmalı:** beş `fetch-*` komutunu bir zamanlamaya bağlamak.
-Backtest harness'ının besleneceği canlı özellik akışı bugün YOK, ve kaçırılan bir gözlem —
-tıpkı kapanış oranı gibi — sonradan üretilemez.
+**Faz 1'in zamanlama borcu İz C'de ödendi:** dört `fetch-*` komutu `collect-daily` /
+`collect-news` ile pg_cron'dan tetikleniyor (0005 push'tan sonra uygulanacak — §0); `fetch-results`
+kredi harcadığı için elle (R67). Sıra ve paralellik: yol haritası v2 (§0/7).
 
 **Faz 2'nin birincil girdisi `xgabora/Club-Football-Match-Data`dır ve lisans zinciri hâlâ
 açık bir sorudur** (MIT ilan ediyor, verisi football-data.co.uk'tan türemiş, o kaynağın
@@ -213,3 +257,66 @@ lisansı ticari türevleri dışlıyor). Eğitim verisi olarak kullanılır, ham
   ÖNCE taranır. Faz 1'de beş dal sıfır çakışmayla birleşti.
 - Her görev: implementer → rapor → inceleme paketi → inceleme ajanı → defter. Atlanmaz.
 - Model: varsayılan **opus**, çok karmaşık işlerde **fable**, **haiku asla**.
+- Mutasyon kanıtı `PYTHONDONTWRITEBYTECODE=1` ile koşulur: aynı boyutlu, aynı saniyede geri alınan
+  düzenleme bayat `.pyc` bırakır ve geri yüklenen kaynak mutant bytecode'u çalıştırır.
+- Son doğrulama taze bir klonda ve `TMPDIR` klonun DIŞINDA: bir test `tmp_path`in git deposu
+  dışında olduğunu varsayıyor (R63).
+- GitHub `schedule`ı güvenilmez (51 saatte ~203 turun 16'sı): kaçırılamaz işler pg_cron →
+  `workflow_dispatch` ile tetiklenir.
+- `main`e bot yazıyor: push'tan önce fetch + merge, asla rebase ya da force.
+- Loglar public: yeni bir kimlik bilgisi `_log_secrets`e de eklenir (RUNBOOK §3.8, DEFERRED 10o).
+- Risk kademeleri ve paralel dalga kuralları yol haritası v2 §3–§4'te: K1 (defter, mühür, model,
+  güvenlik) tam inceleme; en çok 4 paralel implementer; her dalgadan önce tek-yazar taraması.
+
+---
+
+## 8. 2026-09-21/22 oturumunda verilen görevler
+
+Her ajan işi aynı yoldan geçti: brief → implementer (izole worktree) → bağımsız inceleme (opus) →
+düzeltme turu → controller mutasyon doğrulaması → `main`e `--no-ff` → taze klon kapısı.
+
+### 8.1 Ajanlara verilen görevler
+1. **Faz 1 son inceleme düzeltme turu (Task F)** — limite takılıp yarım kalan dalga tamamlandı:
+   `4158f81` (kod), `370caae` (belgeler); kontrol incelemesi 12/12 ADDRESSED; yedi artık (R62):
+   `28cbd4f`, `1f6a9b6`.
+2. **Faz 1'in `main`e alınması** (controller): `e9acd0f` (origin çıpaları, merge), `668ec61`.
+3. **C1 — mühür tetiği** (controller): migration 0003 + testler + RUNBOOK §3 (`e4a3dae`, `1975e5c`,
+   `940caef`); yol haritası v2 (`ee65f52`).
+4. **Task A — çıpa gürültüsü:** `b2658d7` + düzeltme `10b7e11` → `ee07601`. İnceleme: tek-alan testi
+   eksikti (Important), UTF-8 olmayan çıpa (Minor) — ikisi de düzeltildi.
+5. **Task B — snapshot pg_cron + `ops-alert` + bekçi:** `8d7ab72`, `1df6d83` + `f4c2d57`, `a75c302`
+   → `3b00066`; 0004 uygulandı ve canlıda doğrulandı. İnceleme: bekçi alarmı kendini geri
+   çekiyordu → kendi issue'su (R66).
+6. **Task C3 — toplayıcı zamanlaması:** `151620f` + `6c12d0d` → `36fc89c` (0005 uygulanmadı — §0).
+7. **Task C5 — kredi bekçisi + toplayıcı tetik izleme:** `9c687af`, `d6e46c6` + `49fa13a` → `6fdf093`.
+8. **Task C4 — robots otomatik yeniden doğrulama:** `4383c6a`, `b27c062`, `368a189` + `07b2af9`,
+   `6c82e11`, `9de9875` → `1f89c17` (controller'ın bulduğu `os.replace` kör noktası kapatıldı).
+9. **Entegrasyon** (controller): bekçinin izlediği her workflow var + push'lamayan her checkout
+   token'ı diske yazmaz (`d0e37c7`), belgeler (`a02158c`), E501 (`8a5456c`).
+10. **Task C7 — loglarda sır (K1):** `1a605a0`, `5c6c407` + `f46ac76` → `596b025`, yorum `8465077`.
+    İnceleme: yakalanmayan istisna parolayı public loga basıyordu, DSN parolası libpq ile
+    uyuşmuyordu — düzeltildi, uçtan uca doğrulandı.
+11. **Task C6 — çıpa push'u + checkout güncel uç + test bölme:** `ace2abc`, `731fc4d`, `d38fa9d` →
+    `3009c5b` (`tests/test_workflows.py` 1030 → 610 satır; saf taşıma).
+12. **Belgeler:** `40dc723`, `6973cde`, `d086d4f`, `f86bb03` ve bu devir.
+
+### 8.2 Kullanıcıya verilen görevler
+1. `git push origin main` (iki kez) — **yapıldı** (`4b6a143..668ec61`, `dd963ce..b1eea7c`).
+2. `git pull --no-rebase origin main` — **yapıldı** (gerek kalmamıştı).
+3. Migration 0003'ü SQL editöründe çalıştırmak — **yapıldı**.
+4. Fine-grained GitHub token (hazır form: yalnız bu depo, Actions: Read and write, süresiz) — **yapıldı**.
+5. Token'ı Vault'a `github_seal_dispatch` adıyla koymak — **yapıldı**.
+6. `.claude/settings.local.json` (SEO eklentisi kapalı + Supabase migration izni) — **yapıldı**,
+   yeni oturumda etkin.
+7. Depoyu GitHub'da **Watch** etmek — **açık** (alarm e-postaları için).
+8. `/pseo-approve` — **kullanılmamalı**: onay ilgisiz `bigcat-tr` defterine düşer.
+
+### 8.3 Bu oturumun kararları (R55–R71; gerekçe ve bedel defterde)
+R55 yarım dalganın diff'i korundu (mutasyonla doğrulandı) · R56 #M10 gerçekten kapatıldı · R57 PFDK
+uygulanmadı, kayda geçti · R58 yeni §3 maddeleri §3.9'da, eski numaralar sabit · R59 #M28 tek yönlü
+bağ (fetched ⊆ declared) · R60 secret adı elle eklendi, türetme testi ertelendi · R61 donmuş sayılar
+kaldırıldı · R62 yedi artık tek turda · R63 `TMPDIR` test varsayımı park edildi · R64 origin/main
+rebase değil merge · R65 A'nın iki bulgusu düzeltildi · R66 bekçinin kendi alarmı · R67
+`fetch-results` zamanlanmadı (kredi) · R68 C3 Minor'ları + `persist-credentials` · R69 C4 Minor'ları;
+seal push'u ayrı iş (C6) · R70 C7: excepthook + libpq + bütün kök handler'lar · R71 seal checkout
+güncel uç + test dosyası bölme.
