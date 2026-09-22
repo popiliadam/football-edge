@@ -1,13 +1,11 @@
 # Faz 3 — Baz model, walk-forward doğrulama, canlı bağlam ve tek holdout açılışı · Tasarım
 
-**Tarih:** 2026-09-23 · **Durum:** **TASLAK — kullanıcı onayı bekliyor** (§14'teki on iki karar). Onaydan önce
-Faz 3 planı yazılmaz; plan onaylanmadan ve İz A (`feat/leagues-n1-b1-aut`) `main`e birleşmeden Faz 3 kodu
-yazılmaz · **Spec:** `2026-09-19-football-edge-design.md` (§4, §6.2, §6.3, §9 Faz 3) · **Önceki faz:**
+**Tarih:** 2026-09-23 · **Durum:** **ONAYLANDI** (kullanıcı, 2026-09-23 — §14'ün on iki kararının hepsi önerildiği gibi; kararlar §14.1'de R122–R133). Sıradaki onay kapısı: TDD planı `../plans/2026-09-23-faz3-model-walkforward.md`; plan onaylanmadan ve İz A (`feat/leagues-n1-b1-aut`) `main`e birleşmeden Faz 3 kodu yazılmaz · **Spec:** `2026-09-19-football-edge-design.md` (§4, §6.2, §6.3, §9 Faz 3) · **Önceki faz:**
 `2026-09-22-faz2-tarihsel-taban-design.md` (D1–D20), `docs/phases/02-tarihsel-taban/HANDOFF.md` (§3 ölçülmeyenler,
 §4 R78–R121, §6 ön koşullar) · **Yol haritası:** `../plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` (Faz 3
 dalgaları) · **Ertelenenler:** `docs/DEFERRED.md` §12, §14
 
-Bu belge bir TASLAKTIR: kodla doğrulanan her olgu `dosya:satır` ile, ölçülmemiş her şey "ölçülmedi" diye
+Bu belge taslak olarak yazıldı ve 2026-09-23'te onaylandı: kodla doğrulanan her olgu `dosya:satır` ile, ölçülmemiş her şey "ölçülmedi" diye
 yazılıdır. Bu belge yazılırken veritabanına bağlanılmadı, kapı dışında hiçbir şey koşulmadı, holdout AÇILMADI.
 Plan-zamanı ölçümleri (§11, dalga 0) ayrı bir ölçüm belgesine (`2026-09-23-faz3-olcumler.md`, plan aşamasında)
 yazılır. Atıf biçimi: "§3/N" = Faz 2 HANDOFF §3'ün N. maddesi; "12x"/"14x" = DEFERRED §12/§14; "Rnn" = Faz 2
@@ -468,7 +466,27 @@ holdout ve spec §9'un kapısına dokunduğu için AYRICA onay ister.
 | **K11** | Açılıştan önce kapatılacak ertelenenler | 14h (özel yardımcı erişim kuralı), 14j (anahtarlı pozitif yol), 14l (Placebo tohumu), 14k (kanarya iki yuva) | **14h, 14j, 14l zorunlu; 14k isteğe bağlı** (ucuz, aynı dosya) |
 | **K12** | CLV bahis kuralının eşiği `τ` | birincil `τ` ve duyarlılık kümesi | **birincil `τ = 0.02`, duyarlılık {0, 0.05}**, önceden kayıtlı; `τ` E'de seçilmez (seçilirse holdout karşılaştırması örneklem içi olur) |
 
-## 15. Karar kaydı (taslak — onaydan sonra kesinleşir)
+### 14.1 Kullanıcının kararları (2026-09-23) — Ruling
+
+Kullanıcı on iki kararın hepsinde önerilen seçeneği onayladı; K1 ve K3 ayrıca açıkça onaylandı. Biçim: karar —
+*yanlışsa bedeli*.
+
+| Ruling | Karar | Seçilen | Yanlışsa bedeli |
+|---|---|---|---|
+| **R122** | K1 holdout boşluğu | **H1**: canlı ve anahtarsız her yol DEV + POST; boşluk cezası DEV simülasyonu ve `final_eval` C6 ile ölçülür; holdout canlı duruma ancak Faz 5 açılışından SONRA serbest kalır | Faz 3–5 canlı gölgesi bir sezon bayat durumla koşar |
+| **R123** | K2 walk-forward şeması | **A**: hiperparametreler S'de (2012/13–2018/19) bir kez seçilip `config/model_faz3.yaml`da dondurulur; E'de (2019/20–2024/25) raporlanır; havuz ağırlığı genişleyen sezon katlarıyla | hiperparametre kayması yakalanmaz |
+| **R124** | K3 kapı ölçütü | **P**: süreç + akıl sağlığı (ön kayıt, tek açılış, eşitlik testi, W1); holdout sayıları kaydedilir, kenar şartı YOK | kötü bir baz çizgi de fazı geçer — Faz 4 onu kıyas tabanı olarak alır |
+| **R125** | K4 model ailesi | fit Elo + Dixon-Coles + log-doğrusal havuz; 1X2 birincil, Ü/A 2.5 ikincil | Ü/A kodu ve raporu ek iş |
+| **R126** | K5 canlı sonuç kaynağı | football-data POST + bayat durum koruması + cuma 09:50 UTC ek senkronu; kredi yok | gecikmeli sonuçlar tahmin kaybına döner |
+| **R127** | K6 canlı karar anı fiyatı | mevcut 06:22 UTC snapshot; ek snapshot İz A'nın kredi ölçümünden sonra ayrı onayla | canlı `pre` fiyatı tarihsel olandan saatler erken |
+| **R128** | K7 canlı kapsam | bütün aktif liglerde gölge tahmin (append-only `model_predictions`, yayın yok) | bir migration, bir iş akışı |
+| **R129** | K8 tek açılış | uygulama denetimi + `0010_holdout_phase.sql` (faz başına tekil) + 2024/25 üzerinde tam prova; çöküşte YALNIZ rapor üretilmediyse ve git SHA aynıysa tek, kayıtlı yeniden koşu | ikinci kayıt HANDOFF'ta adıyla sayılır |
+| **R130** | K9 DC grubu | ülke grubu (kademeler birlikte); süre dalga 0'da ölçülür, aşarsa lig başına ve ADIYLA | ince bağlantılı grupta güçler zayıf tanımlı |
+| **R131** | K10 ek ligler | tarihte yalnız model (LL, kalibrasyon, kapanışa uzaklık); harman ve CLV canlı gölgede | AUT'ta harman iddiası canlı veri birikene dek yok |
+| **R132** | K11 açılış öncesi ertelenenler | 14h, 14j, 14l zorunlu; 14k isteğe bağlı (plan dahil ediyor, aynı dosya) | küçük üç görev |
+| **R133** | K12 CLV eşiği | birincil `τ = 0.02`, duyarlılık {0, 0.05}, ön kayıtta sabit, E'de seçilmez | τ optimum olmayabilir; bu bilinçli |
+
+## 15. Karar kaydı
 
 | # | Karar | Bölüm |
 |---|---|---|
