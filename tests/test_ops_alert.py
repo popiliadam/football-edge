@@ -298,7 +298,8 @@ def test_ok_without_an_open_alarm_writes_nothing() -> None:
 # Bekçinin raporu KENDİ issue'sudur (`🔴 bekçi kırmızı`) ve adım bayat tetikte de 0 döner:
 # seal job'ını düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı geri alırdı. Eşikler
 # sınırın iki yanından sınanır: seal 59/61 dk, snapshot ve collect-daily 29/31 sa,
-# collect-news 3 sa 59 dk/4 sa 1 dk, footystats-local (Mac'in kalp atışı, R74) 71/73 sa.
+# collect-news 3 sa 59 dk/4 sa 1 dk, footystats-local (Mac'in kalp atışı, R74) 71/73 sa,
+# history 7 gün 23 sa/8 gün 1 sa.
 
 FRESH = {
     "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=59))],
@@ -306,6 +307,7 @@ FRESH = {
     "collect-daily.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
     "collect-news.yml": [_workflow_run("workflow_dispatch", timedelta(hours=3, minutes=59))],
     "footystats-local.yml": [_workflow_run("workflow_dispatch", timedelta(hours=71))],
+    "history.yml": [_workflow_run("workflow_dispatch", timedelta(days=7, hours=23))],
 }
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
@@ -761,3 +763,17 @@ def test_every_watched_workflow_exists() -> None:
     ]
 
     assert missing == [], f"bekçi olmayan workflow'u izliyor (GitHub 404 → adım düşer): {missing}"
+
+
+def test_a_stale_history_trigger_is_named_in_the_watchdog_alarm() -> None:
+    """Tarihsel tabanın tek tetiği pg_cron'dur (0008, haftada bir): durursa geriye bu alarm kalır.
+    FRESH onu eşiğin hemen içinde tutar (7 gün 23 sa); bir saat sonrası bayattır."""
+    stale = [_workflow_run("workflow_dispatch", timedelta(days=8, hours=1))]
+    fake = FakeGitHub(runs={**FRESH, "history.yml": stale})
+
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in ("history.yml: ", "history-dispatch"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"

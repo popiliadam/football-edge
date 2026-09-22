@@ -95,6 +95,13 @@ TRIGGERS = (
         "oturumu düşmüş — RUNBOOK §3.9",
         alarm="footystats-local",
     ),
+    # Tarihsel taban haftalık (0008, salı 09:50): eşik bir hafta + pay.
+    Trigger(
+        workflow="history.yml",
+        event=None,
+        max_age=timedelta(days=8),
+        hint="pg_cron history-dispatch durmuş olabilir — RUNBOOK §3.3",
+    ),
 )
 
 

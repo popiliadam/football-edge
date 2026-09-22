@@ -450,3 +450,39 @@ telafi yalnız gün içindedir. Tek bir tur için katı bir süre üst sınırı
 ağa çıkan adımların kendi sınırları var. `DATABASE_URL` değişirse yalnız `.env` güncellenir: plist
 sırrı değil, dosyanın yolunu taşır. Güven sınırı: `main`in ucu her gün bu Mac'te, kullanıcının
 yetkisiyle ve insan olmadan koşar (10t).
+
+### 3.10 Tarihsel taban (`history.yml`)
+football-data.co.uk CSV'lerini önbelleğe (`hist_files`) çeker, her denemeyi append-only
+`hist_fetches`e yazar (0006). Tek tetiği pg_cron'dur: `history-dispatch`, salı 09:50 UTC (0008) —
+ana lig dosyaları pazartesi akşamı, ek lig dosyaları salı sabahı güncelleniyor. Haftalık tur
+yalnız değişebilen dosyaları ister (güncel sezon ana dosyaları + ek lig dosyaları); `--all`
+ilk yüklemedir (katalogdaki bütün yollar). Bekçi 8 günden eski turu `🔴 bekçi kırmızı`ya yazar
+(§3.6).
+
+Elle tetikleme:
+```bash
+gh workflow run history.yml -f all=true    # ilk yükleme ya da tam tazeleme
+gh workflow run history.yml                # yalnız değişebilen dosyalar
+```
+
+Kırmızının iki anlamı (log yalnız toplu sayı ve neden kodu taşır, hücre değeri taşımaz):
+- **Kaynak hatası** (exit 7): `SyncReport.failed` listesinde yol ve neden — 404 (o lig o sezon
+  yok: katalogdaki `first_season` düzeltilir), robots reddi, ağ. Başarısız yol önbelleğe girmez;
+  önceki sürüm yerinde kalır.
+- **Kalite** (sözleşme ihlali): dosya reddedilen satır ya da eksik fiyat payı eşiğini aşıyor.
+  Kapı GEVŞETİLMEZ (R104): ret nedenleri dosya başına sayılır, biçim ölçülür, sonra karar.
+
+Kilit ihlali (`python -m football_edge.history lock --verify config/history_lock.yaml` exit 9):
+dondurulmuş bir satır değişti ya da kilit dosyası bozuk. Önce farkı incele (hangi lig, hangi
+sezon, kaç satır); kilidi güncellemek gerekçeli, ayrı bir commit'tir — sessizce yeniden
+`lock --write` yapılmaz.
+
+Yıllık sezon ilerletme: football-data yeni sezonun ilk dosyasını YAYIMLAYINCA
+`config/history_leagues.yaml`da `current_season` ilerletilir ve `config/sources.yaml`ın
+`football-data` `declared_paths`i Task 6'nın üretici komutuyla yenilenir (eski listeyi elle
+çıkar, sonra):
+```bash
+uv run python -c 'from pathlib import Path; from football_edge.history.catalog import declared_paths, load_catalog; print("\n".join(f"      - {p}" for p in declared_paths(load_catalog(Path("config/history_leagues.yaml")))))'
+```
+`tests/test_history_registry.py`nin eşitlik testi eksik ya da fazla satırı adıyla söyler. Dosya
+yayımlanmadan ilerletmek turu 404 ile kırmızı yapar.
