@@ -88,12 +88,30 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run python -m football_edge.collect publish-head
       - name: Dış çıpayı commit'le
+        # Yalnız commit varsa push'lar: yayınlanacak bir şey taşımayan push da main ilerlediyse
+        # reddedilir ve doğru bir turu kırmızıya çevirirdi. main'e sources-audit.yml'in botu ve
+        # insanlar da push'luyor: reddedilen push main birleştirilerek (rebase değil, deponun
+        # mesaj biçimiyle) en çok 3 kez denenir, force asla.
         run: |
           git config user.name "football-edge-bot"
           git config user.email "bot@users.noreply.github.com"
           git add ledger/
-          git diff --cached --quiet || git commit -m "chore: zincir başı $(date -u +%F)"
-          git -c http.version=HTTP/1.1 push origin HEAD
+          if git diff --cached --quiet; then
+            echo "zincir başı değişmedi — commit ve push yok"
+            exit 0
+          fi
+          git commit -m "chore: zincir başı $(date -u +%F)"
+          attempt=1
+          until git -c http.version=HTTP/1.1 push origin HEAD; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::push 3 denemede de reddedildi — bu turun çıpası main'e yayınlanamadı"
+              exit 1
+            fi
+            echo "::warning::push reddedildi (deneme $attempt/3), main birleştirilip yeniden deneniyor"
+            git fetch origin main
+            git merge --no-edit -m "merge: origin/main — seal botu" FETCH_HEAD
+            attempt=$((attempt + 1))
+          done
       - name: Mühür turunun sonucunu yansıt
         if: always() && steps.seal.outputs.code != '0'
         env:
