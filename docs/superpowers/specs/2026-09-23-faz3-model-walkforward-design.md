@@ -486,6 +486,20 @@ Kullanıcı on iki kararın hepsinde önerilen seçeneği onayladı; K1 ve K3 ay
 | **R132** | K11 açılış öncesi ertelenenler | 14h, 14j, 14l zorunlu; 14k isteğe bağlı (plan dahil ediyor, aynı dosya) | küçük üç görev |
 | **R133** | K12 CLV eşiği | birincil `τ = 0.02`, duyarlılık {0, 0.05}, ön kayıtta sabit, E'de seçilmez | τ optimum olmayabilir; bu bilinçli |
 
+### 14.2 Plan yazımında netleşenler (2026-09-23)
+
+TDD planı (`../plans/2026-09-23-faz3-model-walkforward.md`) yazılırken kod bir kopyada koşuldu; tasarımdan sapan
+ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştirenler:
+
+- **P1** — §7.1–7.4: bağlam yalnız `Avg` 1X2 kapanış öncesi fiyatını taşır; canlı defter yalnız 1X2 toplar, başka
+  kitap/market bağlamda kalsaydı E1 eşitliği sözde kalırdı. Faz 2'nin bir testi buna göre güncellenir.
+- **P7** — §5.1: ek liglerde S `2013-01-01`den başlar (2012 ısınma).
+- **P8, P9** — §6.3, §9 G4: lig kendi eğitim satırı < 1.000 ise havuzlanmış ağırlık; W1 = ortalama ΔLL ≤ δ = 0.001.
+- **P11** — §6.1: Elo'nun 1X2 eşlemesi sıralı lojit değil `P(D) = δ·4E(1−E)` (tek parametre, kapalı biçim fit).
+- **P20** — §11: görev numaraları — gölge Task 11, modelin bilinen sonuçları Task 12.
+- **P25** — §10: haftalık gölge CLV raporu Faz 3'te yazılmaz (Faz 4'ün ilk görevi); R122'nin boşluk cezası bu fazda
+  DEV simülasyonu (`walkforward --gap`) ve `final_eval` C6 ile ölçülür, canlı ayağı o rapora kadar ölçülmez.
+
 ## 15. Karar kaydı
 
 | # | Karar | Bölüm |
