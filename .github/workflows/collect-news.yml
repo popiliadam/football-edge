@@ -26,6 +26,9 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Bu iş push'lamaz: job token'ı `.git/config`e yazılmaz, sonraki adımlar okuyamaz.
+          persist-credentials: false
       - name: Secret taraması
         # Depo PUBLIC: izlenen bir dosyaya kaçmış secret varsa tur, veritabanı secret'ını hiçbir
         # adıma vermeden kırmızı düşer.

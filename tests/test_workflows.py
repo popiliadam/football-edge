@@ -5,8 +5,9 @@ kapıyı elle koşmayan bir push taramadan geçmeden iner. Tarama ucuzdur, crede
 istemez ve checkout'tan sonra her runner'da çalışır — CI'da koşmaması bir tercih değil,
 bir boşluktu (HANDOFF §3.4/15).
 
-Bu dosya iş akışlarının İÇERİĞİNİ okur, koşmaz: runner'da gerçekten yeşil verdiği
-ölçülmedi (workflow'lar hâlâ hiç koşmadı — HANDOFF §3.2).
+Bu dosya iş akışlarının İÇERİĞİNİ okur. Koşulan tek şey toplama adımlarının kabuk gövdesidir,
+`uv` yerine bir sahteyle (`test_a_red_collector_*`); bir runner'da yeşil verdikleri burada
+ölçülmez.
 """
 
 from __future__ import annotations
@@ -608,6 +609,36 @@ def test_alarm_jobs_may_write_issues_and_read_runs(path: Path) -> None:
     assert _contents_permission(permissions) == contents, f"{path.name}: contents izni değişti"
 
 
+def _pushes(path: Path) -> bool:
+    """Bir adım `git … push` koşuyor mu (`git -c … push` de sayılır, yorum satırı sayılmaz)."""
+    return any(
+        re.search(r"\bgit\b.*\bpush\b", line)
+        for step in _steps(path)
+        for line in str(step.get("run", "")).splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_only_a_pushing_workflow_keeps_the_checkout_token_on_disk(path: Path) -> None:
+    """`actions/checkout` job token'ını varsayılan olarak `.git/config`e yazar; sonraki her adım
+    (üçüncü taraf `setup-uv` eylemi dâhil) onu diskten okuyabilir. Push'lamayan workflow
+    `persist-credentials: false` taşır — alarm adımları token'ı kendi `env`lerinden alır.
+    Push'layan (seal'in çıpa commit'i) taşıyamaz: token diskte olmazsa push düşer."""
+    checkouts = [
+        step for step in _steps(path) if str(step.get("uses", "")).startswith("actions/checkout")
+    ]
+    on_disk = [
+        str((step.get("with") or {}).get("persist-credentials", True)).lower() != "false"
+        for step in checkouts
+    ]
+
+    assert checkouts, f"{path.name}: checkout adımı yok — test kurgusu bayatlamış"
+    assert on_disk == [_pushes(path)] * len(checkouts), (
+        f"{path.name}: push'luyor={_pushes(path)}, checkout token'ı diskte={on_disk}"
+    )
+
+
 def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
     """Bekçi pg_cron tetiklerini ölçer, bu yüzden GitHub'ın seyrek yedek `schedule`ında koşar:
     mühürden SONRA (mührü asla engellemez). Bayat tetikte kendi alarmını açar ve 0 döner; GitHub
@@ -642,33 +673,108 @@ def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
 # gözlem, kapanış oranı gibi, sonradan üretilemez.
 
 
+def _cron_jobs() -> dict[str, tuple[str, str]]:
+    """pg_cron iş adı → yürürlükteki (zamanlama, komut). Aynı adla yeniden zamanlamak işi
+    günceller: migration sırasında son çağrı kazanır."""
+    return {
+        job: (spec, command)
+        for sql in _migrations().values()
+        for job, spec, command in re.findall(
+            r"cron\.schedule\(\s*'([\w-]+)',\s*'([^']+)',\s*'([^']+)'\s*\)", sql
+        )
+    }
+
+
+def _wrapper(path: Path) -> str:
+    """Toplayıcı workflow'unun sarmalayıcısı: `collect-news.yml` → `dispatch_collect_news`."""
+    return "dispatch_" + path.stem.replace("-", "_")
+
+
 @pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
 def test_collectors_are_triggered_by_pg_cron_alone(path: Path) -> None:
     """GitHub'ın `schedule`ı seyrek ve gecikmeli koşar (0003); ikinci bir tetik aynı turu iki kez
     koşar ve kaynağa iki kat istek gider. Tek tetik `<ad>-dispatch` işi ve onun sarmalayıcısı."""
-    wrapper = "dispatch_" + path.stem.replace("-", "_")
-    job = (
-        rf"cron\.schedule\(\s*'{path.stem}-dispatch',\s*'[^']+',"
-        rf"\s*'select ops\.{wrapper}\(\)'\s*\)"
-    )
+    _, command = _cron_jobs().get(f"{path.stem}-dispatch", ("", ""))
 
-    assert re.search(job, "\n".join(_migrations().values())), (
-        f"{path.name}'i hiçbir pg_cron işi tetiklemiyor: toplayıcı hiç koşmaz"
+    assert command == f"select ops.{_wrapper(path)}()", (
+        f"{path.stem}-dispatch işinin komutu {command!r}: {path.name} hiç tetiklenmiyor"
     )
-    assert f"ops.dispatch_workflow('{path.name}')" in _functions().get(wrapper, ""), (
-        f"ops.{wrapper}() {path.name}'i tetiklemiyor"
+    assert f"ops.dispatch_workflow('{path.name}')" in _functions().get(_wrapper(path), ""), (
+        f"ops.{_wrapper(path)}() {path.name}'i tetiklemiyor"
     )
     assert "schedule" not in _triggers(path), f"{path.name} GitHub'dan da tetikleniyor"
 
 
+# Saat alanı: günlük tur günde bir kez (tek bir saat), haber iki saatte bir.
+CADENCE = {COLLECT_DAILY: r"\d+", COLLECT_NEWS: r"\*/2"}
+
+
+@pytest.mark.parametrize("path", CADENCE, ids=lambda path: path.name)
+def test_collector_dispatch_cadence_is_pinned(path: Path) -> None:
+    """Varlık yetmez: `'*/2 * * * *'` gibi bir yazım hatası haber kaynağını günde 720 kez çağırır
+    ve yukarıdaki test yeşil kalırdı. Dakika tek bir sayıdır ve mühürün ya da snapshot'ın dakikası
+    değildir (zaman-kritik tetik dakikasını paylaşmaz); tur her gün koşar."""
+    jobs = _cron_jobs()
+    seal_period = re.fullmatch(r"\*/(\d+)", jobs["seal-dispatch"][0].split()[0])
+    assert seal_period is not None, f"seal zamanlaması okunamadı: {jobs['seal-dispatch'][0]!r}"
+    taken = {
+        *range(0, 60, int(seal_period.group(1))),
+        int(jobs["snapshot-dispatch"][0].split()[0]),
+    }
+    spec, _ = jobs[f"{path.stem}-dispatch"]
+    minute, hour, *days = spec.split()
+
+    assert re.fullmatch(r"\d+", minute) and int(minute) not in taken, (
+        f"{path.name}: dakika {minute!r} tek bir sayı değil ya da mühür/snapshot dakikası "
+        f"{sorted(taken)}"
+    )
+    assert re.fullmatch(CADENCE[path], hour) and days == ["*", "*", "*"], (
+        f"{path.name}: zamanlama {spec!r} — beklenen saat alanı {CADENCE[path]!r}, her gün"
+    )
+
+
+def _secret_expressions(text: str) -> list[str]:
+    """Metindeki `${{ … }}` ifadelerinden secret okuyanlar (`secrets.X` ya da `secrets['X']`).
+    Çıplak kelime aranmaz: `./scripts/check_secrets.sh` adımı da "secrets" içerir."""
+    return [
+        expression.strip()
+        for expression in re.findall(r"\$\{\{(.*?)\}\}", text, flags=re.S)
+        if re.search(r"\bsecrets\b", expression)
+    ]
+
+
+def _secret_paths(node: Any, path: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """Ayrıştırılmış belgede secret ifadesi taşıyan her değerin yolu (yorumlar belgede yok)."""
+    if isinstance(node, dict):
+        return [
+            found for key, value in node.items() for found in _secret_paths(value, (*path, key))
+        ]
+    if isinstance(node, list):
+        return [
+            found
+            for index, value in enumerate(node)
+            for found in _secret_paths(value, (*path, index))
+        ]
+    return [path] if _secret_expressions(str(node)) else []
+
+
 @pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
-def test_collectors_read_only_the_database_secret(path: Path) -> None:
-    """Toplayıcılar ücretli API çağırmaz. `ODDS_API_KEY` verilen bir workflow kredi harcayabilir
-    ve pg_cron onu kimse bakmadan koşar."""
-    expressions = re.findall(r"\$\{\{(.*?)\}\}", path.read_text(encoding="utf-8"), flags=re.S)
-    secrets = sorted({text.strip() for text in expressions if "secrets" in text})
+def test_only_the_collector_step_gets_a_secret_and_only_the_database_one(path: Path) -> None:
+    """Toplayıcılar ücretli API çağırmaz: `ODDS_API_KEY` verilen bir workflow kredi harcayabilir ve
+    pg_cron onu kimse bakmadan koşar. `DATABASE_URL` de YALNIZ toplama adımının `env`inde durur:
+    workflow ya da job `env`ine taşınırsa secret taramasına, üçüncü taraf `setup-uv` eylemine,
+    `uv sync`e ve alarm adımlarına da açılır."""
+    text = path.read_text(encoding="utf-8")
+    secrets = sorted(set(_secret_expressions(text)))
+    document = yaml.safe_load(text)
+    ((job_id, job),) = document["jobs"].items()
+    collector = _index_of(job["steps"], "football_edge.collect")
+    reached = _secret_paths(document)
 
     assert secrets == ["secrets.DATABASE_URL"], f"{path.name} beklenmeyen secret okuyor: {secrets}"
+    assert reached == [("jobs", job_id, "steps", collector, "env", "DATABASE_URL")], (
+        f"{path.name}: secret'ın ulaştığı yerler {reached} — yalnız toplama adımının env'i olmalı"
+    )
 
 
 # `uv run python -m football_edge.collect <alt komut>`un yerine geçer: alt komutu kaydeder,
@@ -696,8 +802,17 @@ def _collect_run_body(path: Path) -> str:
         (COLLECT_DAILY, "fetch-venues", 1, "beklenmedik"),
         (COLLECT_NEWS, None, 0, ""),
         (COLLECT_NEWS, "fetch-news", collect.EXIT_SOURCE_FAILED, "kaynak"),
+        (COLLECT_NEWS, "fetch-news", 1, "beklenmedik"),
     ],
-    ids=["daily-ok", "daily-footystats-3", "daily-tff-7", "daily-venues-1", "news-ok", "news-7"],
+    ids=[
+        "daily-ok",
+        "daily-footystats-3",
+        "daily-tff-7",
+        "daily-venues-1",
+        "news-ok",
+        "news-7",
+        "news-1",
+    ],
 )
 def test_a_red_collector_does_not_stop_the_others_and_turns_the_run_red(
     tmp_path: Path, path: Path, failing: str | None, code: int, named: str
