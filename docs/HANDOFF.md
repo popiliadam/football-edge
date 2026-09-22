@@ -38,14 +38,17 @@ toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main
 
 **Sıradaki adımlar**
 1. **Task 1'i kapat.** Kapsamlı yeniden inceleme `e215b27..be402bb` (iki turu birlikte; bulgular defterde: Important 1,
-   Minor 3, 5, 6 + R103–R105; `general-purpose` — kabuk gerekir; brif
-   `task-1-brief.md`, rapor `task-1-report.md`, paket `scripts/review-package`; rapor `task-1-rereview.md`).
-   Bulgu kalırsa tur 3 **yeni** bir implementer'la (ajan kimlikleri oturumla gider, "resume" edilemez).
+   Minor 3, 5, 6 + R103–R105; `general-purpose` — kabuk gerekir). Girdiler defter dizininde
+   (`.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/`): brif `task-1-brief.md`, implementer raporu `task-1-report.md`
+   (iki turun bölümleri sonda); paket SDD skill'inin `scripts/review-package` betiğiyle (repodaki `scripts/` DEĞİL):
+   `review-package <plan> e215b27 be402bb`; inceleme raporu `task-1-rereview.md`. Bulgu kalırsa tur 3 **yeni** bir
+   implementer'la (ajan kimlikleri oturumla gider, "resume" edilemez).
 2. **Task 5 — planın metni birebir.** Merge sırası devig → lock → parser → harness; her biri `--no-ff` (merge
    commit: gitleaks parmak izleri squash/rebase ile bozulur) ve her merge'den sonra tam `verify.sh`. 0007 canlı
    Supabase'e **`86ed2d8`deki hâliyle** uygulanır (`recorded_at` dahil). `leakage` sayısı ölçülür, `sızıntı` adımı
-   eklenir (`EXPECTED_MIN_LEAKAGE`); belge sayıları (README "On bir adım", HANDOFF "10 adım"); taze klon kapısı;
-   `git fetch` + `git merge origin/main`, sonra push (force yok).
+   eklenir (`EXPECTED_MIN_LEAKAGE`) ve mutasyonla kanıtlanır (Step 5); belge sayıları (README "On bir adım",
+   HANDOFF "10 adım"); taze klon kapısı; `git fetch` + `git merge origin/main`, sonra push (force yok). Plandaki
+   commit mesajlarının `Co-Authored-By` satırı eski modeli yazar — satırı oturumun kendi atıf talimatından al.
 3. **Task 6–12** planın dalgalarıyla. Task 8'in ilk gerçek senkronunda: **R104** — genişlik reddi ya da AvgC
    doluluğu yüzünden dosya düşerse kapı GEVŞETİLMEZ; dosya/satır sayısı ve fazlalığın biçimi ölçülür, sonra ruling.
    **R102** — Step 10b ile `Date` takvimi ölçülür. Task 12: lig önerisi kullanıcı onayı ister; tasarım metni
@@ -76,6 +79,9 @@ tam eşitlik (fail-closed) · R105 — 2019/20 sezon penceresi 31 Ağustos'ta ka
 - Dalga 0 — `e521ed5`: `history/types.py`, numpy, `leakage` işareti; taze klon 743 passed / 2 skipped.
 - Devir commit'i: plana Task 8 Step 10b (R102, `Date` takvimi ölçümü); DEFERRED 12a'ya 0001 tetikleyici mesajı,
   yeni 12e–12j (dalga 1 incelemelerinin ertelenen bulguları).
+- `withqwerty/football-docs` değerlendirildi (DEFERRED §13a): veri kaynağı değil, kurulmadı; Faz 3–4'te
+  Sportmonks'u (hakem, sakatlık, muhtemel 11) kendi şartlarıyla değerlendirmek için bir iz, Faz 6'da grafik esini.
+  Ücretsiz kaynak tavsiyeleri §3.2.1 ile çelişir — uygulanmaz.
 
 **İzlenecekler (kendiliğinden olmalı; olmazsa RUNBOOK §3)**
 1. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:
@@ -136,7 +142,7 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP · 593 passed, 2 skipped · contract 18 — `6dccfa8` | taze klon, `TMPDIR` klon dışında, secret'sız, log dosyasından okundu |
+| Kapı | 9 adım PASS + `zincir` SKIP · `main` `a2ea655`: 743 passed, 2 skipped · contract 18 (dalga 1 dalları 818–923 passed — defter) | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 09-22 09:27 UTC uygulandı | elle 09:28 → `204`/`204`; cron 10:07 → `succeeded` + `204` → `collect-news` yeşil |
@@ -275,20 +281,17 @@ Bir sonraki fazın üstüne inşa etmemesi gerekenler:
 **Ön koşullar:** `docs/phases/01-toplayicilar/HANDOFF.md` §5
 **Devralınan borç:** `docs/DEFERRED.md` (§9 Faz 1'indir)
 
-Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı denetimi.
+Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı denetimi. **Yürütülüyor — güncel durum
+§0'da**; bu bölüm yalnız başlangıç bağlamıdır.
 
-**Faz 1'in zamanlama borcu İz C'de ödendi:** dört `fetch-*` komutu `collect-daily` /
-`collect-news` ile pg_cron'dan tetikleniyor (0005 push'tan sonra uygulanacak — §0); `fetch-results`
-kredi harcadığı için elle (R67). Sıra ve paralellik: yol haritası v2 (§0/7).
+**Birincil girdi football-data.co.uk'tur** (Faz 2 tasarımı D1; `xgabora/Club-Football-Match-Data` bırakıldı:
+kapanış oranı yok, ek ligler 2024-12'de bitiyor — ölçüm belgesi
+`docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`). Lisans sorusu artık doğrudan football-data
+içindir (ana spec §10/2): özel depolama, yalnız türetilmiş sayısal özellik, ham satır yayımlanmaz; ticari
+lansmandan önce avukat ve site sahibinden yazılı izin.
 
-**2026-09-22'de ölçülen Faz 2 girdileri:** `docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`
-(xgabora'da kapanış yok ve ek ligler 2024-12'de bitiyor; football-data.co.uk runner'dan tam
-erişilebilir, kapanış sütunları dolu, kanonik adres artık kök alan adı; `MatchTime` Europe/London).
-Aşağıdaki "birincil girdi" cümlesi bu ölçümle ESKİDİ: tasarım birincil kaynağı yeniden seçecek.
-
-**Faz 2'nin birincil girdisi `xgabora/Club-Football-Match-Data`dır ve lisans zinciri hâlâ
-açık bir sorudur** (MIT ilan ediyor, verisi football-data.co.uk'tan türemiş, o kaynağın
-lisansı ticari türevleri dışlıyor). Eğitim verisi olarak kullanılır, ham satır yayınlanmaz.
+**Faz 1'in zamanlama borcu İz C'de ödendi:** dört `fetch-*` komutu `collect-daily` / `collect-news` ile
+pg_cron'dan tetikleniyor (0005 uygulandı — §2); `fetch-results` kredi harcadığı için elle (R67).
 
 ---
 

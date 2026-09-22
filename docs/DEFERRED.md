@@ -612,3 +612,34 @@ Test kazara girişi durdurur; kasıtlı kaçışa karşı bir güvenlik sınır�
 | 12h | Harness: Python yansıması (`sys._getframe(1).f_locals`, `gc.get_referrers`) `HistMatch`e ulaşır (Task 4 incelemesi) | Tip ayrımının dışında, harness kapatamaz → Task 11 raporuna "stratejiler düşmanca kod değildir" varsayımı yazılır |
 | 12i | Holdout anahtarı: gerçek bir anahtarın mührü kopyalanarak sınırsız anahtar üretilebilir — sayılan şey AÇILIŞ, kullanım değil (Task 3 incelemesi) | Faz 3 `final_eval` işçilere anahtar değil SEÇİLMİŞ satır vermeli |
 | 12j | Belge düzeltmeleri (Task 2 incelemesi): tasarım §6 "k ≥ 1" → "B ≥ 1 iken k ≥ 1"; iki yollu OvR kalibrasyonunda kesişim simetriyle ≡ 0 — Ü/A'da "kesişim ≈ 0" yanlılık yok demek değildir | Task 12'nin belge adımında (tasarım metni) ve Task 9 raporunda not |
+
+## 13. Değerlendirilen dış araçlar (2026-09-22)
+
+### 13a. `withqwerty/football-docs` — veri kaynağı DEĞİL; kurulmadı
+
+Futbol veri sağlayıcılarının belgelerini yerel bir SQLite tam metin dizininde arayan stdio MCP sunucusu
+("futbol verisi için Context7"; 24 sağlayıcı/kütüphane, çoğu olay ve tracking verisi: Opta, StatsBomb, Wyscout,
+SkillCorner, Sportmonks, Sportradar…). Salt okunur inceleme `gh api` ile yapıldı (`38dadf5`/v0.11.1, üstüne
+`bd224f6`); hiçbir şey klonlanmadı, kurulmadı, çalıştırılmadı. Pratikte tek kişilik bakım, 1.0 öncesi.
+
+| Faz | Ne işe yarar | Hüküm |
+|---|---|---|
+| 0, 2, 3, 5 | Oran modellemesi yok: The Odds API, kapanış çizgisi, CLV, devig, piyasa verimliliği, Dixon-Coles, Kelly kapsanmıyor; football-data.co.uk yalnız URL deseni + Bet365 1X2 (kapanış, AH, Ü/A sütunları yok) | Yok |
+| 1 | `docs/free-sources/contextual-story-joins.md` (hava, stadyum, yolculuk, Elo birleştirmeleri) ve sağlayıcı başına kimlik alanı notları | Yalnız okuma; tarifleri UYGULANMAZ (aşağıda) |
+| 3–4 | Sportmonks belgeleri hakem, sakatlık, muhtemel 11, xG ve haber uçlarını listeliyor — bizim bilinen boşluklarımız (FBref kapandığından beri küresel hakem verisi yok; TR dışında kadro/sakatlık kaynağı yok) | Aday İZ: Süper Lig kapsamı ve fiyat belgede YOK → karar Sportmonks'un kendi şartları, fiyatı ve kapsamıyla (§3.2.1 `api_terms`, `terms_url`); bu depo üzerinden değil |
+| 6–7 | Grafik tarifleri (xG zaman çizelgesi, skor şeridi, kadro) | Yalnız tasarım esini; ham içerik ve metin kopyalanmaz |
+| — | Aynı kuruluşun **Reep** kimlik sicili (Wikidata'dan; eski v0 CC0 ama donmuş) — sağlayıcı kimliklerini eşler | Ayrı iz: yalnız kimlikli bir sağlayıcı eklenirse; bugünkü eşleşmemiz (The Odds API adı ↔ football-data adı) kimlik taşımaz |
+
+Neden kurulmadı ve kurulursa koşulları:
+- **Lisans belirsiz:** LICENSE dosyası yok; yalnız `package.json` ve README "MIT" diyor (metin ve telif sahibi yok).
+  Derlemin çoğu sağlayıcı belgelerinin birebir taranmış metni — onların fikrî mülkü. Araç olarak okunabilir;
+  metni ya da şartnameleri depomuza ve sayfalarımıza kopyalanmaz (§3.2/4).
+- **Ücretsiz kaynak tavsiyeleri politikamızla ÇELİŞİYOR:** Understat için robots'tan söz etmeden kazıma
+  (ölçümümüz `Disallow: /`); ClubElo'yu çalışan API diye sunuyor (ölçümümüz: kapatıldı; bir testi ölü adresi
+  sabitliyor); Transfermarkt şartları yasaklarken ipucu, WhoScored için başlıklı tarayıcıyla kazıma, sahte başlık
+  ve gizli istemci önerileri (§3.2.1 yasak listesi). football-data.co.uk için "ticari kullanım: Yes" kaynaksız —
+  bizim sorumuz açık (ana spec §10/2). Bu MCP'yi kullanan bir ajan için bu tavsiyeler ONAYSIZDIR.
+- **Ağ ve tedarik zinciri:** ağa çıkan tek araç `resolve_entity` (Reep: yerel DuckDB kopyası ya da elle verilen
+  anahtarla API; tazelik denetimi `data.reep.football`a) — sorgulanan ad/kimlik üçüncü tarafa gider, kullanılmaz.
+  Sunucunun talimatı ajanlara DuckDB indirme komutu önermelerini söylüyor — her indirme kullanıcı onayı ister.
+  Önerilen `npx -y football-docs` sürüm sabitlemiyor; kurulursa sürüm sabitlenir.
