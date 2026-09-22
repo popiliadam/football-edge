@@ -29,6 +29,8 @@ sources:
       - /germany/bundesliga/xg
       - /france/ligue-1/xg
       - /turkey/super-lig/xg
+      - /netherlands/eredivisie/xg
+      - /belgium/pro-league/xg
     enabled: true
     access_basis: robots
     terms_url: ''
@@ -50,7 +52,11 @@ sources:
       altında izinli (/england/league-one ve /league-two hariç, onlar zaten kapalı) — dürüst
       kimliğin bedeli sıfır. Task 5: Understat robots.txt ile kapalı olduğundan (Disallow: /)
       footystats artık altı ligin HEPSİ için xG kaynağı; declared_paths altısını da taşıyor
-      ve her biri canlıda 200 döndüğü doğrulanarak eklendi (task-5-report.md).
+      ve her biri canlıda 200 döndüğü doğrulanarak eklendi (task-5-report.md). İz A
+      (2026-09-23, R125): Eredivisie ve Pro League yolları `collector._guarded_get` ile
+      ölçüldü (bu robots anlık görüntüsü altında izinli, 200, `xg-all` 18/18 takım) ve ligler
+      açılınca eklendi. `/austria/bundesliga/xg` de ölçüldü (200, 12 takım) ama AUT kapalı,
+      fetch edilmediği için beyan edilmedi (R7).
 
   - id: tff
     base_url: https://www.tff.org

@@ -169,7 +169,32 @@ LIVE_SIX = (
 )
 
 
-def test_the_six_live_leagues_are_unchanged_and_are_the_only_active_ones() -> None:
+# R125 (kullanıcı kararı 2026-09-22): N1 ve B1 kredi harcamaya açıldı; AUT kapalı kalır.
+OPENED_BY_R125 = (
+    League(
+        "ned.1",
+        "soccer_netherlands_eredivisie",
+        "Eredivisie",
+        "Netherlands",
+        "nl",
+        "NL",
+        True,
+        "/netherlands/eredivisie/xg",
+    ),
+    League(
+        "bel.1",
+        "soccer_belgium_first_div",
+        "First Division A",
+        "Belgium",
+        "nl",
+        "BE",
+        True,
+        "/belgium/pro-league/xg",
+    ),
+)
+
+
+def test_the_six_original_leagues_are_unchanged_and_eight_are_active() -> None:
     configured = load_leagues(REPO / "config/leagues.yaml")
     assert configured[: len(LIVE_SIX)] == LIVE_SIX
-    assert active_leagues(configured) == LIVE_SIX
+    assert active_leagues(configured) == (*LIVE_SIX, *OPENED_BY_R125)

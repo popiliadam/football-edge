@@ -267,7 +267,7 @@ def test_collect_skips_a_league_without_a_footystats_path_and_names_it(tmp_path:
     assert result.written > 0, "yollu lig yine toplanmalıydı"
 
 
-def test_the_live_config_requests_exactly_the_six_live_paths_in_order(tmp_path: Path) -> None:
+def test_the_live_config_requests_exactly_the_eight_live_paths_in_order(tmp_path: Path) -> None:
     """İz A: gerçek `config/leagues.yaml` ile toplayıcı bugünkü altı yolu, bugünkü sırayla
     ister — lig eklemek ya da alanı isteğe bağlı yapmak bu diziyi değiştirmemeli."""
     repo = Path(__file__).resolve().parents[1]
@@ -295,6 +295,8 @@ def test_the_live_config_requests_exactly_the_six_live_paths_in_order(tmp_path: 
         "/germany/bundesliga/xg",
         "/france/ligue-1/xg",
         "/turkey/super-lig/xg",
+        "/netherlands/eredivisie/xg",
+        "/belgium/pro-league/xg",
     ]
     assert result.failed_leagues == ()
     assert result.skipped_leagues == ()

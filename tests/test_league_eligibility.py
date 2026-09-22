@@ -1,10 +1,10 @@
-"""İz A (2026-09-23) — N1/B1/AUT yapılandırmada, ama KREDİ HARCAMAZ.
+"""İz A (2026-09-23) — N1/B1/AUT yapılandırmada; kredi anahtarı yalnız N1 ve B1'de AÇIK.
 
 The Odds API kredisi yalnız `active: true` liglerde harcanır: `collect snapshot`/`seal`
-`active_leagues()`i, `fetch-results` de aynısını verir. Üç yeni lig `active: false` taşır;
-etkinleştirme kullanıcı kararıdır (bütçe 500/ay). Bu dosya o anahtarın KAPALI olduğunu ve
-kapalıyken gerçekten hiçbir ücretli isteğin atılmadığını uçtan uca sınar; bir de her
-toplayıcının hangi liglere uygulandığını (TFF/stadyum/haber yalnız Türkiye).
+`active_leagues()`i, `fetch-results`/`fetch-footystats` de aynısını verir. Kullanıcı kararı
+(2026-09-22, R125): N1 ve B1 açık, AUT `active: false` (bütçe 500/ay). Bu dosya anahtarın
+AUT'ta KAPALI olduğunu ve kapalıyken hiçbir ücretli isteğin atılmadığını uçtan uca sınar;
+bir de her toplayıcının hangi liglere uygulandığını (TFF/stadyum/haber yalnız Türkiye).
 """
 
 from __future__ import annotations
@@ -35,6 +35,8 @@ LIVE_KEYS = (
     "soccer_germany_bundesliga",
     "soccer_france_ligue_one",
     "soccer_turkey_super_league",
+    "soccer_netherlands_eredivisie",
+    "soccer_belgium_first_div",
 )
 
 # Anahtarlar ölçüm belgesinden (docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-
@@ -48,7 +50,7 @@ NEW_LEAGUES = (
         "Netherlands",
         "nl",
         "NL",
-        False,
+        True,
         "/netherlands/eredivisie/xg",
     ),
     League(
@@ -58,7 +60,7 @@ NEW_LEAGUES = (
         "Belgium",
         "nl",
         "BE",
-        False,
+        True,
         "/belgium/pro-league/xg",
     ),
     League(
@@ -72,7 +74,7 @@ NEW_LEAGUES = (
         "/austria/bundesliga/xg",
     ),
 )
-NEW_KEYS = tuple(league.odds_api_key for league in NEW_LEAGUES)
+INACTIVE = tuple(league for league in NEW_LEAGUES if not league.active)
 
 
 def _configured() -> tuple[League, ...]:
@@ -83,13 +85,16 @@ def test_the_three_new_leagues_are_configured_after_the_live_six() -> None:
     assert _configured()[6:] == NEW_LEAGUES
 
 
-def test_the_odds_spending_switch_is_off_for_the_new_leagues() -> None:
+def test_the_odds_spending_switch_is_off_for_aut() -> None:
     """ANAHTAR: `active`. Açmak (true) snapshot + mühür kredisi harcar — kullanıcı kararı.
-    Bu test kırmızıya dönerse biri anahtarı açmıştır: onay ve kredi hesabı raporda olmalı."""
+    N1/B1 açıldı (R125); AUT kapalı kalır. Bu test kırmızıya dönerse biri AUT'u açmıştır:
+    onay ve kredi hesabı raporda olmalı."""
+    assert tuple(league.id for league in INACTIVE) == ("aut.1",)
     by_id = {league.id: league for league in _configured()}
-    for league in NEW_LEAGUES:
+    for league in INACTIVE:
         assert by_id[league.id].active is False, f"{league.id} kredi harcamaya açılmış"
-    assert not set(NEW_KEYS) & {league.odds_api_key for league in active_leagues(_configured())}
+    inactive_keys = {league.odds_api_key for league in INACTIVE}
+    assert not inactive_keys & {league.odds_api_key for league in active_leagues(_configured())}
 
 
 def test_odds_keys_agree_with_the_history_catalog() -> None:
@@ -121,7 +126,7 @@ def _patch_main(monkeypatch: pytest.MonkeyPatch, db: FakeLedgerDb, requested: li
     monkeypatch.setenv("ODDS_API_KEY", "TEST-KEY")
 
 
-def test_snapshot_with_the_real_config_calls_only_the_six_live_keys(
+def test_snapshot_with_the_real_config_calls_only_the_eight_live_keys(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     db = FakeLedgerDb()
@@ -134,8 +139,6 @@ def test_snapshot_with_the_real_config_calls_only_the_six_live_keys(
     assert tuple(requested) == LIVE_KEYS
     # Ayna tüm yapılandırmayı taşır (yabancı anahtar için) — `active` bayrağıyla birlikte.
     assert {league_id: row[6] for league_id, row in db.leagues.items() if row[6] is False} == {
-        "ned.1": False,
-        "bel.1": False,
         "aut.1": False,
     }
 
@@ -147,8 +150,9 @@ def test_seal_with_the_real_config_never_calls_an_inactive_league(
     (ör. elle eklenmiş) ücretli çağrı atılmaz."""
     soon = datetime.now(UTC) + timedelta(minutes=10)
     db = FakeLedgerDb(
-        leagues={"ned.1": ("ned.1",), "tur.1": ("tur.1",)},
+        leagues={"aut.1": ("aut.1",), "ned.1": ("ned.1",), "tur.1": ("tur.1",)},
         matches={
+            "evt_aut": {"league_id": "aut.1", "commence_time": soon, "sealed_at": None},
             "evt_ned": {"league_id": "ned.1", "commence_time": soon, "sealed_at": None},
             "evt_tur": {"league_id": "tur.1", "commence_time": soon, "sealed_at": None},
         },
@@ -160,10 +164,10 @@ def test_seal_with_the_real_config_never_calls_an_inactive_league(
 
     capsys.readouterr()
     assert code == 0
-    assert requested == ["soccer_turkey_super_league"]
+    assert requested == ["soccer_turkey_super_league", "soccer_netherlands_eredivisie"]
 
 
-def test_fetch_results_with_the_real_config_asks_only_the_six_live_leagues(
+def test_fetch_results_with_the_real_config_asks_only_the_eight_live_leagues(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`/scores` de ücretli (2 kredi/çağrı, `daysFrom`); bugün hiçbir zamanlayıcı çağırmıyor."""
@@ -205,9 +209,8 @@ def test_fetch_footystats_with_the_real_config_asks_only_the_active_leagues_path
 
     capsys.readouterr()
     assert seen == [tuple(league.footystats_path for league in active_leagues(_configured()))]
-    assert not {league.footystats_path for league in NEW_LEAGUES if not league.active} & set(
-        seen[0]
-    )
+    assert "/austria/bundesliga/xg" not in seen[0]
+    assert len(seen[0]) == 8
 
 
 # ── Toplayıcı başına uygunluk ───────────────────────────────────────────────
