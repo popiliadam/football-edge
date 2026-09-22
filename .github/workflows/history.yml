@@ -1,0 +1,89 @@
+name: history
+
+on:
+  # Tek tetik `workflow_dispatch`: elle (ilk tam yükleme `all: true`) ve — controller'ın 0008
+  # migration'ından sonra — haftalık pg_cron dispatch'i (yalnız `ref` gönderir, `all` false
+  # kalır). GitHub `schedule`ı KASITLI olarak yok: seyrek ve gecikmeli koşar (0003).
+  workflow_dispatch:
+    inputs:
+      all:
+        description: "Bütün beyanlı yollar (ilk tam yükleme); kapalıysa yalnız değişken dosyalar"
+        type: boolean
+        default: false
+        required: false
+
+concurrency:
+  # Kendi grubu: üst üste binen iki tur aynı kaynağa iki istemci gönderir ve 3 sn'lik aralık
+  # ikiye bölünür. `odds-collect`e girmez — orada bekleyen bir mühür turunu iptal ettirebilirdi.
+  group: history
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # TEK job: tests/workflow_helpers.py `_steps()` tek job varsayar. Task 10'un `selftest`i ikinci
+  # bir job değil, `Senkron` ile alarm adımları arasına girecek bir ADIMDIR.
+  history:
+    runs-on: ubuntu-latest
+    # `--all`: 500 dosya × 3 sn nezaket aralığı ≈ 25 dk + indirme; haftalık tur ~40 dosya.
+    timeout-minutes: 60
+    permissions:
+      # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
+      contents: read
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py).
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Bu iş push'lamaz: job token'ı `.git/config`e yazılmaz, sonraki adımlar okuyamaz.
+          persist-credentials: false
+      - name: Secret taraması
+        # Depo PUBLIC: izlenen bir dosyaya kaçmış secret varsa tur, veritabanı secret'ını hiçbir
+        # adıma vermeden kırmızı düşer.
+        run: ./scripts/check_secrets.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Senkron
+        # Veritabanı secret'ını yalnız veritabanını kullanan adımlar alır (bugün bu; Task 10'dan
+        # sonra selftest) — liste tests/test_history_workflow.py::DATABASE_STEPS. Girdi `env` ile
+        # gelir, betiğe `${{ }}` ile gömülmez. Task 10'un selftest ADIMI bu adımla alarm
+        # adımlarının arasına girer.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALL_PATHS: ${{ inputs.all }}
+        run: |
+          set +e
+          if [ "$ALL_PATHS" = "true" ]; then
+            uv run python -m football_edge.history sync --all
+          else
+            uv run python -m football_edge.history sync
+          fi
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            7) echo "::error::history sync: en az bir dosya senkronlanamadı (exit 7) — ayrıntı yukarıdaki satırlarda" ;;
+            *) echo "::error::history sync beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
+      - name: Alarm aç
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız gövdesi
+        # güncellenir. `cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış döner.
+        if: ${{ failure() || cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow history --run-url "$RUN_URL"
+      - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
+        # turda kapanır.
+        if: success()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow history --run-url "$RUN_URL"
