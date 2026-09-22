@@ -353,7 +353,7 @@ yalnız kendi başlığına dokunur:
 | `🔴 collect-daily kırmızı` | kırmızı ya da koşarken iptal edilen `collect-daily.yml` turu | yeşil `collect-daily.yml` turu |
 | `🔴 collect-news kırmızı` | kırmızı ya da koşarken iptal edilen `collect-news.yml` turu | yeşil `collect-news.yml` turu |
 | `🔴 sources-audit kırmızı` | `main`deki kırmızı ya da iptal edilen `sources-audit.yml` turu (§3.7) | `main`deki yeşil tur |
-| `🔴 footystats-local kırmızı` | Mac'teki işin `result=fail` raporu (`footystats-local.yml`, §3.9) | `result=ok` raporu |
+| `🔴 footystats-local kırmızı` | Mac'teki işin `result=fail` raporu (`footystats-local.yml`, §3.9) ya da 72 sa rapor görmeyen bekçi | `result=ok` raporu (bekçi kapatmaz) |
 | `🔴 bekçi kırmızı` | bayat tetik, az ya da ölçülemeyen kredi, ya da ücretli ölçüm bulan bekçi | hepsini temiz bulan bekçi |
 
 - Açık alarm varsa yenisi açılmaz, yalnız gövdesi güncellenir — gövde düzenlemesi bildirim
@@ -364,7 +364,9 @@ yalnız kendi başlığına dokunur:
   dönmez; açık alarm sonraki yeşil turda kapanır.
 - **Bekçi** yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra koşar. Eşikler: `seal.yml`in son
   `workflow_dispatch` turu 60 dk, `snapshot.yml` 30 sa, `collect-daily.yml` 30 sa, `collect-news.yml`
-  4 sa, `footystats-local.yml` 72 sa (Mac'in kalp atışı, §3.9) (hiç tur yoksa da bayat). Ayrıca Odds API kalan kredisini ücretsiz `/v4/sports` ucundan ölçer:
+  4 sa, `footystats-local.yml` 72 sa (hiç tur yoksa da bayat). Son eşik Mac'in kalp atışıdır (§3.9) ve
+  bekçinin kendi alarmını paylaşmaz, `🔴 footystats-local kırmızı`ya yazılır: tatilde açık kalan
+  bir bekçi alarmı, sonradan ölen bir mühür tetiğini yalnız gövde düzenlemesiyle bildirirdi. Ayrıca Odds API kalan kredisini ücretsiz `/v4/sports` ucundan ölçer:
   60'ın altındaysa, ölçülemiyorsa ya da ölçüm ücretliyse (`x-requests-last` ≠ 0) de alarm. Anahtar
   hiçbir çıktıya yazılmaz. Bulduğunda kendi alarmını açar ve **0 döner**: seal job'ını düşürseydi seal'in sonraki yeşil turu
   alarmı geri alırdı. Gövdede hangi tetiğin ne kadar bayat olduğu ve eşik yazar; teşhis §3.3.
@@ -417,8 +419,9 @@ açılışı kaçan turu telafi eder. UTC günü başına BİR tur toplanır (da
    alarmı o workflow `github-actions` kimliğiyle açar ve kapatır (§3.6). Kullanıcının kendi
    token'ıyla açılan issue bildirim üretmezdi: GitHub kişiye kendi eylemi için haber vermez.
    Token işin süreçlerine hiç girmez. GitHub'a ulaşılamazsa Mac'te bir bildirim çıkar.
-6. Her rapor bekçi için bir kalp atışıdır: 72 saat rapor yoksa `🔴 bekçi kırmızı` açılır (Mac
-   kapalı, launchd işi durmuş ya da `gh` oturumu düşmüş).
+6. Her rapor bekçi için bir kalp atışıdır: 72 saat rapor yoksa bekçi `🔴 footystats-local
+   kırmızı`yı açar (Mac kapalı, launchd işi durmuş ya da `gh` oturumu düşmüş); onu bir sonraki
+   `ok` raporu kapatır. Bekçinin kendi alarmına yazılmaz (§3.6).
 
 Günlük: `~/Library/Logs/football-edge/footystats.log` (launchd stdout ve stderr'i ekler, döndürmez).
 

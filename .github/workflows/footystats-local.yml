@@ -3,7 +3,7 @@ name: footystats-local
 # Mac'teki günlük footystats işinin (RUNBOOK §3.9) sonucunu GitHub'a taşır. İş alarmı kendi `gh`
 # token'ıyla açsaydı GitHub, kişinin kendi eylemi olduğu için bildirim göndermezdi (R74): alarm
 # burada `github.token` (github-actions) kimliğiyle açılır ve kapanır. Her tetikleme bekçi için
-# bir kalp atışıdır: Mac 72 saat raporlamazsa `🔴 bekçi kırmızı` açılır (§3.6).
+# bir kalp atışıdır: bekçi 72 saat rapor görmezse `🔴 footystats-local kırmızı`yı açar (§3.6).
 on:
   workflow_dispatch:
     inputs:
