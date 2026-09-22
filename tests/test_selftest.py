@@ -369,6 +369,8 @@ def test_k4_passes_when_the_placebo_bets_into_prices_that_never_move() -> None:
 
     assert (k4.gate, k4.passed) == (True, True)
     assert "bahis=30" in k4.detail and "kapanışı eksik 0" in k4.detail
+    # R120: K4 fiyat sütunu negatif kontrolüdür; yeşili harness'ın sızdırmadığı diye okunmasın.
+    assert "harness sızıntısını ölçmez" in k4.detail, k4.detail
 
 
 @pytest.mark.leakage
