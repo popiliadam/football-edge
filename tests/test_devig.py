@@ -34,7 +34,9 @@ MARKETS = (LOPSIDED, BALANCED, TWO_WAY, LONGSHOT, (1.90, 1.90))
 
 def test_contract_constants() -> None:
     assert METHODS == (MULTIPLICATIVE, POWER, SHIN) == ("multiplicative", "power", "shin")
-    assert DEFAULT_METHOD == SHIN
+    # K2 (2026-09-22, n=103.232 AvgC kapanış): power 1.00188 < shin 1.00195 < multiplicative
+    # 1.00248 — varsayılan ölçülen en düşük log loss'lu yöntemdir.
+    assert DEFAULT_METHOD == POWER
     assert TOLERANCE == 1e-12
 
 

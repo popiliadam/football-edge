@@ -17,8 +17,9 @@ POWER: str = "power"
 SHIN: str = "shin"
 METHODS: tuple[str, ...] = (MULTIPLICATIVE, POWER, SHIN)
 TOLERANCE: float = 1e-12
-# Task 9'un ölçümü (K2) başka yöntemi seçerse controller Task 12'de günceller.
-DEFAULT_METHOD: str = SHIN
+# K2 ölçümü (2026-09-22, n=103.232 AvgC kapanış log loss'u): power 1.00188 < shin 1.00195 <
+# multiplicative 1.00248 — varsayılan en düşük log loss'lu yöntemdir.
+DEFAULT_METHOD: str = POWER
 
 # Aralık her adımda yarılanır: 200 adım float çözünürlüğünün çok ötesidir; sonsuz döngü olmaz.
 _MAX_STEPS = 200
