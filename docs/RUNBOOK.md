@@ -261,7 +261,7 @@ fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron:
 | İş | Ne zaman | Çağırdığı | Tetiklediği |
 |---|---|---|---|
 | `seal-dispatch` | her 15 dakikada | `ops.dispatch_seal()` | `seal.yml` |
-| `snapshot-dispatch` | her gün 06:17 UTC | `ops.dispatch_snapshot()` | `snapshot.yml` |
+| `snapshot-dispatch` | her gün 06:22 UTC | `ops.dispatch_snapshot()` | `snapshot.yml` |
 
 İkisi de `ops.dispatch_workflow()`a delege eder; o yalnız izinli listedeki bir adı GitHub
 API'si üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`).
@@ -271,10 +271,12 @@ API'si üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workfl
 ### 3.2 Kurulum (tek sefer)
 1. **Token (GitHub):** hazır doldurulmuş form (ad, açıklama, sahip, süre ve **Actions: Read and
    write** gelir; başka izin yok):
-   <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
+   <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+and+snapshot.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
    Elle seçilen tek alan: Repository access → *Only select repositories* → `football-edge`.
    `expires_in=none` bilinçli: yıllık yenileme bir el işidir. Yetki tek depoda yalnız Actions;
-   süreli token istenirse tarih seçilir ve §3.4 devreye girer.
+   süreli token istenirse tarih seçilir ve §3.4 devreye girer. Token artık **iki** workflow'u
+   tetikler: `seal.yml` ve `snapshot.yml`. Actions yetkisi depodaki her workflow'u tetikleyebilir;
+   sınırı `ops.dispatch_workflow`un izinli listesi çizer (`0004_workflow_dispatch.sql`).
 2. **Vault (Supabase):** panelde Vault sayfasında *Add new secret* → adı tam olarak
    `github_seal_dispatch`, değeri token. SQL editörü de olur ama token sorgu geçmişinde kalır:
    `select vault.create_secret('<token>', 'github_seal_dispatch');`
@@ -309,8 +311,8 @@ alarmı (§3.6) — kendiliğinden biter.
 
 ### 3.4 Token yenileme
 Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) iki dispatch de `401` alır: mühür
-yalnız seyrek yedek `schedule`la koşar, snapshot hiç koşmaz. Bekçi yedek turda kırmızı verir ve
-`seal` alarmı açılır (§3.6). Yeni tokenı §3.2/1'deki gibi oluştur, sonra:
+yalnız seyrek yedek `schedule`la koşar, snapshot hiç koşmaz. Bekçi yedek turda kendi alarmını
+(`🔴 bekçi kırmızı`) açar (§3.6). Yeni tokenı §3.2/1'deki gibi oluştur, sonra:
 ```sql
 select vault.update_secret((select id from vault.secrets where name = 'github_seal_dispatch'),
                            '<yeni token>');
@@ -321,23 +323,33 @@ select vault.update_secret((select id from vault.secrets where name = 'github_se
 select cron.unschedule('seal-dispatch');       -- mührü durdur
 select cron.schedule('seal-dispatch', '*/15 * * * *', 'select ops.dispatch_seal()');       -- başlat
 select cron.unschedule('snapshot-dispatch');   -- snapshot'ı durdur
-select cron.schedule('snapshot-dispatch', '17 6 * * *', 'select ops.dispatch_snapshot()');  -- başlat
+select cron.schedule('snapshot-dispatch', '22 6 * * *', 'select ops.dispatch_snapshot()');  -- başlat
 ```
-Durdurulan iş eşiği aşınca bekçiyi kırmızıya düşürür (§3.6): bilinçli bir durdurma da alarmda
-görünür kalır.
+Durdurulan iş eşiği aşınca bekçi kendi alarmını açar (§3.6): bilinçli bir durdurma da görünür
+kalır. İş yeniden başlayıp bekçi iki tetiği taze bulunca alarm kendiliğinden kapanır.
 
 ### 3.6 Kırmızı tur alarmı ve bekçi
-`seal.yml` ve `snapshot.yml`in son iki adımı `scripts/ops_alert.py`yi çağırır:
+`scripts/ops_alert.py` üç ayrı `ops-alert` issue'su tutar; her biri yalnız kendi başlığına dokunur:
 
-- **Kırmızı tur** (`if: failure()`): `ops-alert` etiketli `🔴 <workflow> kırmızı` issue'su açılır
-  (etiket yoksa önce oluşturulur). Açık alarm varsa yenisi açılmaz; yalnız gövdesi son kırmızı
-  turun bağlantısı ve UTC zamanıyla güncellenir — gövde düzenlemesi bildirim üretmez.
-- **Yeşil tur** (`if: success()`): açık alarm varsa `yeşile döndü: <tur>` yorumu yazılır ve
-  issue kapanır; yoksa hiçbir şey yazılmaz.
-- **Bekçi** (yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra): `seal.yml`in son
+| Başlık | Açan ya da güncelleyen | Kapatan |
+|---|---|---|
+| `🔴 seal kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `seal.yml` turu | yeşil `seal.yml` turu |
+| `🔴 snapshot kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `snapshot.yml` turu | yeşil `snapshot.yml` turu |
+| `🔴 bekçi kırmızı` | bayat tetik bulan bekçi | iki tetiği de taze bulan bekçi |
+
+- Açık alarm varsa yenisi açılmaz, yalnız gövdesi güncellenir — gövde düzenlemesi bildirim
+  üretmez. Kapanırken `yeşile döndü: <tur>` yorumu yazılır. Etiket yoksa ilk açılışta oluşturulur.
+- **Alarm aç** `if: failure() || cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış
+  döner. Kuyrukta beklerken iptal edilen tur hiç adım koşmaz, alarm da açmaz.
+- **Alarm kapat** `continue-on-error: true`: kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya
+  dönmez; açık alarm sonraki yeşil turda kapanır.
+- **Bekçi** yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra koşar. `seal.yml`in son
   `workflow_dispatch` turu 60 dakikadan, `snapshot.yml`in son turu 30 saatten eskiyse (ya da hiç
-  yoksa) kırmızı verir ve `seal` alarmı açılır. Hangi tetiğin bayat olduğu turun `::error::`
-  satırında yazar; teşhis §3.3.
+  yoksa) kendi alarmını açar ve **0 döner**: seal job'ını düşürseydi seal'in sonraki yeşil turu
+  alarmı geri alırdı. Gövdede hangi tetiğin ne kadar bayat olduğu ve eşik yazar; teşhis §3.3.
+  Ölü snapshot sessiz bir arızadır: maçları yalnız snapshot kaydeder; o durunca mühür de kayıtlı
+  maçlar bitince "kaçan" raporu bile vermeden susar. GitHub API'nin kendisi düşerse bekçi düşer ve
+  `seal` alarmı açılır.
 
 Haber GitHub'ın issue bildirimiyle gelir: e-posta, depo sahibinin bu depoyu izleme ayarına
 bağlıdır. Depo sayfasında *Watch* → *All Activity* (ya da *Custom* → *Issues*) seçili değilse
