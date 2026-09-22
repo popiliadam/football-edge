@@ -100,18 +100,23 @@ def _head_referee(row: Tag) -> str:
 
 
 def _officials_cell_is_empty(row: Tag) -> bool:
-    """Görevli hücresi VAR ama hiç `<a>` taşımıyor mu — bu, ÖLÇÜLEN, GERÇEK "TFF henüz
-    atamamış" durumudur (63 maçtan 1'i, `YENİ MALATYASPOR – NİĞDE BELEDİYESİ SPOR`:
-    hücre `<div class="...Hakemler">` olarak MEVCUT, içi tamamen boş — `find_all("a")`
-    boş liste döner). Hücrenin KENDİSİ hiç yoksa bu FARKLI bir arıza sınıfıdır (satır
-    şekli beklenenden de fazla değişmiş demektir); o durumda `False` döner ki çağıran
-    bunu meşru boşluk SAYMASIN — `parse_referees`teki sayım bunu bir kayıp olarak
+    """Görevli hücresi VAR ama hiç `<a>` ve hiç metin taşımıyor mu — bu, ÖLÇÜLEN, GERÇEK
+    "TFF henüz atamamış" durumudur (09-19: 63 maçtan 1'i, `YENİ MALATYASPOR – NİĞDE
+    BELEDİYESİ SPOR`; 09-22: 63 maçın 63'ü — hücre `<div class="...Hakemler">` olarak
+    MEVCUT, içi tamamen boş). Hücrenin KENDİSİ hiç yoksa bu FARKLI bir arıza sınıfıdır
+    (satır şekli beklenenden de fazla değişmiş demektir); o durumda `False` döner ki
+    çağıran bunu meşru boşluk SAYMASIN — `parse_referees`teki sayım bunu bir kayıp olarak
     işaretler.
+
+    Metin şartı yük taşır: bağlantısız isim taşıyan bir hücre (ör. TFF profil
+    bağlantılarını kaldırırsa) atanmamış DEĞİLDİR. Yalnız `<a>` yokluğuna bakmak o kaybı
+    sessizce "görevlisiz" sayardı — ve bütün hafta boş döndüğünde her gün 0 yazıp yeşil
+    kalırdı.
     """
     officials_cell = row.find("div", class_=_OFFICIALS_CLASS)
     if not isinstance(officials_cell, Tag):
         return False
-    return not officials_cell.find_all("a")
+    return not officials_cell.find_all("a") and not _text(officials_cell)
 
 
 def _league_blocks(soup: BeautifulSoup) -> tuple[tuple[str, Tag], ...]:
@@ -154,8 +159,11 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     (`unassigned`) ile ayrıştırıcı kaybı arasındaki TEK fark, görevli hücresinin VAR
     ama boş mu, yoksa DOLU ama etiketsiz mi olduğudur (bkz. `_officials_cell_is_empty`).
 
-    HİÇ satır tanınmazsa da aynı istisna fırlar: boş sonuç, sayfa şekli tamamen
-    değiştiğinde başarıdan ayırt edilemez olurdu.
+    HİÇ maç satırı tanınmazsa da aynı istisna fırlar: boş sonuç, sayfa şekli tamamen
+    değiştiğinde başarıdan ayırt edilemez olurdu. Satırlar tanınıp HEPSİ meşru olarak
+    görevlisizse ise sonuç boştur ve istisna FIRLAMAZ: hakemler her hafta maçlardan birkaç
+    gün önce açıklanır, arada sayfa bütün maçları boş hücreyle taşır (ölçüldü 09-22: 63/63).
+    İlk canlı tur bu durumu "sayfa şekli değişti" diye kırmızıya düşürüyordu.
     """
     soup = BeautifulSoup(html_text, "html.parser")
     parsed: tuple[Observation, ...] = ()
@@ -186,8 +194,8 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
                     },
                 ),
             )
-    if not parsed:
-        raise ContractViolation(f"{SOURCE_ID}: hiç hakem ataması tanınmadı — sayfa şekli değişti")
+    if total_rows == 0:
+        raise ContractViolation(f"{SOURCE_ID}: hiç maç satırı tanınmadı — sayfa şekli değişti")
     if unassigned:
         LOGGER.info("%s: %d maç için hakem ataması henüz yayınlanmamış", SOURCE_ID, unassigned)
     if len(parsed) + unassigned < total_rows:
@@ -227,6 +235,11 @@ def collect_tff(
     parser = robots_for(source, robots_dir)
     body = fetch_text(client, source, REFEREE_PATH, parser, expect="text/html", encoding=ENCODING)
     parsed = parse_referees(body, observed_at=now)
+    if not parsed:
+        # `parse_referees` boş sonucu YALNIZ her satır meşru olarak görevlisizken döner
+        # (sıfır satır ve açıklanamayan her satır fırlatır) ve sayıyı kendisi loglar.
+        # `minimum_rows=5` burada uygulanırsa atanmamış hafta yeniden kırmızıya düşer.
+        return 0
     assert_schema(
         parsed,
         source_id=SOURCE_ID,

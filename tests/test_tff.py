@@ -17,12 +17,14 @@ kırmızı verir; aksi hâlde dosyanın varlığı yalnız bu docstring'e ve rap
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import pytest
+from bs4 import BeautifulSoup
 
 from football_edge.collector import ContractViolation
 from football_edge.collectors.tff import collect_tff, parse_referees
@@ -57,6 +59,45 @@ def _drop_all_but_first_n_head_referees(html: str, *, keep: int) -> str:
         return match.group(0) if seen <= keep else ""
 
     return pattern.sub(_replace, html)
+
+
+_OFFICIALS_CELL_CLASS = "haftaninMaclariMaclarHakemler"
+
+
+def _week_with_no_assignments(html: str) -> str:
+    """Her görevli hücresini TAMAMEN boşaltır.
+
+    2026-09-22'de canlı ölçülen durum budur: `pageID=600` yine 7 lig bloğu ve 63 maç
+    satırı taşıyor, ama 63 hücrenin HEPSİ `<a>`sız, metinsiz ve alt etiketsiz — TFF o
+    haftanın hakemlerini henüz açıklamamış. Fixture'daki tek atanmamış satırın hücresi de
+    tam olarak bu şekilde (ölçüldü). Canlı sayfa depoya girmez (Ruling 4); durum mevcut
+    fixture'dan türetilir.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for cell in soup.find_all("div", class_=_OFFICIALS_CELL_CLASS):
+        cell.clear()
+    return str(soup)
+
+
+def _officials_as_plain_text(html: str, *, keep_links: int) -> str:
+    """İlk `keep_links` dolu hücre HARİÇ görevli bağlantılarını düz metne çevirir.
+
+    `<a>` açılır, isim METİN olarak hücrede kalır: bir üst akış değişikliği (ör. TFF
+    hakem profil bağlantılarını kaldırır) hücreyi BOŞALTMAZ. Bu hücreler "TFF henüz
+    atamamış" sayılırsa kayıp sessizce "görevlisiz" diye geçer — boş hücreden FARKLIDIR.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    seen = 0
+    for cell in soup.find_all("div", class_=_OFFICIALS_CELL_CLASS):
+        links = cell.find_all("a")
+        if not links:
+            continue
+        seen += 1
+        if seen <= keep_links:
+            continue
+        for link in links:
+            link.unwrap()
+    return str(soup)
 
 
 @pytest.mark.contract
@@ -142,6 +183,46 @@ def test_referee_search_page_433_yields_no_rows() -> None:
 def test_empty_page_raises_rather_than_returning_empty() -> None:
     with pytest.raises(ContractViolation):
         parse_referees("<html><body></body></html>", observed_at=NOW)
+
+
+def test_week_with_no_assignments_yet_is_empty_not_a_shape_change(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """İlk canlı `collect-daily` turu (2026-09-22, run 35710579845) burada kırmızıydı:
+    sayfa şekli SAĞLAMDI (7 blok, 63 satır, 63 boş hücre) ama "hiç hakem ataması
+    tanınmadı — sayfa şekli değişti" fırlıyordu. Hakemler her hafta maçlardan birkaç gün
+    önce açıklanır; bu durum haftada birkaç gün GERÇEKTİR, arıza değildir.
+
+    Boş sonuç sessiz de değildir: kaç maçın görevlisiz olduğu adıyla loglanır.
+    """
+    caplog.set_level(logging.INFO, logger="football_edge.collectors.tff")
+
+    parsed = parse_referees(_week_with_no_assignments(fixture_html()), observed_at=NOW)
+
+    assert parsed == ()
+    assert "63 maç için hakem ataması henüz yayınlanmamış" in caplog.text
+
+
+def test_officials_named_without_links_are_a_loss_not_unassigned() -> None:
+    """Görevli hücresi DOLU ama `<a>` taşımıyorsa o maç "TFF henüz atamamış" DEĞİLDİR.
+
+    Eski `_officials_cell_is_empty` yalnız `<a>` yokluğuna bakıyordu: 62 dolu satırdan
+    56'sı bağlantısız isme dönünce 6 gözlem yazılıp 57 satır "görevlisiz" sayılıyordu —
+    56 satırlık kayıp hatasız "başarı" olarak geçiyordu.
+    """
+    degraded = _officials_as_plain_text(fixture_html(), keep_links=6)
+    with pytest.raises(ContractViolation, match="görevlisiz"):
+        parse_referees(degraded, observed_at=NOW)
+
+
+def test_all_officials_named_without_links_still_raises() -> None:
+    """Atanmamış haftanın boş dönmesi (yukarıdaki test) bir deliğe dönüşmemeli: TFF bütün
+    görevlileri bağlantısız metin olarak basmaya başlarsa her gün 0 yazıp yeşil kalırdık.
+    Hücre metin taşıdığı sürece o satır meşru boşluk sayılmaz.
+    """
+    degraded = _officials_as_plain_text(fixture_html(), keep_links=0)
+    with pytest.raises(ContractViolation, match="görevlisiz"):
+        parse_referees(degraded, observed_at=NOW)
 
 
 def test_team_normalisation_is_case_and_space_insensitive() -> None:
@@ -232,3 +313,35 @@ def test_collect_tff_second_round_is_idempotent(tmp_path: Path) -> None:
 
     assert first == 62
     assert second == 0
+
+
+def test_collect_tff_week_with_no_assignments_writes_nothing_and_succeeds(
+    tmp_path: Path,
+) -> None:
+    """`assert_schema(minimum_rows=5)` atanmamış haftayı YENİDEN kırmızıya çevirmemeli:
+    `parse_referees` boş sonucu yalnız her satır meşru olarak görevlisizken döner.
+    """
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "tff", "")
+    page = _week_with_no_assignments(fixture_html())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=page.encode("windows-1254"),
+            headers={"content-type": "text/html; charset=windows-1254"},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    db = FakeObservationDb()
+
+    written = collect_tff(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert written == 0
+    assert db.rows == []
