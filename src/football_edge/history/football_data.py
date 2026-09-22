@@ -21,7 +21,7 @@ import math
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
@@ -148,6 +148,8 @@ class ParseResult:
     price_cells: int
     encoding: str
     columns: tuple[str, ...]
+    # R111: sonu boş fazla hücreli kayıt kırpılıp kabul edilir; sayı sessiz kalmasın diye taşınır.
+    trimmed_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -155,7 +157,7 @@ class _Context:
     league: HistoryLeague
     season: str | None
     layout: _Layout
-    width: int  # başlığın alan sayısı; her kayıt tam bu genişlikte olmalı
+    width: int  # başlığın alan sayısı; kayıt bu genişlikte (ya da fazlası boş, R111) olmalı
     window: tuple[date, date] | None  # ana lig sezonunun tarih penceresi; ek ligde None
     index: Mapping[str, int]
     odds: tuple[tuple[int, OddsKey], ...]
@@ -179,6 +181,7 @@ class _Row:
     outcome: HistMatch | Rejected
     price_cells: int
     dropped: int
+    trimmed: bool = False
 
 
 def _decode(content: bytes) -> tuple[str, str]:
@@ -339,14 +342,26 @@ def _fields(line: int, row: Sequence[str], ctx: _Context) -> _Fields | Rejected:
     return _Fields(season, match_date, kickoff, home, away, home_goals, away_goals, result)
 
 
-def _row(line: int, row: Sequence[str], ctx: _Context) -> _Row:
-    if len(row) != ctx.width:
+def _fit(record: Sequence[str], width: int) -> Sequence[str] | None:
+    """Başlık genişliğindeki kayıt; sığmıyorsa None. Fazlası yalnız boş hücreyse kırpılır (R111):
+    ölçülen fazlalık sonda ve boştur, dolu bir fazla hücre ise kaymanın izidir."""
+    if len(record) == width:
+        return record
+    if len(record) > width and not any(cell.strip() for cell in record[width:]):
+        return record[:width]
+    return None
+
+
+def _row(line: int, record: Sequence[str], ctx: _Context) -> _Row:
+    row = _fit(record, ctx.width)
+    if row is None:
         # Kaymış kaydın hücresi hangi sütuna ait bilinmez: satır düşer, hücresi fiyat sayılmaz.
         return _Row(Rejected(line, REASON_WIDTH), 0, 0)
+    trimmed = len(row) != len(record)
     odds, cells, dropped = _prices(row, ctx)
     fields = _fields(line, row, ctx)
     if isinstance(fields, Rejected):
-        return _Row(fields, cells, dropped)
+        return _Row(fields, cells, dropped, trimmed)
     match = HistMatch(
         league=ctx.league.code,
         season=fields.season,
@@ -361,7 +376,7 @@ def _row(line: int, row: Sequence[str], ctx: _Context) -> _Row:
         stats=_stats(row, ctx),
         source_line=line,
     )
-    return _Row(match, cells, dropped)
+    return _Row(match, cells, dropped, trimmed)
 
 
 def _context(
@@ -399,7 +414,7 @@ def _without_duplicates(rows: Sequence[_Row]) -> tuple[_Row, ...]:
         if first[(match.date, match.home, match.away)] != position
     }
     return tuple(
-        _Row(Rejected(repeated[position], REASON_DUPLICATE), row.price_cells, row.dropped)
+        replace(row, outcome=Rejected(repeated[position], REASON_DUPLICATE))
         if position in repeated
         else row
         for position, row in enumerate(rows)
@@ -435,6 +450,7 @@ def parse_file(content: bytes, *, league: HistoryLeague, season: str | None) -> 
         price_cells=sum(row.price_cells for row in rows),
         encoding=encoding,
         columns=tuple(name.strip() for name in records[0] if name.strip()),
+        trimmed_rows=sum(1 for row in rows if row.trimmed),
     )
 
 

@@ -152,3 +152,11 @@ def csv_bytes(
     lines = [",".join(header), *(",".join(row.get(name, "") for name in header) for row in rows)]
     body = ("\r\n".join(lines) + "\r\n").encode(encoding)
     return b"\xef\xbb\xbf" + body if bom else body
+
+
+def widen(content: bytes, line: int, excess: str) -> bytes:
+    """`line`ıncı kaydın (başlık 0) sonuna `excess` eklenir: başlıktan uzun kayıt (R111 ölçümü:
+    fazla hücreler kaydın SONUNDA)."""
+    lines = content.split(b"\r\n")
+    widened = [*lines[:line], lines[line] + excess.encode("utf-8"), *lines[line + 1 :]]
+    return b"\r\n".join(widened)

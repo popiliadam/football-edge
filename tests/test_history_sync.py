@@ -28,6 +28,7 @@ from tests.history_csv import (
     csv_bytes,
     extra_row,
     main_row,
+    widen,
 )
 
 CATALOG = Catalog(current_season="2627", leagues=(E0, BRA))
@@ -170,6 +171,49 @@ def test_rejected_rows_under_the_limit_are_counted_not_hidden() -> None:
     assert (report.changed, report.rejected_rows) == (1, 1)
     assert (db.fetches[0]["rows_parsed"], db.fetches[0]["rows_rejected"]) == (199, 1)
     assert db.files[OLD]["row_count"] == 199
+
+
+def test_trimmed_rows_are_logged_per_file_as_a_count_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """R111: kırpma sessiz geçmez — dosya başına tek INFO satırı, yalnız sayı (hücre değeri yok)."""
+    rows = [main_row(n, {"HomeTeam": f"Gizli {n}"}) for n in range(3)]
+    widened = widen(widen(csv_bytes(MAIN_2526, rows), 1, ",,,"), 3, ", ,")
+    db = FakeHistDb()
+
+    with caplog.at_level("INFO", logger="football_edge.history.sync"):
+        report = run(db, Site({**FILES, OLD: widened}))
+
+    assert (report.failed, report.rejected_rows) == ((), 0)
+    assert db.fetches[0]["rows_parsed"] == 3
+    trimmed = [record for record in caplog.records if "kırpıldı" in record.getMessage()]
+    assert [(record.levelname, record.args) for record in trimmed] == [("INFO", (OLD, 2))]
+    assert not any("Gizli" in record.getMessage() for record in caplog.records)
+
+
+def test_a_file_that_fails_the_contract_still_logs_its_trim_count(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Kırpma satırı sözleşme denetiminden ÖNCE yazılır: düşen dosyanın kırpma sayısı da görünür."""
+    rows = [main_row(0), *(main_row(n, {"FTR": "A", "HomeTeam": f"Gizli {n}"}) for n in (1, 2))]
+    widened = widen(csv_bytes(MAIN_2526, rows), 1, ",,,")
+    db = FakeHistDb()
+
+    with caplog.at_level("INFO", logger="football_edge.history.sync"):
+        report = run(db, Site({**FILES, OLD: widened}), (OLD,))
+
+    ((path, reason),) = report.failed
+    assert path == OLD and "ContractViolation" in reason and "reddedilen satır" in reason
+    trimmed = [record for record in caplog.records if "kırpıldı" in record.getMessage()]
+    assert [(record.levelname, record.args) for record in trimmed] == [("INFO", (OLD, 1))]
+    assert not any("Gizli" in record.getMessage() for record in trimmed)
+
+
+def test_a_file_without_trimmed_rows_logs_no_trim_line(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO", logger="football_edge.history.sync"):
+        run(FakeHistDb(), Site(FILES))
+
+    assert not [record for record in caplog.records if "kırpıldı" in record.getMessage()]
 
 
 def test_an_undeclared_path_is_never_requested() -> None:
