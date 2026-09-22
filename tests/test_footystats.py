@@ -8,7 +8,7 @@ import pytest
 
 from football_edge.collector import ContractViolation
 from football_edge.collectors.footystats import collect_footystats, parse_xg_table
-from football_edge.leagues import League
+from football_edge.leagues import League, active_leagues, load_leagues
 from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import write_robots
 
@@ -227,3 +227,74 @@ def test_collect_does_not_count_a_league_whose_commit_fails(tmp_path: Path) -> N
     assert result.written == 0, f"commit düştü ama written sayıldı: {result}"
     assert result.failed_leagues == ("good.1",)
     assert db.rollbacks == 1
+
+
+def test_collect_skips_a_league_without_a_footystats_path_and_names_it(tmp_path: Path) -> None:
+    """İz A: footystats sayfası olmayan lig İSTENMEZ (ne uydurma yol ne arıza) — ama sessiz
+    de geçilmez: `skipped_leagues` onu adıyla taşır, `failed_leagues`e düşmez."""
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "footystats", "")
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.path)
+        return httpx.Response(200, text=fixture_html(), headers={"content-type": "text/html"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    db = FakeObservationDb()
+    pathless = League(
+        id="aut.1",
+        odds_api_key="x",
+        name="aut.1",
+        country="X",
+        lang="de",
+        gl="AT",
+        active=True,
+    )
+
+    result = collect_footystats(
+        db,  # type: ignore[arg-type]
+        client,
+        (pathless, _league("good.1", "/good/xg")),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert requested == ["/good/xg"], f"yolsuz lig için istek atıldı: {requested}"
+    assert result.skipped_leagues == ("aut.1",)
+    assert result.failed_leagues == ()
+    assert result.written > 0, "yollu lig yine toplanmalıydı"
+
+
+def test_the_live_config_requests_exactly_the_six_live_paths_in_order(tmp_path: Path) -> None:
+    """İz A: gerçek `config/leagues.yaml` ile toplayıcı bugünkü altı yolu, bugünkü sırayla
+    ister — lig eklemek ya da alanı isteğe bağlı yapmak bu diziyi değiştirmemeli."""
+    repo = Path(__file__).resolve().parents[1]
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "footystats", "")
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.path)
+        return httpx.Response(200, text=fixture_html(), headers={"content-type": "text/html"})
+
+    result = collect_footystats(
+        FakeObservationDb(),  # type: ignore[arg-type]
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        active_leagues(load_leagues(repo / "config/leagues.yaml")),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    assert requested == [
+        "/england/premier-league/xg",
+        "/spain/la-liga/xg",
+        "/italy/serie-a/xg",
+        "/germany/bundesliga/xg",
+        "/france/ligue-1/xg",
+        "/turkey/super-lig/xg",
+    ]
+    assert result.failed_leagues == ()
+    assert result.skipped_leagues == ()
