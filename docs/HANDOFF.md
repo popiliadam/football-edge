@@ -26,18 +26,40 @@ ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve
 - Defterler (gitignored, bu makinede): `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md` (R78–R100),
   `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` (R101–R121). Ertelenenler DEFERRED §12, §14.
 
-**Sıradaki adımlar**
-1. **Lig ekleme görevi — N1, B1, AUT** (Faz 2 HANDOFF §5): `config/leagues.yaml`a ekleme; `League`'in
-   `footystats_path`i isteğe bağlı olmalı (footystats sayfası olmayan lig); toplayıcılar ve ad eşlemesi; The Odds
-   API kredisi (bütçe 500/ay — mühür + snapshot tüketimi artar, önce ölç).
-2. **Faz 2 worktree'leri ve dalları — silme KULLANICI ONAYI bekliyor.** `.worktrees/wt-{parser,devig,lock,harness,
-   sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve dalları (`feat/faz2-*`, `measure/r104-width`);
-   uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı, main'e girmedi). Hepsi birleşti ya da ölçüm artığı.
-3. **İzle:** ilk cron'lu `history.yml` turu **salı 2026-09-29 09:50 UTC** — "Bilinen sonuçlar" (selftest) adımı
-   runner'da İLK kez koşar; yeşil olmalı (yerelde 25 sn, iş zaman aşımı 60 dk). Kırmızıysa `🔴 history kırmızı`
-   açılır: logu oku, kapıyı gevşetme. Aşağıdaki "İzlenecekler" de açık.
-4. **Faz 3 planlaması** — ön koşullar Faz 2 HANDOFF §6: walk-forward, canlı bağlam kurucusu + eşitlik testi
-   (bağlam VE `observe` akışı), Elo fiti, scipy dalga 0'ı, `final_eval` işçilere anahtar değil seçilmiş satır verir.
+**Sıradaki oturum — PARALEL İZLER (kullanıcı kararı 2026-09-22: izler birbirini kırmadan paralel yürür)**
+
+Yeni oturumda: "`docs/HANDOFF.md` §0'dan devam et" → bu tabloyu oku → `git worktree list` ile başla. İzler
+ayrı worktree'de, ayrı dalda, AYRIK dosya kümeleriyle yürür; her iz kendi SDD defterini tutar
+(`.superpowers/sdd/<plan-adı>/`). Bir izin dosyasına öteki YAZMAZ (tek-yazar kuralı).
+
+| İz | İş | Dal · worktree | Yazdığı dosyalar (YALNIZ bunlar) | Dokunmaz |
+|---|---|---|---|---|
+| **A** | Lig ekleme: N1, B1, AUT (Faz 2 HANDOFF §5) | `feat/leagues-n1-b1-aut` · `.worktrees/wt-leagues` | `config/leagues.yaml`, `src/football_edge/leagues.py` (`footystats_path` isteğe bağlı), `src/football_edge/collectors/*` ve `odds_api.py` kayıtları, bunların testleri; kapı sabitleri (`verify.sh` `EXPECTED_MIN_*`) GEREKİRSE yalnız bu iz | `docs/superpowers/**`, `history/`, `backtest/`, `market/` |
+| **B** | Faz 3 tasarımı ve TDD planı (model + walk-forward) | `docs/faz3-plan` · `.worktrees/wt-faz3` | yalnız `docs/superpowers/specs/2026-*-faz3-*.md`, `docs/superpowers/plans/2026-*-faz3-*.md` (+ ölçüm belgesi) — KOD YOK | `src/`, `tests/`, `config/`, `verify.sh` |
+| **C** | İzleme + temizlik (ana oturum, controller) | `main` | `docs/HANDOFF.md`, `docs/RUNBOOK.md` (gerekirse) | izlerin dosyaları |
+
+- **A — adımlar:** (1) footystats sayfası var mı ölç (yalnız `collector._guarded_get`, robots; football-data ölçümü
+  gerekirse runner'da — yerel ağ ulaşamıyor); (2) `footystats_path` isteğe bağlı, altı canlı ligin davranışı sabit
+  (TDD); (3) The Odds API anahtarları (ölçüm belgesi §2.5) ve **günlük kredi maliyeti hesaplanıp kullanıcıya
+  sorulur — kredi harcayan etkinleştirme onaysız YOK** (bütçe 500/ay); (4) toplayıcı başına uygunluk (tff yalnız
+  Türkiye); (5) `config/history_aliases.yaml` ilk canlı kapanışlardan sonra — ad TAHMİN edilmez.
+- **B — adımlar:** `superpowers:brainstorming` → tasarım (kullanıcı onayı) → `superpowers:writing-plans` →
+  bağımsız plan incelemesi (Faz 2 deseni: planın kodu plan metninden tek ağaca kurulur). Girdi: Faz 2 HANDOFF §3
+  (ölçülmeyenler, 43 madde) ve §6 (ön koşullar: walk-forward, canlı bağlam kurucusu + eşitlik testi — bağlam VE
+  `observe` akışı, Elo fiti, scipy dalga 0'ı, `final_eval` işçilere anahtar değil SEÇİLMİŞ satır verir — 12i),
+  DEFERRED §12, §14. Holdout Faz 3'e dek AÇILMAZ; tasarım açılışı tek sefer ve kayıtlı yapar. Uygulama, plan
+  onaylandıktan SONRA ve A birleştikten sonra başlar (A'nın lig kümesi Faz 3'ün canlı kapsamını belirler).
+- **C — adımlar:** (1) 2026-09-23 sabahı ilk cron'lu `collect-daily` + footystats; (2) **2026-09-29 09:50 UTC**
+  `history.yml` — selftest adımının runner'daki ilk turu (yerelde 25 sn); kırmızıysa logu oku, kapıyı gevşetme;
+  (3) temizlik YALNIZ kullanıcı onayıyla: `.worktrees/wt-{parser,devig,lock,harness,sync,bridge,efficiency,selftest,
+  r111,method,t11fix,measure}`, dalları `feat/faz2-*`, yerel + uzak `measure/r104-width` (hepsi birleşti ya da
+  ölçüm artığı) ve Faz 2 SDD defter dizinleri.
+- **Birleştirme kuralı (her iz):** kendi dalında her commit'ten sonra tam `verify.sh` (log dosyasından, SKIP adıyla);
+  `main`e `--no-ff` merge ÖNCESİ `git fetch origin && git merge origin/main` + kapı; push, CI yeşil. Force/rebase yok.
+  İki iz aynı anda merge ediyorsa sırayla: önce biri push'lar, öteki yeniden fetch + merge + kapı.
+- **Başlatma istemi (yeni oturuma yapıştır):** "`docs/HANDOFF.md` §0'dan devam et. İz A ve İz B'yi paralel
+  başlat (ayrı worktree, SDD, her dispatch'e 'hiçbir şey silme'); İz C'yi ana oturumda izle. Durma noktaları:
+  A'da kredi harcayan etkinleştirme, B'de tasarım onayı."
 
 **Oturum 4'ün kararları** (gerekçe ve bedel defterde; tam liste Faz 2 HANDOFF §4): R106 — `ci.yml` yorumu ·
 R107/R113 — dalga implementer'ları ayrı worktree'lerde paralel · R108 — fikstür için ayrıştırıcı gevşetilmez ·
