@@ -1,0 +1,77 @@
+name: collect-daily
+
+on:
+  # TEK tetik pg_cron: `ops.dispatch_collect_daily()` bu workflow'u her gün `workflow_dispatch`
+  # ile çağırır (db/migrations/0005_collect_dispatch.sql). GitHub `schedule`ı KASITLI olarak yok:
+  # seyrek ve gecikmeli koşar; ikinci bir tetik aynı günü iki kez toplar.
+  workflow_dispatch:
+
+concurrency:
+  # Kendi grubu: üst üste binen iki tur aynı kaynağa iki istemci gönderir ve crawl-delay ikiye
+  # bölünür. `odds-collect`e girmez — orada bekleyen bir mühür turunu iptal ettirebilirdi.
+  group: collect-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
+      contents: read
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py).
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret taraması
+        # Depo PUBLIC: izlenen bir dosyaya kaçmış secret varsa tur, veritabanı secret'ını hiçbir
+        # adıma vermeden kırmızı düşer.
+        run: ./scripts/check_secrets.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Toplayıcıları koş
+        env:
+          # Yalnız veritabanı: bu toplayıcılar ücretli API çağırmaz.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # Biri düşse de diğerleri koşar: bir kaynağın arızası ötekilerin gözlemini kaçırtmaz.
+          set +e
+          failed=0
+          for command in fetch-footystats fetch-tff fetch-venues; do
+            uv run python -m football_edge.collect "$command"
+            code=$?
+            case "$code" in
+              0) ;;
+              3) echo "::error::$command: en az bir lig toplanamadı (exit 3) — diğerleri yazıldı" ;;
+              7) echo "::error::$command: kaynak toplanamadı (exit 7) — ayrıntı yukarıdaki satırlarda" ;;
+              *) echo "::error::$command beklenmedik kodla düştü (exit $code)" ;;
+            esac
+            [ "$code" -eq 0 ] || failed=1
+          done
+          set -e
+          # Hiçbir kod yutulmaz: düşen her toplayıcı işi kırmızıya düşürür, yalnız adıyla.
+          exit "$failed"
+      - name: Alarm aç
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
+        # gövdesi güncellenir (her tur yeni bildirim üretseydi alarm gürültüye gömülürdü).
+        # `cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış döner.
+        if: ${{ failure() || cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow collect-daily --run-url "$RUN_URL"
+      - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
+        # turda kapanır.
+        if: success()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow collect-daily --run-url "$RUN_URL"

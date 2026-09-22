@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ REPO = Path(__file__).resolve().parent.parent
 WORKFLOWS = (
     REPO / ".github/workflows/snapshot.yml",
     REPO / ".github/workflows/seal.yml",
+    REPO / ".github/workflows/collect-daily.yml",
+    REPO / ".github/workflows/collect-news.yml",
 )
 SCAN_SCRIPT = "scripts/check_secrets.sh"
 
@@ -84,8 +87,8 @@ def _seal_run_body() -> str:
 # `EXIT_SOURCE_POLICY` yorumu.
 # `EXIT_SOURCE_FAILED = 7` (M7, 2026-09-19 merge) AYNI GEREKÇEYLE KASITLI OLARAK YOKTUR:
 # `fetch-tff`/`fetch-venues`/`fetch-news` `seal.yml`/`snapshot.yml` tarafından HİÇ çağrılmaz
-# (M8: bu merge adımı yeni bir workflow/cron eklemiyor — dört yeni alt komut şimdilik yalnız
-# elle/CLI'dan çalıştırılıyor). `_seal_run_body()`nin döndürdüğü metin bu yüzden 7'yi üretecek
+# (onları `collect-daily.yml`/`collect-news.yml` çağırır ve 7'yi orada adlandırır — bkz.
+# `test_a_red_collector_*`). `_seal_run_body()`nin döndürdüğü metin bu yüzden 7'yi üretecek
 # bir case arm'ı ASLA taşımaz; `fetch-results` ise `EXIT_LEAGUE_FAILED`ı (3, zaten listede)
 # yeniden kullanıyor — bkz. `collect.py`'deki `EXIT_SOURCE_FAILED` yorumu ve
 # `collectors.results.collect_results` docstring'i.
@@ -374,7 +377,7 @@ def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -
     )
 
 
-# ── Tetikler pg_cron'da (db/migrations/0003, 0004) ───────────────────────────────────────────
+# ── Tetikler pg_cron'da (db/migrations/) ─────────────────────────────────────────────────────
 # GitHub'ın `schedule`ı 51 saatte ~203 tur yerine 16 tur koştu ve 47 maçın kapanış mührü kaçtı.
 # Asıl tetik artık pg_cron → `workflow_dispatch`. İki uç birbirine yalnız bir dosya adıyla ve bir
 # tetik adıyla bağlı: izinli listedeki bir workflow yeniden adlandırılırsa ya da
@@ -382,6 +385,13 @@ def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -
 
 MIGRATIONS = REPO / "db/migrations"
 SNAPSHOT = REPO / ".github/workflows/snapshot.yml"
+COLLECT_DAILY = REPO / ".github/workflows/collect-daily.yml"
+COLLECT_NEWS = REPO / ".github/workflows/collect-news.yml"
+# Her toplayıcı workflow'u ve sırayla koşturduğu `football_edge.collect` alt komutları.
+COLLECTORS = {
+    COLLECT_DAILY: ("fetch-footystats", "fetch-tff", "fetch-venues"),
+    COLLECT_NEWS: ("fetch-news",),
+}
 GITHUB_TOKEN_PATTERN = re.compile(r"github_pat_|gh[pousr]_[A-Za-z0-9]{20,}")
 
 
@@ -405,10 +415,30 @@ def _dispatch_targets(sql: str) -> set[str]:
     return {*in_urls, *in_lists}
 
 
+def _functions() -> dict[str, str]:
+    """`ops.<ad>` → yürürlükteki gövdesi. Migration'lar ad sırasıyla uygulanır ve `create or
+    replace` öncekini ezer: aynı adın son tanımı kazanır."""
+    return {
+        name: body
+        for sql in _migrations().values()
+        for name, body in re.findall(
+            r"create or replace function ops\.(\w+)\([^)]*\).*?\$\$(.*?)\$\$", sql, flags=re.S
+        )
+    }
+
+
+def _allow_list() -> set[str]:
+    """`ops.dispatch_workflow`un yürürlükteki izinli listesi: her tanım listeyi BAŞTAN yazar."""
+    return _dispatch_targets(_functions()["dispatch_workflow"])
+
+
 def test_every_workflow_pg_cron_may_dispatch_exists_and_accepts_a_bare_dispatch() -> None:
     """Dispatch yalnız `ref` gönderir: eksik tetik ya da zorunlu girdi o turu reddettirir."""
     targets = set().union(*map(_dispatch_targets, _migrations().values()))
-    assert {"seal.yml", "snapshot.yml"} <= targets, f"izinli liste okunamadı: {sorted(targets)}"
+    expected = {"seal.yml", "snapshot.yml", *(path.name for path in COLLECTORS)}
+    assert expected <= targets, (
+        f"izinli listede beklenen workflow yok: {sorted(expected - targets)}"
+    )
 
     for name in sorted(targets):
         path = REPO / ".github/workflows" / name
@@ -436,6 +466,38 @@ def test_no_migration_carries_a_github_token() -> None:
     )
 
     assert leaking == [], f"migration'da GitHub token'ı: {leaking}"
+
+
+def test_every_dispatch_wrapper_targets_the_allow_list_in_force() -> None:
+    """`ops.dispatch_workflow` listede olmayan adı reddeder ve her tanım listeyi BAŞTAN yazar:
+    yeni listeden düşen ya da hiç girmeyen bir workflow'un cron işi her turda hata verir, tur hiç
+    koşmaz ve tek iz `cron.job_run_details`te kalır."""
+    wrapped = {
+        target
+        for body in _functions().values()
+        for target in re.findall(r"ops\.dispatch_workflow\('([\w.-]+)'\)", body)
+    }
+    expected = {"seal.yml", "snapshot.yml", *(path.name for path in COLLECTORS)}
+
+    assert expected <= wrapped, f"sarmalayıcısı olmayan workflow: {sorted(expected - wrapped)}"
+    assert wrapped <= _allow_list(), (
+        f"izinli listede olmayan sarmalayıcı hedefi: {sorted(wrapped - _allow_list())}"
+    )
+
+
+def test_no_api_role_may_call_a_dispatch_function() -> None:
+    """`ops` şeması API'ye zaten kapalı; fonksiyon düzeyindeki revoke ikinci katmandır. Postgres
+    yeni fonksiyonun EXECUTE'unu PUBLIC'e verir: revoke unutulursa o katman sessizce yok olur."""
+    sql = "\n".join(_migrations().values())
+    exposed = sorted(
+        name
+        for name in _functions()
+        if not re.search(
+            rf"revoke all on function ops\.{name}\([^)]*\) from public, anon, authenticated;", sql
+        )
+    )
+
+    assert exposed == [], f"API rollerinden geri alınmamış ops fonksiyonu: {exposed}"
 
 
 def test_snapshot_is_triggered_by_pg_cron_alone() -> None:
@@ -474,7 +536,8 @@ def test_snapshot_dispatch_lands_between_two_seal_dispatches() -> None:
 # gövdesini günceller), yeşil tur kapatır. Burada ölçülen, adımların VAR ve DOĞRU YERDE
 # olduğudur; betiğin davranışı `tests/test_ops_alert.py`de.
 
-ALARMED = (SEAL, SNAPSHOT)
+# pg_cron'un tetiklediği turlara kimse bakmıyor: izinli listeye giren HER workflow alarm taşır.
+ALARMED = tuple(REPO / ".github/workflows" / name for name in sorted(_allow_list()))
 
 
 def _condition(step: dict[str, Any]) -> str:
@@ -531,15 +594,14 @@ def test_only_the_closing_step_may_fail_without_turning_the_run_red(path: Path) 
     assert steps[closes]["continue-on-error"] is True
 
 
-@pytest.mark.parametrize(
-    ("path", "contents"), [(SEAL, "write"), (SNAPSHOT, "read")], ids=["seal.yml", "snapshot.yml"]
-)
-def test_alarm_jobs_may_write_issues_and_read_runs(path: Path, contents: str) -> None:
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_alarm_jobs_may_write_issues_and_read_runs(path: Path) -> None:
     """Job düzeyindeki `permissions:` üst düzeyi TAMAMEN ezer, listelenmeyen izin `none` olur:
-    `contents` açıkça yazılmazsa checkout düşer. Seal'in `write`ı çıpa commit'i içindir."""
+    `contents` açıkça yazılmazsa checkout düşer. Yalnız seal `write` taşır: çıpa commit'i."""
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     (job,) = document["jobs"].values()
     permissions = job.get("permissions") or {}
+    contents = "write" if path == SEAL else "read"
 
     assert permissions.get("issues") == "write", f"{path.name}: alarm issue açamaz"
     assert permissions.get("actions") == "read", f"{path.name}: turlar okunamaz"
@@ -573,3 +635,109 @@ def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
         "bekçi alarmı bekçi turuna bağlanmıyor"
     )
     assert '--run-url "$RUN_URL"' in str(steps[watchdog]["run"])
+
+
+# ── Faz 1 toplayıcıları da pg_cron'dan (db/migrations/0005) ──────────────────────────────────
+# Toplayıcılar yalnız elle koşuyordu: hiç koşmayan toplayıcı hiçbir şey toplamaz ve kaçan bir
+# gözlem, kapanış oranı gibi, sonradan üretilemez.
+
+
+@pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
+def test_collectors_are_triggered_by_pg_cron_alone(path: Path) -> None:
+    """GitHub'ın `schedule`ı seyrek ve gecikmeli koşar (0003); ikinci bir tetik aynı turu iki kez
+    koşar ve kaynağa iki kat istek gider. Tek tetik `<ad>-dispatch` işi ve onun sarmalayıcısı."""
+    wrapper = "dispatch_" + path.stem.replace("-", "_")
+    job = (
+        rf"cron\.schedule\(\s*'{path.stem}-dispatch',\s*'[^']+',"
+        rf"\s*'select ops\.{wrapper}\(\)'\s*\)"
+    )
+
+    assert re.search(job, "\n".join(_migrations().values())), (
+        f"{path.name}'i hiçbir pg_cron işi tetiklemiyor: toplayıcı hiç koşmaz"
+    )
+    assert f"ops.dispatch_workflow('{path.name}')" in _functions().get(wrapper, ""), (
+        f"ops.{wrapper}() {path.name}'i tetiklemiyor"
+    )
+    assert "schedule" not in _triggers(path), f"{path.name} GitHub'dan da tetikleniyor"
+
+
+@pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
+def test_collectors_read_only_the_database_secret(path: Path) -> None:
+    """Toplayıcılar ücretli API çağırmaz. `ODDS_API_KEY` verilen bir workflow kredi harcayabilir
+    ve pg_cron onu kimse bakmadan koşar."""
+    expressions = re.findall(r"\$\{\{(.*?)\}\}", path.read_text(encoding="utf-8"), flags=re.S)
+    secrets = sorted({text.strip() for text in expressions if "secrets" in text})
+
+    assert secrets == ["secrets.DATABASE_URL"], f"{path.name} beklenmeyen secret okuyor: {secrets}"
+
+
+# `uv run python -m football_edge.collect <alt komut>`un yerine geçer: alt komutu kaydeder,
+# `FAIL_COMMAND` için `FAIL_CODE` ile döner.
+FAKE_UV = """\
+#!/usr/bin/env bash
+for command; do :; done
+echo "$command" >> "$CALLS"
+[ "$command" != "$FAIL_COMMAND" ] || exit "$FAIL_CODE"
+"""
+
+
+def _collect_run_body(path: Path) -> str:
+    return next(
+        str(step["run"]) for step in _steps(path) if "football_edge.collect" in str(step.get("run"))
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "failing", "code", "named"),
+    [
+        (COLLECT_DAILY, None, 0, ""),
+        (COLLECT_DAILY, "fetch-footystats", collect.EXIT_LEAGUE_FAILED, "lig"),
+        (COLLECT_DAILY, "fetch-tff", collect.EXIT_SOURCE_FAILED, "kaynak"),
+        (COLLECT_DAILY, "fetch-venues", 1, "beklenmedik"),
+        (COLLECT_NEWS, None, 0, ""),
+        (COLLECT_NEWS, "fetch-news", collect.EXIT_SOURCE_FAILED, "kaynak"),
+    ],
+    ids=["daily-ok", "daily-footystats-3", "daily-tff-7", "daily-venues-1", "news-ok", "news-7"],
+)
+def test_a_red_collector_does_not_stop_the_others_and_turns_the_run_red(
+    tmp_path: Path, path: Path, failing: str | None, code: int, named: str
+) -> None:
+    """Workflow koşulmaz: toplama adımının `run:` gövdesi, `uv` yerine kayıt tutan bir sahteyle,
+    GitHub'ın `shell:` verilmemiş adımı koştuğu `bash -e` altında koşulur. Bir kaynağın arızası
+    ötekilerin gözlemini kaçırtmamalı; düşen toplayıcı turu kırmızıya çevirmeli ve `::error::`
+    satırında (turun özetine düşer) adıyla görünmeli."""
+    fake = tmp_path / "uv"
+    fake.write_text(FAKE_UV, encoding="utf-8")
+    fake.chmod(0o755)
+    script = tmp_path / "step.sh"
+    script.write_text(_collect_run_body(path), encoding="utf-8")
+    calls = tmp_path / "calls"
+    calls.touch()
+    env = {
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "FAIL_COMMAND": failing or "",
+        "FAIL_CODE": str(code),
+    }
+
+    result = subprocess.run(
+        ["bash", "-e", str(script)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    ran = calls.read_text(encoding="utf-8").split()
+    errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
+    assert ran == list(COLLECTORS[path]), f"{path.name}: koşan alt komutlar {ran}"
+    assert (result.returncode == 0) == (failing is None), (
+        f"{path.name}: düşen {failing or 'yok'}, adımın çıkışı {result.returncode}"
+    )
+    if failing is None:
+        assert errors == [], f"{path.name}: yeşil turda hata satırı: {errors}"
+    else:
+        assert any(failing in line and named in line for line in errors), (
+            f"{path.name}: {failing} (exit {code}) adıyla ({named!r}) raporlanmıyor: {errors}"
+        )

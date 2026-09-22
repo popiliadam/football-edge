@@ -1,0 +1,70 @@
+name: collect-news
+
+on:
+  # TEK tetik pg_cron: `ops.dispatch_collect_news()` bu workflow'u iki saatte bir
+  # `workflow_dispatch` ile çağırır (db/migrations/0005_collect_dispatch.sql). GitHub `schedule`ı
+  # KASITLI olarak yok (bkz. collect-daily.yml).
+  workflow_dispatch:
+
+concurrency:
+  # Kendi grubu (gerekçe collect-daily.yml'de): `odds-collect`e de `collect-daily`ye de girmez.
+  group: collect-news
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
+      contents: read
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py).
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secret taraması
+        # Depo PUBLIC: izlenen bir dosyaya kaçmış secret varsa tur, veritabanı secret'ını hiçbir
+        # adıma vermeden kırmızı düşer.
+        run: ./scripts/check_secrets.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Haberleri topla
+        env:
+          # Yalnız veritabanı: haber toplayıcısı ücretli API çağırmaz.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.collect fetch-news
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "haber turu tamam" ;;
+            7) echo "::error::fetch-news: kaynak toplanamadı (exit 7) — ayrıntı yukarıdaki satırlarda" ;;
+            *) echo "::error::fetch-news beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          # Hiçbir kod yutulmaz: 7 de işi kırmızıya düşürür, yalnız adıyla.
+          exit "$code"
+      - name: Alarm aç
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
+        # gövdesi güncellenir (her tur yeni bildirim üretseydi alarm gürültüye gömülürdü).
+        # `cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış döner.
+        if: ${{ failure() || cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow collect-news --run-url "$RUN_URL"
+      - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
+        # turda kapanır.
+        if: success()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow collect-news --run-url "$RUN_URL"
