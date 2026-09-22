@@ -284,12 +284,13 @@ def test_bridge_writes_the_report_with_the_days_n(
     text = out.read_text(encoding="utf-8")
     assert "Karşılaştırılan maç (N): 2" in text  # takma adla eşlenen dahil
     assert "Karşılaştırılamayan canlı maç: 1" in text
-    assert "Yöntem: shin" in text
+    assert f"Yöntem: {DEFAULT_METHOD}" in text
     assert "Alpha Town" not in text
     summary = [
         record.getMessage() for record in caplog.records if record.name == "football_edge.market"
     ]
-    assert summary == [f"köprü: n=2 · karşılaştırılamayan=1 · yöntem=shin · rapor={out}"]
+    line = f"köprü: n=2 · karşılaştırılamayan=1 · yöntem={DEFAULT_METHOD} · rapor={out}"
+    assert summary == [line]
 
 
 def test_bridge_honours_catalog_since_and_method(
@@ -343,7 +344,7 @@ def test_bridge_defaults_point_at_the_repository_config() -> None:
     assert args.since == date(2026, 7, 1)
     assert args.catalog == Path("config/history_leagues.yaml")
     assert args.aliases == Path("config/history_aliases.yaml")
-    assert args.method == "shin"
+    assert args.method == DEFAULT_METHOD
 
 
 # ── Düzeltme turu 1 (R114) ─────────────────────────────────────────────────────────────────
@@ -353,7 +354,8 @@ def test_efficiency_measures_with_the_method_the_pooled_leagues_choose(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     # Aynı marjlı fiyat (1.5, 4.0, 7.0): M1'de favori kazanır → M1 TEK BAŞINA `power` seçer;
-    # X1'de sürpriz kazanır → iki lig HAVUZLANINCA `multiplicative`. İkisi de DEFAULT_METHOD değil.
+    # X1'de sürpriz kazanır → iki lig HAVUZLANINCA `multiplicative`. Havuz sonucu DEFAULT_METHOD
+    # (power) değil: sabit varsayılan da (R6) yalnız ilk lig de (R15) `power` üretir, RED olur.
     main = patterned(
         "HHHHHHHDDA", league="M1", season="2324", start=date(2023, 8, 5), repeats=8, first=0
     )

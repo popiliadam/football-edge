@@ -494,12 +494,13 @@ def test_a_league_that_could_not_be_measured_keeps_a_dash_row() -> None:
 
 
 def test_report_names_the_selected_method_and_flags_a_default_it_did_not_choose() -> None:
-    assert "Seçilen yöntem: **shin**" in _report(SHIN_BEST)
-    assert "UYARI" not in _report(SHIN_BEST)
+    # DEFAULT_METHOD = power (K2): power seçilince uyarı yok, shin seçilince var.
     power_best = {"multiplicative": 0.99, "power": 0.96, "shin": 0.97}
-    text = _report(power_best)
-    assert "Seçilen yöntem: **power**" in text
-    assert "UYARI" in text
+    assert "Seçilen yöntem: **power**" in _report(power_best)
+    assert "UYARI" not in _report(power_best)
+    text = _report(SHIN_BEST)
+    assert "Seçilen yöntem: **shin**" in text
+    assert "UYARI: ölçüm `shin` seçti; `DEFAULT_METHOD` ölçümden sonra güncellenmeli." in text
 
 
 def test_report_says_when_there_is_no_candidate() -> None:

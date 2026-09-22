@@ -454,7 +454,9 @@ def _score_lines(scores: Mapping[str, float]) -> list[str]:
         f"Seçilen yöntem: **{chosen}** (lig tablosu bununla) · `DEFAULT_METHOD`: {DEFAULT_METHOD}",
     ]
     if chosen != DEFAULT_METHOD:
-        lines.append(f"UYARI: ölçüm `{chosen}` seçti; `DEFAULT_METHOD` Task 12'de güncellenmeli.")
+        lines.append(
+            f"UYARI: ölçüm `{chosen}` seçti; `DEFAULT_METHOD` ölçümden sonra güncellenmeli."
+        )
     return [*lines, ""]
 
 
