@@ -13,6 +13,12 @@ on:
     - cron: "41 5 * * *"
   workflow_dispatch:
 
+concurrency:
+  # Tek tur: üst üste binen iki tur aynı tarihi ayrı ayrı çekip birbirinin push'unu reddettirir.
+  # `odds-collect` DEĞİL — o grubu paylaşan workflow mühür turlarını kuyruktan düşürür.
+  group: sources-audit
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -28,6 +34,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Yeniden koşturulan eski tur da ref'in BUGÜNKÜ ucunu alır; tetikleyen sha'nın bayat
+          # tarihlerini tazeleyip güncel main'le çakışmaz.
+          ref: ${{ github.ref }}
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
@@ -42,7 +52,8 @@ jobs:
       - name: Tazelenen tarihleri commit'le
         # Sapan bir kaynak turu kırmızı yapar ama aynı kalanların tarihi yine yazılır. Yalnız
         # main: başka dala elle tetiklenen tur bot commit'i atmaz. seal.yml'in botu da main'e
-        # çıpa push'luyor: reddedilen push main birleştirilerek en çok 3 kez denenir, force asla.
+        # çıpa push'luyor: reddedilen push main birleştirilerek (rebase değil, deponun mesaj
+        # biçimiyle) en çok 3 kez denenir, force asla.
         if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         run: |
           if git diff --quiet -- config/sources.yaml; then
@@ -60,7 +71,8 @@ jobs:
               exit 1
             fi
             echo "::warning::push reddedildi (deneme $attempt/3), main birleştirilip yeniden deneniyor"
-            git pull --no-rebase --no-edit origin main
+            git fetch origin main
+            git merge --no-edit -m "merge: origin/main — sources-audit botu" FETCH_HEAD
             attempt=$((attempt + 1))
           done
       - name: FBref ve ClubElo yeniden ölçümü
@@ -88,7 +100,9 @@ jobs:
       - name: Alarm aç
         # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız gövdesi
         # güncellenir. `cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış döner.
-        if: ${{ failure() || cancelled() }}
+        # Yalnız main (iki alarm adımı da): başka dala elle tetiklenen tur main'in alarmına
+        # dokunmaz. Parantez şart — `&&`, `||`dan sıkı bağlar.
+        if: ${{ (failure() || cancelled()) && github.ref == 'refs/heads/main' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -96,7 +110,7 @@ jobs:
       - name: Alarm kapat
         # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
         # turda kapanır.
-        if: success()
+        if: ${{ success() && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}

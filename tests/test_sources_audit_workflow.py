@@ -20,7 +20,11 @@ REPO = Path(__file__).resolve().parent.parent
 WORKFLOW = REPO / ".github/workflows/sources-audit.yml"
 DRIFT = "scripts/robots_drift.py"
 COMMIT_MESSAGE = "chore: robots yeniden doğrulandı"
-PULL = "pull --no-rebase --no-edit origin main"
+MERGE_MESSAGE = "merge: origin/main — sources-audit botu"
+MAIN_ONLY = "github.ref == 'refs/heads/main'"
+# Sahte git'in kaydettiği biçim (`$*`): kabuk tırnakları düşmüş hâli.
+FETCH = "fetch origin main"
+MERGE = f"merge --no-edit -m {MERGE_MESSAGE} FETCH_HEAD"
 
 # Sahte git: her çağrıyı kaydeder; `diff` FAKE_DIFF_EXIT döner, `push` ilk FAKE_REJECTS
 # denemede reddedilir (seal.yml'in botu main'e araya çıpa commit'i sokmuş gibi).
@@ -82,6 +86,20 @@ def test_drift_step_refreshes_the_verified_dates() -> None:
     assert "--refresh" in str(_steps()[_index_of(DRIFT)]["run"]).split()
 
 
+def test_runs_queue_in_their_own_concurrency_group() -> None:
+    """Üst üste binen iki tur aynı tarihi ayrı ayrı çekip birbirinin push'unu reddettirirdi.
+    `odds-collect` değil: o grubu paylaşan workflow mühür turlarını kuyruktan düşürür."""
+    assert _document().get("concurrency") == {"group": "sources-audit", "cancel-in-progress": False}
+
+
+def test_checkout_takes_the_current_tip_of_the_ref() -> None:
+    """Yeniden koşturulan eski bir tur varsayılan olarak TETİKLEYEN sha'yı alır: o günün bayat
+    tarihlerini tazeler ve güncel main'le çakışıp kırmızı verir. Ref'in bugünkü ucu alınmalı."""
+    (checkout,) = [step for step in _steps() if "actions/checkout" in str(step.get("uses", ""))]
+
+    assert (checkout.get("with") or {}).get("ref") == "${{ github.ref }}"
+
+
 def test_github_schedule_stays_the_daily_trigger() -> None:
     """PyYAML (YAML 1.1) `on:` anahtarını True'ya çevirir; iki yazım da okunur."""
     document = _document()
@@ -120,16 +138,22 @@ def test_commit_step_commits_only_the_registry_under_the_bot_identity() -> None:
     assert 'git config user.name "football-edge-bot"' in body
 
 
-def test_no_push_in_the_workflow_is_ever_forced() -> None:
-    """main'e seal.yml'in botu da çıpa push'luyor: force onun commit'ini silerdi."""
+def test_no_push_is_forced_and_a_rejection_is_merged_not_rebased() -> None:
+    """main'e seal.yml'in botu da çıpa push'luyor: force onun commit'ini silerdi, rebase de
+    geçmişi yeniden yazar. Reddedilen push main'i BİRLEŞTİRİR — deponun `<tür>: <açıklama>`
+    biçiminde bir mesajla (git'in varsayılanı "Merge branch 'main' of …" değil)."""
     runs = "\n".join(str(step.get("run", "")) for step in _steps())
-    pushes = re.findall(r"git\b[^\n]*\bpush\b[^\n]*", runs)
+    git_lines = re.findall(r"\bgit\b[^\n]*", runs)
+    pushes = [line for line in git_lines if "push" in line.split()]
 
     assert pushes, "push adımı yok"
     for line in pushes:
         tokens = line.split()
         assert not [t for t in tokens if t in ("-f", "--mirror") or t.startswith(("--force", "+"))]
-    assert f"git {PULL}" in runs
+    assert not [line for line in git_lines if re.search(r"\b(pull|rebase)\b", line)], git_lines
+    assert f"git {FETCH}" in runs
+    assert f'git merge --no-edit -m "{MERGE_MESSAGE}" FETCH_HEAD' in runs
+    assert re.fullmatch(r"[a-z]+: \S.*", MERGE_MESSAGE)
 
 
 def _run_commit_step(tmp_path: Path, *, changed: bool, rejects: int) -> tuple[int, list[str]]:
@@ -164,10 +188,13 @@ def _is_push(call: str) -> bool:
     return "push" in call.split()
 
 
-def _push_or_pull(calls: list[str]) -> list[str]:
-    """push ve pull çağrılarının sırası. pull yalnız tam `PULL` argümanlarıyla sayılır."""
+def _sync_calls(calls: list[str]) -> list[str]:
+    """push/fetch/merge çağrılarının sırası. fetch ve merge yalnız tam argümanlarıyla sayılır."""
+    names = {FETCH: "fetch", MERGE: "merge"}
     return [
-        "push" if _is_push(call) else "pull" for call in calls if _is_push(call) or call == PULL
+        "push" if _is_push(call) else names[call]
+        for call in calls
+        if _is_push(call) or call in names
     ]
 
 
@@ -178,11 +205,13 @@ def test_unchanged_dates_make_no_commit(tmp_path: Path) -> None:
     assert calls == ["diff --quiet -- config/sources.yaml"]
 
 
-def test_a_rejected_push_merges_main_without_rebase_and_retries(tmp_path: Path) -> None:
+def test_a_rejected_push_merges_main_with_a_conventional_message_and_retries(
+    tmp_path: Path,
+) -> None:
     code, calls = _run_commit_step(tmp_path, changed=True, rejects=1)
 
     assert code == 0
-    assert _push_or_pull(calls) == ["push", "pull", "push"]
+    assert _sync_calls(calls) == ["push", "fetch", "merge", "push"]
     commit = next(i for i, c in enumerate(calls) if c.startswith("commit "))
     assert re.fullmatch(rf"commit -m {COMMIT_MESSAGE} \d{{4}}-\d{{2}}-\d{{2}}", calls[commit])
     assert (
@@ -196,7 +225,7 @@ def test_push_gives_up_red_after_three_rejections(tmp_path: Path) -> None:
     code, calls = _run_commit_step(tmp_path, changed=True, rejects=99)
 
     assert code != 0, "üç kez reddedilen push turu yeşil bıraktı: tarih main'e yazılmadı"
-    assert _push_or_pull(calls) == ["push", "pull", "push", "pull", "push"]
+    assert _sync_calls(calls) == ["push", "fetch", "merge", "push", "fetch", "merge", "push"]
 
 
 def test_job_may_write_contents_and_issues_and_read_runs() -> None:
@@ -210,19 +239,29 @@ def test_job_may_write_contents_and_issues_and_read_runs() -> None:
 
 
 @pytest.mark.parametrize(
-    ("command", "condition"),
+    ("command", "status"),
     [("fail", {"failure()", "cancelled()"}), ("ok", {"success()"})],
     ids=["alarm-aç", "alarm-kapat"],
 )
-def test_red_run_opens_the_alarm_and_green_run_closes_it(command: str, condition: set[str]) -> None:
+def test_red_run_opens_the_alarm_and_green_run_closes_it_on_main_only(
+    command: str, status: set[str]
+) -> None:
     """`failure()`/`success()` yalnız önceki adımları görür: alarm adımları job'ın son iki
-    adımıdır. Zaman aşımı turu iptal eder ve `failure()` yanlış döner — `cancelled()` o yüzden."""
+    adımıdır. Zaman aşımı turu iptal eder ve `failure()` yanlış döner — `cancelled()` o yüzden.
+    Yalnız main: başka dala elle tetiklenen yeşil tur main'in açık alarmını kapatmamalı."""
     steps = _steps()
     index = _index_of(f"scripts/ops_alert.py {command} --workflow sources-audit ")
     step = steps[index]
+    conjuncts = {part.strip() for part in _condition(step).split("&&")}
 
     assert index == len(steps) - (2 if command == "fail" else 1)
-    assert {part.strip() for part in _condition(step).split("||")} == condition
+    assert MAIN_ONLY in conjuncts, f"alarm main dışında da çalışıyor: {_condition(step)!r}"
+    (rest,) = conjuncts - {MAIN_ONLY}
+    if "||" in rest:
+        # `&&`, `||`dan sıkı bağlar: parantezsiz yazılırsa main koşulu yalnız son dala uyar.
+        assert rest.startswith("(") and rest.endswith(")"), rest
+        rest = rest[1:-1]
+    assert {part.strip() for part in rest.split("||")} == status
     env = step.get("env") or {}
     assert env.get("GITHUB_TOKEN") == "${{ github.token }}"
     assert str(env.get("RUN_URL", "")).endswith("/actions/runs/${{ github.run_id }}")
