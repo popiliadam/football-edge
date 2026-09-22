@@ -81,10 +81,9 @@ EXIT_SOURCE_POLICY = 6
 # `fetch-results` bu kodu ALMAZ: o gerçekten LİG döngüler (aynı `League.odds_api_key`
 # kümesi, aynı per-lig izolasyon deseni) ve `EXIT_LEAGUE_FAILED`ı DOĞRU biçimde yeniden
 # kullanır — bkz. `collectors.results.collect_results` docstring'i.
-# Bu kod da (EXIT_SOURCE_POLICY gibi) `seal.yml`nin case listesinde YOKTUR: M8 bu görevde
-# hiçbir yeni workflow/cron eklenmesini yasaklıyor, dört yeni alt komuttan hiçbiri
-# `seal.yml`/`snapshot.yml` tarafından hiç çağrılmıyor — `tests/test_workflows.py`deki
-# "BU LİSTE ELLE TUTULUR" yorumu bu kararı da adıyla taşır.
+# Bu kod da (EXIT_SOURCE_POLICY gibi) `seal.yml`nin case listesinde YOKTUR: `seal.yml`/
+# `snapshot.yml` `fetch-*` komutlarını çağırmaz. Onları `collect-daily.yml`/`collect-news.yml`
+# çağırır ve bu kodu case kollarında adıyla ("kaynak") karşılar.
 # Task 11 (review fix, Minor #3 promoted) — `map-entities` de BU kodu alır: `mapping.
 # resolve_source_aliases`in fırlattığı `RuntimeError` (örn. `_alias_text`in eksik
 # `team_name` bulgusu) AYNI İSTİSNA, AYNI GEREKÇE — bir kaynağın veri sözleşmesi ihlali,
