@@ -1,8 +1,8 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-21 · **Durum:** **Faz 1 `main`'e merge edildi ve push'landı
-(`668ec61`), CI yeşil** · **AÇIK ACİL İŞ: mühür tetiği (§1/1)**
-**Dal:** `main` · **368 test** (18'i contract) · kapı **9 adım yeşil + `zincir` adıyla SKIP**
+**Son güncelleme:** 2026-09-22 · **Durum:** **Faz 1 `main`'de; İz C (işletme) sürüyor** — mühür ve
+snapshot pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor (RUNBOOK §3)
+**Dal:** `main` · **405 test** (18'i contract) · kapı **9 adım yeşil + `zincir` adıyla SKIP**
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -13,15 +13,15 @@
 
 ## 1. Senin yapacağın şeyler
 
-**1. ACİL — mühür tetiğini kur (tek sefer, ~5 dakika).** GitHub `seal.yml`in `*/15`
-cron'unu 51 saatte ~203 tur yerine 16 kez koşturdu; 47 maçın kapanış fiyatı kalıcı olarak
-kaçtı (DEFERRED §10). Düzeltme hazır: pg_cron her 15 dakikada `seal.yml`i API'den tetikler
-(`db/migrations/0003_seal_dispatch.sql`). Kalan üç adım **RUNBOOK §3.2**'de: fine-grained
-GitHub tokenı, Vault'a `github_seal_dispatch` adıyla koymak, migration'ı SQL editöründe bir
-kez çalıştırmak. Token ve üretimde kalıcı zamanlanmış iş asistanın yapamadığı adımlar. Kurulana
-kadar mühür kaçmaya devam eder.
+**1. Tetikler canlı — yapman gereken bir şey yok.** `seal` (15 dakikada bir) ve `snapshot`
+(06:22 UTC) Supabase pg_cron'dan `workflow_dispatch` ile tetikleniyor (0003/0004, RUNBOOK §3);
+token Vault'ta `github_seal_dispatch` adıyla, süresiz. Kırmızı bir tur `ops-alert` etiketli bir
+issue açar, yeşil tur kapatır; tetikler durursa bekçi `🔴 bekçi kırmızı` açar. Haber almak için
+depoyu GitHub'da **Watch** etmen yeterli. (GitHub'ın `schedule`ı 51 saatte ~203 mühür turunun
+16'sını koşturmuş, 47 maçın kapanış fiyatı kalıcı kaçmıştı — DEFERRED §10.)
 
-**2. Push'lar senin terminalinden.** `outward_action_gate` asistanın push'unu kapatıyor.
+**2. Push, merge ve migration'ları asistan yapar.** Bu projede SEO eklentisi (ve onun push kapısı)
+`.claude/settings.local.json` ile kapalı; Supabase migration araçlarına izin verildi.
 **Asla `--force`:** `seal.yml`in bot commit'leri zincir çıpalarıdır, force push onları siler.
 Push reddedilirse önce `git pull --no-rebase origin main`.
 
@@ -54,7 +54,7 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
 | Kapı | 9 adım PASS + `zincir` SKIP | Birleşik `main` (`668ec61`) taze klonda + CI push koşusu |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
-| Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (0003) **canlı**; `snapshot-dispatch` (0004) depoda, **veritabanına UYGULANMADI** — `snapshot.yml`in `schedule`ı kalktı | seal: 09-22 05:00 UTC dispatch → `204` → tur success (controller); snapshot: uygulanınca RUNBOOK §3.3 |
+| Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | Yalnız MockTransport testleri — runner'da ve gerçek GitHub'da **henüz koşmadı** |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 

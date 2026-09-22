@@ -66,8 +66,8 @@ koruması her seferinde devreye girip `None` döner ve `_verify_chain_command`
 hiçbirinde** çıpa-eksikliği kontrolü gerçekten koşmaz. Silinen bir çıpa yalnız haftalık
 `full-scan.yml`de (o `fetch-depth: 0` çeker) yakalanır; tespit gecikmesi en fazla **7 gün**.
 
-Bu KASITLI bir maliyet ödünleşmesidir, gözden kaçmış değil: `seal.yml`in kendisi günde
-~96 çıpa commit'i üretiyor, 15 dakikada bir tam geçmiş çekmek bu sıklıkla bileşip gerçek
+Bu KASITLI bir maliyet ödünleşmesidir, gözden kaçmış değil: `seal.yml` günde ~96 kez
+koşuyor; her turda tam geçmiş çekmek (geçmiş her gün en az bir çıpa commit'iyle büyüyor) gerçek
 ve büyüyen bir maliyete dönüşürdü. Geciken **ALARM**dır, **KANIT** değil — silinen
 çıpanın git geçmişindeki izi hâlâ durur, yalnız fark edilmesi haftaya kadar sürebilir.
 
@@ -226,12 +226,11 @@ risk hâline gelir.
 mühür turunun snapshot'tan ayrı bir concurrency grubuna alınması — ikincisi C2'nin
 kapattığı yarışı geri açar, yani **kilit olmadan yapılamaz.**
 
-### 4.2 Çıpa commit'i günde ~96 ek CI koşusu doğuruyor
+### 4.2 ~~Çıpa commit'i günde ~96 ek CI koşusu doğuruyor~~ — YANLIŞTI, konusu da kalmadı (2026-09-22)
 
-`seal.yml` her mühür turunda `ledger/` altına commit atıp push'luyor; `ci.yml`
-`push` ile tetiklendiği için her biri bir kapı koşusu demek. Depo public → Actions
-dakikası ücretsiz, yani bugün yalnız gürültü. `paths-ignore` ile susturulabilir ama
-bu kapıya filtre eklemektir; **bilinçli olarak yapılmadı.**
+Bot `GITHUB_TOKEN` ile push'lar ve GitHub bu push'lardan yeni workflow tetiklemez: CI yalnız
+insan push'larında koştu (ölçüldü). Çıpa da artık yalnız zincir başı değiştiğinde ya da yeni UTC
+gününde commit'lenir (`publish-head`). `ci.yml`e dal filtresi yine bilinçli olarak eklenmedi.
 
 ---
 
@@ -570,3 +569,4 @@ için `0004_workflow_dispatch.sql`; `docs/RUNBOOK.md` §3). Açık kalanlar:
 | 10d | Kredi bütçesi ilk kez gerçekten kullanılacak | Mühürler bugüne kadar çoğunlukla kaçtığı için ayda ~314 kredilik mühür payı hiç tüketilmedi; güvenilir tetikle ay sonuna doğru `EXIT_QUOTA_EXHAUSTED` görülebilir |
 | 10e | `snapshot.yml`in tek tetiği pg_cron (`snapshot-dispatch`); GitHub `schedule`ı kaldırıldı | İki tetik aynı gün iki tur, yani iki kat kredi demek. Bedeli: pg_cron durursa snapshot'ın yedeği yok — bekçi 30 saatte kendi alarmını açar |
 | 10f | Alarmın kör noktaları | (1) Bekçi yalnız GitHub'ın seyrek yedek `schedule` turunda koşar: bayat tetik saatler sonra görünür, bekçi alarmı da ancak iki tetiği taze bulan sonraki yedek turda kapanır. (2) Alarm açıkken yeni bir kırmızı yeni bildirim üretmez, yalnız gövdeyi günceller — 10b'nin "yalnız YENİ kayıp" ayrımı gelene kadar açık alarm "son tura bak" demektir. (3) Alarm adımı `uv run` ile koşar: `uv` kurulmadan önce düşen bir tur (checkout, secret taraması) alarm açamayabilir. (4) GitHub'ın kendi "run failed" e-postaları (dispatch'i tetikleyen hesaba, hesap ayarına göre) `ops-alert`in tekilleştirmesinin dışındadır: kırmızı sürdükçe her tur ayrı bir e-posta olabilir |
+| 10g | `publish-head` satır sayısını ve zincir başını İKİ ayrı sorguda okuyor (READ COMMITTED) | Arada bir yazım commit edilirse çıpanın `head`i `last_id` satırının hash'i olmaz. Otomatik turlarda risk düşük (seal ve snapshot aynı `odds-collect` grubunda); risk, elle çalıştırılan bir komutun bir turla çakışması. Düzeltme: tek ifade ya da REPEATABLE READ (Task A incelemesi, 2026-09-22) |

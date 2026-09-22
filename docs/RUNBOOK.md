@@ -114,6 +114,7 @@ uv run python -m football_edge.collect verify-chain
 
 uv run python -m football_edge.collect publish-head
 # beklenen: "zincir başı yazıldı: ledger/head-YYYY-MM-DD.txt"
+#           (bugünün çıpası aynı başla zaten varsa: "zincir başı değişmedi: …")
 ```
 
 **`ÇIPA ARŞİVLENDİ` satırı beklenen çıktıdır ve kaybolmaz.** Arşivlenmiş bir çıpa
@@ -241,6 +242,7 @@ uv run python -m football_edge.collect verify-chain
 
 uv run python -m football_edge.collect publish-head
 # beklenen: "zincir başı yazıldı: ledger/head-YYYY-MM-DD.txt"
+#           (bugünün çıpası aynı başla zaten varsa: "zincir başı değişmedi: …")
 ```
 
 `ATLANDI` bir tur beklenir, sonra kaybolmalıdır (§1.5). Kaybolmuyorsa çıpa
