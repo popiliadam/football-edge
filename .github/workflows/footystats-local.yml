@@ -1,0 +1,58 @@
+name: footystats-local
+
+# Mac'teki günlük footystats işinin (RUNBOOK §3.9) sonucunu GitHub'a taşır. İş alarmı kendi `gh`
+# token'ıyla açsaydı GitHub, kişinin kendi eylemi olduğu için bildirim göndermezdi (R74): alarm
+# burada `github.token` (github-actions) kimliğiyle açılır ve kapanır. Her tetikleme bekçi için
+# bir kalp atışıdır: Mac 72 saat raporlamazsa `🔴 bekçi kırmızı` açılır (§3.6).
+on:
+  workflow_dispatch:
+    inputs:
+      result:
+        description: "Mac'teki turun sonucu"
+        type: choice
+        options: [ok, fail]
+        required: true
+
+concurrency:
+  # Raporlar sırayla işlenir, hiçbiri iptal edilmez: kuyrukta bekleyen bir `fail` kaybolmasın.
+  group: footystats-local
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
+      contents: read
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py). Secret yok: bu iş veriye dokunmaz.
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Bu iş push'lamaz: job token'ı `.git/config`e yazılmaz, sonraki adımlar okuyamaz.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Alarm aç
+        # Girdi yalnız bu koşulda okunur; hiçbir `run:` gövdesine girmez (workflow enjeksiyonu).
+        if: inputs.result == 'fail'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          uv run python scripts/ops_alert.py fail --workflow footystats-local
+          --run-url "$RUN_URL — ayrıntı Mac'teki günlükte: ~/Library/Logs/football-edge/footystats.log"
+      - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) rapor kırmızıya dönmez; açık alarm sonraki `ok`ta kapanır.
+        if: inputs.result == 'ok'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow footystats-local --run-url "$RUN_URL"

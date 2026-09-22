@@ -297,13 +297,14 @@ def test_ok_without_an_open_alarm_writes_nothing() -> None:
 # Bekçinin raporu KENDİ issue'sudur (`🔴 bekçi kırmızı`) ve adım bayat tetikte de 0 döner:
 # seal job'ını düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı geri alırdı. Eşikler
 # sınırın iki yanından sınanır: seal 59/61 dk, snapshot ve collect-daily 29/31 sa,
-# collect-news 3 sa 59 dk/4 sa 1 dk.
+# collect-news 3 sa 59 dk/4 sa 1 dk, footystats-local (Mac'in kalp atışı, R74) 71/73 sa.
 
 FRESH = {
     "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=59))],
     "snapshot.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
     "collect-daily.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
     "collect-news.yml": [_workflow_run("workflow_dispatch", timedelta(hours=3, minutes=59))],
+    "footystats-local.yml": [_workflow_run("workflow_dispatch", timedelta(hours=71))],
 }
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
@@ -367,8 +368,13 @@ def test_stale_snapshot_is_named_in_the_watchdog_alarm() -> None:
             timedelta(hours=4, minutes=1),
             ("son tur 4 sa 1 dk önce", "eşik 4 sa 0 dk", "collect-news-dispatch"),
         ),
+        (
+            "footystats-local.yml",
+            timedelta(hours=73),
+            ("son workflow_dispatch turu 73 sa 0 dk önce", "eşik 72 sa 0 dk", "RUNBOOK §3.9"),
+        ),
     ],
-    ids=["collect-daily", "collect-news"],
+    ids=["collect-daily", "collect-news", "footystats-local"],
 )
 def test_a_stale_collect_trigger_is_named_in_the_watchdog_alarm(
     workflow: str, age: timedelta, needles: tuple[str, ...]
@@ -393,7 +399,7 @@ def test_collect_triggers_just_inside_their_thresholds_are_read_and_stay_fresh()
 
     assert fake.writes == [], "eşiğin içindeki toplayıcı alarm yazdı"
     asked = {path for method, path in fake.requests if method == "GET"}
-    for workflow in ("collect-daily.yml", "collect-news.yml"):
+    for workflow in ("collect-daily.yml", "collect-news.yml", "footystats-local.yml"):
         assert f"/actions/workflows/{workflow}/runs" in asked, f"{workflow} izlenmiyor"
 
 
@@ -403,8 +409,9 @@ def test_collect_triggers_just_inside_their_thresholds_are_read_and_stay_fresh()
         ("seal.yml", []),
         ("seal.yml", [_workflow_run("schedule", timedelta(minutes=1))]),
         ("snapshot.yml", []),
+        ("footystats-local.yml", []),
     ],
-    ids=["seal-hic-tur", "seal-yalniz-schedule", "snapshot-hic-tur"],
+    ids=["seal-hic-tur", "seal-yalniz-schedule", "snapshot-hic-tur", "mac-hic-rapor"],
 )
 def test_a_trigger_that_never_ran_opens_the_watchdog_alarm(
     workflow: str, runs: list[dict[str, Any]]

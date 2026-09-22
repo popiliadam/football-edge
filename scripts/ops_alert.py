@@ -77,6 +77,15 @@ TRIGGERS = (
         max_age=timedelta(hours=4),
         hint="pg_cron collect-news-dispatch durmuş olabilir — RUNBOOK §3.3",
     ),
+    # Mac'teki footystats işi her turdan sonra bu rapor workflow'unu tetikler (R74): kalp atışı.
+    # 72 sa: hafta sonu kapalı kalan bir Mac alarm üretmez, bir hafta kapalı kalan üretir.
+    Trigger(
+        workflow="footystats-local.yml",
+        event="workflow_dispatch",
+        max_age=timedelta(hours=72),
+        hint="Mac'teki footystats işi raporlamıyor: Mac kapalı, launchd işi durmuş ya da gh "
+        "oturumu düşmüş — RUNBOOK §3.9",
+    ),
 )
 
 
