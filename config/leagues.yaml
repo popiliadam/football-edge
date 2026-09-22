@@ -49,3 +49,38 @@ leagues:
     gl: TR
     active: true
     footystats_path: /turkey/super-lig/xg
+  # ── İz A (2026-09-23): Faz 2 lig önerisi, kullanıcı onaylı (N1, B1, AUT) ─────────────
+  # `active: false` = The Odds API KREDİ ANAHTARI KAPALI. snapshot/seal/fetch-results yalnız
+  # `active: true` ligleri çağırır; açmak (true) snapshot + mühür kredisi harcar ve
+  # footystats'ı da açar — kullanıcı kararı (bütçe 500/ay; hesap: .superpowers/sdd/
+  # 2026-09-23-leagues-n1-b1-aut/izA-report.md). Açmadan ÖNCE `config/sources.yaml`
+  # footystats `declared_paths`ine aşağıdaki üç yol eklenmeli — kapı
+  # (`test_each_collectors_fetched_path_is_declared`) eklenmemişse kırmızı verir.
+  # odds_api_key: ölçüm belgesi §2.5 (`/v4/sports?all=true`, 0 kredi) = history_leagues.yaml.
+  # footystats_path: 2026-09-23'te `collector._guarded_get` ile ölçüldü (robots izinli, 200,
+  # `xg-all` tablosu 18/18/12 takım). lang/gl bugün yalnız `leagues` aynasına yazılır;
+  # Belçika iki dilli (nl/fr) — nl seçildi, hiçbir toplayıcı henüz okumuyor.
+  - id: ned.1
+    odds_api_key: soccer_netherlands_eredivisie
+    name: Eredivisie
+    country: Netherlands
+    lang: nl
+    gl: NL
+    active: false
+    footystats_path: /netherlands/eredivisie/xg
+  - id: bel.1
+    odds_api_key: soccer_belgium_first_div
+    name: First Division A
+    country: Belgium
+    lang: nl
+    gl: BE
+    active: false
+    footystats_path: /belgium/pro-league/xg
+  - id: aut.1
+    odds_api_key: soccer_austria_bundesliga
+    name: Bundesliga
+    country: Austria
+    lang: de
+    gl: AT
+    active: false
+    footystats_path: /austria/bundesliga/xg
