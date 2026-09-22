@@ -10,6 +10,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "defusedxml>=0.7",
     "typesafe-sdk>=0.1",
+    "numpy>=2.1",
 ]
 
 [dependency-groups]
@@ -32,7 +33,10 @@ packages = ["src/football_edge"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-markers = ["contract: kaydedilmiş fixture üzerinde tazelik/şema sözleşmesi"]
+markers = [
+    "contract: kaydedilmiş fixture üzerinde tazelik/şema sözleşmesi",
+    "leakage: zaman semantiği, dönem ayrımı, kilit ve bağlam/sonuç ayrımı — kapının sızıntı adımı sayar",
+]
 
 [tool.ruff]
 line-length = 100
