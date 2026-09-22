@@ -1,0 +1,352 @@
+# Tarihsel taban kilidi (tasarım §5.2, D8): `python -m football_edge.history lock --write`.
+# İÇERİK TAŞIMAZ: yalnız dönem başına satır sayısı, kanonik satırların sha256 özeti ve AvgC
+# 1X2'si tam satır sayısı. Kilitli dönemler dev ve holdout; sonrası her hafta değiştiği için
+# kilitlenmez. Bu dosyayı değiştirmek gerekçeli bir commit'tir (ör. kaynak eski bir skoru
+# düzeltti): gerekçe commit mesajına yazılır, eski özet git geçmişinde kalır.
+canonical_version: 1
+locked_at: 2026-09-22
+dev_end: 2025-07-01
+holdout_end: 2026-07-01
+leagues:
+  ARG:
+    dev:
+      rows: 5726
+      sha256: 12ef16b8cddc218ab2f8e3c2e5eaf88315c566fccef9a6a6af0e15120ea7c3a4
+      avgc_complete: 5726
+    holdout:
+      rows: 509
+      sha256: 61aa9875c9aa19d74e130a7f6f3eac09cb676756bda70e27e2673807acc0963e
+      avgc_complete: 509
+  AUT:
+    dev:
+      rows: 2446
+      sha256: f724ebc2e236489f33cd1cb609c4b2b0075091a0ba856a0d3ee8ba29fd7f656d
+      avgc_complete: 2446
+    holdout:
+      rows: 192
+      sha256: 18016da2ba7d2dd187929149878771083403e6f9f8abc486a206e847e82bd0c7
+      avgc_complete: 192
+  B1:
+    dev:
+      rows: 5368
+      sha256: c64ef2ff61cacbf60f94d8e9361288ec71008f2db59ad74ef66d4943e6f7f781
+      avgc_complete: 1774
+    holdout:
+      rows: 311
+      sha256: 95937833e429c98ad1c1c3a4d5e3d7ea3ffbda2492b6705e9cbd24c15b2304a2
+      avgc_complete: 311
+  BRA:
+    dev:
+      rows: 5055
+      sha256: 1dfc3f6de6fe3608a255a02c93709229e85b53b69be123aeab1938247501553d
+      avgc_complete: 5055
+    holdout:
+      rows: 441
+      sha256: 588d0b890eafc3c7c6c1a4681f2fbf8955d51b4c321091db8b4fccf73b6f1b9c
+      avgc_complete: 441
+  CHN:
+    dev:
+      rows: 2696
+      sha256: 0169873ce7ee557f723a4835b5a96e1d30fe0722bfb487788834913457986990
+      avgc_complete: 2690
+    holdout:
+      rows: 240
+      sha256: 1f0dc59e51cfa2c2534d0915b5e10e9c953c4f428c093a1aca9ccc08c3eb95c9
+      avgc_complete: 240
+  D1:
+    dev:
+      rows: 6120
+      sha256: 0334b650a47878dbc54d5c270a1bd0ba0516d72c53a4acface7b8aa480254b40
+      avgc_complete: 1836
+    holdout:
+      rows: 306
+      sha256: db2d512617fd7d330c197285ca109050dc656b2f4f881ad719eae11b65b0ac14
+      avgc_complete: 306
+  D2:
+    dev:
+      rows: 6120
+      sha256: a66b85eed86a574e468471f85395834e3b2386426a053b0e457713ca9aac0d35
+      avgc_complete: 1836
+    holdout:
+      rows: 306
+      sha256: aa7c661444d2641ba3c5b831f3f2e79b4a58c650fd798d07331a501c0b52fb99
+      avgc_complete: 306
+  DNK:
+    dev:
+      rows: 2760
+      sha256: 81a936268bcb03c6574be0b7b4cd5c34a71971cac36dcd6a19d5a44d05bf4918
+      avgc_complete: 2760
+    holdout:
+      rows: 192
+      sha256: aa21665fc45644c309d81220b0d9b76dd1006e80663c937aacf942915d285453
+      avgc_complete: 192
+  E0:
+    dev:
+      rows: 7600
+      sha256: 74f98e57463d6f8ad6ae922979562cbb2984803d85c3ee55a58647251ccbdc3a
+      avgc_complete: 2280
+    holdout:
+      rows: 380
+      sha256: 33cf8537a505fb7260076715e6fb98f6ae867b8b436b08a4b10c82a63d42e656
+      avgc_complete: 380
+  E1:
+    dev:
+      rows: 11040
+      sha256: bfcab13275dbae96cdf4e2c667ec574304e02bb0b4c8eabcf23505a71aaae0dc
+      avgc_complete: 3312
+    holdout:
+      rows: 552
+      sha256: 5b3cdb4d26f7fa63a46c0ca7561626513f491be8b2414e1b43ccad09d8980977
+      avgc_complete: 552
+  E2:
+    dev:
+      rows: 10888
+      sha256: 5333f154ef20e36888f78a2a7b67bcde369c4d27a27061b939f6fa7d27b2c975
+      avgc_complete: 3160
+    holdout:
+      rows: 552
+      sha256: f23f62dce1a8707a58ab71c4fb106aa7e8a8765a546d82ba680d008ec7326a6a
+      avgc_complete: 552
+  E3:
+    dev:
+      rows: 10928
+      sha256: 2f353c48958b8d048b9fffee9207eb6b410ff2205384e860b61332cafc34888f
+      avgc_complete: 3200
+    holdout:
+      rows: 552
+      sha256: 06d34d377325dd94a6d722157810b1a81814bcd44a68b1744d6db2af0da5e4e2
+      avgc_complete: 552
+  EC:
+    dev:
+      rows: 10682
+      sha256: b9f1e3191a1864cee34d18f353fb58e8fa6638c0d0b25a7f17344955f7ef68f4
+      avgc_complete: 3090
+    holdout:
+      rows: 552
+      sha256: e61b5dbe7f6662404a400e8b4fa0af70e49e2ce5532631ac4a71f1caa60ddfd9
+      avgc_complete: 552
+  F1:
+    dev:
+      rows: 7351
+      sha256: 71f7b20f2aa8829983a67a5bd271aa11e3975691785611a12d512d5e4f439b92
+      avgc_complete: 2031
+    holdout:
+      rows: 306
+      sha256: c132eea08ed42ba5aeb7e88c73499856a31000ab7c63519210ff82e674ce0f34
+      avgc_complete: 306
+  F2:
+    dev:
+      rows: 7425
+      sha256: 5deac5f2ca35453d5f51469222bfc212de3078618db872506d6d5ab1795b6240
+      avgc_complete: 2105
+    holdout:
+      rows: 305
+      sha256: 07b2f3925ce5f82b2e6dc1772e761e6f55379f848e5feee1ee3b24ff03019665
+      avgc_complete: 305
+  FIN:
+    dev:
+      rows: 2443
+      sha256: b67893cd36c090db1f7725067d8d2431daba48fbfa045d0c722fabe5cfba3312
+      avgc_complete: 2443
+    holdout:
+      rows: 183
+      sha256: 356cf711f245f682ca1cdd097167724e576ae1ed29c127887dba3a034b53dce6
+      avgc_complete: 183
+  G1:
+    dev:
+      rows: 4923
+      sha256: 1b9abb31ab7bc7a470b3ff0b7e724932885f5257c45bc6f62cabc2d34c3a9d52
+      avgc_complete: 1433
+    holdout:
+      rows: 236
+      sha256: c50b1cf3d8c05351d4674a5f766019e53b4673c2fadb4d264df2c65d65b75a7c
+      avgc_complete: 236
+  I1:
+    dev:
+      rows: 7600
+      sha256: ab0a1638cce6a6ee9aa6b944297a2c43ee583614c21a8d393e18764aba21fecd
+      avgc_complete: 2280
+    holdout:
+      rows: 380
+      sha256: 6a8ff0f1b628cf2422f2365505d07a52e28e25891b4e0239a74f496f0155209e
+      avgc_complete: 380
+  I2:
+    dev:
+      rows: 8628
+      sha256: 13ee1efd05ef32535d31c090fcd0d688a1761a88c6be27ae6092f4128fe639b5
+      avgc_complete: 2277
+    holdout:
+      rows: 380
+      sha256: 3865a2ae634a9b4deed0ef495151459432453ae5bd06aee7dc52b46465e6c1a4
+      avgc_complete: 380
+  IRL:
+    dev:
+      rows: 2497
+      sha256: 4a53f2139fe2e7b1ca5ed017a4d40999e929f51e3983e33ce634702799f6eab3
+      avgc_complete: 2497
+    holdout:
+      rows: 179
+      sha256: fc6cbc72e9ba33dd30387f88bf342fa8ade349e4ef65e96877815d2ec22a1966
+      avgc_complete: 179
+  JPN:
+    dev:
+      rows: 4361
+      sha256: 50257df29be92be59614b2a273734eea0d9b07c3c43d9a53b6ade396a8ca7cff
+      avgc_complete: 4361
+    holdout:
+      rows: 162
+      sha256: d87595aadb673c87c1912a34897007fcbe5258b9a11fbf41e4b0eabd9cd18760
+      avgc_complete: 162
+  MEX:
+    dev:
+      rows: 4319
+      sha256: 6cb23e3c6f63dd780eacba5cf984639df9687de1524393e76694bd412cee5574
+      avgc_complete: 4319
+    holdout:
+      rows: 336
+      sha256: 5e8482a26822d6adb20aa54a8577baa3c4d48dde81e4f4d4cb6c060c229838bc
+      avgc_complete: 336
+  N1:
+    dev:
+      rows: 6046
+      sha256: 1f09a61939730b8bfb21c59cd1b016548eada8879b00b15d38a82783ee7f28d2
+      avgc_complete: 1762
+    holdout:
+      rows: 306
+      sha256: 586378d78e06d06a58af0cd22fb0cae775fede2e03d147019cfd83a56e87aaef
+      avgc_complete: 306
+  NOR:
+    dev:
+      rows: 3236
+      sha256: 50630eb4032df8d542d52d989d1759608db43a356d5b0a2892ec44e2ac8a0143
+      avgc_complete: 3236
+    holdout:
+      rows: 235
+      sha256: 5d33f786ed536281ed8a20c87460af5c78ec4fd3a6674162d12a1481e0c701b4
+      avgc_complete: 235
+  P1:
+    dev:
+      rows: 5592
+      sha256: df68af857266747ac0d9677100ad56d2d5e1586ea4ab8857d5591034c85489c2
+      avgc_complete: 1836
+    holdout:
+      rows: 306
+      sha256: f590525757125f04d5f4a0df6b986e3ac65d298e4270478b3cc082292bb4b243
+      avgc_complete: 306
+  POL:
+    dev:
+      rows: 3776
+      sha256: 8796925f360e012de9ef3b3813f1eba6803ff088a9275daf9e13645618805a16
+      avgc_complete: 3776
+    holdout:
+      rows: 306
+      sha256: ea0fd233864e0638b8139ff483b7d4b4afb14e89e19a2869adee212261e43341
+      avgc_complete: 306
+  ROU:
+    dev:
+      rows: 3861
+      sha256: 2f31160b9395e644d1d8d5f2028ce08a2d52734dc3ca073a6f1998dc79acaf60
+      avgc_complete: 3861
+    holdout:
+      rows: 321
+      sha256: 546e68b9fc7dc2fbd0e6c47aa21bb2c5d117eee1f3cebad267c2b16d558fec03
+      avgc_complete: 321
+  RUS:
+    dev:
+      rows: 3160
+      sha256: fc6becf1c1123fc1e12236e1562aa11e10ff61e7fc5822ed674d2a426ca47c84
+      avgc_complete: 3158
+    holdout:
+      rows: 240
+      sha256: 4cd1055d6d3c3d90e8d939c8a9be3d000b943c0020d3f06b4437fd17a8c208dc
+      avgc_complete: 160
+  SC0:
+    dev:
+      rows: 4511
+      sha256: 770a355ffdb3e807d13d1eca1f66bd2c41931f5004a71aff5f5957f0f629ef88
+      avgc_complete: 1319
+    holdout:
+      rows: 228
+      sha256: 027c7b569cd977469e558f622bf2a083e669968d2a402c22b39de40a1f692a09
+      avgc_complete: 228
+  SC1:
+    dev:
+      rows: 3512
+      sha256: d75692da52a5b99b235b18bf918eb26d2df1ce0424a7a7c898e1eb4a6bb05d37
+      avgc_complete: 992
+    holdout:
+      rows: 180
+      sha256: 87e55516cb08cc347ab2fc6aafb14b5fec38139aa68826c34a69c3206e523963
+      avgc_complete: 180
+  SC2:
+    dev:
+      rows: 3489
+      sha256: e26191197265df7de568379a637ce6838e6bfcead9f6a2e2b61aab0b0da42004
+      avgc_complete: 969
+    holdout:
+      rows: 180
+      sha256: fa51d1f5e2c4a1638a4e6d91fcfa3b99124b48b5e128ddd03e645ef10cc3c2fa
+      avgc_complete: 180
+  SC3:
+    dev:
+      rows: 3487
+      sha256: 9dbeae374a26f8862e949e23153549c8c7793b9e40646e53738e6e9f1c985473
+      avgc_complete: 967
+    holdout:
+      rows: 180
+      sha256: 1fb34135f66992f3db49c452a1da065e9633582fda1427e7842270807e9239b6
+      avgc_complete: 180
+  SP1:
+    dev:
+      rows: 7600
+      sha256: ef4dce5ebc40fe75d24b42646434004ee49a6ccc9c9d81f5a879725f986e298a
+      avgc_complete: 2280
+    holdout:
+      rows: 380
+      sha256: 75570b3877f7c4fb14dd5c7e6e72b3461b0d6cd8f9c5f571ddfed0acf966b8c5
+      avgc_complete: 380
+  SP2:
+    dev:
+      rows: 9240
+      sha256: 3368aad71eee90c765e438250150bfa52e32d8a794b2a4b718a21e4d2d193fe6
+      avgc_complete: 2772
+    holdout:
+      rows: 462
+      sha256: 073709c42f34d2fce2a25ea9f88c8a7f52aaa1f923e680d5c6329a542e88dcde
+      avgc_complete: 462
+  SWE:
+    dev:
+      rows: 3250
+      sha256: edf5a99005b901df13b7b403d9e9d88d925208d9c8fb17e0ec79f00b0f173304
+      avgc_complete: 3250
+    holdout:
+      rows: 215
+      sha256: f2086a18834f222026ffcc9383dafc755b93f44df6d7e00b1ca072730132beb2
+      avgc_complete: 215
+  SWZ:
+    dev:
+      rows: 2447
+      sha256: be9596e50c3fdeab7d636053e036509b60f56ad90b6a8a35e6eb6bbf35003084
+      avgc_complete: 2446
+    holdout:
+      rows: 228
+      sha256: 5ea144b6f4af3e5e6b6b1566fd79f4e27412fd0d94c8839840351cc753d24a27
+      avgc_complete: 228
+  T1:
+    dev:
+      rows: 6419
+      sha256: 03ea83e0c3e95aceabc625715d994066fff282a9e3ee5c8e6f67c7d42e929d7f
+      avgc_complete: 2141
+    holdout:
+      rows: 306
+      sha256: 2b08fabf38c6e97c5eec397fe92df94c40b155a6dad89200348ab931e385cc01
+      avgc_complete: 306
+  USA:
+    dev:
+      rows: 5567
+      sha256: 306f8590c1bcb2c9cf067579d1c2d65b6a07c2f0061ae76c24c18af0008e1b4a
+      avgc_complete: 5566
+    holdout:
+      rows: 467
+      sha256: 58b6fb0195eaf79b8d4fbeaf5fbc4062132a70216c62950bd16c27162cc61c11
+      avgc_complete: 467

@@ -95,6 +95,38 @@ girmediler.
 Veritabanı 15 MB (ücretsiz sınır 500 MB). `odds_snapshots` 5.763 satır; **kapanışı mühürlenmiş maç 4**
 (milli maç arası) → T7 (tarihsel ↔ canlı kapanış kalibrasyonu) haftalarca örtüşen veri ister.
 
+### 2.6 İlk tam yükleme, satır genişliği ve `Date` takvimi (Task 8, oturum 4)
+
+**İlk `--all` turu** (Actions 35765084910): 500 yol, 495 önbelleğe girdi, 5'i genişlik reddiyle düştü —
+`0607/T1` 16/306, `0708/F2` 32/380, `0708/N1` 32/306, `0708/P1` 32/240, `0708/SP2` 16/462 (404 yok).
+Biçim runner'da ölçüldü (Actions 35768752898; yerel ağ kaynağa ulaşamıyor — bağlantı sıfırlanıyor): 2007/08
+dosyalarında başlık 58, bozuk satırların hepsi 61 geniş, **3 fazla hücre sonda ve boş**, son dolu hücre başlığın
+içinde; bozuklar tek ardışık blok (1–2 hafta). T1 0607: başlık 55, 16 satır 63 geniş; 15'inin fazlası sonda ve
+boş, **1 satırın başlık dışında dolu hücresi var**. Kısa satır yok. → **R111:** fazlası tamamen boş satır başlığa
+kırpılır ve normal doğrulanır, sayısı dosya başına loglanır; dolu fazla ve kısa satır reddedilir. İkinci tur
+(Actions 35770065873): beş dosya girdi (kırpılan 15/32/32/32/16); iki geçici `RemoteProtocolError`
+(`2324/E0`, `2324/F2`) önceki sürümle önbellekte kaldı. Önbellek tam: 38 lig, dev + sonrası 214.723 satır.
+
+**Kilit (Task 8 Step 13, `config/history_lock.yaml`).** Holdout ana ligler **7.646** (§2.4: 7.647), ek ligler
+**4.446**; dev ek ligler **57.600** (§2.4: 57.601). İki fark da tek satır ve bulundu: `2526/F2` ve `/new/BRA.csv`
+birer satırı **`gol çözülemedi`** ile reddediyor (skoru olmayan — oynanmamış/yarıda kalmış — maç); §2.4 ham satır
+saymıştı. Tüm reddedilenler (6): `gol çözülemedi` ×4 (`2526/F2`, `BRA`, `1415/G1`, `1819/G1`), `Div` uyuşmazlığı ×1
+(`1314/T1`, son satır), genişlik ×1 (`0607/T1`, R111). Holdout'ta ana liglerin AvgC 1X2'si %100, RUS %66,7.
+`lock --write` tepe bellek (RSS) 756 MB, 9 sn; `lock --verify` exit 0.
+
+**`Date` takvimi (R102).** Önbellekten, Londra saatiyle 00:00–05:59 başlayan satırların `Date` günü:
+
+| lig | toplam | 06:00 öncesi | Paz | Cmt | Pzt | Per | Sal | Çar | Cum |
+|---|---|---|---|---|---|---|---|---|---|
+| USA | 5.736 | 4.371 | 2.624 | 227 | 459 | 876 | 27 | 72 | 86 |
+| BRA | 5.155 | 1.294 | 305 | 25 | 62 | 511 | 146 | 40 | 205 |
+| ARG | 5.876 | 1.828 | 405 | 376 | 374 | 70 | 401 | 101 | 101 |
+| MEX | 4.398 | 3.386 | 1.428 | 805 | 480 | 268 | 50 | 167 | 188 |
+
+Karar kuralı (plan Task 8 Step 10b): MLS maçları ağırlıkla cumartesi yerel akşamı; gece yarısından sonraki Londra
+saatleri **pazar**a yığılıyor (2.624'e 227) → `Date` **Londra tarihidir, D5 doğru**; ek liglerde başlama anı
+güvenilir. Ana liglerde (rakamlı 21 kod — `EC` sayıma girmedi; saatli 43.772 satır) 06:00 öncesi satır **0**.
+
 ## 3. Tasarım önerileri (taslak — tasarım belgesinde kesinleşecek)
 
 1. **Birincil tarihsel kaynak football-data.co.uk (doğrudan).** xgabora onun türevi; kapanış oranı

@@ -1,4 +1,11 @@
 # The Odds API takım adı → football-data takım adı (tarihsel ↔ canlı köprü, tasarım §9).
 # Yalnız normalize edilmiş ad eşitliğinin (naming.normalise_team) tutmadığı çiftler girer.
 # Boş başlar: controller dalga 2 sonunda gerçek eşleşmeyen adlardan doldurur.
-aliases: {}
+aliases:
+  # 2026-09-19/20 canlı kapanışları (Task 8 Step 12); karşılığı aynı gün, aynı lig dosyasında.
+  Tottenham Hotspur: Tottenham
+  Bayer Leverkusen: Leverkusen
+  Amed SK: Amedspor
+  Besiktas JK: Besiktas
+  Goztepe: Goztep
+  Çaykur Rizespor: Rizespor
