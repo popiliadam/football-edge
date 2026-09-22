@@ -78,7 +78,10 @@ def test_rps_penalises_mass_on_distant_outcomes_where_brier_does_not() -> None:
 
 def test_a_certain_miss_is_floored_not_infinite() -> None:
     assert LOG_FLOOR == 1e-15
-    assert per_match_log_loss(((1.0, 0.0, 0.0),), (1,)) == (-math.log(1e-15),)
+    # numpy'nin x86 log çekirdeği doğru yuvarlanmış olmak zorunda değil: tam eşitlik değil.
+    assert per_match_log_loss(((1.0, 0.0, 0.0),), (1,)) == pytest.approx(
+        (-math.log(1e-15),), rel=1e-15
+    )
 
 
 @pytest.mark.parametrize("metric", (per_match_log_loss, log_loss, brier, rps, calibration))
@@ -92,15 +95,58 @@ def test_a_certain_miss_is_floored_not_infinite() -> None:
         (((0.5, 0.5),), (2,)),
         (((0.5, 0.5),), (-1,)),
         (((1.5, -0.5),), (0,)),
+        (((1.5, 0.5),), (0,)),
         (((math.nan, 0.5),), (0,)),
     ),
-    ids=("bos", "uzunluk", "genislik", "tek-sonuc", "sira-ust", "sira-negatif", "aralik", "nan"),
+    ids=(
+        "bos",
+        "uzunluk",
+        "genislik",
+        "tek-sonuc",
+        "sira-ust",
+        "sira-negatif",
+        "aralik",
+        "ust-sinir",
+        "nan",
+    ),
 )
 def test_malformed_input_is_rejected(
     metric: Metric, probs: tuple[tuple[float, ...], ...], outcomes: tuple[int, ...]
 ) -> None:
     with pytest.raises(ValueError):
         metric(probs, outcomes)
+
+
+def test_a_probability_above_one_is_rejected_by_the_range_check() -> None:
+    # (1.5, 0.5): negatif değer yok, yalnız üst sınır yakalar (toplam denetimi aralıktan sonra).
+    with pytest.raises(ValueError, match=r"\[0, 1\] aralığında"):
+        brier(((1.5, 0.5),), (0,))
+
+
+@pytest.mark.parametrize(
+    "row",
+    ((0.5, 0.5 + 2e-9), (0.6, 0.3), (0.3, 0.3, 0.3)),
+    ids=("milyarda-iki", "onda-bir-eksik", "uc-sonuc-eksik"),
+)
+def test_a_row_that_does_not_sum_to_one_is_rejected(row: tuple[float, ...]) -> None:
+    with pytest.raises(ValueError, match="toplamı 1"):
+        brier((row,), (0,))
+
+
+def test_a_row_within_the_sum_tolerance_is_accepted() -> None:
+    # Sınır 1e-9: vig temizleme ve normalleştirme yuvarlaması (~1e-16) rahatça içeride kalır.
+    assert brier(((0.5, 0.5 + 5e-10),), (0,)) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("outcome", (0.9, 1.0))
+def test_a_non_integer_outcome_is_rejected_not_truncated(outcome: float) -> None:
+    # np.asarray(…, dtype=int64) 0.9'u sessizce 0'a keserdi: yanlış sonuç, geçerli görünen ölçüt.
+    with pytest.raises(ValueError, match="tamsayı"):
+        brier(((0.5, 0.5),), (outcome,))  # type: ignore[arg-type]
+
+
+def test_numpy_integer_outcomes_are_accepted() -> None:
+    assert brier(((0.5, 0.5),), (np.int64(1),)) == pytest.approx(0.5)
 
 
 def test_frequencies_that_match_the_forecasts_give_slope_one_and_no_ece() -> None:
@@ -131,6 +177,22 @@ def test_ece_weights_each_bin_by_its_share_of_pairs() -> None:
     outcomes = (0, 1, 0, 1, 1)
     assert calibration(probs, outcomes).ece == pytest.approx(0.19)
     assert calibration(probs, outcomes, bins=2).ece == pytest.approx(0.09)
+
+
+def test_certain_forecasts_are_clipped_and_counted_in_the_top_bin() -> None:
+    # 100 kalibre çapa satırı + kesin ıska (1.0, 0.0 → sonuç 1) + üst kovada isabet (0.95 → 0).
+    # ECE: üst kova [0.9, 1] 0.95'i (y=1) ve 1.0'ı (y=0) birlikte taşır → |1 − 1.95| = 0.95; alt
+    # kova 0.05 (y=0) + 0.0 (y=1) → 0.95; çapa kovaları 0 → 1.9/204 (1.0 ayrı kovada: 2.0/204).
+    # Eğim bu makinede ölçüldü: kırpılmış logit(1.0) ≈ 13.8 (LOGIT_CLIP 0.1'de ≈ 2.2 ve eğim
+    # 0.927); kırpma olmasa logit ±∞ olur, fit ıraksar. Örnek (p, y) → (1 − p, 1 − y) altında
+    # simetrik: kesim 0.
+    probs = ((0.75, 0.25),) * 100 + ((1.0, 0.0), (0.95, 0.05))
+    outcomes = (0, 0, 0, 1) * 25 + (1, 0)
+    result = calibration(probs, outcomes)
+    assert result.n == 204
+    assert result.ece == pytest.approx(1.9 / 204)
+    assert result.slope == pytest.approx(0.4829364932719946, rel=1e-9)
+    assert result.intercept == pytest.approx(0.0, abs=1e-9)
 
 
 def _synthetic(size: int, *, sharpen: float) -> Sample:
@@ -206,6 +268,14 @@ def test_bootstrap_interval_brackets_the_sample_mean() -> None:
     # ortalamanın standart hatası 0.5/√400 = 0.025 → %95 aralık ≈ 0.5 ± 0.049
     assert interval.low == pytest.approx(0.451, abs=0.01)
     assert interval.high == pytest.approx(0.549, abs=0.01)
+
+
+def test_bootstrap_golden_interval_pins_seed_level_and_percentile_method() -> None:
+    # Bu makinede ölçüldü (numpy 2.4.6, PCG64, yüzdelik tip 7 = numpy "linear"). 0/1 verinin
+    # ortalamaları k/400'dür ve iki uçta komşu sıralı değerler eşittir: değer tam, platformdan
+    # bağımsız. Tohum, düzey → kuyruk dönüşümü ve yüzdelik yöntemi birlikte sabitlenir.
+    golden = Interval(0.5, 0.4575, 0.55)
+    assert bootstrap_mean((0.0, 1.0) * 200, resamples=2000, seed=11) == golden
 
 
 def test_bootstrap_level_sets_the_width() -> None:

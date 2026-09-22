@@ -21,6 +21,7 @@ from football_edge.market.devig import (
     match_probs,
     overround,
 )
+from football_edge.market.metrics import outcome_index
 from tests.market_factory import hist_match
 
 LOPSIDED = (1.30, 5.50, 11.0)  # net favori + iki sürpriz; Σ 1/o ≈ 1.051
@@ -89,6 +90,24 @@ def test_power_probabilities_are_one_common_power_of_the_implied(prices: tuple[f
     assert max(exponents) - min(exponents) < 1e-9
     # B > 1 ise k > 1 (marj uzak sonuçlardan daha çok alınır), B < 1 ise k < 1
     assert (exponents[0] > 1.0) == (math.fsum(implied) > 1.0)
+
+
+@pytest.mark.parametrize(
+    ("prices", "exponent"),
+    (((1.06, 10_000.0), 0.407417157324016), ((1.25, 1.25), math.log(0.5) / math.log(0.8))),
+    ids=("alt-uc", "ust-uc"),
+)
+def test_power_widens_its_start_bracket_when_the_root_lies_outside_it(
+    prices: tuple[float, ...], exponent: float
+) -> None:
+    # Başlangıç aralığı B < 1 iken [0.5, 1], B > 1 iken [1, 2]. (1.06, 10000): B = 0.9435, kök
+    # k = 0.4074 (50 basamaklı Decimal ikiye bölmesiyle) · (1.25, 1.25): B = 1.6, k = ln ½ / ln 0.8
+    # ≈ 3.106. Aralık genişlemeseydi ikiye bölme uca yapışır, Σ p 1'den uzak kalırdı.
+    probs = devig(prices, POWER)
+    assert math.fsum(probs) == pytest.approx(1.0, abs=1e-9)
+    implied = tuple(1.0 / price for price in prices)
+    exponents = [math.log(p) / math.log(q) for p, q in zip(probs, implied, strict=True)]
+    assert exponents == pytest.approx([exponent] * len(prices), abs=1e-9)
 
 
 @pytest.mark.parametrize("prices", (LOPSIDED, BALANCED, TWO_WAY, LONGSHOT))
@@ -187,3 +206,13 @@ def test_match_probs_does_not_hide_an_unknown_method() -> None:
     bare = hist_match()  # fiyatsız maç: yazım hatası yine de sessiz None olmamalı
     with pytest.raises(ValueError, match="bilinmeyen"):
         match_probs(bare, book="Avg", market=H2H, phase=CLOSING, method="shinn")
+
+
+def test_match_probs_names_an_unknown_market_like_outcome_index() -> None:
+    # Çıplak KeyError değil: bilinmeyen market iki modülde de aynı adlı ValueError'dır.
+    bare = hist_match()
+    with pytest.raises(ValueError, match="bilinmeyen market") as from_devig:
+        match_probs(bare, book="Avg", market="ah", phase=CLOSING, method=SHIN)
+    with pytest.raises(ValueError) as from_metrics:
+        outcome_index(bare, "ah")
+    assert str(from_devig.value) == str(from_metrics.value)

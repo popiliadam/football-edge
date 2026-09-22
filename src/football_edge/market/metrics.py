@@ -19,6 +19,9 @@ from football_edge.history.types import H2H, RESULTS, TOTALS_25, HistMatch
 LOG_FLOOR = 1e-15
 # logit(0) ve logit(1) tanımsız: kalibrasyon fiti uçları kırpar.
 LOGIT_CLIP = 1e-6
+# Toplamı 1'den bundan çok sapan satır dağılım değildir; normalleştirme yuvarlaması (~1e-16)
+# rahatça içeride kalır.
+ROW_SUM_TOLERANCE = 1e-9
 _IRLS_STEPS = 100
 _IRLS_TOLERANCE = 1e-10
 # exp taşmasın: |η| > 500'de sigmoid zaten 0 ya da 1'dir.
@@ -54,6 +57,15 @@ def _checked(probs: Sequence[Sequence[float]], outcomes: Sequence[int]) -> tuple
     matrix = np.asarray(probs, dtype=np.float64)
     if not np.all(np.isfinite(matrix)) or np.any(matrix < 0.0) or np.any(matrix > 1.0):
         raise ValueError("olasılıklar sonlu ve [0, 1] aralığında olmalı")
+    drift = float(np.max(np.abs(matrix.sum(axis=1) - 1.0)))
+    if drift > ROW_SUM_TOLERANCE:
+        raise ValueError(
+            f"her satırın olasılık toplamı 1 olmalı: sapma {drift:.3g} > {ROW_SUM_TOLERANCE:g}"
+        )
+    # np.asarray(…, dtype=int64) 0.9'u sessizce 0'a keserdi: tamsayı olmayan sıra adıyla reddedilir.
+    strays = [value for value in outcomes if not isinstance(value, (int, np.integer))]
+    if strays:
+        raise ValueError(f"sonuç sırası tamsayı olmalı: {strays[0]!r}")
     index = np.asarray(outcomes, dtype=np.int64)
     if np.any(index < 0) or np.any(index >= matrix.shape[1]):
         raise ValueError("sonuç sırası olasılık satırının dışında")

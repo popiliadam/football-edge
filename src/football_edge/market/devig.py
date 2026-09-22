@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 
-from football_edge.history.types import HistMatch
+from football_edge.history.types import MARKET_OUTCOMES, HistMatch
 
 MULTIPLICATIVE: str = "multiplicative"
 POWER: str = "power"
@@ -35,6 +35,12 @@ def _check_method(method: str) -> None:
     # `match_probs` InvalidPrices'ı None'a çevirir; yazım hatası her maçı sessizce düşürmesin.
     if method not in METHODS:
         raise ValueError(f"bilinmeyen vig yöntemi: {method!r} (seçenekler: {', '.join(METHODS)})")
+
+
+def _check_market(market: str) -> None:
+    # `HistMatch.prices` bilinmeyen markette çıplak KeyError verir; `outcome_index` ile aynı hata.
+    if market not in MARKET_OUTCOMES:
+        raise ValueError(f"bilinmeyen market: {market!r}")
 
 
 def _implied(prices: Sequence[float]) -> tuple[float, ...]:
@@ -124,6 +130,7 @@ def match_probs(
     T4, T7 ve T10 bu tek yolu paylaşır: aynı eksik-veri kuralı üç yerde ayrı yazılmaz.
     """
     _check_method(method)
+    _check_market(market)
     prices = match.prices(book, market, phase)
     if prices is None:
         return None
