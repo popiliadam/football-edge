@@ -6,7 +6,8 @@ import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, TextIO
 
 import httpx
 import psycopg
@@ -32,6 +33,7 @@ from football_edge.ledger import (
     verify_chain,
 )
 from football_edge.mapping import MappingReport, canonical_team_names, resolve_source_aliases
+from football_edge.redaction import dsn_password_forms, redact
 from football_edge.rounds import (
     CollectResult,
     _mirror_failed,
@@ -427,8 +429,71 @@ def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR
     return 0
 
 
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+# httpx her isteği INFO'da tam URL'siyle — `apiKey` dâhil — loglar; o satır hiç üretilmez.
+QUIET_LOGGERS = ("httpx", "httpcore")
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Sardığı formatter'ın çıktısının TAMAMINI — mesaj + traceback — redakte eder.
+
+    `httpx.HTTPStatusError` mesajı tam URL'yi, yani anahtarı taşır ve `LOGGER.exception` onu
+    traceback'le basar. Depo public: Actions logları herkese açık. Sarmak (değiştirmek değil)
+    önceden kurulmuş bir handler'ın biçimini korur; formatter'sız handler varsayılanı kullanır.
+    """
+
+    def __init__(self, secrets: tuple[str, ...], inner: logging.Formatter | None) -> None:
+        super().__init__()
+        self._secrets = secrets
+        self._inner = inner or logging.Formatter()
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(self._inner.format(record), self._secrets)
+
+
+def _log_secrets() -> tuple[str, ...]:
+    """Pipeline'ın ortamdan aldığı her credential; boş olanı `redact` zaten atlar."""
+    dsn = os.getenv("DATABASE_URL", "")
+    # Tam DSN parolasından ÖNCE değişir: yoksa URL'nin kalanı (kullanıcı, host) açıkta kalır.
+    return (
+        os.getenv("ODDS_API_KEY", ""),
+        os.getenv("TYPESAFE_API_KEY", ""),
+        dsn,
+        *dsn_password_forms(dsn),
+    )
+
+
+def _log_uncaught(
+    exc_type: type[BaseException], exc: BaseException, tb: TracebackType | None
+) -> None:
+    """Yakalanmamış istisna da kök handler'dan — yani redaksiyondan — geçer.
+
+    Varsayılan excepthook traceback'i stderr'e DÜZ basar: libpq'nun ayrıştırma hatası
+    parolanın parçasını taşır. Süreç yine 1 ile çıkar.
+    """
+    logging.critical("yakalanmamış istisna", exc_info=(exc_type, exc, tb))
+
+
+def configure_logging(stream: TextIO | None = None) -> None:
+    """HER kök handler'ı redakte eden formatter'la sarar, httpx/httpcore'u WARNING'e çeker,
+    yakalanmamış istisnayı da aynı yoldan geçirir.
+
+    `basicConfig` semantiği korunur: kök logger zaten yapılandırılmışsa handler eklenmez —
+    ama oradaki handler'lar da sarılır; yoksa redaksiyon sessizce devre dışı kalırdı.
+    """
+    secrets = _log_secrets()
+    handler = logging.StreamHandler(sys.stderr if stream is None else stream)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+    for existing in logging.getLogger().handlers:
+        existing.setFormatter(_RedactingFormatter(secrets, existing.formatter))
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    sys.excepthook = _log_uncaught
+
+
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging()
     parser = argparse.ArgumentParser(prog="football-edge")
     parser.add_argument(
         "command",
