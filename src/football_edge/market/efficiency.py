@@ -7,6 +7,7 @@ doluluğu (aday kuralı) satırlardan değil, kilitteki özetten okunur.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +40,8 @@ from football_edge.market.metrics import (
     per_match_log_loss,
     rps,
 )
+
+LOGGER = logging.getLogger("football_edge.market.efficiency")
 
 AVERAGE = "Avg"  # (Avg, CLOSING) = AvgC, referans kapanış (D3); (Avg, PRE_CLOSING) = Avg
 BEST = "Max"  # (Max, PRE_CLOSING): kapanış öncesi en iyi fiyat
@@ -217,15 +220,29 @@ def _book_gap(
 
 
 def _totals(
-    rows: Sequence[HistMatch], *, method: str, resamples: int, code: str, n: int
+    rows: Sequence[HistMatch], *, method: str, resamples: int, code: str
 ) -> tuple[Interval | None, Interval | None, Calibration | None]:
-    """Ü/A 2.5 kapanışı (AvgC>2.5, AvgC<2.5): marj, log loss, kalibrasyon — tam satır yoksa None."""
+    """Ü/A 2.5 kapanışı (AvgC>2.5, AvgC<2.5): marj, log loss, kalibrasyon.
+
+    Tam satır yoksa ya da Ü/A fiti ayrışırsa üçü de None ("—"): lig 1X2 ölçütleri ve adaylığıyla
+    kalır (R116; adaylar 1X2'den seçilir, R92 bu alanları Optional tanımlar).
+    """
     sample = _sample(rows, book=AVERAGE, market=TOTALS_25, phase=CLOSING, method=method)
     if not sample.matches:
         return None, None, None
+    # Girdiyi doğrulayan ölçütler yakalamanın dışında (R115): bozuk girdi düz hata olarak yükselir.
     margin = bootstrap_mean([overround(prices) for prices in sample.prices], resamples=resamples)
     loss = bootstrap_mean(per_match_log_loss(sample.probs, sample.outcomes), resamples=resamples)
-    return margin, loss, _fit(sample.probs, sample.outcomes, code=code, n=n)
+    try:
+        fit = calibration(sample.probs, sample.outcomes)
+    except ValueError:
+        LOGGER.warning(
+            "lig=%s Ü/A 2.5 kalibrasyonu %d maçla kurulamadı — Ü/A 2.5 ölçütleri boş bırakıldı",
+            code,
+            len(sample.matches),
+        )
+        return None, None, None
+    return margin, loss, fit
 
 
 def league_efficiency(
@@ -256,7 +273,7 @@ def _measured(
     brier_score, rps_score = brier(close.probs, close.outcomes), rps(close.probs, close.outcomes)
     fit = _fit(close.probs, close.outcomes, code=league.code, n=n)
     ou25_margin, ou25_loss, ou25_fit = (
-        _totals(rows, method=method, resamples=resamples, code=league.code, n=n)
+        _totals(rows, method=method, resamples=resamples, code=league.code)
         if main
         else (None, None, None)
     )

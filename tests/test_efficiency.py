@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -643,10 +644,35 @@ def test_invalid_probabilities_propagate_instead_of_becoming_unmeasurable(
     assert not isinstance(caught.value, Unmeasurable)
 
 
-def test_a_main_league_whose_totals_fit_separates_is_unmeasurable() -> None:
-    # Ü/A 2.5 fiti de `_fit`ten geçer: tek maçlık Ü/A örneği ayrışır → lig ölçülemez (düz
-    # ValueError raporu düşürürdü). N yine 1X2'ninkidir.
+def test_a_failed_totals_fit_blanks_only_the_totals_and_keeps_the_league(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # R116: tek maçlık Ü/A örneğinde Ü/A 2.5 fiti ayrışır. YALNIZ ou25_* alanları None ("—") olur;
+    # 1X2 ölçütleri ve adaylık kalır (adaylar 1X2'den seçilir, R92'de Ü/A alanları Optional).
     totals = (with_prices(BASE[0], {("Avg", TOTALS_25, CLOSING): TOTAL_SETS[0]}), *BASE[1:])
-    with pytest.raises(Unmeasurable, match="M1") as caught:
-        league_efficiency(MAIN_LEAGUE, totals, method=SHIN, resamples=FAST)
-    assert caught.value.n == 56
+    caplog.set_level(logging.WARNING, logger="football_edge.market.efficiency")
+    result = league_efficiency(MAIN_LEAGUE, totals, method=SHIN, resamples=FAST)
+    # 1) 1X2 sayıları Ü/A'sız ölçümle birebir aynı; Ü/A üçlüsü boş.
+    assert result == league_efficiency(MAIN_LEAGUE, BASE, method=SHIN, resamples=FAST)
+    assert (result.ou25_margin, result.ou25_log_loss, result.ou25_calibration) == (None,) * 3
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in warnings] == [
+        "lig=M1 Ü/A 2.5 kalibrasyonu 1 maçla kurulamadı — Ü/A 2.5 ölçütleri boş bırakıldı"
+    ]
+    # 2) Raporda satır kalır, son üç (Ü/A) hücre "—".
+    text = render_report(
+        (result,),
+        rank((result,)),
+        scores=SHIN_BEST,
+        candidates=(),
+        generated_at=datetime(2026, 10, 5, 9, 0, tzinfo=UTC),
+    )
+    (line,) = [row for row in text.splitlines() if row.startswith("| M1 ")]
+    assert line.split(" | ")[-3:] == ["—", "—", "— |"]
+    assert line.split(" | ")[5] != "—"  # 1X2 log loss dolu
+    # 3) Adaylık 1X2'den: yeterli N ile lig aday olabilir.
+    enough = replace(result, n=efficiency.MIN_MATCHES)
+    chosen = candidates(
+        (enough,), rank((enough,)), lock=_lock({"M1": (100, 100)}), leagues=(MAIN_LEAGUE,)
+    )
+    assert chosen == ("M1",)
