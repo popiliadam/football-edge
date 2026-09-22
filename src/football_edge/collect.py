@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import httpx
 import psycopg
@@ -32,6 +32,7 @@ from football_edge.ledger import (
     verify_chain,
 )
 from football_edge.mapping import MappingReport, canonical_team_names, resolve_source_aliases
+from football_edge.redaction import redact
 from football_edge.rounds import (
     CollectResult,
     _mirror_failed,
@@ -427,8 +428,40 @@ def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR
     return 0
 
 
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+# httpx her isteği INFO'da tam URL'siyle — `apiKey` dâhil — loglar; o satır hiç üretilmez.
+QUIET_LOGGERS = ("httpx", "httpcore")
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Biçimlendirilmiş çıktının TAMAMINI — mesaj + traceback — redakte eder.
+
+    `httpx.HTTPStatusError` mesajı tam URL'yi, yani anahtarı taşır ve `LOGGER.exception` onu
+    traceback'le basar. Depo public: Actions logları herkese açık.
+    """
+
+    def __init__(self, secrets: tuple[str, ...]) -> None:
+        super().__init__(LOG_FORMAT)
+        self._secrets = secrets
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record), self._secrets)
+
+
+def configure_logging(stream: TextIO | None = None) -> None:
+    """Kök handler'ı redakte eden formatter'la kurar, httpx/httpcore'u WARNING'e çeker.
+
+    `basicConfig` semantiği korunur: kök logger zaten yapılandırılmışsa handler eklenmez.
+    """
+    handler = logging.StreamHandler(sys.stderr if stream is None else stream)
+    handler.setFormatter(_RedactingFormatter((os.getenv("ODDS_API_KEY", ""),)))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    configure_logging()
     parser = argparse.ArgumentParser(prog="football-edge")
     parser.add_argument(
         "command",
