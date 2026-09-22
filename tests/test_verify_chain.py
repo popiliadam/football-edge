@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ from football_edge.collect import _publish_head_command, _verify_chain_command
 from tests.fake_db import FakeChainDb, chained_rows
 
 NOW = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
+LATER = NOW + timedelta(minutes=15)  # aynı gün, bir sonraki mühür turu
 
 
 def _write_anchor(
@@ -166,6 +167,143 @@ def test_publish_head_records_last_id(tmp_path: Path, capsys: pytest.CaptureFixt
     assert anchor.last_id == 3
     assert anchor.rows == 3
     assert anchor.head == db.rows[-1]["row_hash"]
+
+
+# ── K1: baş değişmediyse çıpaya dokunulmaz ──────────────────────────────────
+# Mühür turu 15 dakikada bir koşar; yalnız zaman damgası değişen bir çıpa, seal.yml'in
+# `git diff --cached --quiet` kontrolünü her turda geçip veri değişmeden commit üretir.
+# Kıyas yalnız BUGÜNÜN dosyasıyladır: yeni gün yeni dosyadır (günlük canlılık çıpası).
+
+
+def _published(when: datetime, db: FakeChainDb) -> str:
+    """`publish-head`in `when` anında `db` için yazması gereken çıpa metni."""
+    last = db.rows[-1]
+    return (
+        f"{when.isoformat()}\nrows={len(db.rows)}\nlast_id={last['id']}\nhead={last['row_hash']}\n"
+    )
+
+
+def test_publish_head_leaves_an_unchanged_anchor_untouched(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K1: aynı gün, aynı baş — ikinci tur dosyayı BYTE-BYTE bırakır, ilk zaman damgası durur."""
+    db = FakeChainDb(chained_rows(3))
+    target = tmp_path / "head-2026-09-19.txt"
+    _publish_head_command(db, NOW, directory=tmp_path)  # type: ignore[arg-type]
+    first = target.read_bytes()
+    capsys.readouterr()
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_bytes() == first, "baş değişmedi ama çıpa yeniden yazıldı"
+    assert f"zincir başı değişmedi: {target}\n" in out, out
+
+
+def test_publish_head_rewrites_the_anchor_when_the_head_moves(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K1: aynı gün, yeni satır — çıpa yeni değerlerle yeniden yazılır."""
+    target = tmp_path / "head-2026-09-19.txt"
+    _publish_head_command(FakeChainDb(chained_rows(3)), NOW, directory=tmp_path)  # type: ignore[arg-type]
+    grown = FakeChainDb(chained_rows(4))
+    capsys.readouterr()
+
+    code = _publish_head_command(grown, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, grown)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+
+
+def test_publish_head_writes_a_new_file_on_a_new_day_even_if_the_head_is_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K1: yeni gün = yeni dosya — baş aynı olsa da günlük canlılık çıpası yazılır."""
+    db = FakeChainDb(chained_rows(3))
+    _publish_head_command(db, NOW, directory=tmp_path)  # type: ignore[arg-type]
+    previous_day = (tmp_path / "head-2026-09-19.txt").read_bytes()
+    next_day = NOW + timedelta(days=1)
+    capsys.readouterr()
+
+    code = _publish_head_command(db, next_day, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    target = tmp_path / "head-2026-09-20.txt"
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(next_day, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+    assert (tmp_path / "head-2026-09-19.txt").read_bytes() == previous_day
+
+
+# Okunabilen her değer şu ankiyle AYNI: yeniden yazmanın tek sebebi dosyanın bozukluğu.
+@pytest.mark.parametrize(
+    "broken",
+    ["rows=3\nlast_id=3\n", "rows=abc\nlast_id=3\nhead={head}\n"],
+    ids=["eksik-alan", "bozuk-sayi"],
+)
+def test_publish_head_rewrites_an_unreadable_anchor_for_today(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], broken: str
+) -> None:
+    """K1: bugünün dosyası okunamıyorsa "değişmedi" sayılmaz — yeniden yazılır."""
+    db = FakeChainDb(chained_rows(3))
+    target = tmp_path / "head-2026-09-19.txt"
+    target.write_text(
+        f"{NOW.isoformat()}\n" + broken.format(head=db.rows[-1]["row_hash"]), encoding="utf-8"
+    )
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+
+
+# Tek alan farklı: kıyas üç alanın HER BİRİNE bakmalı; herhangi bir alt küme bunu geçemez.
+@pytest.mark.parametrize(
+    "wrong",
+    [{"rows": 4}, {"last_id": 4}, {"head": "0" * 64}],
+    ids=["rows", "last_id", "head"],
+)
+def test_publish_head_rewrites_when_a_single_field_differs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], wrong: dict[str, Any]
+) -> None:
+    """K1: rows, last_id, head'den YALNIZ biri farklıysa da çıpa yeniden yazılır."""
+    db = FakeChainDb(chained_rows(3))
+    h = db.rows[-1]["row_hash"]
+    target = _write_anchor(tmp_path, **{"rows": 3, "last_id": 3, "head": h, **wrong})
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+
+
+def test_publish_head_rewrites_a_non_utf8_anchor_for_today(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K1: UTF-8 olmayan bugünkü dosya da okunamaz — publish-head düşmez, yeniden yazar.
+
+    Anahtar satırlar şu anki değerleri taşır: gevşek çözme (`errors="ignore"`) onları
+    "değişmedi" okuyup bozuk dosyayı yerinde bırakırdı.
+    """
+    db = FakeChainDb(chained_rows(3))
+    target = tmp_path / "head-2026-09-19.txt"
+    target.write_bytes(
+        b"\xff\xfe\n" + f"rows=3\nlast_id=3\nhead={db.rows[-1]['row_hash']}\n".encode()
+    )
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
 
 
 # ── G4: EN YENİ çıpa okunamayınca kontrol sessizce bir öncekine düşüyordu ────
