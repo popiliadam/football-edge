@@ -19,7 +19,7 @@ from football_edge.backtest.harness import (
     replay,
 )
 from football_edge.backtest.timeline import result_known_at
-from football_edge.history.types import CLOSING, PRE_CLOSING, TOTALS_25, HistMatch
+from football_edge.history.types import CLOSING, PRE_CLOSING, RESULTS, TOTALS_25, HistMatch
 from tests.backtest_builders import hist_match, quote
 
 FRIDAY_NOON_BST = datetime(2024, 8, 9, 11, tzinfo=UTC)
@@ -356,3 +356,98 @@ def test_an_empty_history_replays_to_nothing() -> None:
 
     assert (result.predictions, dict(result.outcomes)) == ((), {})
     assert (result.no_decision, result.no_prediction) == (0, 0)
+
+
+# ── Harness kanaryası (R120): sonuç kullanan strateji dürüst harness'ta hiç tahmin üretmez ──
+
+
+@dataclass(frozen=True)
+class Oracle:
+    """Gördüğü sonuçları kullanır: karar verdiği maçın sonucunu gördüyse kazananı tahmin eder.
+
+    Yalnız o durumda tahmin döner; her tahmini harness'ın karar anından ÖNCE açtığı bir sonuca
+    dayanır. K4 (Placebo, CLV) bu sızıntıyı göremez: Placebo sonucu yok sayar, CLV sonuçtan
+    bağımsızdır (T11 F2).
+    """
+
+    seen: tuple[ResultRecord, ...] = ()
+
+    @property
+    def name(self) -> str:
+        return "oracle"
+
+    def observe(self, result: ResultRecord) -> Oracle:
+        return replace(self, seen=(*self.seen, result))
+
+    def predict(self, context: DecisionContext) -> Prediction | None:
+        own = (context.league, context.date, context.home, context.away)
+        leaked = next((r for r in self.seen if (r.league, r.date, r.home, r.away) == own), None)
+        if leaked is None:
+            return None
+        diff = leaked.home_goals - leaked.away_goals
+        winner = "H" if diff > 0 else "A" if diff < 0 else "D"
+        probs = tuple(0.9 if outcome == winner else 0.05 for outcome in RESULTS)
+        return Prediction(context.match_index, self.name, (probs[0], probs[1], probs[2]))
+
+
+# Haftanın maç anları (cumartesiden gün farkı, UTC başlama; None = saatsiz). Hafta sonu kararı
+# cuma, hafta içi kararı salı 12:00 Londra; gece yarısı çevresi ve saatsiz maçlar sonucu
+# kararlara en yakın taşıyan anlardır.
+_SLOTS: tuple[tuple[int, time | None], ...] = (
+    (-1, time(19, 45)),  # cuma akşamı
+    (0, time(14)),
+    (0, time(23, 45)),  # cumartesi gece yarısına 15 dk
+    (1, None),  # pazar, saatsiz: ertesi gün 03:00'te bilinir
+    (2, time(0, 30)),  # pazartesi 00:30
+    (3, time(18, 45)),  # salı akşamı
+    (4, time(23, 30)),  # çarşamba gece
+)
+_CANARY_LEAGUES = ("E0", "SP1", "BRA")
+
+
+def _canary_schedule(weeks: int = 12) -> tuple[HistMatch, ...]:
+    """Üç lig × `weeks` hafta × yedi an; giriş sırası lig lig (olay sırası değil)."""
+    first = date(2024, 8, 10)
+    return tuple(
+        hist_match(
+            day=(day := first + timedelta(weeks=week, days=offset)),
+            kickoff=None if kick is None else datetime.combine(day, kick, tzinfo=UTC),
+            league=league,
+            home=f"{league} Ev {week}-{slot}",
+            away=f"{league} Konuk {week}-{slot}",
+            goals=((1, 0), (1, 1), (0, 2))[(week + slot) % 3],
+            line=week * len(_SLOTS) + slot + 1,
+        )
+        for league in _CANARY_LEAGUES
+        for week in range(weeks)
+        for slot, (offset, kick) in enumerate(_SLOTS)
+    )
+
+
+@pytest.mark.leakage
+def test_the_oracle_predicts_once_it_has_seen_the_match_result() -> None:
+    """Kanaryanın kendisi kör değil: sonucu gördüğü maçta tahmin eder, kazananı doğru bilir."""
+    match = _canary_schedule(weeks=1)[2]  # deplasman galibiyeti (0-2)
+    context = harness._context(0, match, FRIDAY_NOON_BST)
+
+    assert Oracle().predict(context) is None
+    prediction = Oracle().observe(harness._result_record(match, FRIDAY_NOON_BST)).predict(context)
+    assert prediction is not None and prediction.probs == (0.05, 0.05, 0.9)
+
+
+@pytest.mark.leakage
+def test_an_oracle_that_uses_results_gets_no_prediction_from_the_honest_harness() -> None:
+    """Harness'ın gerçek kanaryası (R120, judge-selftest ilkesi): bir karardan önce kendi maçının
+    sonucu açılırsa Oracle tahmin eder. Dürüst harness'ta tahmin 0; `build_events` sonuçları öne
+    alacak biçimde yamalanınca her karar tahmine döner (T11 S8: 1.200 tahmin, log loss 0,105)."""
+    schedule = _canary_schedule()
+
+    result = replay(schedule, Oracle())
+    earlier = replay(schedule, Counter())
+
+    assert result.predictions == (), f"{len(result.predictions)} karar sonucunu önceden gördü"
+    # Boş geçmesin: her maçın kararı var ve Oracle'a ulaştı; başka maçların sonuçları kararlardan
+    # önce gerçekten açılıyor — Oracle bir sonucu görmediği için değil, kendi maçınınkini
+    # görmediği için susuyor.
+    assert (result.no_decision, result.no_prediction) == (0, len(schedule))
+    assert sum(prediction.probs[0] > 0 for prediction in earlier.predictions) > len(schedule) // 2

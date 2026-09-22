@@ -29,6 +29,9 @@ from football_edge.market.metrics import (
 
 K1_MIN_POSITIVE = 18
 K3_MIN_COVERAGE = 0.9
+# R120: Placebo sonucu yok sayar ve CLV sonuçtan bağımsızdır; sızan harness'ta K4 aynı değerle
+# geçer (T11 S8). Harness kanaryası `tests/test_harness.py`deki Oracle testidir.
+K4_SCOPE = "fiyat sütunu negatif kontrolü; harness sızıntısını ölçmez"
 DRIFT_BUCKETS: tuple[tuple[float, float], ...] = ((0, 12), (12, 36), (36, 60), (60, 96))
 REFERENCE_BOOK = "Avg"
 SHARP_BOOK = "PS"
@@ -180,7 +183,7 @@ def _k4(main: Leagues, *, method: str, resamples: int) -> Check:
     interval = bootstrap_mean(values, resamples=resamples)
     detail = (
         f"Placebo CLV (AvgC kapanışına karşı) {_interval(interval)} bahis={len(values)}; "
-        f"kapanışı eksik {bets - len(values)}; {counts}"
+        f"kapanışı eksik {bets - len(values)}; {counts}; {K4_SCOPE}"
     )
     return Check(id="K4", gate=True, passed=interval.high < 0, detail=detail)
 
