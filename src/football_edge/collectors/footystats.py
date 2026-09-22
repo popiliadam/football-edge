@@ -188,6 +188,9 @@ class FootyStatsResult:
     # atılıyordu ve ALTI LİGİN HEPSİ kırılsa bile "footystats: 0 yeni gözlem" ikinci turun
     # idempotent 0'ıyla AYIRT EDİLEMEZ biçimde exit 0 veriyordu.
     failed_leagues: tuple[str, ...] = ()
+    # İz A: `footystats_path`i olmayan (footystats sayfası yok) ligler. Arıza DEĞİLDİR —
+    # hiç istek atılmaz — ama sessiz de değildir: adıyla burada ve logda durur.
+    skipped_leagues: tuple[str, ...] = ()
 
 
 def collect_footystats(
@@ -209,7 +212,12 @@ def collect_footystats(
     parser = robots_for(source, robots_dir)
     written = 0
     failed: tuple[str, ...] = ()
+    skipped: tuple[str, ...] = ()
     for league in leagues:
+        if league.footystats_path is None:
+            LOGGER.info("lig=%s footystats yolu yok — istek atılmadı, atlandı", league.id)
+            skipped = (*skipped, league.id)
+            continue
         try:
             body = fetch_text(client, source, league.footystats_path, parser, expect="text/html")
             parsed = parse_xg_table(body, league_id=league.id, observed_at=now)
@@ -234,4 +242,4 @@ def collect_footystats(
             conn.rollback()
             LOGGER.exception("lig=%s footystats toplanamadı, diğerlerine devam", league.id)
             failed = (*failed, league.id)
-    return FootyStatsResult(written=written, failed_leagues=failed)
+    return FootyStatsResult(written=written, failed_leagues=failed, skipped_leagues=skipped)

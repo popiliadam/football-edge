@@ -16,12 +16,26 @@ class League:
     lang: str
     gl: str
     active: bool
-    footystats_path: str
+    # İz A (2026-09-23): isteğe bağlı. Yoksa footystats toplayıcısı ligi İSTEMEZ ve adıyla
+    # atlar (`collectors.footystats.collect_footystats`) — uydurma bir yol yazılmaz.
+    footystats_path: str | None = None
 
 
-REQUIRED_FIELDS = frozenset(
-    {"id", "odds_api_key", "name", "country", "lang", "gl", "active", "footystats_path"}
-)
+REQUIRED_FIELDS = frozenset({"id", "odds_api_key", "name", "country", "lang", "gl", "active"})
+OPTIONAL_FIELDS = frozenset({"footystats_path"})
+
+
+def _validate_footystats_path(entry: dict[str, Any]) -> None:
+    """Anahtar yazılmışsa gerçek bir mutlak yol olmalı: boş anahtar (`None`) ya da göreli
+    yol sessizce "sayfa yok" okunmaz — sayfa yoksa satır hiç yazılmaz."""
+    if "footystats_path" not in entry:
+        return
+    path = entry["footystats_path"]
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise ValueError(
+            f"footystats_path '/' ile başlayan bir yol olmalı ya da hiç yazılmamalı: "
+            f"{path!r} ({entry['id']})"
+        )
 
 
 def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
@@ -29,11 +43,12 @@ def _validate(entry: dict[str, Any], seen: frozenset[str]) -> None:
     missing = REQUIRED_FIELDS - keys
     if missing:
         raise ValueError(f"lig kaydında eksik alan: {sorted(missing)} ({entry.get('id', '?')})")
-    unknown = keys - REQUIRED_FIELDS
+    unknown = keys - REQUIRED_FIELDS - OPTIONAL_FIELDS
     if unknown:
         raise ValueError(f"lig kaydında bilinmeyen alan: {sorted(unknown)} ({entry['id']})")
     if entry["id"] in seen:
         raise ValueError(f"yinelenen lig id: {entry['id']}")
+    _validate_footystats_path(entry)
 
 
 def load_leagues(path: Path) -> tuple[League, ...]:

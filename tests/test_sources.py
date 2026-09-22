@@ -430,8 +430,11 @@ def test_snapshot_from_status_distinguishes_no_policy_from_unmeasured(
 
 def _collector_fetched_paths() -> tuple[tuple[str, str], ...]:
     leagues = active_leagues(load_leagues(REPO / "config/leagues.yaml"))
+    # Yolu olmayan lig footystats'ta HİÇ istenmez (`collect_footystats` atlar) — beyan da gerekmez.
     pairs: tuple[tuple[str, str], ...] = tuple(
-        ("footystats", league.footystats_path) for league in leagues
+        ("footystats", league.footystats_path)
+        for league in leagues
+        if league.footystats_path is not None
     )
     pairs += (("tff", tff.REFEREE_PATH),)
     pairs += tuple(("wikidata", venues.ENTITY_PATH.format(qid=spec.qid)) for spec in venues.VENUES)
