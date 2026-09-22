@@ -1,9 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 (oturum 4) · **Durum:** **Faz 2 yürütülüyor** — dalga 0 ve dalga 1 `main`de
-(Task 5 `5f033fe`: dört `--no-ff` merge, 0007 canlıda, `sızıntı` adımı); **dalga 2 (Task 6, 7) kendi dallarında
-yürütülüyor** · İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` =
-`origin/main` · kapı **10 adım yeşil + `zincir` adıyla SKIP**
+**Son güncelleme:** 2026-09-22 (oturum 4) · **Durum:** **Faz 2 yürütülüyor** — dalga 0, 1, 2 ve Task 8 `main`de
+(tarihsel taban canlı: 0006/0007/0008, ilk tam yükleme, kilit `a647f36`); **dalga 3 (Task 9, 10) kendi dallarında** ·
+İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı
+**10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -31,27 +31,34 @@ yürütülüyor** · İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan
 (`holdout_access_log` 0 satır, iki append-only tetikleyici, RLS açık / politika yok). `EXPECTED_MIN_LEAKAGE=209`,
 üç mutantla kanıtlı. Dalga 1 worktree'leri (`.worktrees/wt-{parser,devig,lock,harness}`) yerinde — silmek kullanıcı onayı ister.
 
-**Dalga 2 — kendi dallarında, taban `5f033fe`**
+**Dalga 2 + Task 8 — `main`de (CI yeşil).** Merge'ler `5b6eb35` sync · `0a0bff5` bridge; `sızıntı` alt sınırı 221
+(`729dd30`). Canlı: 0006 (`hist_files`, append-only `hist_fetches` + TRUNCATE tetikleyicisi R110), 0008
+(`history-dispatch` salı 09:50 UTC; bekçi 8 gün). İlk tam yükleme 5 dosyada genişlik reddi → runner'da ölçüldü →
+**R111** (sonu boş fazla hücre kırpılır, sayısı loglanır; `b14f3e0`). Önbellek tam: 500 dosya, 38 lig. **R102
+kapandı:** `Date` Londra tarihi (USA gece satırları pazara yığılıyor), D5 doğru. Kilit `config/history_lock.yaml`
+(`a647f36`): holdout 7.646 ana + 4.446 ek (7.647'den fark: skorsuz tek maç, R112). 6 takım adı eşlemesi (canlı 4/4).
+Yerel ağ football-data'ya ULAŞAMIYOR (bağlantı sıfırlanıyor) — kaynak ölçümleri runner'da.
+
+**Dalga 3 — kendi dallarında, taban `a647f36`**
 
 | Görev | Dal · worktree | Durum |
 |---|---|---|
-| Task 6 — senkron, önbellek, CLI, 0006, history.yml | `feat/faz2-sync` · `.worktrees/wt-sync` | defterde |
-| Task 7 — tarihsel ↔ canlı köprü | `feat/faz2-bridge` · `.worktrees/wt-bridge` | defterde |
+| Task 9 — piyasa verimliliği + `market` CLI | `feat/faz2-efficiency` · `.worktrees/wt-efficiency` | defterde |
+| Task 10 — evaluate, K1–K4 selftest, history.yml adımı | `feat/faz2-selftest` · `.worktrees/wt-selftest` | defterde |
 
 **Sıradaki adımlar**
-1. Defterin son satırlarındaki Task 6/7 durumundan devam: rapor `task-{6,7}-report.md`, paket SDD skill'inin
-   `scripts/review-package <plan> 5f033fe <uç>` betiğiyle; inceleme kabuklu `general-purpose`. Ajan kimlikleri
-   oturumla gider — düzeltme turu yeni oturumda **yeni** bir implementer'la.
-2. **Task 8 (controller):** dalga 2 merge'leri, haftalık tetik, ilk tam yükleme, kilit. İlk gerçek senkronda
-   **R104** — genişlik reddi ya da AvgC doluluğu yüzünden dosya düşerse kapı GEVŞETİLMEZ; dosya/satır sayısı ve
-   fazlalığın biçimi ölçülür, sonra ruling. **R102** — Step 10b ile `Date` takvimi ölçülür. DEFERRED 12e (latin-1,
-   BOM'lu dosyada her satır `REASON_DIVISION`) ilk senkronun ret nedenlerinde görünür.
-3. **Task 9–12** planın dalgalarıyla. Task 12: lig önerisi kullanıcı onayı ister; tasarım metni düzeltmeleri
-   (R86, R98, DEFERRED 12j); "kapının ölçmedikleri"ne eşit genişlikli fiyat kayması (Task 1 yeniden incelemesi).
+1. Defterin son satırlarından Task 9/10 durumu: rapor `task-{9,10}-report.md`, paket `review-package <plan> a647f36 <uç>`,
+   inceleme kabuklu `general-purpose`; sağ kalan mutantlar R101 küçük turu, controller kendi kopyasında yeniden koşar.
+2. Dalga 3 merge (Task 9, 10 → `main`, `--no-ff`, her birinden sonra kapı; `sızıntı` alt sınırı yeniden ölçülür).
+3. **Task 11** — kırmızı takım sızıntı denetimi (kabuklu `general-purpose`, kod yazmaz; DEFERRED 12h varsayımı).
+4. **Task 12** — gerçek verimlilik raporu ve K1–K4 gerçek veride (`--env-file .env`), **lig önerisi kullanıcı onayı
+   ister (DUR)**; tasarım metni düzeltmeleri (R86, R98, 12j); "kapının ölçmedikleri": eşit genişlikli kayma, R111
+   boş-kuyruk kayması, canlı kapanış örneği küçük (bugün 4 maç).
 
 **Oturum 4'ün kararları** (gerekçe ve bedel defterde): R106 — `ci.yml` yorumundaki bayat adım listesi düzeltildi ·
-R107 — dalga 2 implementer'ları ayrı worktree'lerde paralel · R108 — T6 fikstürü sıkılaşmış ayrıştırıcıya takılırsa
-ayrıştırıcı gevşetilmez · R109 — DEFERRED 12e T6'ya eklenmez.
+R107/R113 — dalga implementer'ları ayrı worktree'lerde paralel · R108 — fikstür için ayrıştırıcı gevşetilmez · R109 —
+DEFERRED 12e T6'ya eklenmez · R110 — 0006'ya TRUNCATE tetikleyicisi · R111 — boş fazla kuyruk kırpılır · R112 — kilit
+7.646 ile commit'lendi (fark bulundu).
 
 **Oturum 3'ün kararları** (gerekçe ve bedel defterde): R101 — K1 incelemesinde sağ kalan mutantlar küçük tek turda
 kapanır, controller onları kendi kopyasında yeniden koşar · R102 — `Date` takvimi Task 8'de ölçülür · R103 — fiyat
@@ -141,7 +148,7 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 10 adım PASS + `zincir` SKIP · `main` (dalga 1 merge'lü): 1271 passed, 2 skipped · contract 18 · leakage 221 | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
+| Kapı | 10 adım PASS + `zincir` SKIP · `main` `a647f36`: 1378 passed, 2 skipped (DATABASE_URL bağlı: 11/11, 1380 passed, zincir SAĞLAM) · contract 18 · leakage 221 | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 09-22 09:27 UTC uygulandı | elle 09:28 → `204`/`204`; cron 10:07 → `succeeded` + `204` → `collect-news` yeşil |
