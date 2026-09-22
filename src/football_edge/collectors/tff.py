@@ -112,6 +112,10 @@ def _officials_cell_is_empty(row: Tag) -> bool:
     bağlantılarını kaldırırsa) atanmamış DEĞİLDİR. Yalnız `<a>` yokluğuna bakmak o kaybı
     sessizce "görevlisiz" sayardı — ve bütün hafta boş döndüğünde her gün 0 yazıp yeşil
     kalırdı.
+
+    AYIRT EDİLEMEYEN durum (DEFERRED 10s): TFF görevlileri bu `div`in DIŞINA taşır ve
+    hücreyi boş bırakırsa her satır "henüz açıklanmadı" sayılır ve tur 0 yazıp yeşil kalır.
+    Sayfa bu ikisini ayırmaya yetmez; ayıracak olan zaman boyutudur.
     """
     officials_cell = row.find("div", class_=_OFFICIALS_CLASS)
     if not isinstance(officials_cell, Tag):
