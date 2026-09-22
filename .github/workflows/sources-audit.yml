@@ -3,10 +3,21 @@ name: sources-audit
 # Kapanan kaynak kadar AÇILAN kaynak da olaydır: FBref'in 403'ü ve ClubElo'nun 502'si bu
 # makineden (TR) ölçüldü; runner ABD/AB'de. Bu iş her gün runner'dan ölçer ve commit'lenmiş
 # anlık görüntüyle diff'ler. Politika değişirse kırmızı verir — iki yönde de.
+#
+# Aynı kalan robots.txt bir yeniden doğrulamadır: `--refresh` o kaynağın `robots_verified_at`ini
+# bugüne çeker ve bot main'e commit'ler, kapının 30 günlük tazelik kuralı elle tarih istemez.
+# Sapan ya da ölçülemeyen kaynağın tarihi yerinde kalır; tur kırmızı verir ve alarm açılır.
 on:
   schedule:
+    # Günlük; GitHub'ın bir iki turluk gecikmesi 30 günlük pencerede zararsız.
     - cron: "41 5 * * *"
   workflow_dispatch:
+
+concurrency:
+  # Tek tur: üst üste binen iki tur aynı tarihi ayrı ayrı çekip birbirinin push'unu reddettirir.
+  # `odds-collect` DEĞİL — o grubu paylaşan workflow mühür turlarını kuyruktan düşürür.
+  group: sources-audit
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -15,8 +26,18 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      # Tazelenen tarihi depoya YALNIZ bu iş yazar; yetki workflow geneline açılmaz.
+      contents: write
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py).
+      issues: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Yeniden koşturulan eski tur da ref'in BUGÜNKÜ ucunu alır; tetikleyen sha'nın bayat
+          # tarihlerini tazeleyip güncel main'le çakışmaz.
+          ref: ${{ github.ref }}
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
@@ -24,7 +45,36 @@ jobs:
       - name: Çevrimdışı sözleşme
         run: uv run python -m football_edge.collect sources-audit
       - name: Canlı robots.txt sapması
-        run: uv run python scripts/robots_drift.py
+        # `!cancelled()`: çevrimdışı adım tarihi 30 günü aşmış bulup kırmızı verse de ölçüm ve
+        # tazeleme koşar — yoksa bayatlamış tarih bir daha hiç tazelenmez.
+        if: ${{ !cancelled() }}
+        run: uv run python scripts/robots_drift.py --refresh
+      - name: Tazelenen tarihleri commit'le
+        # Sapan bir kaynak turu kırmızı yapar ama aynı kalanların tarihi yine yazılır. Yalnız
+        # main: başka dala elle tetiklenen tur bot commit'i atmaz. seal.yml'in botu da main'e
+        # çıpa push'luyor: reddedilen push main birleştirilerek (rebase değil, deponun mesaj
+        # biçimiyle) en çok 3 kez denenir, force asla.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        run: |
+          if git diff --quiet -- config/sources.yaml; then
+            echo "robots_verified_at değişmedi — commit yok"
+            exit 0
+          fi
+          git config user.name "football-edge-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add config/sources.yaml
+          git commit -m "chore: robots yeniden doğrulandı $(date -u +%F)"
+          attempt=1
+          until git -c http.version=HTTP/1.1 push origin HEAD; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::push 3 denemede de reddedildi — tazelenen tarih main'e yazılamadı"
+              exit 1
+            fi
+            echo "::warning::push reddedildi (deneme $attempt/3), main birleştirilip yeniden deneniyor"
+            git fetch origin main
+            git merge --no-edit -m "merge: origin/main — sources-audit botu" FETCH_HEAD
+            attempt=$((attempt + 1))
+          done
       - name: FBref ve ClubElo yeniden ölçümü
         # Bilgilendirme: bu iki kaynak TR'den kapalı ölçüldü ve plan onları kapsam dışı
         # bıraktı (Ruling A). Runner'dan AÇIK çıkarlarsa bu adım bunu görünür kılar; kararı
@@ -47,3 +97,22 @@ jobs:
           # ayrı değerlendirilir.
           curl -sS -m 25 -o /dev/null -w 'clubelo /Fixtures HTTP %{http_code}\n' \
             http://api.clubelo.com/Fixtures || true
+      - name: Alarm aç
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız gövdesi
+        # güncellenir. `cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış döner.
+        # Yalnız main (iki alarm adımı da): başka dala elle tetiklenen tur main'in alarmına
+        # dokunmaz. Parantez şart — `&&`, `||`dan sıkı bağlar.
+        if: ${{ (failure() || cancelled()) && github.ref == 'refs/heads/main' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow sources-audit --run-url "$RUN_URL"
+      - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
+        # turda kapanır.
+        if: ${{ success() && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow sources-audit --run-url "$RUN_URL"
