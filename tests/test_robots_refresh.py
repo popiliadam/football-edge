@@ -9,13 +9,17 @@ değeri: sapan ya da ölçülemeyen kaynağın tarihi yerinde kalır, tur kırm�
 from __future__ import annotations
 
 import dataclasses
+import errno
 import importlib.util
+import io
 import re
 import shutil
+import stat
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import IO, Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -26,6 +30,7 @@ from football_edge.sources import load_sources
 REPO = Path(__file__).resolve().parent.parent
 REGISTRY = Path("config/sources.yaml")
 TODAY = date(2026, 10, 15)
+NOW = datetime.combine(TODAY, time(12), tzinfo=UTC)
 STALE = TODAY - timedelta(days=8)
 FRESH = TODAY - timedelta(days=3)
 ALPHA_ROBOTS = "User-agent: *\nDisallow: /private\n"
@@ -117,7 +122,7 @@ def _run(original: str, live: dict[str, Live], argv: list[str] | None = None) ->
     """Kayıt defterini yazar, betiği koşar; (çıkış kodu, dosyanın son baytları) döner."""
     REGISTRY.write_text(original, encoding="utf-8")
     code = robots_drift.main(
-        ["--refresh"] if argv is None else argv, transport=_serve(live), today=TODAY
+        ["--refresh"] if argv is None else argv, transport=_serve(live), now=NOW
     )
     return code, REGISTRY.read_bytes()
 
@@ -236,26 +241,134 @@ def _shared_anchor(original: str) -> str:
     )
 
 
+def _alpha(registry: Path) -> list[Any]:
+    """`refresh`e verilecek doğrulanmış kaynak: yalnız alpha (beta sapmış sayılır)."""
+    return [source for source in load_sources(registry) if source.id == "alpha"]
+
+
 @pytest.mark.parametrize(
     "mangle", [_duplicate_key, _shared_anchor], ids=["yinelenen-anahtar", "paylaşılan-çapa"]
 )
-def test_an_ambiguous_date_is_never_guessed(workspace: Path, mangle: Callable[[str], str]) -> None:
+def test_an_ambiguous_date_is_never_guessed(tmp_path: Path, mangle: Callable[[str], str]) -> None:
     """Düzenlenecek değer tek anlamlı değilse tahmin edilmez: hiçbir şey yazılmaz ve tur düşer —
-    sessizce atlanan bir tarih 30 gün sonra kapıyı kırmızıya düşürürdü."""
+    sessizce atlanan bir tarih 30 gün sonra kapıyı kırmızıya düşürürdü. Hata, düzenlenen
+    dosyanın KENDİSİNİ adlandırır (varsayılan kayıt defterini değil)."""
+    registry = tmp_path / "kopya.yaml"
     original = mangle(_registry(alpha=STALE, beta=FRESH))
     assert original != _registry(alpha=STALE, beta=FRESH), "bozma işlevi hiçbir şeyi değiştirmedi"
+    registry.write_text(original, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="robots_verified_at"):
-        _run(original, {"alpha.example": _same(ALPHA_ROBOTS), "beta.example": _same(ALPHA_ROBOTS)})
+    with pytest.raises(ValueError, match=rf"^{re.escape(str(registry))}: .*robots_verified_at"):
+        robots_drift.refresh(registry, _alpha(registry), TODAY)
 
-    assert REGISTRY.read_bytes() == original.encode("utf-8")
+    assert registry.read_bytes() == original.encode("utf-8")
+
+
+class _FullDisk:
+    """Yazılanın yarısını diske bırakıp ENOSPC ile düşen dosya tutamacı."""
+
+    def __init__(self, handle: IO[bytes]) -> None:
+        self._handle = handle
+
+    def write(self, data: bytes) -> int:
+        self._handle.write(memoryview(data)[: len(data) // 2])
+        self._handle.flush()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handle, name)
+
+    def __enter__(self) -> _FullDisk:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._handle.close()
+
+
+class _ShortWrite(_FullDisk):
+    """Yarısını bırakıp hata VERMEDEN dönen tutamaç: diskteki baytlar amaçlanan metin değil."""
+
+    def write(self, data: bytes) -> int:
+        half = memoryview(data)[: len(data) // 2]
+        self._handle.write(half)
+        return len(half)
+
+
+@pytest.mark.parametrize(
+    ("handle", "error"),
+    [(_FullDisk, OSError), (_ShortWrite, ValueError)],
+    ids=["yazma-yarıda-düşer", "yazma-sessizce-eksik"],
+)
+def test_a_failed_write_leaves_the_registry_byte_for_byte_intact(
+    tmp_path: Path, handle: type[_FullDisk], error: type[Exception]
+) -> None:
+    """Commit adımı kırmızı turda da koşar: yarıda kalan bir yazma kesik kayıt defterini main'e
+    götürürdü. Arıza `io.open`da taklit edilir — hem `Path.write_bytes` hem `os.fdopen` oradan
+    geçer. Kayıt defteri bayt bayt aynı kalmalı, yanında geçici dosya kalmamalı."""
+    registry = tmp_path / "sources.yaml"
+    original = _registry(alpha=STALE, beta=FRESH)
+    registry.write_text(original, encoding="utf-8")
+    verified = _alpha(registry)
+    real_open = io.open
+
+    def failing_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        opened = real_open(file, mode, *args, **kwargs)
+        return handle(opened) if "w" in mode else opened
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(io, "open", failing_open)
+        with pytest.raises(error):
+            robots_drift.refresh(registry, verified, TODAY)
+
+    assert registry.read_bytes() == original.encode("utf-8")
+    assert [path.name for path in tmp_path.iterdir()] == ["sources.yaml"], "geçici dosya kaldı"
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        # İstanbul 01:30 = UTC'de hâlâ önceki gün: yerel gün yazılsa kapı "gelecekte" derdi.
+        datetime(2030, 1, 1, 1, 30, tzinfo=timezone(timedelta(hours=3))),
+        # New York 20:30 = UTC'de ertesi gün 01:30: yerel gün yazılsa tarih bir gün geride kalırdı.
+        datetime(2029, 12, 31, 20, 30, tzinfo=timezone(timedelta(hours=-5))),
+    ],
+    ids=["yerel-gün-ileride", "yerel-gün-geride"],
+)
+def test_the_written_date_is_the_utc_day_the_gate_uses(workspace: Path, now: datetime) -> None:
+    """Kapı (`collect sources-audit`) `datetime.now(UTC).date()` ile ölçer; bot o günü yazmalı."""
+    utc_day = now.astimezone(UTC).date()
+    assert utc_day != now.date(), "vaka yerel günle UTC gününü ayırmıyor"
+    recent = utc_day - timedelta(days=3)
+    REGISTRY.write_text(_registry(alpha=utc_day - timedelta(days=8), beta=recent), encoding="utf-8")
+
+    code = robots_drift.main(
+        ["--refresh"],
+        transport=_serve(
+            {"alpha.example": _same(ALPHA_ROBOTS), "beta.example": _same(BETA_ROBOTS)}
+        ),
+        now=now,
+    )
+
+    assert code == 0
+    assert REGISTRY.read_bytes() == _registry(alpha=utc_day, beta=recent).encode("utf-8")
+
+
+def test_messages_follow_the_refresh_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eşik tek yerde yaşar: `REFRESH_AFTER` değişirse mesaj ve yardım metni eskisini söylemez."""
+    monkeypatch.setattr(robots_drift, "REFRESH_AFTER", timedelta(days=10))
+
+    assert "10 günden" in robots_drift.refresh(tmp_path / "hiç-yazılmaz.yaml", [], TODAY)
+    assert "10 günden" in " ".join(robots_drift._parser().format_help().split())
 
 
 def test_the_real_registry_changes_only_its_date_values(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Gerçek `config/sources.yaml` + anlık görüntüler, canlısı aynı: her ölçülen kaynağın tarih
-    satırı bugüne döner, başka HİÇBİR bayt değişmez ve dosya aynı kayıtlara ayrışır."""
+    satırı bugüne döner, başka HİÇBİR bayt değişmez, dosya aynı kayıtlara ayrışır; dosya izni ve
+    `config/` içeriği (geçici dosya kalmadan) aynı kalır."""
     shutil.copytree(REPO / "config", tmp_path / "config")
     monkeypatch.chdir(tmp_path)
     sources = load_sources(REGISTRY)
@@ -268,10 +381,16 @@ def test_the_real_registry_changes_only_its_date_values(
         for s in measured
     }
     before = REGISTRY.read_bytes()
+    mode = stat.S_IMODE(REGISTRY.stat().st_mode)
+    listing = sorted(path.name for path in Path("config").iterdir())
 
-    code = robots_drift.main(["--refresh"], transport=_serve(live), today=today)
+    code = robots_drift.main(
+        ["--refresh"], transport=_serve(live), now=datetime.combine(today, time(12), tzinfo=UTC)
+    )
 
     assert code == 0
+    assert stat.S_IMODE(REGISTRY.stat().st_mode) == mode, "dosya izni değişti"
+    assert sorted(path.name for path in Path("config").iterdir()) == listing
     changed = [
         (old, new)
         for old, new in zip(

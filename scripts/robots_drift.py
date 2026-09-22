@@ -6,15 +6,21 @@ bir gün robots'unu gevşetirse bunu görmek isteriz; görmek, kararı değişti
 değildir ama kararın dayanağını tazeler.
 
 `--refresh`: canlısı anlık görüntüyle aynı ölçülen ("sapma yok") kaynağın `robots_verified_at`i
-7 günden eskiyse `config/sources.yaml`da bugüne çekilir — aynı kalan robots.txt bir yeniden
-doğrulamadır. Sapan ya da ölçülemeyen kaynağın tarihine dokunulmaz; tur yine kırmızı verir.
+`REFRESH_AFTER`dan eskiyse `config/sources.yaml`da bugüne (UTC) çekilir — aynı kalan robots.txt
+bir yeniden doğrulamadır. "Aynı" bayt eşitliği DEĞİLDİR: iki metin satır sonları `\\n`e
+indirgenip baştaki/sondaki boşluk `.strip()` ile kırpıldıktan sonra eşittir (`_report_one`).
+Sapan ya da ölçülemeyen kaynağın tarihine dokunulmaz; tur yine kırmızı verir.
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import difflib
+import os
+import shutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -93,7 +99,7 @@ def _child(node: yaml.Node | None, key: str) -> yaml.Node:
     pairs = node.value if isinstance(node, yaml.MappingNode) else []
     values: list[yaml.Node] = [value for name, value in pairs if name.value == key]
     if len(values) != 1:
-        raise ValueError(f"{SOURCES}: '{key}' {len(values)} kez bulundu, tek bekleniyordu")
+        raise ValueError(f"'{key}' {len(values)} kez bulundu, tek bekleniyordu")
     return values[0]
 
 
@@ -106,7 +112,7 @@ def _verified_span(text: str, source_id: str) -> tuple[int, int]:
     entries: list[yaml.Node] = _child(yaml.compose(text, Loader=yaml.SafeLoader), "sources").value
     matches = [entry for entry in entries if _child(entry, "id").value == source_id]
     if len(matches) != 1:
-        raise ValueError(f"{SOURCES}: '- id: {source_id}' kaydı {len(matches)} kez bulundu")
+        raise ValueError(f"'- id: {source_id}' kaydı {len(matches)} kez bulundu")
     node = _child(matches[0], "robots_verified_at")
     return node.start_mark.index, node.end_mark.index
 
@@ -116,27 +122,58 @@ def _bump(text: str, source: Source, today: date) -> str:
     start, end = _verified_span(text, source.id)
     if text[start:end] != source.robots_verified_at.isoformat():
         raise ValueError(
-            f"{SOURCES}: {source.id} robots_verified_at beklenen biçimde değil "
-            f"({text[start:end]!r}) — tarih yazılmadı"
+            f"{source.id} robots_verified_at beklenen biçimde değil ({text[start:end]!r})"
         )
     return f"{text[:start]}{today.isoformat()}{text[end:]}"
+
+
+def _replace_atomically(path: Path, data: bytes, expected: tuple[Source, ...]) -> None:
+    """Önce aynı dizinde geçici dosyaya yazar ve `load_sources` ile ayrıştırır; ancak diskteki
+    baytlar tam `expected` kayıtlara ayrışırsa tek adımda (`os.replace`) yerine koyar.
+
+    `write_bytes` önce dosyayı keser: yazma yarıda düşerse kesik kayıt defteri kalır ve commit
+    adımı kırmızı turda da koştuğu için main'e gider.
+    """
+    handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    temp = Path(name)
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if load_sources(temp) != expected:
+            raise ValueError("yazılan metin beklenen kayıtlara ayrışmıyor")
+        shutil.copymode(path, temp)  # mkstemp 0600 açar; kayıt defterinin izni korunmalı
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def refresh(path: Path, verified: Sequence[Source], today: date) -> str:
     """`verified` kaynaklardan tarihi `REFRESH_AFTER`dan eski olanları bugüne çeker.
 
     Dosya yeniden YAZDIRILMAZ (yaml.dump yorumları ve katlanmış notları siler); hedefli değer
-    düzenlemesidir. Konum bulunamazsa hiçbir şey yazılmaz ve hata yükselir: sessizce atlanan
-    bir tarih 30 gün sonra kapıyı kırmızıya düşürürdü.
+    düzenlemesidir. Konum bulunamazsa ya da sonuç yalnız bu tarihlerde ayrışmıyorsa hiçbir şey
+    yazılmaz ve hata yükselir: sessizce atlanan bir tarih 30 gün sonra kapıyı kırmızıya düşürürdü.
     """
     due = [source for source in verified if today - source.robots_verified_at > REFRESH_AFTER]
     if not due:
-        return "tazeleme: 7 günden eski doğrulanmış tarih yok\n"
-    # Ham bayt: `read_text` satır sonlarını çevirir, dosyanın kalanı bayt bayt korunmalı.
-    text = path.read_bytes().decode("utf-8")
-    for source in due:
-        text = _bump(text, source, today)
-    path.write_bytes(text.encode("utf-8"))
+        return f"tazeleme: {REFRESH_AFTER.days} günden eski doğrulanmış tarih yok\n"
+    refreshed = {source.id for source in due}
+    try:
+        # Ham bayt: `read_text` satır sonlarını çevirir, dosyanın kalanı bayt bayt korunmalı.
+        text = path.read_bytes().decode("utf-8")
+        for source in due:
+            text = _bump(text, source, today)
+        expected = tuple(
+            dataclasses.replace(source, robots_verified_at=today)
+            if source.id in refreshed
+            else source
+            for source in load_sources(path)
+        )
+        _replace_atomically(path, text.encode("utf-8"), expected)
+    except (ValueError, yaml.YAMLError) as error:
+        raise ValueError(f"{path}: {error} — tarih yazılmadı") from error
     return "".join(
         f"yeniden doğrulandı: {source.id} {source.robots_verified_at} → {today}\n" for source in due
     )
@@ -147,7 +184,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="canlısı aynı kalan kaynağın 7 günden eski robots_verified_at'ini bugüne çek",
+        help=(
+            f"canlısı aynı kalan kaynağın {REFRESH_AFTER.days} günden eski "
+            "robots_verified_at'ini bugüne (UTC) çek"
+        ),
     )
     return parser
 
@@ -156,7 +196,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     transport: httpx.BaseTransport | None = None,
-    today: date | None = None,
+    now: datetime | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     drifted = False
@@ -174,7 +214,8 @@ def main(
     if args.refresh:
         # Kapı (`collect sources-audit`) UTC gününü kullanır: yerel gün ondan ileride olabilir
         # ve yazılan tarih kapıda "gelecekte" ihlali olurdu.
-        sys.stdout.write(refresh(SOURCES, verified, today or datetime.now(UTC).date()))
+        today = (now or datetime.now(UTC)).astimezone(UTC).date()
+        sys.stdout.write(refresh(SOURCES, verified, today))
     return 1 if drifted else 0
 
 
