@@ -6,12 +6,17 @@ on:
   # `schedule`ı KASITLI olarak yok: ikisi birden aynı gün iki tur, yani iki kat kredi demektir.
   # pg_cron sessizce durursa `seal.yml`deki bekçi (scripts/ops_alert.py watchdog) alarm açar.
   #
-  # KREDİ ARİTMETİĞİ (ücretsiz katman: 500 kredi/ay, maliyet = markets × regions):
-  #   config/leagues.yaml → 6 aktif lig × 1 kredi = 6 kredi/tur
-  #   1 tur/gün × 31 gün                          = 186 kredi/ay
-  #   mühür turlarına + elle dispatch'e kalan pay ≈ 314 kredi/ay
-  # İkinci bir günlük tetik 186 kredi daha yer ve mühür payını ≈ 128'e indirir. Sıklık
-  # artırılacaksa önce bu aritmetik yeniden yapılır — kredi sessizce tükenir, uyarı vermez.
+  # KREDİ ARİTMETİĞİ (ücretsiz katman: 500 kredi/ay, maliyet = markets × regions = 1; olay
+  # dönmeyen çağrı 0 kredi — ölçüldü, milli maç arasında snapshot bedava):
+  #   config/leagues.yaml → 8 aktif lig × 1 kredi = 8 kredi/tur (R125: +N1, +B1; AUT kapalı)
+  #   1 tur/gün × 30 gün                          = 240 kredi/ay (31 günde 248)
+  #   mühür: ligin AYRI başlama saati başına 1 kredi. 8 lig ≈ 75 maç/hafta × 4,3 ≈ 323 maç/ay
+  #     üst sınır (her maç ayrı saatte)           ≈ 323 → toplam ≈ 563 kredi/ay — BÜTÇEYİ AŞAR
+  #     beklenen (canlı DB, 09-19/20 haftası: 51 maç / 34 ayrı başlama = 0,67) ≈ 215
+  #                                                → toplam ≈ 455 kredi/ay, pay ≈ 45
+  # Pay dar: tükenirse (<5) mühür turu keser ve TÜM liglerin kapanışı KALICI kaçar. Bekçi
+  # 60'ın altında alarm açar. İkinci bir günlük tetik 240 kredi daha yer — bütçeyi aşar. Lig
+  # ya da sıklık artırılacaksa önce bu aritmetik yeniden yapılır — kredi sessizce tükenir.
   workflow_dispatch:
 
 concurrency:

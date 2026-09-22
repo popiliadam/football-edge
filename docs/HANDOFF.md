@@ -26,6 +26,13 @@ ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve
 - Defterler (gitignored, bu makinede): `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md` (R78–R100),
   `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` (R101–R121). Ertelenenler DEFERRED §12, §14.
 
+**Oturum 5 durumu (2026-09-22 ~22:00 UTC):**
+- **İz A BİRLEŞTİ** (`dd038f7`, CI yeşil): N1 (`ned.1`) ve B1 (`bel.1`) `active: true` — kredi harcaması kullanıcı onaylı
+  (R125; beklenen ≈455/ay, üst sınır ≈563/ay, pay ≈45); AUT `active: false`. Defter
+  `.superpowers/sdd/2026-09-23-leagues-n1-b1-aut/`, R122–R127; artıklar DEFERRED §15.
+- **İz B:** tasarım (`docs/faz3-plan`, `f25a821`) kullanıcı onaylı — K1–K12 hepsi önerilen seçenek; TDD planı yazılıyor.
+  Uygulama plan onayından sonra (A artık birleşti). Defter `.superpowers/sdd/2026-09-23-faz3-plan/`.
+
 **Sıradaki oturum — PARALEL İZLER (kullanıcı kararı 2026-09-22: izler birbirini kırmadan paralel yürür)**
 
 Yeni oturumda: "`docs/HANDOFF.md` §0'dan devam et" → bu tabloyu oku → `git worktree list` ile başla. İzler
@@ -85,6 +92,8 @@ kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
    ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72).
 3. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
 4. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir.
+6. **İz A sonrası (2026-09-23):** 06:22 UTC snapshot logunda 8 anahtar ve kalan kredi; N1/B1 maçlı ilk mühür turu
+   yeşil ve maçı mühürlüyor; 10:40 yerel footystats turu 8 lig ok (bel.1 satır sayısı — DEFERRED 15d).
 5. CI'da bir kez `astral-sh/setup-uv` 10 dk takıldı (2026-09-22, rerun yeşil); tekrarlarsa adım düzeyi timeout
    (DEFERRED 14u).
 

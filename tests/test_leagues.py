@@ -69,3 +69,132 @@ def test_duplicate_id_raises(tmp_path: Path) -> None:
     text = VALID.replace("id: tur.1", "id: eng.1")
     with pytest.raises(ValueError, match="yinelenen"):
         load_leagues(write(tmp_path, text))
+
+
+# ── İz A (2026-09-23): `footystats_path` isteğe bağlı ───────────────────────
+# Her ligin footystats sayfası yok; alan zorunlu kalırsa sayfası olmayan lig ya
+# yapılandırılamaz ya da uydurma bir yol taşır (toplayıcı onu isteyip düşer).
+
+WITHOUT_FOOTYSTATS = """
+leagues:
+  - id: ned.1
+    odds_api_key: soccer_netherlands_eredivisie
+    name: Eredivisie
+    country: Netherlands
+    lang: nl
+    gl: NL
+    active: false
+"""
+
+
+def test_footystats_path_may_be_absent_and_reads_as_none(tmp_path: Path) -> None:
+    (league,) = load_leagues(write(tmp_path, WITHOUT_FOOTYSTATS))
+    assert league.footystats_path is None
+
+
+def test_footystats_path_when_present_must_be_an_absolute_path(tmp_path: Path) -> None:
+    """Boş anahtar (`footystats_path:` → None) ya da göreli yol sessizce "sayfa yok"
+    sayılmaz: yazılmışsa gerçek bir yol olmalı, yoksa satır hiç yazılmamalı."""
+    for bad in ("    footystats_path:\n", "    footystats_path: netherlands/x\n"):
+        with pytest.raises(ValueError, match="footystats_path"):
+            load_leagues(write(tmp_path, WITHOUT_FOOTYSTATS + bad))
+
+
+def test_league_without_footystats_path_can_be_built_directly() -> None:
+    league = League(
+        id="aut.1",
+        odds_api_key="soccer_austria_bundesliga",
+        name="Bundesliga",
+        country="Austria",
+        lang="de",
+        gl="AT",
+        active=False,
+    )
+    assert league.footystats_path is None
+
+
+# ── Canlı altı ligin davranışı SABİT (İz A) ─────────────────────────────────
+# Gerçek `config/leagues.yaml`e karşı: lig eklemek ya da alanı isteğe bağlı yapmak, bugün
+# toplanan altı ligin HİÇBİR alanını değiştirmemeli — kimliği, anahtarı, footystats yolu,
+# sırası (toplama sırası = kredi harcama sırası) dâhil.
+REPO = Path(__file__).resolve().parents[1]
+
+LIVE_SIX = (
+    League(
+        "eng.1",
+        "soccer_epl",
+        "Premier League",
+        "England",
+        "en",
+        "GB",
+        True,
+        "/england/premier-league/xg",
+    ),
+    League(
+        "esp.1", "soccer_spain_la_liga", "La Liga", "Spain", "es", "ES", True, "/spain/la-liga/xg"
+    ),
+    League(
+        "ita.1", "soccer_italy_serie_a", "Serie A", "Italy", "it", "IT", True, "/italy/serie-a/xg"
+    ),
+    League(
+        "ger.1",
+        "soccer_germany_bundesliga",
+        "Bundesliga",
+        "Germany",
+        "de",
+        "DE",
+        True,
+        "/germany/bundesliga/xg",
+    ),
+    League(
+        "fra.1",
+        "soccer_france_ligue_one",
+        "Ligue 1",
+        "France",
+        "fr",
+        "FR",
+        True,
+        "/france/ligue-1/xg",
+    ),
+    League(
+        "tur.1",
+        "soccer_turkey_super_league",
+        "Super Lig",
+        "Turkey",
+        "tr",
+        "TR",
+        True,
+        "/turkey/super-lig/xg",
+    ),
+)
+
+
+# R125 (kullanıcı kararı 2026-09-22): N1 ve B1 kredi harcamaya açıldı; AUT kapalı kalır.
+OPENED_BY_R125 = (
+    League(
+        "ned.1",
+        "soccer_netherlands_eredivisie",
+        "Eredivisie",
+        "Netherlands",
+        "nl",
+        "NL",
+        True,
+        "/netherlands/eredivisie/xg",
+    ),
+    League(
+        "bel.1",
+        "soccer_belgium_first_div",
+        "First Division A",
+        "Belgium",
+        "nl",
+        "BE",
+        True,
+        "/belgium/pro-league/xg",
+    ),
+)
+
+
+def test_the_six_original_leagues_are_unchanged_and_eight_are_active() -> None:
+    configured = load_leagues(REPO / "config/leagues.yaml")
+    assert configured[: len(LIVE_SIX)] == LIVE_SIX
+    assert active_leagues(configured) == (*LIVE_SIX, *OPENED_BY_R125)
