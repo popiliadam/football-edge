@@ -38,6 +38,10 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Kuyrukta bekleyen ya da yeniden koşturulan tur da ref'in BUGÜNKÜ ucunu alır: tetikleyen
+          # sha'da önceki turun çıpası yoktur ve bugünün çıpası birleştirmede çakışırdı.
+          ref: ${{ github.ref }}
       - name: Secret taraması
         # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
         # halka açılır ve geri alınamaz. Bu iş ayrıca `contents: write` taşıyor ve

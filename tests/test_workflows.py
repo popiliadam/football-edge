@@ -1028,3 +1028,14 @@ def test_no_anchor_git_call_forces_or_rebases(
 
     assert calls, "adım git'i hiç çağırmadı — test kurgusu bayatlamış"
     assert [call for call in calls if _rewrites_history(call)] == []
+
+
+def test_seal_checks_out_the_current_tip_of_the_ref() -> None:
+    """Kuyrukta bekleyen ya da yeniden koşturulan tur varsayılan olarak TETİKLEYEN sha'yı alır:
+    önceki turun çıpa commit'i o tabanda yoktur, bugünün çıpası birleştirmede çakışır ve tur
+    kırmızı verir. Tur ref'in bugünkü ucunu almalı."""
+    (checkout,) = [
+        step for step in _steps(SEAL) if str(step.get("uses", "")).startswith("actions/checkout")
+    ]
+
+    assert (checkout.get("with") or {}).get("ref") == "${{ github.ref }}"
