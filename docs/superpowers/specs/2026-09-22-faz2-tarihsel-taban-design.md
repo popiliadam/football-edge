@@ -82,7 +82,7 @@ football-data.co.uk ──► history/sync.py ──► hist_files (son sürüm,
                 │                                  │
        market/devig.py · market/metrics.py (saf, ortak)
                 │
-       docs/reports/*.md (yalnız toplu sayılar) · backtest-selftest.yml (K1–K4, haftalık, alarm)
+       docs/reports/*.md (yalnız toplu sayılar) · `history.yml`in `Bilinen sonuçlar` adımı (K1–K4, haftalık, alarm — R84)
 ```
 
 Harness ve rapor üretimi `DATABASE_URL` olan her yerde koşar (Mac ya da runner): önbellek
@@ -201,9 +201,12 @@ büyüklük. Mac'teki footystats işini (DEFERRED 10r) emekliye ayırma adayıd�
 
 ### 5.2 Kilit (D8)
 
-- **Kanonik satır:** sabit, sıralı bir sütun listesinin KAYNAK METNİ (float'a çevrilmeden; biçimlendirme
-  kayması olmasın), sekmeyle birleştirilmiş: lig, sezon, tarih, saat, ev, deplasman, goller, sonuç ve
-  Faz 2'nin kullandığı oran sütunları. Sütun listesi sürümlüdür (`canonical_version`).
+- **Kanonik satır:** sabit, sıralı bir sütun listesinin AYRIŞTIRILMIŞ DEĞERLERİ (float `repr`, ISO
+  tarih/saat, sıralı oran ve istatistik anahtarları), sekmeyle birleştirilmiş: lig, sezon, tarih, saat, ev,
+  deplasman, goller, sonuç ve Faz 2'nin kullandığı oran sütunları. Sütun listesi sürümlüdür
+  (`canonical_version`). *(düzeltme 2026-09-22, R86: bu cümle önce "KAYNAK METNİ (float'a çevrilmeden)"
+  diyordu. Kaynak metni `HistMatch`te yoktur ve "2.10" → "2.1" gibi biçim farkını yanlış kilit ihlali
+  sayardı. Sonuç: kaynağın biçim değişikliği görünmez, değer değişikliği görünür — HANDOFF Faz 2 §3/23.)*
 - **Özet:** her `(lig, dönem)` için satır sayısı ve kanonik satırların sıralı birleşiminin sha256'sı.
 - `config/history_lock.yaml` (depoda, yalnız sayı ve özet — içerik değil): `canonical_version`,
   `locked_at`, dönem sınırları, lig başına `dev` ve `holdout` için `{rows, sha256}`. İlk tam yüklemeden
@@ -233,11 +236,15 @@ büyüklük. Mac'teki footystats işini (DEFERRED 10r) emekliye ayırma adayıd�
 | Shin | `p_i = (√(z² + 4(1−z)·q_i²/B) − z) / (2(1−z))`, `Σ p_i = 1` | `z ∈ [0, 0.5)` üzerinde ikiye bölme |
 
 - scipy gerekmez: tek değişkenli, tekdüze kök bulma stdlib ile ikiye bölmedir (tolerans `1e-12`).
-- Özellikler testlerle: toplam 1, sıra korunur, `B = 1` iken `p = q`, `z ≥ 0`, `k ≥ 1`; iki yollu
-  (Ü/A) ve üç yollu (1X2) marketler; eksik ya da `≤ 1.0` fiyat reddedilir.
+- Özellikler testlerle: toplam 1, sıra korunur, `B = 1` iken `p = q`, `z ≥ 0`, `B ≥ 1` iken `k ≥ 1`;
+  iki yollu (Ü/A) ve üç yollu (1X2) marketler; eksik ya da `≤ 1.0` fiyat reddedilir. *(düzeltme
+  2026-09-22, DEFERRED 12j — Task 2 incelemesi Minor 8: metin koşulsuz "`k ≥ 1`" diyordu; `B < 1`
+  (düşük toplamlı) fiyatlarda power'ın üssü 1'in altındadır.)*
 - **Varsayılan yöntem ölçümle seçilir:** geliştirme döneminde kapanış `AvgC`'nin log loss'u en düşük
   olan (beklenen: Shin ya da power, favori–sürpriz yanlılığı nedeniyle). Seçim verimlilik raporuna ve
-  bir sabite yazılır; Faz 3 onu kullanır.
+  bir sabite yazılır; Faz 3 onu kullanır. *(sonuç 2026-09-22, R118: ölçüm **power**'ı seçti —
+  havuzlanmış kapanış LL'si çarpımsal 1.00248 · power 1.00188 · Shin 1.00195; `DEFAULT_METHOD = POWER`,
+  merge `aec668f`. power–Shin farkı ~7e-5 ve aralıksız.)*
 
 ## 7. Backtest harness (D10, D11)
 
@@ -256,9 +263,13 @@ sonra birleştirilir.
 
 ### 7.2 Tiple ayrılmış iki kayıt
 
-- `DecisionContext`: maç kimliği, lig, ev, deplasman, karar anı, maçın kendi kapanış öncesi fiyatları,
-  durumun o anki görüntüsü (yalnız okuma: `results_before`, Elo reytingleri). Kapanış ve sonuç alanı
-  YOKTUR — bir strateji onları isteyemez, çünkü tip onları taşımaz.
+- `DecisionContext`: maç kimliği, lig, ev, deplasman, karar anı, maçın kendi kapanış öncesi fiyatları.
+  Durumun görüntüsünü TAŞIMAZ: durum (geçmiş sonuçlar, Elo reytingleri) stratejinin içindedir ve
+  harness'ın karar anından önce bilinen sonuçlarla çağırdığı `observe` ile güncellenir; zamanı harness
+  yönetir. Kapanış ve sonuç alanı YOKTUR — bir strateji onları isteyemez, çünkü tip onları taşımaz.
+  *(düzeltme 2026-09-22, R98: bu cümle önce "durumun o anki görüntüsü (yalnız okuma: `results_before`,
+  Elo reytingleri)" diyordu. Sonuç: Faz 3'ün eşitlik testi (§7.4) yalnız bağlamı değil, bağlamı VE
+  `observe` akışını karşılaştırır.)*
 - `Outcome`: sonuç, goller, kapanış fiyatları. Yalnız değerlendirici görür.
 
 ### 7.3 Stratejiler (Faz 2)
@@ -348,7 +359,12 @@ satır yok.
 3. Harness, bir kararın durumuna zamanı karar anına eşit ya da sonra olan bir olayın girdiğini görürse
    `LeakageError` fırlatır (savunma katmanı; olay sıralaması zaten bunu önler).
 4. Kilit doğrulaması (§5.2) ve holdout anahtarı (§5.3).
-5. Negatif kontrol: `Placebo`'nun ortalama CLV'si pozitif çıkamaz (K4).
+5. Fiyat sütunu negatif kontrolü: `Placebo`'nun ortalama CLV'si pozitif çıkamaz (K4). K4 harness
+   sızıntısını ÖLÇMEZ: `Placebo` sonucu yok sayar ve CLV sonuçtan bağımsızdır. Harness'ın negatif
+   kontrolü `tests/test_harness.py`'deki `leakage` işaretli Oracle kanaryasıdır — sonuç kullanan bir
+   strateji dürüst harness'ta 0 tahmin üretir, sızdırılan harness'ta kırmızıdır. *(düzeltme 2026-09-22,
+   R120: bu madde önce K4'ü harness'ın negatif kontrolü olarak okutuyordu; Task 11 F2 kasten sızdırılan
+   harness'ta K4'ün yine geçtiğini ölçtü — sonuç kullanan Oracle'ın log loss'u 0,105 iken.)*
 6. `pytest -m leakage` işaretli testler kapıda kendi adımıyla koşar (§11).
 
 **Kırmızı takım (T6):** dalga sonunda bir inceleme ajanı (fable) harness'ı ve bu belgeyi "bu
@@ -364,7 +380,7 @@ seçimi yoluyla sızması. Bulgular normal düzeltme döngüsüne girer; rapor `
 kırmızı). Sayı, işaretli testleri getiren dalga birleşirken ölçülüp yazılır. `verify.sh` ortak
 dosyadır: yalnız dalga sonu birleştirmesinde değişir.
 
-**`backtest-selftest.yml` (haftalık, `DATABASE_URL`li, kırmızı → `ops-alert`):** kilitli geliştirme
+**`history.yml`in `Bilinen sonuçlar` adımı (haftalık, `DATABASE_URL`li, kırmızı → `ops-alert`; düzeltme 2026-09-22, R84 — ayrı workflow yerine senkronla aynı işte):** kilitli geliştirme
 verisinde bilinen sonuçlar:
 
 | # | Beklenen | Tür |
@@ -374,8 +390,12 @@ verisinde bilinen sonuçlar:
 | K3 | İkisinin birlikte dolu olduğu geliştirme sezonlarında (§8.2) `PSC`, `AvgC`'den düşük log loss (havuzlanmış) — keskin kitap ortalamadan isabetli | kapı |
 | K4 | `Placebo`'nun ortalama CLV'si negatif, GA'nın üst ucu sıfırın altında | kapı |
 
-K1 ve K4, zaman semantiği ya da birleştirme bozulursa düşer (kapanış ile kapanış öncesi yer değiştirirse
-K1, gelecek fiyat sızarsa K4). Bekçi bu iki yeni işin tazeliğini izler (`scripts/ops_alert.py` tetik
+K1, fiyat evreleri bozulursa düşer (kapanış ile kapanış öncesi yer değiştirirse ya da kapanış öncesi
+sütun aslında kapanışsa). K4 bir fiyat sütunu negatif kontrolüdür — kapanış öncesi fiyatın adil kapanıştan
+iyi olmadığını sınar; harness sızıntısını ÖLÇMEZ. Harness sızıntısını `sızıntı` adımında her push'ta koşan
+Oracle kanaryası ölçer (§10/5). *(düzeltme 2026-09-22, R120: bu cümle önce "gelecek fiyat sızarsa K4
+düşer" diyordu. Task 11 ölçtü: `pre == close` verisinde K1 ΔLL = 0 ile yakalar, K4 geçer; kasten
+sızdırılan harness'ta da K4 geçer.)* Bekçi bu iki yeni işin tazeliğini izler (`scripts/ops_alert.py` tetik
 listesi — ortak dosya, dalga sonu).
 
 ## 12. Görevler, dalgalar, riskler
@@ -390,7 +410,7 @@ listesi — ortak dosya, dalga sonu).
 | 2 | **T1b** senkron + önbellek + ilk tam yükleme + kilit commit'i | `history/store.py`, `history/sync.py`, `0006_history.sql`, `history-sync.yml`, `sources.yaml`, robots anlık görüntüsü | K2 |
 | 2 | **T7** köprü kodu (sentetik + ilk gerçek rapor) | `market/bridge.py`, `config/history_aliases.yaml` | K2 |
 | 3 | **T4** verimlilik raporu (gerçek veri) | `market/efficiency.py`, `backtest/report.py`, `docs/reports/…` | K1 |
-| 3 | **T2b** bütünleşik harness + K1–K4 + zamanlanmış iş | `backtest-selftest.yml`, harness'ın gerçek veri yolu | K1 |
+| 3 | **T2b** bütünleşik harness + K1–K4 + zamanlanmış iş | `history.yml` selftest adımı (R84), harness'ın gerçek veri yolu | K1 |
 | 4 | **T6** kırmızı takım + Faz 2 HANDOFF + lig önerisi | rapor, belgeler | K1 |
 
 - Her dalgadan önce tek-yazar taraması; en çok 4 paralel implementer, her biri izole worktree'de.

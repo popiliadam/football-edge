@@ -1,106 +1,77 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 (oturum 4) · **Durum:** **Faz 2 yürütülüyor** — dalga 0, 1, 2 ve Task 8 `main`de
-(tarihsel taban canlı: 0006/0007/0008, ilk tam yükleme, kilit `a647f36`); **dalga 3 (Task 9, 10) kendi dallarında** ·
-İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı
-**10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11)
+**Son güncelleme:** 2026-09-22 (oturum 4, Faz 2 kapanışı) · **Durum:** **Faz 2 TAMAMLANDI — `main`de** (son
+commit `450d95d`; devir belgesi `docs/phases/02-tarihsel-taban/HANDOFF.md`) · tarihsel taban canlı (0006/0007/0008,
+kilit `a647f36`, haftalık `history.yml` salı 09:50 UTC) · İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan;
+footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL
+bağlıyken 11/11)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
-> Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
-> Faz 0'ınki: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3.
+> **Faz 2'nin devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/02-tarihsel-taban/HANDOFF.md` §3.**
+> Faz 1'inki: `docs/phases/01-toplayicilar/HANDOFF.md` §3. Faz 0'ınki: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3.
 > Arıza prosedürleri: `docs/RUNBOOK.md`.
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 4'te güncellendi)
+## 0. Sonraki oturum — buradan başla (2026-09-22, Faz 2 kapanışında güncellendi)
 
-**Faz 2 yürütülüyor — kaldığın yeri DEFTER söyler.**
-- Plan: `docs/superpowers/plans/2026-09-22-faz2-tarihsel-taban.md` (13 görev, onaylı, iki tur bağımsız
-  incelemeden geçti: planın kodu plan metninden tek ağaca kuruldu, her dalga yeşil). Tasarım:
-  `docs/superpowers/specs/2026-09-22-faz2-tarihsel-taban-design.md` (onaylı; §14/1 holdout politikası spec'e
-  işlendi). Ölçümler: `docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`.
-- **Defter (gitignored, bu makinede):** `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` —
-  `Task N: complete` satırı olan görev BİTMİŞTİR, yeniden dispatch edilmez; ilk tamamlanmamış görevden devam
-  (`superpowers:subagent-driven-development`). Planın hazırlık kararları (R78–R100):
-  `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md`.
-- Başlatmak için: "`docs/HANDOFF.md` §0'dan devam et" → defteri oku → açık worktree'leri (`git worktree list`)
-  ve dalları defterle karşılaştır.
-
-**Dalga 1 — `main`de (Task 5, `3bd722f..5f033fe`, CI yeşil).** Merge'ler `438cd6a` devig · `b792704` lock ·
-`45a4881` parser · `f0edb37` harness; her birinden sonra kapı yeşil (923 → 1062 → 1196 → 1271 passed). 0007 canlıda
-(`holdout_access_log` 0 satır, iki append-only tetikleyici, RLS açık / politika yok). `EXPECTED_MIN_LEAKAGE=209`,
-üç mutantla kanıtlı. Dalga 1 worktree'leri (`.worktrees/wt-{parser,devig,lock,harness}`) yerinde — silmek kullanıcı onayı ister.
-
-**Dalga 2 + Task 8 — `main`de (CI yeşil).** Merge'ler `5b6eb35` sync · `0a0bff5` bridge; `sızıntı` alt sınırı 221
-(`729dd30`). Canlı: 0006 (`hist_files`, append-only `hist_fetches` + TRUNCATE tetikleyicisi R110), 0008
-(`history-dispatch` salı 09:50 UTC; bekçi 8 gün). İlk tam yükleme 5 dosyada genişlik reddi → runner'da ölçüldü →
-**R111** (sonu boş fazla hücre kırpılır, sayısı loglanır; `b14f3e0`). Önbellek tam: 500 dosya, 38 lig. **R102
-kapandı:** `Date` Londra tarihi (USA gece satırları pazara yığılıyor), D5 doğru. Kilit `config/history_lock.yaml`
-(`a647f36`): holdout 7.646 ana + 4.446 ek (7.647'den fark: skorsuz tek maç, R112). 6 takım adı eşlemesi (canlı 4/4).
-Yerel ağ football-data'ya ULAŞAMIYOR (bağlantı sıfırlanıyor) — kaynak ölçümleri runner'da.
-
-**Dalga 3 — kendi dallarında, taban `a647f36`**
-
-| Görev | Dal · worktree | Durum |
-|---|---|---|
-| Task 9 — piyasa verimliliği + `market` CLI | `feat/faz2-efficiency` · `.worktrees/wt-efficiency` | defterde |
-| Task 10 — evaluate, K1–K4 selftest, history.yml adımı | `feat/faz2-selftest` · `.worktrees/wt-selftest` | defterde |
+**Faz 2 bitti.** 13 görevin hepsi `main`de (dalga 0–4, Task 11 denetimi ve düzeltmesi, Task 12 raporları);
+ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve Faz 3 ön koşulları:
+**`docs/phases/02-tarihsel-taban/HANDOFF.md`**. Kısaca:
+- Kapı: 1530 passed / 2 skipped · contract 18 · leakage 265. `holdout_access_log` = **0 açılış**.
+- Kilit `config/history_lock.yaml` (`a647f36`): holdout 7.646 ana + 4.446 ek (R112).
+- Gerçek veride bilinen sonuçlar (yöntem power): K1 0.0036 [0.0029, 0.0043] 22/22 · K3 0.0003 [0.0001, 0.0004]
+  348/348 · K4 −0.0713 [−0.0721, −0.0704] · D1 tekdüze. `DEFAULT_METHOD = power` (R118, Shin'den ~7e-5 iyi).
+- Verimlilik raporu: 38 lig, aday 32/38; köprü n = 4. Lig önerisi kullanıcı onaylı: **N1, B1, AUT** (T1 zaten canlı).
+- Defterler (gitignored, bu makinede): `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md` (R78–R100),
+  `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` (R101–R121). Ertelenenler DEFERRED §12, §14.
 
 **Sıradaki adımlar**
-1. Defterin son satırlarından Task 9/10 durumu: rapor `task-{9,10}-report.md`, paket `review-package <plan> a647f36 <uç>`,
-   inceleme kabuklu `general-purpose`; sağ kalan mutantlar R101 küçük turu, controller kendi kopyasında yeniden koşar.
-2. Dalga 3 merge (Task 9, 10 → `main`, `--no-ff`, her birinden sonra kapı; `sızıntı` alt sınırı yeniden ölçülür).
-3. **Task 11** — kırmızı takım sızıntı denetimi (kabuklu `general-purpose`, kod yazmaz; DEFERRED 12h varsayımı).
-4. **Task 12** — gerçek verimlilik raporu ve K1–K4 gerçek veride (`--env-file .env`), **lig önerisi kullanıcı onayı
-   ister (DUR)**; tasarım metni düzeltmeleri (R86, R98, 12j); "kapının ölçmedikleri": eşit genişlikli kayma, R111
-   boş-kuyruk kayması, canlı kapanış örneği küçük (bugün 4 maç).
+1. **Lig ekleme görevi — N1, B1, AUT** (Faz 2 HANDOFF §5): `config/leagues.yaml`a ekleme; `League`'in
+   `footystats_path`i isteğe bağlı olmalı (footystats sayfası olmayan lig); toplayıcılar ve ad eşlemesi; The Odds
+   API kredisi (bütçe 500/ay — mühür + snapshot tüketimi artar, önce ölç).
+2. **Faz 2 worktree'leri ve dalları — silme KULLANICI ONAYI bekliyor.** `.worktrees/wt-{parser,devig,lock,harness,
+   sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve dalları (`feat/faz2-*`, `measure/r104-width`);
+   uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı, main'e girmedi). Hepsi birleşti ya da ölçüm artığı.
+3. **İzle:** ilk cron'lu `history.yml` turu **salı 2026-09-29 09:50 UTC** — "Bilinen sonuçlar" (selftest) adımı
+   runner'da İLK kez koşar; yeşil olmalı (yerelde 25 sn, iş zaman aşımı 60 dk). Kırmızıysa `🔴 history kırmızı`
+   açılır: logu oku, kapıyı gevşetme. Aşağıdaki "İzlenecekler" de açık.
+4. **Faz 3 planlaması** — ön koşullar Faz 2 HANDOFF §6: walk-forward, canlı bağlam kurucusu + eşitlik testi
+   (bağlam VE `observe` akışı), Elo fiti, scipy dalga 0'ı, `final_eval` işçilere anahtar değil seçilmiş satır verir.
 
-**Oturum 4'ün kararları** (gerekçe ve bedel defterde): R106 — `ci.yml` yorumundaki bayat adım listesi düzeltildi ·
-R107/R113 — dalga implementer'ları ayrı worktree'lerde paralel · R108 — fikstür için ayrıştırıcı gevşetilmez · R109 —
-DEFERRED 12e T6'ya eklenmez · R110 — 0006'ya TRUNCATE tetikleyicisi · R111 — boş fazla kuyruk kırpılır · R112 — kilit
-7.646 ile commit'lendi (fark bulundu).
+**Oturum 4'ün kararları** (gerekçe ve bedel defterde; tam liste Faz 2 HANDOFF §4): R106 — `ci.yml` yorumu ·
+R107/R113 — dalga implementer'ları ayrı worktree'lerde paralel · R108 — fikstür için ayrıştırıcı gevşetilmez ·
+R109 — DEFERRED 12e T6'ya eklenmez · R110 — 0006'ya TRUNCATE tetikleyicisi · R111 — boş fazla kuyruk kırpılır ·
+R112 — kilit 7.646 ile · R114–R116 — verimlilik raporu tek lig yüzünden düşmez, yakalama dar · R117 — denetçi fable ·
+R118 — `DEFAULT_METHOD = power` · R119 — AST kuralı `load_files`/`parse_file`/`_parsed`ı korur · R120 — Oracle
+kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
 
-**Oturum 3'ün kararları** (gerekçe ve bedel defterde): R101 — K1 incelemesinde sağ kalan mutantlar küçük tek turda
-kapanır, controller onları kendi kopyasında yeniden koşar · R102 — `Date` takvimi Task 8'de ölçülür · R103 — fiyat
-hücresi sayımı reddedilen ve yinelenen satırları içerir, genişliği tutmayan kaydınkini içermez · R104 — satır genişliği
-tam eşitlik (fail-closed) · R105 — 2019/20 sezon penceresi 31 Ağustos'ta kapanır (Serie A son haftası 1–2 Ağustos 2020).
-
-**Oturum düzeni (bu oturumda öğrenilenler)**
+**Oturum düzeni (öğrenilenler)**
 - Bağlam ~%95'e yaklaşınca devir: koşan görev bitince defter + bu bölüm + commit/push, sonra yeni oturum —
   otomatik sıkıştırmaya güvenme.
 - `Agent`'ın `isolation: "worktree"`ü bu makinede çalışmıyor (WorktreeCreate hook yol döndürmüyor) → worktree'yi
   `git worktree add` ile elle aç.
-- Alt ajanlar izinsiz `rm -rf` yaptı (kendi scratch dizinleri) → her dispatch'e "hiçbir şey silme" yaz. Bazı
-  implementer'lar rapor dosyasını yazamıyor → raporu son mesajda iste, controller kaydeder.
+- Alt ajanlar izinsiz `rm -rf` yaptı (kendi scratch dizinleri) → her dispatch'e "hiçbir şey silme" yaz; paralel
+  ajanlara scratchpad'de AYRI alt dizin ver. Bazı implementer'lar rapor dosyasını yazamıyor → raporu son mesajda
+  iste, controller kaydeder.
+- Yerel ağ football-data.co.uk'a ULAŞAMIYOR (bağlantı sıfırlanıyor) — kaynak ölçümleri runner'da, geçici dalda.
 - Scratchpad'den `gh` çağrısı → `-R popiliadam/football-edge`.
 
-**Oturum 3'te bitenler** (hepsi `main`de, push'lu, CI yeşil)
-- 0a — R77 erişim kuralı testi (`c3aedaa`): yasak araçlar import edilemez, kilide ve kuruluma giremez;
-  Scrapling'in fetcher tarafı bütünüyle yasak (R80), CAPTCHA/IP döndürme araçları (R81). Kalan boşluklar DEFERRED §11.
-- 0b — ikinci runner ölçümü (ölçüm belgesi §2.4): kapanış öncesi oranlar cuma/salı öğleden sonra toplanıyor;
-  `disclaimer.php` veri lisansı içermiyor; kapanış tarihçesi (PSC 2012/13+, AvgC 2019/20+, BFEC 2024/25+); holdout
-  12.093 maç. The Odds API anahtarları (§2.5, 0 kredi): 38 ligin 31'i.
-- 0c — Scrapling denemesi: uyarlanabilir seçiciler TFF'de BENİMSENMEZ (§4.1: 1.979 yeniden bulmanın 0'ı doğru).
-- Adım 1–2 — tasarım (`acdc6b5`, spec güncellemesi `5b3addd`) ve plan (`f1bf664`, DEFERRED §11–12).
-- Dalga 0 — `e521ed5`: `history/types.py`, numpy, `leakage` işareti; taze klon 743 passed / 2 skipped.
-- Devir commit'i: plana Task 8 Step 10b (R102, `Date` takvimi ölçümü); DEFERRED 12a'ya 0001 tetikleyici mesajı,
-  yeni 12e–12j (dalga 1 incelemelerinin ertelenen bulguları).
-- `withqwerty/football-docs` değerlendirildi (DEFERRED §13a): veri kaynağı değil, kurulmadı; Faz 3–4'te
-  Sportmonks'u (hakem, sakatlık, muhtemel 11) kendi şartlarıyla değerlendirmek için bir iz, Faz 6'da grafik esini.
-  Ücretsiz kaynak tavsiyeleri §3.2.1 ile çelişir — uygulanmaz.
-
 **İzlenecekler (kendiliğinden olmalı; olmazsa RUNBOOK §3)**
-1. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:
+1. **2026-09-29 09:50 UTC `history.yml`** — selftest adımının runner'daki ilk turu (yukarıda, adım 3).
+2. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:
    ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72).
-2. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
-3. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir.
-4. CI'da bir kez `astral-sh/setup-uv` 10 dk takıldı (2026-09-22, rerun yeşil); tekrarlarsa adım düzeyi timeout.
+3. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
+4. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir.
+5. CI'da bir kez `astral-sh/setup-uv` 10 dk takıldı (2026-09-22, rerun yeşil); tekrarlarsa adım düzeyi timeout
+   (DEFERRED 14u).
 
 **Kullanıcıdan beklenenler**
 1. Depoyu GitHub'da **Watch** etmek (alarm e-postaları) — ölçülemedi (`gh` token'ında `notifications` yok).
 2. DEFERRED 10t kararı (yerel işi yetkisiz ayrı macOS kullanıcısında koşturmak) — şimdilik kabul.
 3. İz B için Netlify sitesi ve alan adı.
-4. Faz 2 Task 12'de lig önerisi (plan §8.4) — onay sorulacak.
+4. ~~Faz 2 Task 12'de lig önerisi~~ — **verildi:** N1, B1, AUT.
+5. **Faz 2 worktree'lerini ve dallarını (yerel + uzak `measure/r104-width`) silme onayı** (adım 2).
 
 ---
 
@@ -148,7 +119,7 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 10 adım PASS + `zincir` SKIP · `main` `a647f36`: 1378 passed, 2 skipped (DATABASE_URL bağlı: 11/11, 1380 passed, zincir SAĞLAM) · contract 18 · leakage 265 | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
+| Kapı | 10 adım PASS + `zincir` SKIP · `main` (Task 11 kapanışı, `7ff6457` sonrası): **1530 passed, 2 skipped** · contract 18 · **leakage 265** · `a647f36`'da DATABASE_URL bağlı: 11/11, 1380 passed, zincir SAĞLAM | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 09-22 09:27 UTC uygulandı | elle 09:28 → `204`/`204`; cron 10:07 → `succeeded` + `204` → `collect-news` yeşil |
@@ -287,8 +258,8 @@ Bir sonraki fazın üstüne inşa etmemesi gerekenler:
 **Ön koşullar:** `docs/phases/01-toplayicilar/HANDOFF.md` §5
 **Devralınan borç:** `docs/DEFERRED.md` (§9 Faz 1'indir)
 
-Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı denetimi. **Yürütülüyor — güncel durum
-§0'da**; bu bölüm yalnız başlangıç bağlamıdır.
+Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı denetimi. **Tamamlandı (2026-09-22) —
+devir belgesi `docs/phases/02-tarihsel-taban/HANDOFF.md`**; bu bölüm yalnız başlangıç bağlamıdır.
 
 **Birincil girdi football-data.co.uk'tur** (Faz 2 tasarımı D1; `xgabora/Club-Football-Match-Data` bırakıldı:
 kapanış oranı yok, ek ligler 2024-12'de bitiyor — ölçüm belgesi

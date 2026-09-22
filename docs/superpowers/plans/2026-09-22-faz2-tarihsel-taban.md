@@ -23,6 +23,40 @@ spec `docs/superpowers/specs/2026-09-19-football-edge-design.md` (§3.2.1, §6.2
 **Süreç:** `docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` (§3 risk kademeleri,
 §4 paralellik).
 
+## Düzeltme kaydı — yürütmenin ölçtükleri (2026-09-22, Task 12)
+
+Plan TARİHSELDİR: aşağıdaki metin yürütmeden önce yazıldığı gibi kalır, ölçümün yanlışladığı yerler burada
+ve ilgili adımın yanında kısa bir notla işaretlenir. Kaynak-gerçek koddur (`main`). Faz 2'nin sonucu:
+`docs/phases/02-tarihsel-taban/HANDOFF.md`.
+
+**D1 — Varsayılan vig yöntemi `SHIN` değil `POWER` (R118).** Plan `DEFAULT_METHOD: str = SHIN` diyor:
+arayüz sözleşmesinde (Task 2 üretir), Task 2'nin koduyla testinde (`assert DEFAULT_METHOD == SHIN`), ve
+köprü CLI'ının örnek çağrısında (`[--method shin]`, Task 9 arayüzü). Satırlar bu kayıt eklenmeden önceki
+numaralarla ~205, 2286, 2429, 2618, 10107; ~11096 raporun "`DEFAULT_METHOD` Task 12'de güncellenmeli"
+uyarısıdır. Ölçüm (Task 12 önizlemesi ve Step 1, geliştirme dönemi, havuzlanmış kapanış `AvgC` LL'si):
+çarpımsal 1.00248 · **power 1.00188** · Shin 1.00195. Task 12 Step 3'ün kuralıyla sabit değişti
+(`bf26e94`, merge `aec668f`; test `DEFAULT_METHOD == POWER`). Uyarı: power–Shin farkı ~7e-5 ve bu fark
+için aralık yok. Planın Shin'i adıyla çağıran testleri (`method=SHIN`) yöntemi AÇIKÇA verir ve geçerli kalır.
+
+**D2 — Holdout ana lig sayısı 7.647 değil 7.646 (R112).** Task 8 Step 13 ve Step 14'ün commit mesajı
+7.647 bekliyor ("farklıysa commit'lenmez, fark bulunur"). Fark bulundu: `2526/F2`'nin (holdout) bir
+satırı `gol çözülemedi` ile reddediliyor (skoru olmayan maç); ölçüm belgesi §2.4 ham satır saymıştı. Kilit
+7.646 + 4.446 ile commit'lendi (`a647f36`); dev ek ligler de aynı nedenle (`/new/BRA.csv`'nin bir satırı)
+57.601 değil 57.600. Plan metnindeki
+beklenen sayı değiştirilmedi; ölçüm belgesi §2.6.
+
+**D3 — Satır genişliği: R104'ün tam eşitliği, ilk tam yüklemede R111'e döndü.** Planın ayrıştırıcısı satır
+genişliğini başlıkla karşılaştırmıyordu; Task 1 incelemesi (Important 1) sessiz kaymayı buldu ve R104 tam
+eşitliği (fail-closed) koydu — "ilk senkronda ret çıkarsa kapı gevşetilmez, önce ölçülür". Task 8 Step 10'un
+beklentisi (`failed` boş) tutmadı: ilk `--all` turu (35765084910) 5 dosyayı genişlik reddiyle düşürdü. Biçim
+runner'da ölçüldü (35768752898): fazla hücreler SONDA ve BOŞ (bir satır hariç). **R111:** başlıktan uzun
+satırın fazlası tamamen boşsa başlığa kırpılır, sayısı loglanır; dolu fazla ve kısa satır reddedilir
+(merge `b14f3e0`; ikinci tur 35770065873'te beş dosya girdi). Tam eşitlik dışında başka tolerans yok.
+
+**D4 — Ölçülmemiş denen iki şey ölçüldü.** Task 8 Step 13'ün "~240 bin maç belleğe yüklenir; ölçülmedi"
+cümlesi: `lock --write` tepe RSS **756 MB**, 9 sn (2 GB eşiğinin altında; bellek görevi açılmadı).
+"Ölçmeyecekler" madde 17 (`first_season`): ilk `--all` turunda **404 yok**.
+
 ## Global Constraints
 
 - Python `>=3.11`; `from __future__ import annotations` her modülde.
@@ -196,6 +230,9 @@ def check_quality(result: ParseResult, *, path: str, league: HistoryLeague, seas
 ```
 
 ### Task 2 (T3) üretir
+
+> **Düzeltme (2026-09-22, R118):** aşağıdaki `DEFAULT_METHOD: str = SHIN` ölçümle `POWER` oldu —
+> baştaki Düzeltme kaydı D1.
 
 ```python
 # football_edge/market/devig.py
@@ -9944,6 +9981,10 @@ Expected: `SyncReport` — `failed` boş; istenen yol sayısı `declared_paths` 
 satırlar dosya başına adıyla. Bir yol 404 verirse (o lig o sezon yok) katalogdaki `first_season`
 düzeltmesi Task 6'nın implementer'ına bulgu olarak döner; kapı gevşetilmez.
 
+> **Düzeltme (2026-09-22, R104 → R111):** `failed` boş çıkmadı — 5 dosya genişlik reddiyle düştü (tur
+> 35765084910; 404 yok). Runner ölçümünden sonra R111 (sonu boş fazla hücre kırpılır, sayılır); ikinci tur
+> 35770065873'te beş dosya girdi. Bkz. baştaki Düzeltme kaydı D3.
+
 - [ ] **Step 10b: `Date` takviminin ölçümü (R102)** — tasarım D5 `Time`in Europe/London olduğunu dağılımdan
 çıkardı; gece yarısından SONRAKİ Londra saatlerinde `Date`in Londra tarihi mi yerel tarih mi olduğu ölçülmedi.
 Yerel tarihse o satırların başlama anı 24 saat erken hesaplanır (sonuç, ait olduğu karardan önce "bilinir" —
@@ -10016,6 +10057,10 @@ Tepe 2 GB'ı aşarsa Faz 3'ten önce bir bellek görevi açılır.)
 commit'lenmez, fark bulunur). `avgc_complete / rows` holdout'ta ana liglerde 1.0, RUS'ta ~0.67.
 Run: `uv run --env-file .env python -m football_edge.history lock --verify config/history_lock.yaml`
 Expected: exit 0.
+
+> **Düzeltme (2026-09-22, R112):** ölçülen holdout 7.646 ana + 4.446 ek (fark bulundu: `2526/F2`'nin skorsuz
+> bir satırı `gol çözülemedi` ile reddediliyor, §2.4 ham satır saymıştı); kilit 7.646 ile commit'lendi (`a647f36`).
+> Tepe RSS 756 MB, 9 sn. Bkz. baştaki Düzeltme kaydı D2, D4.
 
 - [ ] **Step 14: Commit, kapı, push**
 
@@ -13715,6 +13760,10 @@ geçmez: kırmızı kontrolün sahibi olan göreve bulgu olarak döner.
 - [ ] **Step 3: Varsayılan vig yöntemi** — K2'nin en düşük log loss'u veren yöntemi `SHIN` değilse
 `market/devig.py` `DEFAULT_METHOD` değişir: küçük bir K1 görevi (test sabitlemesiyle) → kapsamlı
 inceleme → birleştirme. `SHIN` ise değişiklik yok, karar defterde.
+
+> **Düzeltme (2026-09-22, R118):** K2 `power`ı seçti (1.00188 < Shin 1.00195 < çarpımsal 1.00248);
+> `DEFAULT_METHOD = POWER` — `bf26e94`, merge `aec668f`. Planın başka yerlerindeki `SHIN` varsayılanı
+> için bkz. baştaki Düzeltme kaydı D1.
 
 - [ ] **Step 4: Lig önerisi → kullanıcı** — raporun aday listesi (tasarım §8.4) kullanıcıya
 `AskUserQuestion` ile sunulur. Onaylanan ligler `config/leagues.yaml`a ayrı bir görevle girer — not:

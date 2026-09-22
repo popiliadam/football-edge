@@ -643,3 +643,59 @@ Neden kurulmadı ve kurulursa koşulları:
   anahtarla API; tazelik denetimi `data.reep.football`a) — sorgulanan ad/kimlik üçüncü tarafa gider, kullanılmaz.
   Sunucunun talimatı ajanlara DuckDB indirme komutu önermelerini söylüyor — her indirme kullanıcı onayı ister.
   Önerilen `npx -y football-docs` sürüm sabitlemiyor; kurulursa sürüm sabitlenir.
+
+## 14. Faz 2 yürütmesinden ertelenenler (2026-09-22)
+
+Kaynak: yürütme defteri (`.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md`, gitignored) — her
+`minor (deferred)` satırı, park edilen işler ve Task 11 denetiminin açık bulguları; yinelenenler birleştirildi.
+§12'de zaten duran madde burada tekrar yazılmaz, yalnız EKİ yazılır. Kapının ölçmediği eksenler (erteleme,
+`Date` takviminin ölçülmediği ligler, katalog kilitte değil…) ayrıca `docs/phases/02-tarihsel-taban/HANDOFF.md`
+§3'te. Her satırın bugünkü etkisi kendi "neden bekliyor" hücresinde; Critical/Important bulguların hiçbiri
+ertelenmedi, hepsi kapatıldı.
+
+### 14.1 Ayrıştırıcı ve senkron (`history/football_data.py`, `history/sync.py`, `0006`)
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 14a | `AvgC` doluluk kuralında iki test eksik: `_check_closing_coverage`'da `all` → `any` (K) ve kuralın yalnız `season > "1920"` koşulu (L) sağ kalıyor. Kod doğru (Task 1 yeniden incelemesi) | Yalnız test boşluğu; eksik: tek `AvgCD` boş örnek + "1920" sezonunda `_with_closing` örneği | Ayrıştırıcıya dokunan ilk görevde |
+| 14b | §12e'ye ek: latin-1 geri dönüşünde BOM → `ï»¿Div` → HER satır `REASON_DIVISION` (gürültülü, dosya düşer). Senkron dosya başına kodlamayı hâlâ loglamıyor (R109: `parse_file` kodlamayı dışarı vermiyor) | Gürültülü, sessiz değil; logu eklemek T1 API'sini değiştirir | 12e ile birlikte; ilk "latin-1'e düştü" şüphesinde |
+| 14c | Çok satırlı kayıt hata mesajı satır numarasını 0'dan sayar | Kozmetik | Ayrıştırıcıya dokunan ilk görevde |
+| 14d | R111 yeniden ayrıştırma yolu (`sync.py` ~202–206) kırpmayı loglamaz — aynı dosya için yinelenen log satırı olmasın diye, BİLİNÇLİ | İlk ayrıştırma logluyor; ikinci yol aynı dosya | Değişmez; kayıt amaçlı |
+| 14e | Task 6 artıkları: sahte DB docstring'i `memoryview` iddia ediyor (H, zararsız) · `_record_failure` `except` içinde: DB giderse kalan yollar atlanır (koşu yine KIRMIZI) · `history.yml` testi (L) yalnız env değerini sabitliyor, `all` girdisinin bildirimini değil · `forbid_ledger_mutation` mesajı "odds_snapshots" (→ §12a) | Hepsi gürültülü ya da kozmetik | 12a migration'ında / `history.yml`e dokunan ilk görevde |
+| 14f | `sync.py` modül docstring'i yalnız R96'yı (`_load_all`) anıyor; R119'un korunan adları (`load_files`, `parse_file`, `_parsed`) eklenmeli | Belge; kural testte yaşıyor | Sonraki `sync.py` değişikliğinde |
+| 14g | **Task 11 F3:** sezon pencereleri Haz–Tem çakışır; aynı `(lig, tarih, ev, deplasman)` iki sezon dosyasında olursa iki karar + çift Elo güncellemesi, kilit ikisini de özetler (R121) | **Ölçüldü: gerçek veride 0 yinelenen** (38 lig, DEV + sonrası) — bugün etkisiz | Her kilit yenilemesinde sayım; sıfırdan farklıysa Faz 3 ön koşulu (`_load_all`da dosyalar arası ikinci geçiş) |
+
+### 14.2 Holdout erişimi (`tests/test_holdout_access_rule.py`)
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 14h | Ayrıştırıcının ÖZEL yardımcıları (`_decode` → `_records` → `_context` → `_row`) başka bir modülden dört özel adla çağrılırsa holdout satırı kurar; AST kuralı görmez (R119 yeniden incelemesi). Ham SQL / `store._LOAD_FILES` yalnız bayt verir | Kasıtlı yeniden kurma — hesaplanmış adla aynı sınıf (§12h, 12i); kural kazara girişi durdurur | İsteğe bağlı sertleştirme: `history/` dışından `football_data`/`store`un `_`-önekli adlarına erişimi yasaklayan genel kural. Faz 3 `final_eval`den önce |
+| 14i | R119'un korunan adları genel (`parse_file`, `_parsed`): ilgisiz bir modülün yerel `_parsed`ı yanlış pozitif verir | Güvenli yönde hata (kırmızı, sessiz değil) | İlk yanlış pozitifte |
+| 14j | §12d'nin güncel durumu: `_measure`in yakalama genişliği **KAPANDI** (R115 daraltıp sabitledi); `load_matches`in gerçek anahtarla holdout döndüren pozitif yolu hâlâ testsiz (Task 6 incelemesi A); EKSİK kilit dosyası exit 9 değil exit 1 + traceback — kapandığına dair kayıt yok | Faz 2 anahtar açmaz | Faz 3 `final_eval` (pozitif yol orada sınanır) |
+
+### 14.3 Harness ve bilinen sonuçlar (`backtest/`)
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 14k | **Oracle kanaryasının eşiği ≥ 10 sa:** sonucu 10 saatten az erken sızdıran bir harness kanaryayı yeşil bırakır; 1–9 sa'i eski tam-an testleri yakalar, yalnız saatsiz maçlarda 1 sa'lik sızıntıyı yalnız `test_events.py::test_event_instants_come_from_the_timeline` yakalar. Keskinleştirme ölçüldü: takvime 12:15 UTC'de iki yuva (bir cuma, bir salı) eşiği **4 sa**'e indirir; 3 sa altı kendi-sonucu Oracle'ı için yapısal olarak erişilemez | Kanarya bugün 252 maçta 0 tahmin, sızdırılan harness'ta kırmızı — amacına yetiyor | `test_harness.py`ye dokunan ilk görevde (iki yuva, düşük maliyet) |
+| 14l | **Task 11 F5:** Placebo tohumu maç kimliğine değil giriş SIRASINA bağlı — yeniden karıştırmada 1.200 seçimin 775'i değişir; bir lig eklenince K4 "başka bir sayı" verir (R121) | Sızıntı değil, tekrarlanabilirlik; sıra bugün belirlenimci (lig koduyla) | Katalog değişince / Faz 3; öneri: tohum `sha256(seed|lig|tarih|ev|deplasman)` |
+| 14m | `REFERENCE_BOOK = "Avg"` `selftest.py` ve `evaluate.py`de iki kez; `backtest` CLI'ında exit 1 hem kırmızı kapı hem çöküş (brif bilinçli) | Açık kalmaz — tur yine kırmızı | `backtest/`e dokunan ilk görevde |
+| 14n | K3'ün `resamples`i sabitlenmemiş (spy fikstüründe PSC yok — ek mutant sağ); K4 yöntem testlerinde (D/E) CLV payı ince: 8,2e-5 fark, `abs=5e-5` | Test hassasiyeti; kod doğru | Aynı |
+
+### 14.4 Verimlilik, yöntem seçimi ve köprü (`market/`)
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 14o | Ü/A 2.5 marj/log-loss bootstrap'larının Ü/A `try` DIŞINDA oluşu sabitlenmemiş (OU_INCATCH sağ) · `SEED`/`LEVEL` tekrarı, "%95" sabit metin · `load_catalog`/`method_scores`/`candidates`'ın `ValueError`'ı traceback basar · k = 3 ince lig testleri `RESAMPLES`e bağlı · `efficiency.py` 400 satırı aşıyor (incelemede 502, `main`de 568; sert sınır 800) | Rapor doğru üretiliyor; hepsi kalite | `market/efficiency.py`ye dokunan ilk görevde (bölme ile birlikte) |
+| 14p | BFEC'te `Σ 1/o < 1` (borsa düşük toplamı) Shin'de "eksik" sayılır → borsa kapsamı yanlılığı (Shin artık varsayılan değil, R118) | `exchange_gap` yalnız rapor | Borsa fiyatı modele girerse (Faz 3+) |
+| 14q | `method_scores` penceresiz DEV kullanır (lig tablosu pencereli); yöntem seçimi örneklem içi — geliştirme raporunun sayıları hafifçe iyimser (Task 11 §3/5) | Holdout'a etkisi yok; Faz 3'te dev'de seçilmiş sabit yöntem meşru | Faz 3 walk-forward kurulurken |
+| 14r | Köprü `pair()`: yinelenen (lig, Londra tarihi, adlar) anahtarında iki canlı maç aynı tarihsel satıra eşlenir → `n` şişer; sayılmıyor, loglanmıyor (Task 7 incelemesi) | Bugün n = 4, yineleme yok | Canlı örnek büyüdükçe (haftada ~60 maç); ilk şüpheli `n`de |
+| 14s | Ölçüm tarihçesi `devig.py` ve `test_devig.py` yorumlarında tekrar ediyor (commit mesajında zaten var) — bayatlayan yorum riski | Kozmetik | Sonraki `devig.py` değişikliğinde |
+| — | ~~Köprü CLI `--since` varsayılanı ≥ 2026-07-01~~ **KAPANDI** — Task 9 brifi varsayılanı `HOLDOUT_END` yaptı | — | — |
+
+### 14.5 Park edilenler
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 14t | Faz 2 worktree'leri ve dalları: `.worktrees/wt-{parser,devig,lock,harness,sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve `feat/faz2-*` dalları; uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı) | Silme kullanıcı onayı ister; hepsi `main`e birleşti (measure hariç — main'e girmez) | Kullanıcı onayı gelince |
+| 14u | CI'da `astral-sh/setup-uv@v5` bir kez 10 dk takıldı (hazırlık, rerun yeşil) | Tek olay | Tekrarlarsa adım düzeyi `timeout-minutes` |
