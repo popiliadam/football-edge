@@ -1,8 +1,9 @@
-"""Odds API anahtarı hiçbir log satırına düşmemeli (K1).
+"""Pipeline'ın hiçbir credential'ı log satırına düşmemeli (K1).
 
-Depo PUBLIC: Actions logları herkese açık ve anahtar yalnız `apiKey` sorgu parametresinde
-taşınır. GitHub'ın tam eşleşme maskelemesi tek savunma hattı olmasın diye anahtar hem
-`redact`te hem kök handler'ın formatter'ında ayıklanır; httpx'in istek satırı hiç üretilmez.
+Depo PUBLIC: Actions logları herkese açık. Odds API anahtarı `apiKey` sorgu parametresinde,
+DSN ve parolası psycopg/pooler hatalarında görünebilir. GitHub'ın tam eşleşme maskelemesi tek
+savunma hattı olmasın diye değerler hem `redact`te hem kök handler'ın formatter'ında
+ayıklanır; httpx'in istek satırı hiç üretilmez.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
@@ -22,6 +24,14 @@ from tests.fake_db import FakeLedgerDb
 
 FAKE_KEY = "sahte-odds-anahtari"
 KEYED_URL = f"https://api.the-odds-api.com/v4/sports/soccer_bad/odds?apiKey={FAKE_KEY}&regions=eu"
+FAKE_TYPESAFE = "sahte-typesafe-anahtari"
+FAKE_DB_PASSWORD = "sahte-parola"
+FAKE_DSN = f"postgresql://sahte_kullanici:{FAKE_DB_PASSWORD}@db.sahte.invalid:5432/postgres"
+PIPELINE_ENV: dict[str, str | None] = {
+    "ODDS_API_KEY": FAKE_KEY,
+    "TYPESAFE_API_KEY": FAKE_TYPESAFE,
+    "DATABASE_URL": FAKE_DSN,
+}
 QUIET = ("httpx", "httpcore")
 LOGGER = logging.getLogger(__name__)
 
@@ -127,20 +137,57 @@ def test_logged_status_error_traceback_hides_the_key_but_keeps_the_error_name(
     assert "ERROR lig=bad.1 toplanamadı" in out, f"log biçimi değişmemeli: {out!r}"
 
 
-def test_the_env_key_is_masked_even_outside_the_apikey_parameter(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # `apikey=` regex'i tek başına bunu yakalamaz: secret listesi ortamdan gelmeli.
-    monkeypatch.setenv("ODDS_API_KEY", FAKE_KEY)
+def _logged(monkeypatch: pytest.MonkeyPatch, env: dict[str, str | None], value: str) -> str:
+    """Ortamı kurar (`None` = tanımsız), kurulumdan tek bir WARNING satırı geçirir."""
+    for name, secret in env.items():
+        if secret is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, secret)
     stream = io.StringIO()
-
     with _bare_root_logger():
         collect.configure_logging(stream)
-        LOGGER.warning("yanıt gövdesi anahtarı yansıttı: %s", FAKE_KEY)
+        LOGGER.warning("değer: %s", value)
+    return stream.getvalue()
 
-    out = stream.getvalue()
-    assert FAKE_KEY not in out, out
-    assert "yanıt gövdesi anahtarı yansıttı: ***" in out, out
+
+@pytest.mark.parametrize(
+    "value",
+    [FAKE_KEY, FAKE_TYPESAFE, FAKE_DSN, FAKE_DB_PASSWORD],
+    ids=["odds-anahtari", "typesafe-anahtari", "dsn-tamami", "dsn-parolasi"],
+)
+def test_every_pipeline_credential_is_masked_in_a_log_line(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `apikey=` regex'i bunları yakalamaz: liste ortamdan gelmeli. Satırın TAMAMI kıyaslanır —
+    # DSN'nin yalnız parolası gizlenseydi kullanıcı ve host açıkta kalırdı.
+    out = _logged(monkeypatch, PIPELINE_ENV, value)
+    assert out.endswith("WARNING değer: ***\n"), out
+
+
+@pytest.mark.parametrize("form", ["p%40ss-sahte", "p@ss-sahte"], ids=["url-kodlu", "cozulmus"])
+def test_a_percent_encoded_dsn_password_is_masked_in_both_forms(
+    form: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # DSN'de parola yüzde-kodlu durur; psycopg/pooler hatası onu çözülmüş hâliyle de basabilir.
+    dsn = "postgresql://sahte_kullanici:p%40ss-sahte@db.sahte.invalid:5432/postgres"
+    out = _logged(monkeypatch, {"DATABASE_URL": dsn}, form)
+    assert out.endswith("WARNING değer: ***\n"), out
+
+
+def test_a_missing_dsn_does_not_break_logging(monkeypatch: pytest.MonkeyPatch) -> None:
+    out = _logged(monkeypatch, {"DATABASE_URL": None, "ODDS_API_KEY": FAKE_KEY}, FAKE_KEY)
+    assert out.endswith("WARNING değer: ***\n"), out
+
+
+def test_an_unparsable_dsn_does_not_break_logging_and_is_still_masked_whole(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dsn = "postgresql://sahte_kullanici:bozuk-parola@[sahte/postgres"
+    with pytest.raises(ValueError):
+        urlsplit(dsn)  # ön koşul: bu DSN gerçekten ayrıştırılamıyor
+    out = _logged(monkeypatch, {"DATABASE_URL": dsn}, dsn)
+    assert out.endswith("WARNING değer: ***\n"), out
 
 
 def test_configure_logging_keeps_root_at_info_and_raises_httpx_to_warning() -> None:

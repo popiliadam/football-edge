@@ -32,7 +32,7 @@ from football_edge.ledger import (
     verify_chain,
 )
 from football_edge.mapping import MappingReport, canonical_team_names, resolve_source_aliases
-from football_edge.redaction import redact
+from football_edge.redaction import dsn_password_forms, redact
 from football_edge.rounds import (
     CollectResult,
     _mirror_failed,
@@ -448,13 +448,25 @@ class _RedactingFormatter(logging.Formatter):
         return redact(super().format(record), self._secrets)
 
 
+def _log_secrets() -> tuple[str, ...]:
+    """Pipeline'ın ortamdan aldığı her credential; boş olanı `redact` zaten atlar."""
+    dsn = os.getenv("DATABASE_URL", "")
+    # Tam DSN parolasından ÖNCE değişir: yoksa URL'nin kalanı (kullanıcı, host) açıkta kalır.
+    return (
+        os.getenv("ODDS_API_KEY", ""),
+        os.getenv("TYPESAFE_API_KEY", ""),
+        dsn,
+        *dsn_password_forms(dsn),
+    )
+
+
 def configure_logging(stream: TextIO | None = None) -> None:
     """Kök handler'ı redakte eden formatter'la kurar, httpx/httpcore'u WARNING'e çeker.
 
     `basicConfig` semantiği korunur: kök logger zaten yapılandırılmışsa handler eklenmez.
     """
     handler = logging.StreamHandler(sys.stderr if stream is None else stream)
-    handler.setFormatter(_RedactingFormatter((os.getenv("ODDS_API_KEY", ""),)))
+    handler.setFormatter(_RedactingFormatter(_log_secrets()))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
     for name in QUIET_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
