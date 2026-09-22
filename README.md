@@ -155,11 +155,11 @@ tur `ops-alert` etiketli bir GitHub issue'su açar; yeşil tur kapatır.
 ./verify.sh
 ```
 
-**On adım:** `ruff-check` · `ruff-format` · `mypy` · `pytest` · `paket-kurulu` ·
-`kaynak-politikası` · `veri-sözleşmesi` · `dil-kalibrasyonu` · `secrets` · `zincir`.
+**On bir adım:** `ruff-check` · `ruff-format` · `mypy` · `pytest` · `paket-kurulu` ·
+`kaynak-politikası` · `veri-sözleşmesi` · `sızıntı` · `dil-kalibrasyonu` · `secrets` · `zincir`.
 Sonunda `KAPI YEŞİL` yazmalı.
 
-Faz 1'in eklediği üç adım **ağa çıkmaz ve para harcamaz**:
+Faz 1 ve 2'nin eklediği dört adım **ağa çıkmaz ve para harcamaz**:
 
 - **`kaynak-politikası`** — `config/sources.yaml`'daki her `declared_paths`i
   `config/robots/<id>.txt` anlık görüntüsüne karşı sorar; `access_basis: api_terms`
@@ -168,13 +168,15 @@ Faz 1'in eklediği üç adım **ağa çıkmaz ve para harcamaz**:
   kırmızı verir. Beklenen davranıştır — kapı gevşetilerek yeşil alınmaz.
 - **`veri-sözleşmesi`** — `contract` etiketli testleri koşar ve **sayılarını ölçer**
   (`EXPECTED_MIN_CONTRACT`, bugün 18). Bir marker sessizce kaybolursa kapı kırmızı verir.
+- **`sızıntı`** — `leakage` etiketli testleri koşar ve sayılarını ölçer
+  (`EXPECTED_MIN_LEAKAGE`, bugün 209): zaman semantiği, dönem ayrımı, kilit, bağlam/sonuç ayrımı.
 - **`dil-kalibrasyonu`** — `config/languages.yaml`'da `production_enabled: true` olan her
   dilin geçerli bir kalibrasyon raporu taşıdığını sorar. **Bugün hiçbir dil açık değil.**
 
 Kapı her `push` ve `pull_request`te `.github/workflows/ci.yml` ile de koşar — **ama
 secret'sız**: CI'a `DATABASE_URL` verilmez (defter append-only, her yazma kalıcıdır).
 O yüzden CI'da `zincir` adımı koşmaz ve `SKIP: zincir (DATABASE_URL yok)` basar.
-**Atlanan kontrol geçmek değildir**; bu yüzden adıyla yazılır. On adımın hepsinin
+**Atlanan kontrol geçmek değildir**; bu yüzden adıyla yazılır. On bir adımın hepsinin
 gerçekten koştuğu tek yer, `DATABASE_URL` bağlıyken koşulan yerel kapıdır.
 
 Özet değil **çıktı** okunur: ayrıntı `$TMPDIR/football-edge-verify.log` dosyasındadır.

@@ -53,8 +53,9 @@ jobs:
         #   - `ODDS_API_KEY`: her push ücretli çağrı demek olurdu (ayda 500 kredi).
         # Kapı secret'sız DOĞRU biçimde bozulur: `zincir` adımı
         # "SKIP: zincir (DATABASE_URL yok)" basar — ATLANAN KONTROL GEÇMEK DEĞİLDİR,
-        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan altı adım koşar:
-        # ruff-check · ruff-format · mypy · pytest · paket-kurulu · secrets.
+        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan on adım koşar:
+        # ruff-check · ruff-format · mypy · pytest · paket-kurulu · kaynak-politikası ·
+        # veri-sözleşmesi · sızıntı · dil-kalibrasyonu · secrets.
         #
         # `zincir` adımının gerçekten koştuğu tek yer `seal.yml`'dir (her 15 dakika,
         # varsayılan dalda, kendi secret'ıyla). Bu boşluk HANDOFF §3'te yazılıdır.

@@ -3,8 +3,8 @@
 **Son güncelleme:** 2026-09-22 (oturum 3 sonu) · **Durum:** **Faz 2 yürütülüyor** — tasarım ve TDD planı
 kullanıcı onaylı; dalga 0 `main`de (`e521ed5`); dalga 1'in dört görevi kendi dallarında (üçü `complete`,
 Task 1 son inceleme turunda), **HİÇBİRİ merge edilmedi** — sıradaki Task 5 · İz C canlı (mühür, snapshot,
-toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı **9 adım yeşil +
-`zincir` adıyla SKIP** (Task 5'te `sızıntı` adımıyla 10 olur)
+toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı **10 adım yeşil +
+`zincir` adıyla SKIP** (`sızıntı` Task 5'te eklendi)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -142,7 +142,7 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP · `main` `a2ea655`: 743 passed, 2 skipped · contract 18 (dalga 1 dalları 818–923 passed — defter) | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
+| Kapı | 10 adım PASS + `zincir` SKIP · `main` (dalga 1 merge'lü): 1271 passed, 2 skipped · contract 18 · leakage 209 | `main`: yerel, `TMPDIR` depo dışında, log dosyasından okundu; CI yeşil · dalga 0 (`e521ed5`) taze klonda aynı sayı |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 09-22 09:27 UTC uygulandı | elle 09:28 → `204`/`204`; cron 10:07 → `succeeded` + `204` → `collect-news` yeşil |

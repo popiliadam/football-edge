@@ -101,6 +101,31 @@ step "veri-sözleşmesi" bash -c '
   exit "$code"
 '
 
+# Sızıntı (Faz 2 tasarımı §10): zaman semantiği, dönem ayrımı, kilit, bağlam/sonuç ayrımı.
+# Veri-sözleşmesi adımının deseni: toplanan sayı --collect-only ile ölçülür ve alt sınırın
+# altındaysa pytest hiç koşmadan kırmızı — bir `leakage` işareti sessizce düşerse kapı görür.
+# Sabit yalnız ölçülerek büyütülür (Task 5, Task 12).
+step "sızıntı" bash -c '
+  EXPECTED_MIN_LEAKAGE=209
+
+  collect_output=$(uv run pytest tests/ -q -m leakage --collect-only 2>&1)
+  collect_code=$?
+  if [ "$collect_code" -eq 5 ]; then
+    collected=0
+  else
+    collected=$(printf "%s" "$collect_output" | grep -oE "^[0-9]+/" | head -1 | tr -d "/")
+    collected=${collected:-0}
+  fi
+
+  if [ "$collected" -lt "$EXPECTED_MIN_LEAKAGE" ]; then
+    printf "%s\n" "$collect_output"
+    echo "HATA: leakage etiketli test sayısı ($collected) beklenen alt sınırın ($EXPECTED_MIN_LEAKAGE) altında"
+    exit 1
+  fi
+
+  uv run pytest tests/ -q -m leakage
+'
+
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
 # harcamaz: yalnız `config/languages.yaml`'daki `production_enabled` bayraklarının bir
 # kalibrasyon raporuyla desteklendiğini sorar (`calibration.language_config_violations`).
