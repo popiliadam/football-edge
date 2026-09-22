@@ -161,6 +161,13 @@ def test_closings_come_back_in_kickoff_order() -> None:
     assert [closing.match_id for closing in closings] == ["m1", "m9"]
 
 
+def test_closings_with_the_same_kickoff_are_ordered_by_match_id() -> None:
+    # Aynı saatte başlayan maçlarda sıra satır sırasına değil maç kimliğine bağlıdır.
+    rows = [*_book("m2", "book_a", (2.0, 3.4, 4.0)), *_book("m1", "book_a", (2.0, 3.4, 4.0))]
+    closings = load_live_closings(_FakeClosingDb(rows), since=SINCE)  # type: ignore[arg-type]
+    assert [closing.match_id for closing in closings] == ["m1", "m2"]
+
+
 def _live(
     match_id: str = "m1",
     *,
@@ -238,11 +245,16 @@ def test_unmatched_live_matches_are_returned_in_order_not_dropped() -> None:
 @pytest.mark.leakage
 def test_the_bridge_never_pairs_a_holdout_dated_match() -> None:
     # Holdout [2025-07-01, 2026-07-01) anahtarsız okunmaz: köprü yalnız "sonrası"na bakar.
-    live = _live(kickoff=datetime(2026, 3, 14, 15, 0, tzinfo=UTC))
-    hist = [_hist(date(2026, 3, 14), avgc=(2.0, 4.0, 4.0))]
-    result = pair([live], hist, aliases=NO_ALIASES, codes_by_league_id=CODES)
+    # Geliştirme (< 2025-07-01) satırı da dizine girmez: "yalnız POST" iki yönden sabitlenir.
+    holdout = _live("m1", kickoff=datetime(2026, 3, 14, 15, 0, tzinfo=UTC))
+    dev = _live("m2", kickoff=datetime(2025, 3, 15, 15, 0, tzinfo=UTC))
+    hist = [
+        _hist(date(2026, 3, 14), avgc=(2.0, 4.0, 4.0)),
+        _hist(date(2025, 3, 15), avgc=(2.0, 4.0, 4.0)),
+    ]
+    result = pair([holdout, dev], hist, aliases=NO_ALIASES, codes_by_league_id=CODES)
     assert result.pairs == ()
-    assert result.unmatched_live == (live,)
+    assert result.unmatched_live == (holdout, dev)
 
 
 def test_compare_reports_ours_minus_avgc_per_outcome_and_the_rms() -> None:
@@ -282,9 +294,32 @@ def test_pairs_without_a_closing_avgc_are_counted_as_unmatched() -> None:
     assert (report.n, report.unmatched) == (1, 1)
 
 
+def test_pairs_whose_live_prices_fail_vig_removal_are_counted_as_unmatched() -> None:
+    # Canlı tarafın fiyatı çözülemezse çift düşmez, sayılır (1.0 hiçbir yöntemde geçerli değil).
+    usable = (_live("m1"), _hist(date(2026, 9, 19)))
+    other = _hist(date(2026, 9, 19), home="Gamma United")
+    sound = compare(
+        Pairing(pairs=(usable, (_live("m2", home="Gamma United"), other)), unmatched_live=()),
+        method=SHIN,
+    )
+    broken_live = _live("m2", home="Gamma United", prices=(1.0, 4.0, 4.0))
+    broken = compare(Pairing(pairs=(usable, (broken_live, other)), unmatched_live=()), method=SHIN)
+    assert (sound.n, sound.unmatched) == (2, 0)
+    assert (broken.n, broken.unmatched) == (1, 1)
+
+
 def test_compare_without_comparable_pairs_is_an_error() -> None:
     with pytest.raises(ValueError, match="karşılaştırılabilir"):
         compare(Pairing(pairs=(), unmatched_live=(_live(),)), method=SHIN)
+
+
+def test_the_no_comparable_pairs_error_names_both_counts() -> None:
+    bare = (_live("m1"), _hist(date(2026, 9, 19), avgc=None))
+    pairing = Pairing(pairs=(bare,), unmatched_live=(_live("m2"), _live("m3")))
+    with pytest.raises(ValueError) as caught:
+        compare(pairing, method=SHIN)
+    assert "eşlenemeyen 2" in str(caught.value)
+    assert "AvgC'si eksik/çözülemeyen 1" in str(caught.value)
 
 
 def test_bridge_report_carries_only_aggregates() -> None:
@@ -294,6 +329,7 @@ def test_bridge_report_carries_only_aggregates() -> None:
     report = compare(pairing, method=MULTIPLICATIVE)
     generated = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
     text = render_bridge_report(report, generated_at=generated, since=date(2026, 7, 1))
+    assert "Üretildi: 2026-10-05T09:00:00+00:00" in text
     assert "Karşılaştırılan maç (N): 2" in text
     assert "Karşılaştırılamayan canlı maç: 1" in text
     assert "Yöntem: multiplicative" in text
