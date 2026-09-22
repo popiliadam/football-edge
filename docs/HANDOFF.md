@@ -48,9 +48,12 @@ adıyla SKIP** (ölçüm §2)
   plan kullanıcıya sunulmadan Faz 2 kodu yazılmaz. Önemli ölçüm: birincil tarihsel kaynak
   xgabora değil football-data.co.uk olmalı (kapanış oranları orada; ek ligler güncel; runner'dan
   erişilir, TR'den erişilmez).
-- **Kullanıcı önerisi — Scrapling:** adaptive seçiciler "kendini onaran ayrıştırıcı" için aday;
-  bot korumasını aşan parçaları (`StealthyFetcher`) R2 ve spec §3.2 gereği kullanılmaz. Öneri ve
-  spike tanımı ölçüm belgesinin §4'ünde.
+- **Erişim kuralı netleşti (R77, spec §3.2.1, kullanıcı onayı 09-22):** okumak serbest, aşmak
+  yasak. İlk iş kuralı koda taşımak: `src/` ve `scripts/`in yasak araçları (`StealthyFetcher`,
+  `camoufox`, `undetected_chromedriver`) import etmediğini sınayan bir test (kural prose'da kalmasın).
+- **Kullanıcı önerisi — Scrapling:** ayrıştırıcısı (adaptive seçiciler) ve dürüst kimlikli
+  tarayıcı fetcher'ı R77 ile izinli; `StealthyFetcher` yasak. Önerilen deneme (TFF ayrıştırıcısı)
+  ölçüm belgesinin §4'ünde.
 - **İz B — Faz 6 iskeleti:** Netlify hesabı bağlı ama "football" adlı bir proje yok. Site ve
   alan adı kullanıcı kararı.
 
@@ -165,6 +168,10 @@ gitignored, yani merge etmez ve yalnız bu makinede durur.** Faz 2'yi bağlayan 
    hiç istenmeyen bir yolu ölçmesine yol açar — izinli kaynağı kapatır ya da izinsizi geçirir.
 2. **User-agent sahteciliği YOK.** Plan `ClaudeBot` kimliğini kullanıyordu; ClaudeBot
    Anthropic'in tarayıcısıdır, biz değiliz. *Ölçüldü: dürüst kimliğin bedeli sıfır.*
+   **2026-09-22 (R77):** erişim yöntemi kuralı olarak genişletildi — izinli (dürüst kimlikli
+   headless tarayıcı, adaptive seçiciler, resmî API, izin istemek, meşru ortam) ve yasak
+   (kimlik/parmak izi taklidi, bot kontrolü ya da CAPTCHA aşma, IP/proxy döndürme, 403/429'u
+   yok sayma) listeleri spec §3.2.1'de.
 3. **RFC 9309 uyumlu ayrıştırıcı zorunlu** (`protego`). stdlib iki YÖNDE birden yanlıştı.
 4. **Ham üçüncü taraf içeriği depoya girmez** — public depoda commit etmek yayınlamaktır.
 5. **`access_basis: robots | api_terms`** — API host'u ile web sitesi ayrımı koda geçti,

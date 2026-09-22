@@ -77,9 +77,10 @@ Veritabanı 15 MB (ücretsiz sınır 500 MB). `odds_snapshots` 5.763 satır; **k
 ## 4. Kullanıcı önerisi — Scrapling (`D4Vinci/Scrapling`, 2026-09-22)
 - **Aday:** "adaptive" seçiciler (sayfa şekli değişince öğeyi yeniden bulma) — spec §5.3 "kendini
   onaran ayrıştırıcı" hedefi ve TFF'nin 09-22 arızası (R72) aynı sınıf.
-- **Kullanılmaz:** `StealthyFetcher` ve benzeri parmak izi taklidi / bot korumasını aşan
-  parçalar — Ruling R2 (kimlik taklidi yok) ve spec §3.2 (erişim kontrolü aşılmaz). FootyStats'ın
-  runner 403'ü bu yüzden aşılmadı (R73).
+- **Kural (R77, spec §3.2.1 — kullanıcı onayıyla 09-22'de netleşti):** ayrıştırıcı (adaptive
+  seçiciler) ve dürüst kimlikli tarayıcı fetcher'ı (JS çizimli sayfalar için) İZİNLİ.
+  `StealthyFetcher` ve benzeri parmak izi taklidi / bot korumasını aşan parçalar YASAK.
+  FootyStats'ın runner 403'ü bu yüzden aşılmadı (R73).
 - **Öneri:** küçük bir spike — mevcut ayrıştırıcılardan biri (TFF) üzerinde, dürüst UA, robots kodla
   zorlanır, istek katmanı projenin `_guarded_get`i kalır; ölçüt: fixture'lardan türetilmiş şekil
   değişikliklerinde ayrıştırıcı kaybını sessiz geçirmeden yakalıyor mu.

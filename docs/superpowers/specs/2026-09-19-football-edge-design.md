@@ -114,10 +114,38 @@ tek başına en iyi tahmindir. Dolayısıyla model **mutlak olasılık** değil,
 
 1. **robots.txt'i AI/otomatik erişime kapalı olan kaynak taranmaz.** Bu kaynaklara
    yalnız Google News RSS üzerinden, başlık düzeyinde bakılır.
-2. **Erişim kontrolü aşılmaz.** 403 dönen kaynak (SofaScore) kullanılmaz.
+2. **Erişim kontrolü aşılmaz.** 403 dönen kaynak (SofaScore) kullanılmaz. Kaynak yalnız bir
+   ortamı geri çeviriyor ve başka bir meşru ortama açıksa (footystats: veri merkezi IP'lerine 403,
+   kullanıcının makinesine 200) iş o ortamda koşar (R73); engelin kendisi aşılmaz. Neyin erişim
+   yöntemi, neyin aşma olduğu §3.2.1'de.
 3. **ToS'u otomatik erişimi yasaklayan kaynak kullanılmaz** (FotMob, bet365, Pinnacle).
 4. **Ham içerik yeniden yayınlanmaz.** Kaynaklardan yalnız sayısal özellik türetilir.
 5. Veri kaynağı hakkında sitede **lisans iddiasında bulunulmaz**.
+
+#### 3.2.1 Erişim yöntemi — izinli ve yasak (2026-09-22, kullanıcı onayıyla netleştirildi, R77)
+
+Hangi kütüphane kullanılırsa kullanılsın ölçüt aynıdır: sayfayı **okumak** serbest, kaynağın
+koyduğu engeli ya da kimlik denetimini **aşmak** yasak. Her iki listede de robots.txt kodla
+sorulur (`guard_path`) ve crawl-delay uygulanır.
+
+**İzinli** (robots.txt ve ToS izin veriyorsa, dürüst kimlikle):
+- Düz HTTP isteği — projenin `_guarded_get`i: robots, crawl-delay, yönlendirmenin her sıçraması.
+- Başsız (headless) bir tarayıcıyla JavaScript'le çizilen sayfayı okumak. Tarayıcı kendi
+  varsayılan kimliğini (ör. `HeadlessChrome`) ya da projenin kimliğini taşır; kimlik gizlenmez.
+- Uyarlanabilir (adaptive) seçiciler: sayfa şekli değişince öğeyi yeniden bulan ayrıştırma
+  yardımcıları (ör. Scrapling'in ayrıştırıcısı). Kayıp yine sessiz geçemez (Ruling 6).
+- Resmî API ya da lisanslı veri (`access_basis: api_terms`, `terms_url` zorunlu).
+- Kaynaktan izin istemek (API erişimi, beyaz liste) ve verilen izin kadar toplamak.
+- Kaynağın açık olduğu meşru bir ortamda koşmak (ör. kullanıcının kendi makinesi, R73).
+
+**Yasak:**
+- Kimlik taklidi: başka bir kuruluşun tarayıcısı ya da botu gibi görünmek (User-Agent dahil — R2,
+  ör. `ClaudeBot`) ya da tarayıcı parmak izini gizleyen/taklit eden araçlar (Scrapling
+  `StealthyFetcher`, Camoufox, undetected-chromedriver ve benzerleri).
+- Bot kontrolü sayfasını (Cloudflare challenge, Turnstile) ya da CAPTCHA'yı çözmek veya atlatmak.
+- IP ya da proxy döndürerek engelden kaçmak (residential proxy havuzları dahil).
+- 403/429'u yok sayıp kimlik, zamanlama ya da yol değiştirerek yeniden denemek; `Retry-After`e ve
+  crawl-delay'e uymamak.
 
 ### 3.3 Elenen kaynaklar ve gerekçeleri
 
