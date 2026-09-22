@@ -39,7 +39,7 @@ def _anchor_values(target: Path) -> dict[str, str]:
     return values
 
 
-def _read_anchor(target: Path) -> Anchor | None:
+def read_anchor(target: Path) -> Anchor | None:
     """Tek çıpa dosyasını okur; bozuksa traceback yerine adıyla uyarı verip None döner."""
     values = _anchor_values(target)
     if any(field not in values for field in _ANCHOR_FIELDS):
@@ -61,7 +61,7 @@ def _scan_anchors(directory: Path = ANCHOR_DIR) -> AnchorScan:
     yazılmış bir defteri gösteren tek kanıt onlardır. Bozuk dosya sessizce yutulmaz.
     """
     targets = tuple(sorted(directory.glob("head-*.txt")))
-    found = tuple((target, _read_anchor(target)) for target in targets)
+    found = tuple((target, read_anchor(target)) for target in targets)
     readable = tuple(anchor for _, anchor in found if anchor is not None)
     newest_unreadable = bool(found) and found[-1][1] is None
     return AnchorScan(readable=readable, downgraded=targets[-1] if newest_unreadable else None)

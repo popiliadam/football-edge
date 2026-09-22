@@ -18,6 +18,7 @@ from football_edge.anchors import (
     archived_anchors,
     expected_anchor_names,
     missing_anchors,
+    read_anchor,
 )
 from football_edge.calibration import language_config_violations, run_calibration
 from football_edge.db import chain_head, connect
@@ -283,6 +284,13 @@ def _publish_head_command(
     count, last_id = int(found[0]), int(found[1])
     head = chain_head(conn)
     target = directory / f"head-{now:%Y-%m-%d}.txt"
+    # Yalnız zaman damgası değişen çıpa her turda bir bot commit'i demektir. Kıyas yalnız
+    # BUGÜNÜN dosyasıyla ve verify-chain'in okuyucusuyla: okunamayan dosya yeniden yazılır,
+    # yeni gün baş aynı olsa da yeni dosya açar (günlük canlılık çıpası).
+    current = Anchor(path=target, rows=count, last_id=last_id, head=head)
+    if target.is_file() and read_anchor(target) == current:
+        sys.stdout.write(f"zincir başı değişmedi: {target}\n")
+        return 0
     target.parent.mkdir(parents=True, exist_ok=True)
     # last_id olmadan kuyruk kesme kontrolü kurulamaz: doğrulama nereden devam edeceğini bilemez.
     target.write_text(
