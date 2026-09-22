@@ -699,3 +699,13 @@ ertelenmedi, hepsi kapatıldı.
 |---|---|---|---|
 | 14t | Faz 2 worktree'leri ve dalları: `.worktrees/wt-{parser,devig,lock,harness,sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve `feat/faz2-*` dalları; uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı) | Silme kullanıcı onayı ister; hepsi `main`e birleşti (measure hariç — main'e girmez) | Kullanıcı onayı gelince |
 | 14u | CI'da `astral-sh/setup-uv@v5` bir kez 10 dk takıldı (hazırlık, rerun yeşil) | Tek olay | Tekrarlarsa adım düzeyi `timeout-minutes` |
+
+## 15. İz A'dan (lig ekleme N1/B1/AUT) ertelenenler (2026-09-22)
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 15a | `rounds._seal_candidates` (`rounds.py:207-228`) kaçan mühür listesini `active` filtresi OLMADAN kurar: bir lig `active: false` yapılırsa snapshot'lanmış maçları ≤8 gün `kaçan mühür` (exit 5, alarm) verir (R126) | İz A öncesi kod; şimdilik `config/leagues.yaml`da uyarı yorumu | Bir lig kapatılmadan önce ya da ilk `rounds.py` değişikliğinde: etkin-filtre + test |
+| 15b | `market/bridge.py:222` rapora basılan "altı lig ~60 maç" metni (R127) | `market/` İz A'nın yazma kümesinde değildi | Sonraki `market/` değişikliği (≈75 maç/hafta) |
+| 15c | Beklenen ay sonu kredi bakiyesi ≈45 < bekçi eşiği 60 → `🔴 bekçi kırmızı` ay sonlarında rutin açılabilir | Kullanıcıya bildirildi; eşik kararı ayrı | İlk tam ay tüketimi ölçülünce (≈2026-10-22): eşik ya da bütçe |
+| 15d | 34/51 eşzamanlılık oranı ve "olaysız çağrı 0 kredi" tek hafta (milli ara) ölçümü; bel.1 footystats 18 takım (lig 16) | Küçük örneklem | İlk tam ay sonra yeniden ölç; ilk Mac footystats turunda bel.1 satır sayısı |
+| 15e | AUT (`aut.1`) yapılandırmada `active: false`; `config/history_aliases.yaml` N1/B1 için yok | AUT: bütçe (R125); ad eşlemesi ilk canlı kapanışları bekler (ad TAHMİN edilmez) | Ad eşlemesi: N1/B1'in ilk mühürlü maçlarından sonra |
