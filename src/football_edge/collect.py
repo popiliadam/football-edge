@@ -288,7 +288,13 @@ def _publish_head_command(
     # BUGÜNÜN dosyasıyla ve verify-chain'in okuyucusuyla: okunamayan dosya yeniden yazılır,
     # yeni gün baş aynı olsa da yeni dosya açar (günlük canlılık çıpası).
     current = Anchor(path=target, rows=count, last_id=last_id, head=head)
-    if target.is_file() and read_anchor(target) == current:
+    try:
+        unchanged = target.is_file() and read_anchor(target) == current
+    except UnicodeDecodeError:
+        # UTF-8 olmayan dosya da okunamaz: yeniden yazılır. `read_anchor` burada düşmeye devam
+        # eder, çünkü verify-chain bozuk çıpada yüksek sesle durmalı.
+        unchanged = False
+    if unchanged:
         sys.stdout.write(f"zincir başı değişmedi: {target}\n")
         return 0
     target.parent.mkdir(parents=True, exist_ok=True)

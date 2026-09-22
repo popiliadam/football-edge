@@ -262,6 +262,50 @@ def test_publish_head_rewrites_an_unreadable_anchor_for_today(
     assert f"zincir başı yazıldı: {target}\n" in out, out
 
 
+# Tek alan farklı: kıyas üç alanın HER BİRİNE bakmalı; herhangi bir alt küme bunu geçemez.
+@pytest.mark.parametrize(
+    "wrong",
+    [{"rows": 4}, {"last_id": 4}, {"head": "0" * 64}],
+    ids=["rows", "last_id", "head"],
+)
+def test_publish_head_rewrites_when_a_single_field_differs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], wrong: dict[str, Any]
+) -> None:
+    """K1: rows, last_id, head'den YALNIZ biri farklıysa da çıpa yeniden yazılır."""
+    db = FakeChainDb(chained_rows(3))
+    h = db.rows[-1]["row_hash"]
+    target = _write_anchor(tmp_path, **{"rows": 3, "last_id": 3, "head": h, **wrong})
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+
+
+def test_publish_head_rewrites_a_non_utf8_anchor_for_today(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """K1: UTF-8 olmayan bugünkü dosya da okunamaz — publish-head düşmez, yeniden yazar.
+
+    Anahtar satırlar şu anki değerleri taşır: gevşek çözme (`errors="ignore"`) onları
+    "değişmedi" okuyup bozuk dosyayı yerinde bırakırdı.
+    """
+    db = FakeChainDb(chained_rows(3))
+    target = tmp_path / "head-2026-09-19.txt"
+    target.write_bytes(
+        b"\xff\xfe\n" + f"rows=3\nlast_id=3\nhead={db.rows[-1]['row_hash']}\n".encode()
+    )
+
+    code = _publish_head_command(db, LATER, directory=tmp_path)  # type: ignore[arg-type]
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert target.read_text(encoding="utf-8") == _published(LATER, db)
+    assert f"zincir başı yazıldı: {target}\n" in out, out
+
+
 # ── G4: EN YENİ çıpa okunamayınca kontrol sessizce bir öncekine düşüyordu ────
 # `_anchors` okunamayan dosyayı eliyor; `anchors[-1]` en yeni OKUNABİLİR çıpa oluyor ve
 # stdout `zincir: SAĞLAM` diyor. Tek iz bir log uyarısı. Bu projenin kuralı: atlanan ya da
