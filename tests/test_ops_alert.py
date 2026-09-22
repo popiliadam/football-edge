@@ -27,6 +27,7 @@ NOW = datetime(2026, 9, 22, 8, 15, tzinfo=UTC)
 RUN_URL = "https://github.com/sahip/football-edge/actions/runs/42"
 SEAL_ALARM = "🔴 seal kırmızı"
 SNAPSHOT_ALARM = "🔴 snapshot kırmızı"
+WATCHDOG_ALARM = "🔴 bekçi kırmızı"
 
 
 def _load_script() -> ModuleType:
@@ -176,19 +177,23 @@ def _ok(fake: FakeGitHub) -> int:
 
 def test_fail_opens_a_labelled_alarm_with_the_run_link_and_utc_time() -> None:
     """Açık alarm yoksa issue AÇILIR: oluşturma bildirimi depo sahibine gider. Başka
-    workflow'un açık alarmı (burada snapshot'ınki) bu turun alarmı sayılmaz."""
-    fake = FakeGitHub(issues=[_issue(1, SNAPSHOT_ALARM, body="snapshot turu")])
+    workflow'un ve bekçinin açık alarmları bu turun alarmı sayılmaz, dokunulmaz."""
+    others = [
+        _issue(1, SNAPSHOT_ALARM, body="snapshot turu"),
+        _issue(2, WATCHDOG_ALARM, body="bekçi teşhisi"),
+    ]
+    fake = FakeGitHub(issues=list(others))
 
     assert _fail(fake) == 0
 
     assert fake.writes == [("POST", "/issues")], "tam olarak bir issue açılmalıydı"
-    opened = fake.issue(2)
+    opened = fake.issue(3)
     assert opened["title"] == SEAL_ALARM
     assert opened["state"] == "open"
     assert [label["name"] for label in opened["labels"]] == ["ops-alert"]
     assert RUN_URL in opened["body"], "gövde kırmızı tura bağlanmıyor"
     assert "2026-09-22 08:15 UTC" in opened["body"], "gövde UTC zamanını taşımıyor"
-    assert fake.issue(1)["body"] == "snapshot turu", "başka workflow'un alarmına dokunuldu"
+    assert fake.issues[:2] == others, "başka bir alarma dokunuldu"
 
 
 def test_fail_creates_the_missing_label_before_opening_the_alarm() -> None:
@@ -236,48 +241,60 @@ def test_ok_without_an_open_alarm_writes_nothing() -> None:
     assert fake.issue(5)["state"] == "open"
 
 
-# ── watchdog: pg_cron dispatch'i canlı mı? ──────────────────────────────────────────────────
-# Eşikler sınırın iki yanından sınanır (59/61 dk, 29/31 sa): eşiği hangi yöne kaydıran
-# değişiklik olursa olsun bir test kırmızı verir.
+# ── watchdog: pg_cron tetikleri canlı mı? ───────────────────────────────────────────────────
+# Bekçinin raporu KENDİ issue'sudur (`🔴 bekçi kırmızı`) ve adım bayat tetikte de 0 döner:
+# seal job'ını düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı geri alırdı. Eşikler
+# sınırın iki yanından sınanır (59/61 dk, 29/31 sa).
 
 FRESH = {
     "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=59))],
     "snapshot.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
 }
+STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
 
-def test_watchdog_passes_when_both_triggers_are_fresh() -> None:
+def _watchdog(fake: FakeGitHub) -> int:
+    return _main(fake, "watchdog", "--run-url", RUN_URL)
+
+
+def test_fresh_watchdog_without_an_open_alarm_writes_nothing() -> None:
     fake = FakeGitHub(runs=FRESH)
 
-    assert _main(fake, "watchdog") == 0
+    assert _watchdog(fake) == 0
     assert fake.writes == []
 
 
-def test_watchdog_fails_when_the_last_dispatch_is_older_than_an_hour(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Taze bir `schedule` turu ölü dispatch'i ÖRTMEZ — bekçinin kendi turu da schedule'dır."""
+def test_stale_dispatch_opens_the_watchdog_alarm_and_the_step_stays_green() -> None:
+    """Taze bir `schedule` turu ölü dispatch'i ÖRTMEZ — bekçinin kendi turu da schedule'dır.
+    Teşhis gövdededir; açık seal alarmına dokunulmaz."""
     seal_runs = [
         _workflow_run("schedule", timedelta(minutes=1)),
         _workflow_run("workflow_dispatch", timedelta(minutes=61)),
     ]
-    fake = FakeGitHub(runs={**FRESH, "seal.yml": seal_runs})
+    seal_alarm = _issue(1, SEAL_ALARM, body="seal turu")
+    fake = FakeGitHub(issues=[seal_alarm], runs={**FRESH, "seal.yml": seal_runs})
 
-    assert _main(fake, "watchdog") == 1
+    assert _watchdog(fake) == 0, "bayat tetik seal job'ını düşürüyor"
 
-    out = capsys.readouterr().out
-    assert "pg_cron dispatch durmuş olabilir" in out, out
-    assert "RUNBOOK §3.3" in out, "operatöre teşhis bölümü gösterilmiyor"
+    assert fake.writes == [("POST", "/issues")], "tam olarak bir issue açılmalıydı"
+    alarm = fake.issue(2)
+    assert alarm["title"] == WATCHDOG_ALARM
+    assert [label["name"] for label in alarm["labels"]] == ["ops-alert"]
+    for needle in ("seal.yml", "1 sa 1 dk", "eşik 1 sa 0 dk", "pg_cron dispatch", "RUNBOOK §3"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+    assert RUN_URL in alarm["body"], "alarm bekçi turuna bağlanmıyor"
+    assert fake.issue(1) == seal_alarm, "bekçi seal alarmına dokundu"
 
 
-def test_watchdog_fails_when_the_last_snapshot_is_older_than_thirty_hours(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    stale = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
-    fake = FakeGitHub(runs={**FRESH, "snapshot.yml": stale})
+def test_stale_snapshot_is_named_in_the_watchdog_alarm() -> None:
+    fake = FakeGitHub(runs={**FRESH, "snapshot.yml": STALE_SNAPSHOT})
 
-    assert _main(fake, "watchdog") == 1
-    assert "snapshot.yml" in capsys.readouterr().out
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in ("snapshot.yml", "31 sa 0 dk", "eşik 30 sa 0 dk"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
 
 
 @pytest.mark.parametrize(
@@ -289,11 +306,52 @@ def test_watchdog_fails_when_the_last_snapshot_is_older_than_thirty_hours(
     ],
     ids=["seal-hic-tur", "seal-yalniz-schedule", "snapshot-hic-tur"],
 )
-def test_watchdog_fails_when_a_trigger_never_ran(workflow: str, runs: list[dict[str, Any]]) -> None:
+def test_a_trigger_that_never_ran_opens_the_watchdog_alarm(
+    workflow: str, runs: list[dict[str, Any]]
+) -> None:
     """Hiç koşmamış tetik "bayat değil" sayılmaz: en bayat tetik odur."""
     fake = FakeGitHub(runs={**FRESH, workflow: runs})
 
-    assert _main(fake, "watchdog") == 1
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    assert f"{workflow}: hiç" in alarm["body"]
+
+
+def test_stale_watchdog_only_edits_the_body_of_its_open_alarm() -> None:
+    fake = FakeGitHub(
+        issues=[_issue(4, WATCHDOG_ALARM, body="eski teşhis")],
+        runs={**FRESH, "snapshot.yml": STALE_SNAPSHOT},
+    )
+
+    assert _watchdog(fake) == 0
+
+    assert fake.writes == [("PATCH", "/issues/4")], "açık bekçi alarmı varken yeni kayıt yazıldı"
+    assert "snapshot.yml" in fake.issue(4)["body"], "gövde son teşhise işaret etmiyor"
+    assert fake.issue(4)["state"] == "open"
+
+
+def test_fresh_watchdog_closes_its_own_alarm_and_leaves_the_seal_alarm() -> None:
+    """Bekçi alarmını YALNIZ iki tetiği de taze bulan bir bekçi turu kapatır."""
+    fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM), _issue(5, SEAL_ALARM)], runs=FRESH)
+
+    assert _watchdog(fake) == 0
+
+    assert fake.comments == [(4, f"yeşile döndü: {RUN_URL}")]
+    assert fake.issue(4)["state"] == "closed"
+    assert fake.issue(5)["state"] == "open", "bekçi seal alarmını kapattı"
+
+
+def test_green_seal_run_leaves_the_watchdog_alarm_open() -> None:
+    """Seal'in yeşili snapshot'ın ölümünü ölçmez, bekçi alarmını kapatamaz: maçları yalnız
+    snapshot kaydeder ve ölü snapshot mühürleri "kaçan" raporu bile vermeden susturur."""
+    fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM)])
+
+    assert _ok(fake) == 0
+
+    assert fake.writes == []
+    assert fake.issue(4)["state"] == "open"
 
 
 # ── Hata yolları: alarm düşerse adım da düşer, sessizce "tamam" demez ──────────────────────
@@ -311,11 +369,23 @@ def test_missing_environment_fails_before_calling_github(
     assert missing in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["fail", "--workflow", "seal", "--run-url", RUN_URL],
+        ["ok", "--workflow", "seal", "--run-url", RUN_URL],
+        ["watchdog", "--run-url", RUN_URL],
+    ],
+    ids=["fail", "ok", "watchdog"],
+)
 def test_a_github_error_fails_the_step_with_a_named_message(
-    capsys: pytest.CaptureFixture[str],
+    argv: list[str], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Bekçi bayat tetikte bile 0 döner; ama GitHub API'nin kendisi düşerse her alt komut
+    düşer — bozuk alarm yolu yeşil görünmemeli."""
+
     def down(request: httpx.Request) -> httpx.Response:
         return httpx.Response(502, json={"message": "Bad Gateway"})
 
-    assert _main(down, "fail", "--workflow", "seal", "--run-url", RUN_URL) == 1
+    assert _main(down, *argv) == 1
     assert "GitHub" in capsys.readouterr().err

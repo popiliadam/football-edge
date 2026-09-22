@@ -451,6 +451,24 @@ def test_snapshot_is_triggered_by_pg_cron_alone() -> None:
     assert scheduling, "snapshot.yml'i ne GitHub ne pg_cron zamanlıyor: tur hiç koşmaz"
 
 
+def test_snapshot_dispatch_lands_between_two_seal_dispatches() -> None:
+    """Mühür ve snapshot aynı `odds-collect` grubunda sıraya girer ve grup tek bir BEKLEYEN tur
+    tutar: bir mühür dispatch'inin hemen ardından tetiklenen snapshot o turun arkasında bekler,
+    kuyruğa giren üçüncü bir tur onu sessizce iptal ettirir. Snapshot iki mühür dispatch'inin
+    ortasına düşmeli."""
+    sql = "\n".join(_migrations().values())
+    seal = re.search(r"cron\.schedule\(\s*'seal-dispatch',\s*'\*/(\d+) \* \* \* \*'", sql)
+    snapshot = re.search(r"cron\.schedule\(\s*'snapshot-dispatch',\s*'(\d+) \d+ \* \* \*'", sql)
+    assert seal is not None and snapshot is not None, "pg_cron zamanlamaları okunamadı"
+
+    period, minute = int(seal.group(1)), int(snapshot.group(1))
+    after_seal = minute % period
+    assert period // 3 <= after_seal <= period - period // 3, (
+        f"snapshot :{minute:02d}, bir mühür dispatch'inden {after_seal} dk sonra — kuyrukta "
+        "onun arkasında bekler"
+    )
+
+
 # ── Kırmızı tur alarmı (scripts/ops_alert.py) ──────────────────────────────────────────────
 # 15 kırmızı mühür turu iki gün fark edilmedi. Kırmızı tur `ops-alert` issue'su açar (açıksa
 # gövdesini günceller), yeşil tur kapatır. Burada ölçülen, adımların VAR ve DOĞRU YERDE
@@ -467,18 +485,28 @@ def _condition(step: dict[str, Any]) -> str:
     return text
 
 
-@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
-def test_red_run_opens_the_alarm_and_green_run_closes_it(path: Path) -> None:
-    """`failure()`/`success()` yalnız ÖNCEKİ adımları görür: alarm adımları job'ın son iki
-    adımıdır, yoksa sonrasına eklenen bir adımın kırmızısı alarmsız kalır."""
+def _alarm_steps(path: Path) -> tuple[list[dict[str, Any]], int | None, int | None]:
     steps = _steps(path)
     opens = _index_of(steps, f"scripts/ops_alert.py fail --workflow {path.stem} ")
     closes = _index_of(steps, f"scripts/ops_alert.py ok --workflow {path.stem} ")
+    return steps, opens, closes
+
+
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_red_run_opens_the_alarm_and_green_run_closes_it(path: Path) -> None:
+    """`failure()`/`success()` yalnız ÖNCEKİ adımları görür: alarm adımları job'ın son iki
+    adımıdır, yoksa sonrasına eklenen bir adımın kırmızısı alarmsız kalır. Zaman aşımı turu
+    İPTAL eder ve `failure()` yanlış döner, bu yüzden alarm `cancelled()`da da açılır —
+    kuyrukta beklerken iptal edilen tur hiç adım koşmaz, gürültü üretmez."""
+    steps, opens, closes = _alarm_steps(path)
 
     assert (opens, closes) == (len(steps) - 2, len(steps) - 1), (
         f"{path.name}: alarm aç/kapat job'ın son iki adımı değil ({opens}, {closes})"
     )
-    assert _condition(steps[opens]) == "failure()", f"{path.name}: alarm kırmızıda açılmıyor"
+    opens_on = {part.strip() for part in _condition(steps[opens]).split("||")}
+    assert opens_on == {"failure()", "cancelled()"}, (
+        f"{path.name}: alarm kırmızıda ya da zaman aşımında açılmıyor: {_condition(steps[opens])!r}"
+    )
     assert _condition(steps[closes]) == "success()", f"{path.name}: alarm yeşilde kapanmıyor"
     for step in (steps[opens], steps[closes]):
         env = step.get("env") or {}
@@ -487,6 +515,20 @@ def test_red_run_opens_the_alarm_and_green_run_closes_it(path: Path) -> None:
             f"{path.name}: alarm kırmızı tura bağlanmıyor"
         )
         assert '--run-url "$RUN_URL"' in str(step["run"])
+
+
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_only_the_closing_step_may_fail_without_turning_the_run_red(path: Path) -> None:
+    """Yeşil turda `ok` düşerse (ör. GitHub 502) tur alarmsız kırmızıya dönerdi: `Alarm kapat`
+    `continue-on-error` taşır. Başka HİÇBİR adım taşımaz — alarm açan ya da bekçi düşerse tur
+    kırmızı kalmalı ki bozuk alarm yolu görünsün."""
+    steps, _, closes = _alarm_steps(path)
+    tolerant = [index for index, step in enumerate(steps) if step.get("continue-on-error")]
+
+    assert closes is not None and tolerant == [closes], (
+        f"{path.name}: continue-on-error taşıyan adımlar {tolerant}, beklenen yalnız [{closes}]"
+    )
+    assert steps[closes]["continue-on-error"] is True
 
 
 @pytest.mark.parametrize(
@@ -505,10 +547,11 @@ def test_alarm_jobs_may_write_issues_and_read_runs(path: Path, contents: str) ->
 
 
 def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
-    """Bekçi pg_cron dispatch'ini ölçer, bu yüzden GitHub'ın seyrek yedek `schedule`ında koşar:
-    mühürden SONRA (mührü asla engellemez), alarmdan ÖNCE (kırmızısı alarm açar). Ölü
-    dispatch'in seyrek turları çoğunlukla zaten kırmızıdır (kaçan mühür); örtük `success()`
-    bekçiyi tam o turlarda atlardı — `!cancelled()` bu yüzden."""
+    """Bekçi pg_cron tetiklerini ölçer, bu yüzden GitHub'ın seyrek yedek `schedule`ında koşar:
+    mühürden SONRA (mührü asla engellemez). Bayat tetikte kendi alarmını açar ve 0 döner; GitHub
+    API'nin kendisi düşerse düşer ve seal alarmı açılır — alarm adımlarından ÖNCE olması bu
+    yüzden. Ölü dispatch'in seyrek turları çoğunlukla zaten kırmızıdır (kaçan mühür); örtük
+    `success()` bekçiyi tam o turlarda atlardı — `!cancelled()` bu yüzden."""
     steps = _steps(SEAL)
     seal = _index_of(steps, "football_edge.collect seal")
     watchdog = _index_of(steps, "scripts/ops_alert.py watchdog")
@@ -526,3 +569,7 @@ def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
     assert "!cancelled()" in conjuncts, f"bekçi kırmızı mühür turunda atlanıyor: {condition!r}"
     env = steps[watchdog].get("env") or {}
     assert env.get("GITHUB_TOKEN") == "${{ github.token }}", "bekçiye token verilmiyor"
+    assert str(env.get("RUN_URL", "")).endswith("/actions/runs/${{ github.run_id }}"), (
+        "bekçi alarmı bekçi turuna bağlanmıyor"
+    )
+    assert '--run-url "$RUN_URL"' in str(steps[watchdog]["run"])

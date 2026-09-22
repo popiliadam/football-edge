@@ -4,8 +4,10 @@
     fail --workflow <ad> --run-url <url>   `🔴 <ad> kırmızı` issue'sunu açar; açıksa
                                            yalnız gövdesini son tura göre günceller
     ok   --workflow <ad> --run-url <url>   açık alarmı "yeşile döndü" yorumuyla kapatır
-    watchdog                               dispatch ya da snapshot bayatsa exit 1
+    watchdog --run-url <url>               tetik bayatsa `🔴 bekçi kırmızı`yı açar ya da
+                                           günceller, tazeyse kapatır; iki durumda da exit 0
 
+Her komut yalnız kendi başlığındaki alarma dokunur. GitHub API'nin kendisi düşerse exit 1.
 `GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur. Prosedür: docs/RUNBOOK.md §3.
 """
 
@@ -23,6 +25,7 @@ import httpx
 
 API = "https://api.github.com"
 LABEL = "ops-alert"
+WATCHDOG = "bekçi"
 
 
 @dataclass(frozen=True)
@@ -71,19 +74,19 @@ def _json(response: httpx.Response) -> Any:
     return response.json()
 
 
-def _title(workflow: str) -> str:
-    return f"🔴 {workflow} kırmızı"
+def _title(name: str) -> str:
+    return f"🔴 {name} kırmızı"
 
 
 def _numbers(numbers: list[int]) -> str:
     return ", ".join(f"#{number}" for number in numbers)
 
 
-def _open_alarms(client: httpx.Client, workflow: str) -> list[int]:
-    """Bu workflow'un AÇIK alarmları; başlık tam eşleşir, başka workflow'unki sayılmaz."""
+def _open_alarms(client: httpx.Client, name: str) -> list[int]:
+    """Bu adın AÇIK alarmları; başlık tam eşleşir, başka alarmın issue'su sayılmaz."""
     params = {"state": "open", "labels": LABEL, "per_page": "100"}
     issues: list[dict[str, Any]] = _json(client.get("/issues", params=params))
-    return [int(issue["number"]) for issue in issues if issue.get("title") == _title(workflow)]
+    return [int(issue["number"]) for issue in issues if issue.get("title") == _title(name)]
 
 
 def _ensure_label(client: httpx.Client) -> None:
@@ -95,39 +98,42 @@ def _ensure_label(client: httpx.Client) -> None:
     _json(client.post("/labels", json=label))
 
 
-def raise_alarm(client: httpx.Client, workflow: str, run_url: str, now: datetime) -> str:
+def raise_alarm(client: httpx.Client, name: str, body: str) -> str:
     """Açık alarm yoksa etiketli issue açar; varsa YALNIZ gövdesini günceller.
 
     Yeni issue ve yorum bildirim üretir, gövde düzenlemesi üretmez: kırmızı sürerken her
     turun (15 dakikada bir) e-postası gerçek alarmı gürültüye gömerdi.
     """
-    body = (
-        f"Son kırmızı tur: {run_url}\n"
-        f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
-        "Yeşil bir tur bu issue'yu kendiliğinden kapatır. Prosedür: docs/RUNBOOK.md §3.\n"
-    )
-    numbers = _open_alarms(client, workflow)
+    numbers = _open_alarms(client, name)
     for number in numbers:
         _json(client.patch(f"/issues/{number}", json={"body": body}))
     if numbers:
-        return f"alarm güncellendi: {_title(workflow)} {_numbers(numbers)}\n"
+        return f"alarm güncellendi: {_title(name)} {_numbers(numbers)}\n"
     _ensure_label(client)
-    issue = {"title": _title(workflow), "body": body, "labels": [LABEL]}
+    issue = {"title": _title(name), "body": body, "labels": [LABEL]}
     opened: dict[str, Any] = _json(client.post("/issues", json=issue))
-    return f"alarm açıldı: {_title(workflow)} #{opened['number']}\n"
+    return f"alarm açıldı: {_title(name)} #{opened['number']}\n"
 
 
-def clear_alarm(client: httpx.Client, workflow: str, run_url: str) -> str:
+def clear_alarm(client: httpx.Client, name: str, run_url: str) -> str:
     """Açık alarm varsa "yeşile döndü" yorumu yazıp kapatır; yoksa hiçbir şey yazmaz."""
-    numbers = _open_alarms(client, workflow)
+    numbers = _open_alarms(client, name)
     for number in numbers:
         comment = {"body": f"yeşile döndü: {run_url}"}
         _json(client.post(f"/issues/{number}/comments", json=comment))
         closing = {"state": "closed", "state_reason": "completed"}
         _json(client.patch(f"/issues/{number}", json=closing))
     if not numbers:
-        return f"açık alarm yok: {_title(workflow)}\n"
-    return f"alarm kapandı: {_title(workflow)} {_numbers(numbers)}\n"
+        return f"açık alarm yok: {_title(name)}\n"
+    return f"alarm kapandı: {_title(name)} {_numbers(numbers)}\n"
+
+
+def _red_run_body(run_url: str, now: datetime) -> str:
+    return (
+        f"Son kırmızı tur: {run_url}\n"
+        f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
+        "Yeşil bir tur bu issue'yu kendiliğinden kapatır. Prosedür: docs/RUNBOOK.md §3.\n"
+    )
 
 
 def _last_run(client: httpx.Client, trigger: Trigger) -> datetime | None:
@@ -164,6 +170,31 @@ def watchdog(client: httpx.Client, now: datetime) -> list[str]:
     return [line for trigger in TRIGGERS if (line := _staleness(client, trigger, now)) is not None]
 
 
+def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
+    stale = "".join(f"- {line}\n" for line in problems)
+    return (
+        f"Bayat tetik:\n{stale}\n"
+        f"Bekçi turu: {run_url}\n"
+        f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
+        "Bu issue'yu yalnız iki tetiği de taze bulan bir bekçi turu kapatır; seal'in yeşil\n"
+        "turu kapatmaz. Prosedür: docs/RUNBOOK.md §3.6.\n"
+    )
+
+
+def report_watchdog(client: httpx.Client, run_url: str, now: datetime) -> str:
+    """Bayat tetikte bekçinin KENDİ alarmını açar ya da günceller, tazede onu kapatır.
+
+    Seal alarmına dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu
+    (≤15 dk) alarmı geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
+    """
+    problems = watchdog(client, now)
+    if not problems:
+        return "bekçi: dispatch ve snapshot taze\n" + clear_alarm(client, WATCHDOG, run_url)
+    # `::warning::` turun özet sayfasına düşer; adım bilerek yeşil kalır.
+    warnings = "".join(f"::warning::{line}\n" for line in problems)
+    return warnings + raise_alarm(client, WATCHDOG, _watchdog_body(problems, run_url, now))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="seal/snapshot alarmı ve dispatch bekçisi")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -171,22 +202,16 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name)
         command.add_argument("--workflow", required=True)
         command.add_argument("--run-url", required=True)
-    commands.add_parser("watchdog")
+    commands.add_parser("watchdog").add_argument("--run-url", required=True)
     return parser
 
 
-def _execute(args: argparse.Namespace, client: httpx.Client, now: datetime) -> int:
+def _execute(args: argparse.Namespace, client: httpx.Client, now: datetime) -> str:
     if args.command == "fail":
-        sys.stdout.write(raise_alarm(client, args.workflow, args.run_url, now))
-        return 0
+        return raise_alarm(client, args.workflow, _red_run_body(args.run_url, now))
     if args.command == "ok":
-        sys.stdout.write(clear_alarm(client, args.workflow, args.run_url))
-        return 0
-    problems = watchdog(client, now)
-    # `::error::` satırı turun özet sayfasına düşer: alarmdaki bağlantıyı açan hemen görür.
-    report = "".join(f"::error::{line}\n" for line in problems)
-    sys.stdout.write(report or "bekçi: dispatch ve snapshot taze\n")
-    return 1 if problems else 0
+        return clear_alarm(client, args.workflow, args.run_url)
+    return report_watchdog(client, args.run_url, now)
 
 
 def main(
@@ -203,11 +228,12 @@ def main(
         return 2
     try:
         with _client(env["GITHUB_REPOSITORY"], env["GITHUB_TOKEN"], transport) as client:
-            return _execute(args, client, now or datetime.now(UTC))
+            sys.stdout.write(_execute(args, client, now or datetime.now(UTC)))
     except httpx.HTTPError as error:
         # Alarm yolu düştüyse adım da düşer: sessizce "tamam" sayılmaz.
         sys.stderr.write(f"HATA: GitHub API çağrısı düştü — {error}\n")
         return 1
+    return 0
 
 
 if __name__ == "__main__":

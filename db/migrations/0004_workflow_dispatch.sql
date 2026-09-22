@@ -67,5 +67,7 @@ revoke all on function ops.dispatch_workflow(text) from public, anon, authentica
 revoke all on function ops.dispatch_seal() from public, anon, authenticated;
 revoke all on function ops.dispatch_snapshot() from public, anon, authenticated;
 
+-- :22, iki mühür dispatch'inin (:15, :30) ortası: aynı `odds-collect` grubunda bir mühür
+-- turunun arkasında BEKLEYEN snapshot'ı, kuyruğa giren üçüncü bir tur sessizce iptal ettirir.
 -- Aynı adla yeniden çalıştırmak işi GÜNCELLER (pg_cron ≥ 1.3), ikinci bir iş açmaz.
-select cron.schedule('snapshot-dispatch', '17 6 * * *', 'select ops.dispatch_snapshot()');
+select cron.schedule('snapshot-dispatch', '22 6 * * *', 'select ops.dispatch_snapshot()');

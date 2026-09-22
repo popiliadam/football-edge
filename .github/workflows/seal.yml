@@ -103,24 +103,30 @@ jobs:
           echo "::error::mühür adımı exit ${SEAL_CODE:-bilinmiyor} ile döndü"
           exit 1
       - name: Bekçi
-        # pg_cron dispatch'ini ölçer: koparsa geriye yalnız bu seyrek `schedule` kalır.
+        # pg_cron tetiklerini ölçer: koparsa geriye yalnız bu seyrek `schedule` kalır. Bayat
+        # tetikte KENDİ alarmını (`🔴 bekçi kırmızı`) açar ve 0 döner — job'ı düşürseydi seal'in
+        # sonraki yeşil turu alarmı geri alırdı. Yalnız GitHub API hatasında düşer.
         # `!cancelled()`: ölü dispatch'in seyrek turları çoğunlukla zaten kırmızıdır (kaçan
-        # mühür) ve örtük `success()` bekçiyi tam o turlarda atlardı. Mühürden SONRA koşar,
-        # mührü hiç engellemez.
+        # mühür) ve örtük `success()` bekçiyi tam o turlarda atlardı. Mühürden SONRA koşar.
         if: ${{ !cancelled() && github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: uv run python scripts/ops_alert.py watchdog
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py watchdog --run-url "$RUN_URL"
       - name: Alarm aç
-        # Önceki HERHANGİ bir adım kırmızıysa (bekçi dâhil) `ops-alert` issue'su açılır; açıksa
-        # yalnız gövdesi güncellenir — 15 dakikada bir yeni bildirim alarmı gürültüye gömerdi.
-        if: failure()
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız gövdesi
+        # güncellenir — 15 dakikada bir yeni bildirim alarmı gürültüye gömerdi. `cancelled()`:
+        # zaman aşımı turu iptal eder ve `failure()` yanlış döner.
+        if: ${{ failure() || cancelled() }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python scripts/ops_alert.py fail --workflow seal --run-url "$RUN_URL"
       - name: Alarm kapat
+        # Kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya dönmez; açık alarm sonraki yeşil
+        # turda kapanır.
         if: success()
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
