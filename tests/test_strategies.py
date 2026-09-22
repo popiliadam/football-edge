@@ -323,6 +323,17 @@ def test_placebo_bets_its_seeded_pick_at_the_books_pre_closing_price() -> None:
     assert strategy.predict(_context(AVG_PRE, index=3)) == prediction
 
 
+def test_placebo_picks_follow_the_per_match_seed_over_a_grid() -> None:
+    """Tek örnek yanlış bir tohum biçimini (ör. `seed + index`) şans eseri geçirebilir."""
+    grid = [(seed, index) for seed in (1, 7, 20260922) for index in range(6)]
+
+    picks = [_pick(Placebo(devig=_normalise, seed=seed), index) for seed, index in grid]
+
+    assert picks == [
+        random.Random(seed * 1_000_003 + index).choice(RESULTS) for seed, index in grid
+    ]
+
+
 def test_placebo_picks_vary_across_matches() -> None:
     strategy = Placebo(devig=_normalise)
 

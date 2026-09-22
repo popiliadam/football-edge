@@ -18,6 +18,7 @@ from football_edge.backtest.harness import (
     ResultRecord,
     replay,
 )
+from football_edge.backtest.timeline import result_known_at
 from football_edge.history.types import CLOSING, PRE_CLOSING, TOTALS_25, HistMatch
 from tests.backtest_builders import hist_match, quote
 
@@ -28,15 +29,21 @@ FULL_ODDS = {
     **quote("PS", CLOSING, (1.8, 3.7, 4.6)),
     **quote("Avg", PRE_CLOSING, (1.9, 1.95), market=TOTALS_25),
     **quote("Avg", CLOSING, (1.8, 2.05), market=TOTALS_25),
+    # Uydurma üçüncü evre: iki evreyle "== evre" süzgeci "!= öbür evre"den ayırt edilemezdi.
+    **quote("Avg", "live", (2.2, 3.4, 3.5)),
 }
 
 
 @dataclass(frozen=True)
 class Recorder:
-    """Her kararda o ana kadar gördüğü sonuçları ve aldığı bağlamı kaydeder."""
+    """Her kararda o ana kadar gördüğü sonuçları ve aldığı bağlamı kaydeder.
+
+    `known`, gözlenen her sonucun `known_at`ını (ev, deplasman) çiftiyle tutar.
+    """
 
     seen: dict[int, tuple[tuple[str, str], ...]]
     contexts: dict[int, DecisionContext]
+    known: dict[tuple[str, str], datetime]
     predict_for: frozenset[int] | None = None
     observed: tuple[tuple[str, str], ...] = ()
 
@@ -45,6 +52,7 @@ class Recorder:
         return "recorder"
 
     def observe(self, result: ResultRecord) -> Recorder:
+        self.known[(result.home, result.away)] = result.known_at
         return replace(self, observed=(*self.observed, (result.home, result.away)))
 
     def predict(self, context: DecisionContext) -> Prediction | None:
@@ -93,7 +101,11 @@ class Logged:
 
 @dataclass(frozen=True)
 class Stray:
-    """Başka bir maç için tahmin döndüren bozuk strateji."""
+    """Her kararda 0. maç için tahmin döndüren bozuk strateji.
+
+    Tahmin VAR OLAN bir maça gider: koruma kalksa hata çıkmaz, değerlendirme o tahmini sessizce
+    yanlış maçın sonucuyla eşlerdi.
+    """
 
     @property
     def name(self) -> str:
@@ -103,11 +115,11 @@ class Stray:
         return self
 
     def predict(self, context: DecisionContext) -> Prediction:
-        return Prediction(context.match_index + 1, self.name, (0.4, 0.3, 0.3))
+        return Prediction(0, self.name, (0.4, 0.3, 0.3))
 
 
 def _recorder(predict_for: frozenset[int] | None = None) -> Recorder:
-    return Recorder(seen={}, contexts={}, predict_for=predict_for)
+    return Recorder(seen={}, contexts={}, known={}, predict_for=predict_for)
 
 
 def _weekly(count: int) -> tuple[HistMatch, ...]:
@@ -260,6 +272,9 @@ def test_a_result_known_exactly_at_a_decision_is_not_seen_by_that_decision() -> 
 
     assert recorder.seen[1] == ()
     assert recorder.seen[2] == (("Gama", "Delta"), ("Alfa", "Beta"))
+    assert recorder.known == {
+        (match.home, match.away): result_known_at(match.date, match.kickoff) for match in matches
+    }
 
 
 @pytest.mark.leakage
@@ -327,7 +342,7 @@ def test_replay_counts_matches_without_a_decision_and_decisions_without_a_predic
 
 def test_a_prediction_for_another_match_is_refused() -> None:
     with pytest.raises(ValueError, match="başka bir"):
-        replay(_weekly(1), Stray())
+        replay(_weekly(2), Stray())
 
 
 def test_predictions_follow_decision_order_not_input_order() -> None:

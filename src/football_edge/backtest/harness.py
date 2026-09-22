@@ -7,9 +7,9 @@ SONRA kurulur. Olay sıralaması sızıntıyı zaten önler; `_walk`teki denetim
 
 from __future__ import annotations
 
+import datetime as dt  # `date` bir alan adı: sınıf gövdesinde tip adını gölgelerdi
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
 from types import MappingProxyType
 from typing import Protocol
 
@@ -24,12 +24,12 @@ class LeakageError(RuntimeError):
 @dataclass(frozen=True)
 class ResultRecord:
     league: str
-    date: date
+    date: dt.date
     home: str
     away: str
     home_goals: int
     away_goals: int
-    known_at: datetime
+    known_at: dt.datetime
 
 
 @dataclass(frozen=True)
@@ -42,10 +42,10 @@ class DecisionContext:
     match_index: int
     league: str
     season: str
-    date: date
+    date: dt.date
     home: str
     away: str
-    decision_at: datetime
+    decision_at: dt.datetime
     pre_prices: Mapping[OddsKey, float]  # yalnız PRE_CLOSING anahtarları
 
 
@@ -95,7 +95,7 @@ def _phase_prices(match: HistMatch, phase: str) -> Mapping[OddsKey, float]:
     return MappingProxyType({key: price for key, price in match.odds.items() if key.phase == phase})
 
 
-def _result_record(match: HistMatch, known_at: datetime) -> ResultRecord:
+def _result_record(match: HistMatch, known_at: dt.datetime) -> ResultRecord:
     return ResultRecord(
         league=match.league,
         date=match.date,
@@ -107,7 +107,7 @@ def _result_record(match: HistMatch, known_at: datetime) -> ResultRecord:
     )
 
 
-def _context(index: int, match: HistMatch, decided: datetime) -> DecisionContext:
+def _context(index: int, match: HistMatch, decided: dt.datetime) -> DecisionContext:
     return DecisionContext(
         match_index=index,
         league=match.league,
@@ -135,7 +135,7 @@ def _walk(
 ) -> tuple[tuple[Prediction, ...], int]:
     """Olayları verilen sırayla oynatır; (dondurulan tahminler, tahminsiz karar sayısı) döner."""
     current = strategy
-    latest: datetime | None = None
+    latest: dt.datetime | None = None
     predictions: list[Prediction] = []
     skipped = 0
     for event in events:
