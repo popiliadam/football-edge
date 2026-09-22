@@ -1,20 +1,17 @@
 name: snapshot
 
 on:
-  schedule:
-    # Günde bir tur, 06:17 UTC — maç öncesi periyodik tarama.
-    #
-    # KREDİ ARİTMETİĞİ (ücretsiz katman: 500 kredi/ay, maliyet = markets × regions):
-    #   config/leagues.yaml → 6 aktif lig × 1 kredi = 6 kredi/tur
-    #   1 tur/gün × 31 gün                          = 186 kredi/ay
-    #   mühür turlarına + elle dispatch'e kalan pay ≈ 314 kredi/ay
-    # Brief'teki "0 3,9,15,21" dört tur/gün demekti: 24 kredi/gün = 744 kredi/ay,
-    # yani mühür turu hiç sayılmadan bütçenin bir buçuk katı. Sıklık artırılacaksa
-    # önce bu aritmetik yeniden yapılır — kredi sessizce tükenir, uyarı vermez.
-    #
-    # Dakika 0 değil: saat başı GitHub'ın en yoğun dilimidir, o dakikaya kurulan
-    # zamanlanmış koşular gecikir ya da tamamen düşer.
-    - cron: "17 6 * * *"
+  # TEK tetik pg_cron: her gün 06:17 UTC'de `ops.dispatch_snapshot()` bu workflow'u
+  # `workflow_dispatch` ile çağırır (db/migrations/0004_workflow_dispatch.sql). GitHub
+  # `schedule`ı KASITLI olarak yok: ikisi birden aynı gün iki tur, yani iki kat kredi demektir.
+  # pg_cron sessizce durursa `seal.yml`deki bekçi (scripts/ops_alert.py watchdog) kırmızı verir.
+  #
+  # KREDİ ARİTMETİĞİ (ücretsiz katman: 500 kredi/ay, maliyet = markets × regions):
+  #   config/leagues.yaml → 6 aktif lig × 1 kredi = 6 kredi/tur
+  #   1 tur/gün × 31 gün                          = 186 kredi/ay
+  #   mühür turlarına + elle dispatch'e kalan pay ≈ 314 kredi/ay
+  # İkinci bir günlük tetik 186 kredi daha yer ve mühür payını ≈ 128'e indirir. Sıklık
+  # artırılacaksa önce bu aritmetik yeniden yapılır — kredi sessizce tükenir, uyarı vermez.
   workflow_dispatch:
 
 concurrency:
@@ -29,6 +26,12 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
+      contents: read
+      # Alarm issue'su açar/kapatır (scripts/ops_alert.py).
+      issues: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - name: Secret taraması
@@ -60,3 +63,17 @@ jobs:
           esac
           # Hiçbir kod yutulmaz: 2 de 3 de işi kırmızıya düşürür, yalnız adıyla.
           exit "$code"
+      - name: Alarm aç
+        # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
+        # gövdesi güncellenir (her tur yeni bildirim üretseydi alarm gürültüye gömülürdü).
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow snapshot --run-url "$RUN_URL"
+      - name: Alarm kapat
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow snapshot --run-url "$RUN_URL"
