@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Kırmızı `seal`/`snapshot` turları için GitHub issue alarmı ve pg_cron dispatch bekçisi.
+"""Kırmızı `seal`/`snapshot` turları için GitHub issue alarmı; pg_cron dispatch ve kredi bekçisi.
 
     fail --workflow <ad> --run-url <url>   `🔴 <ad> kırmızı` issue'sunu açar; açıksa
                                            yalnız gövdesini son tura göre günceller
     ok   --workflow <ad> --run-url <url>   açık alarmı "yeşile döndü" yorumuyla kapatır
-    watchdog --run-url <url>               tetik bayatsa `🔴 bekçi kırmızı`yı açar ya da
-                                           günceller, tazeyse kapatır; iki durumda da exit 0
+    watchdog --run-url <url> [--min-credits N]
+                                           tetik bayatsa ya da Odds API kredisi N'nin
+                                           (varsayılan 60) altındaysa ya da ölçülemediyse
+                                           `🔴 bekçi kırmızı`yı açar ya da günceller, hepsi
+                                           yolundaysa kapatır; iki durumda da exit 0
 
 Her komut yalnız kendi başlığındaki alarma dokunur. GitHub API'nin kendisi düşerse exit 1.
-`GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur. Prosedür: docs/RUNBOOK.md §3.
+`GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur; bekçi `ODDS_API_KEY`i de okur ve onu
+hiçbir çıktıya yazmaz. Prosedür: docs/RUNBOOK.md §3.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -24,8 +29,12 @@ from typing import Any
 import httpx
 
 API = "https://api.github.com"
+ODDS_API = "https://api.the-odds-api.com/v4"
 LABEL = "ops-alert"
 WATCHDOG = "bekçi"
+# `run_seal` 5, `run_snapshot` 10 kredinin altında turu kendisi keser (rounds.py): eşik o
+# tabanların üstündedir ki haber kredi bitmeden gelsin.
+MIN_CREDITS = 60
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,11 @@ def _client(repository: str, token: str, transport: httpx.BaseTransport | None) 
         timeout=20.0,
         transport=transport,
     )
+
+
+def _odds_client(transport: httpx.BaseTransport | None) -> httpx.Client:
+    # GitHub istemcisinden AYRI: onun `Authorization` başlığı üçüncü tarafa gitmemeli.
+    return httpx.Client(timeout=20.0, transport=transport)
 
 
 def _json(response: httpx.Response) -> Any:
@@ -170,48 +184,87 @@ def watchdog(client: httpx.Client, now: datetime) -> list[str]:
     return [line for trigger in TRIGGERS if (line := _staleness(client, trigger, now)) is not None]
 
 
-def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
-    stale = "".join(f"- {line}\n" for line in problems)
+def _redact(text: str, api_key: str) -> str:
+    """Anahtarı düz hâliyle de, URL sorgusunda nasıl kodlandıysa (`%0A` gibi) öyle de gizler."""
+    return re.sub(r"apiKey=[^&\s'\"]+", "apiKey=***", text.replace(api_key, "***"))
+
+
+def odds_credits(client: httpx.Client, api_key: str, min_credits: int) -> str | None:
+    """Kredi eşiğin altındaysa ya da ölçülemediyse adlandırılmış satır, yeterliyse None.
+
+    `/v4/sports` kota harcamaz. Satır PUBLIC issue'ya yazılır ve GitHub'ın secret maskelemesi
+    issue'yu kapsamaz; httpx'in hata mesajı ise isteğin URL'sini, yani anahtarı taşır.
+    """
+    if not api_key:
+        return "Odds API: kredi ÖLÇÜLEMEDİ — ODDS_API_KEY ortamda yok"
+    try:
+        response = client.get(f"{ODDS_API}/sports", params={"apiKey": api_key})
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        # Tek satır: `::warning::` ve gövdedeki madde ilk satır sonunda biter.
+        reason = " ".join(_redact(f"{type(error).__name__}: {error}", api_key).split())
+        return f"Odds API: kredi ÖLÇÜLEMEDİ — {reason}"
+    try:
+        remaining = int(response.headers["x-requests-remaining"])
+    except (KeyError, ValueError):
+        return "Odds API: kredi ÖLÇÜLEMEDİ — x-requests-remaining başlığı yok ya da sayı değil"
+    if remaining >= min_credits:
+        return None
     return (
-        f"Bayat tetik:\n{stale}\n"
-        f"Bekçi turu: {run_url}\n"
-        f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
-        "Bu issue'yu yalnız iki tetiği de taze bulan bir bekçi turu kapatır; seal'in yeşil\n"
-        "turu kapatmaz. Prosedür: docs/RUNBOOK.md §3.6.\n"
+        f"Odds API: kredi az: {remaining} kaldı (eşik {min_credits}) — tükenince mühür turu "
+        "EXIT_QUOTA_EXHAUSTED (2) ile kapanır ve mühür kaçar"
     )
 
 
-def report_watchdog(client: httpx.Client, run_url: str, now: datetime) -> str:
-    """Bayat tetikte bekçinin KENDİ alarmını açar ya da günceller, tazede onu kapatır.
+def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
+    diagnosis = "".join(f"- {line}\n" for line in problems)
+    return (
+        f"Teşhis:\n{diagnosis}\n"
+        f"Bekçi turu: {run_url}\n"
+        f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
+        "Bu issue'yu yalnız iki tetiği de taze ve Odds API kredisini eşikte ya da üstünde ölçen\n"
+        "bir bekçi turu kapatır; seal'in yeşil turu kapatmaz. Prosedür: docs/RUNBOOK.md §3.6.\n"
+    )
 
-    Seal alarmına dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu
-    (≤15 dk) alarmı geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
+
+def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: str | None) -> str:
+    """Sorun varsa bekçinin KENDİ alarmını açar ya da günceller, yoksa onu kapatır.
+
+    Sorun: bayat tetik ya da eşiğin altında/ölçülemeyen kredi (`credit`). Seal alarmına
+    dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı
+    geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
     """
-    problems = watchdog(client, now)
+    problems = [line for line in (*watchdog(client, now), credit) if line is not None]
     if not problems:
-        return "bekçi: dispatch ve snapshot taze\n" + clear_alarm(client, WATCHDOG, run_url)
+        healthy = "bekçi: dispatch ve snapshot taze, Odds API kredisi yeterli\n"
+        return healthy + clear_alarm(client, WATCHDOG, run_url)
     # `::warning::` turun özet sayfasına düşer; adım bilerek yeşil kalır.
     warnings = "".join(f"::warning::{line}\n" for line in problems)
     return warnings + raise_alarm(client, WATCHDOG, _watchdog_body(problems, run_url, now))
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="seal/snapshot alarmı ve dispatch bekçisi")
+    parser = argparse.ArgumentParser(description="seal/snapshot alarmı; dispatch ve kredi bekçisi")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("fail", "ok"):
         command = commands.add_parser(name)
         command.add_argument("--workflow", required=True)
         command.add_argument("--run-url", required=True)
-    commands.add_parser("watchdog").add_argument("--run-url", required=True)
+    watch = commands.add_parser("watchdog")
+    watch.add_argument("--run-url", required=True)
+    watch.add_argument("--min-credits", type=int, default=MIN_CREDITS)
     return parser
 
 
-def _execute(args: argparse.Namespace, client: httpx.Client, now: datetime) -> str:
+def _execute(
+    args: argparse.Namespace, client: httpx.Client, odds: httpx.Client, now: datetime
+) -> str:
     if args.command == "fail":
         return raise_alarm(client, args.workflow, _red_run_body(args.run_url, now))
     if args.command == "ok":
         return clear_alarm(client, args.workflow, args.run_url)
-    return report_watchdog(client, args.run_url, now)
+    credit = odds_credits(odds, os.environ.get("ODDS_API_KEY", ""), args.min_credits)
+    return report_watchdog(client, args.run_url, now, credit)
 
 
 def main(
@@ -227,8 +280,11 @@ def main(
         sys.stderr.write(f"HATA: ortamda yok: {', '.join(missing)}\n")
         return 2
     try:
-        with _client(env["GITHUB_REPOSITORY"], env["GITHUB_TOKEN"], transport) as client:
-            sys.stdout.write(_execute(args, client, now or datetime.now(UTC)))
+        with (
+            _client(env["GITHUB_REPOSITORY"], env["GITHUB_TOKEN"], transport) as client,
+            _odds_client(transport) as odds,
+        ):
+            sys.stdout.write(_execute(args, client, odds, now or datetime.now(UTC)))
     except httpx.HTTPError as error:
         # Alarm yolu düştüyse adım da düşer: sessizce "tamam" sayılmaz.
         sys.stderr.write(f"HATA: GitHub API çağrısı düştü — {error}\n")

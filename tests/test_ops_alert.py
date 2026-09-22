@@ -1,8 +1,9 @@
-"""Kırmızı tur alarmı ve pg_cron dispatch bekçisi — `scripts/ops_alert.py`.
+"""Kırmızı tur alarmı, pg_cron dispatch ve Odds API kredi bekçisi — `scripts/ops_alert.py`.
 
-GitHub'a hiç çıkılmaz: `httpx.MockTransport` üstünde küçük bir sahte GitHub gelen istekleri
-kaydeder ve kendi durumunu (issue, etiket, tur) günceller; assertion'lar o duruma bakar.
-Betik, workflow adımının çağırdığı yoldan — `main(argv)` — sınanır.
+Ne GitHub'a ne Odds API'ye çıkılır: `httpx.MockTransport` üstünde küçük bir sahte GitHub gelen
+istekleri kaydeder ve kendi durumunu (issue, etiket, tur) günceller; assertion'lar o duruma
+bakar. Bekçinin kredi isteği host'una göre sahte bir Odds API'ye gider. Betik, workflow
+adımının çağırdığı yoldan — `main(argv)` — sınanır.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 REPOSITORY = "sahip/football-edge"
 TOKEN = "test-token"
+ODDS_KEY = "sahte-odds-anahtari-c5-0123456789"
 NOW = datetime(2026, 9, 22, 8, 15, tzinfo=UTC)
 RUN_URL = "https://github.com/sahip/football-edge/actions/runs/42"
 SEAL_ALARM = "🔴 seal kırmızı"
@@ -152,11 +154,45 @@ class FakeGitHub:
         return httpx.Response(200, json={"total_count": len(matching), "workflow_runs": page})
 
 
+@dataclass
+class FakeOddsApi:
+    """Kota harcamayan `GET /v4/sports`un taklidi: kalan kredi `x-requests-remaining`dadır.
+
+    `remaining=None` başlığı hiç göndermez; `failure` verilirse her istek o yoldan düşer.
+    Yanlış uç ya da anahtar, gerçek API gibi 401 alır — sessiz geçmez.
+    """
+
+    remaining: str | None = "200"
+    failure: Callable[[httpx.Request], httpx.Response] | None = None
+    requests: list[httpx.Request] = field(default_factory=list)
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.failure is not None:
+            return self.failure(request)
+        endpoint = (request.method, request.url.path) == ("GET", "/v4/sports")
+        if not endpoint or request.url.params.get("apiKey") != ODDS_KEY:
+            return httpx.Response(401, json={"message": "API key is not valid"})
+        headers = {} if self.remaining is None else {"x-requests-remaining": self.remaining}
+        return httpx.Response(200, headers=headers, json=[])
+
+
+def _hosts(github: FakeGitHub, odds: FakeOddsApi) -> Callable[[httpx.Request], httpx.Response]:
+    """Bekçi iki API'ye çıkar: istek, host'una göre ilgili taklide gider."""
+
+    def route(request: httpx.Request) -> httpx.Response:
+        return odds(request) if request.url.host == "api.the-odds-api.com" else github(request)
+
+    return route
+
+
 @pytest.fixture(autouse=True)
-def _github_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Runner `GITHUB_REPOSITORY`yi kendisi verir; `GITHUB_TOKEN`ı adımın `env`i verir."""
+def _step_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runner `GITHUB_REPOSITORY`yi kendisi verir; `GITHUB_TOKEN`ı ve bekçinin `ODDS_API_KEY`ini
+    adımın `env`i verir. Anahtar sahtedir: kabukta gerçeği tanımlı olsa bile ezilir."""
     monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
+    monkeypatch.setenv("ODDS_API_KEY", ODDS_KEY)
 
 
 def _main(handler: Callable[[httpx.Request], httpx.Response], *argv: str) -> int:
@@ -253,8 +289,10 @@ FRESH = {
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
 
-def _watchdog(fake: FakeGitHub) -> int:
-    return _main(fake, "watchdog", "--run-url", RUN_URL)
+def _watchdog(fake: FakeGitHub, odds: FakeOddsApi | None = None, *argv: str) -> int:
+    """Kredisi verilmeyen tur yeterli krediyle (200) koşar: tetik testleri krediye bakmaz."""
+    wire = _hosts(fake, odds if odds is not None else FakeOddsApi())
+    return _main(wire, "watchdog", "--run-url", RUN_URL, *argv)
 
 
 def test_fresh_watchdog_without_an_open_alarm_writes_nothing() -> None:
@@ -352,6 +390,139 @@ def test_green_seal_run_leaves_the_watchdog_alarm_open() -> None:
 
     assert fake.writes == []
     assert fake.issue(4)["state"] == "open"
+
+
+# ── watchdog: Odds API kredisi ──────────────────────────────────────────────────────────────
+# Kredi tükenince mühür turu `EXIT_QUOTA_EXHAUSTED` (2) verir; o an mühür çoktan kaçmıştır.
+# Bekçi kalanı kota harcamayan `/v4/sports`un `x-requests-remaining` başlığından önceden okur
+# ve sorunu kendi alarmına yazar. Eşik sınırın iki yanından sınanır (60/59).
+
+
+@pytest.mark.parametrize("remaining", ["200", "60"], ids=["bol", "esikte"])
+def test_enough_credit_is_measured_and_stays_out_of_the_diagnosis(remaining: str) -> None:
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(remaining=remaining)
+
+    assert _watchdog(fake, odds) == 0
+
+    assert fake.writes == [], "yeterli kredi alarm yazdı"
+    (request,) = odds.requests  # ölçülmemiş kredi "yeterli" sayılamaz
+    assert (request.method, request.url.path) == ("GET", "/v4/sports"), "kota harcayan uç"
+    assert request.url.params.get("apiKey") == ODDS_KEY
+    assert "authorization" not in request.headers, "GitHub token'ı Odds API'ye gitti"
+
+
+@pytest.mark.parametrize(
+    ("remaining", "argv", "line"),
+    [
+        ("59", (), "kredi az: 59 kaldı (eşik 60)"),
+        ("40", (), "kredi az: 40 kaldı (eşik 60)"),
+        ("80", ("--min-credits", "100"), "kredi az: 80 kaldı (eşik 100)"),
+    ],
+    ids=["esigin-alti", "az", "min-credits"],
+)
+def test_low_credit_opens_the_watchdog_alarm_and_the_step_stays_green(
+    remaining: str, argv: tuple[str, ...], line: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining=remaining), *argv) == 0, "kredi job'ı düşürdü"
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    assert f"Odds API: {line}" in alarm["body"], "gövdede kredi teşhisi yok"
+    assert f"::warning::Odds API: {line}" in capsys.readouterr().out, "tur özetinde uyarı yok"
+
+
+def test_low_credit_keeps_the_open_watchdog_alarm_open() -> None:
+    """Tetikler taze diye alarm kapanmaz: onu yalnız her şeyi yolunda bulan bekçi turu kapatır."""
+    fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM, body="eski teşhis")], runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining="40")) == 0
+
+    assert fake.writes == [("PATCH", "/issues/4")], "kredi az iken alarm kapandı ya da çoğaldı"
+    assert fake.issue(4)["state"] == "open"
+    assert "kredi az: 40 kaldı (eşik 60)" in fake.issue(4)["body"]
+
+
+@pytest.mark.parametrize("remaining", [None, "bilinmiyor"], ids=["baslik-yok", "sayi-degil"])
+def test_an_unreadable_credit_header_is_named_unmeasured(remaining: str | None) -> None:
+    """Ölçülemeyen kredi "yeterli" sayılmaz: bekçi onu adıyla alarma yazar."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining=remaining)) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", "x-requests-remaining"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["tanimsiz", "bos-secret"])
+def test_a_missing_key_is_named_unmeasured_without_a_request(
+    value: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tanımsız repo secret'ı adımın `env`ine boş dize olarak gelir: o da "anahtar yok"tur."""
+    if value is None:
+        monkeypatch.delenv("ODDS_API_KEY")
+    else:
+        monkeypatch.setenv("ODDS_API_KEY", value)
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi()
+
+    assert _watchdog(fake, odds) == 0
+
+    assert odds.requests == [], "anahtarsız istek atıldı"
+    (alarm,) = fake.issues
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", "ODDS_API_KEY"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def _unauthorized(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(401, json={"message": "API key is not valid"})
+
+
+def _connection_lost(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError(f"bağlantı koptu: {request.url}", request=request)
+
+
+def _echoes_the_key(request: httpx.Request) -> httpx.Response:
+    raise httpx.ProxyError(f"vekil reddetti: {request.url.params['apiKey']}", request=request)
+
+
+@pytest.mark.parametrize(
+    ("secret", "failure", "reason"),
+    [
+        (ODDS_KEY, _unauthorized, "401 Unauthorized"),
+        (ODDS_KEY, _connection_lost, "ConnectError"),
+        (f"{ODDS_KEY}\n", _unauthorized, "401 Unauthorized"),
+        (ODDS_KEY, _echoes_the_key, "ProxyError"),
+    ],
+    ids=["http-401", "ag-hatasi", "satir-sonlu-secret", "duz-anahtar"],
+)
+def test_a_failed_credit_request_is_named_without_leaking_the_key(
+    secret: str,
+    failure: Callable[[httpx.Request], httpx.Response],
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """httpx'in hata mesajı isteğin URL'sini, yani sorgudaki anahtarı taşır; satır sonuyla
+    yapıştırılmış bir secret URL'de kodlanır (`%0A`) ve düz eşleşmeden kaçar. Teşhis PUBLIC
+    issue'ya yazılır ve GitHub'ın secret maskelemesi issue'yu kapsamaz: anahtar hiçbir yoldan
+    çıkmamalı. Hata yine de adıyla raporlanır; `::warning::` yalnız ilk satırı taşır."""
+    monkeypatch.setenv("ODDS_API_KEY", secret)
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(failure=failure)) == 0, "kredi hatası job'ı düşürdü"
+
+    out = capsys.readouterr()
+    written = json.dumps([fake.issues, fake.comments], ensure_ascii=False)
+    for channel, text in {"stdout": out.out, "stderr": out.err, "GitHub": written}.items():
+        assert ODDS_KEY not in text, f"anahtar {channel} yoluyla sızdı"
+    (alarm,) = fake.issues
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", reason):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+    for printed in out.out.splitlines():
+        assert printed.startswith(("::warning::", "alarm ")), f"uyarı satırı bölündü: {printed!r}"
 
 
 # ── Hata yolları: alarm düşerse adım da düşer, sessizce "tamam" demez ──────────────────────
