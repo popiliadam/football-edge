@@ -21,6 +21,7 @@ from tests.workflow_helpers import (
     COLLECT_DAILY,
     COLLECT_NEWS,
     COLLECTORS,
+    REPO,
     _cron_jobs,
     _functions,
     _index_of,
@@ -145,7 +146,6 @@ def _collect_run_body(path: Path) -> str:
     ("path", "failing", "code", "named"),
     [
         (COLLECT_DAILY, None, 0, ""),
-        (COLLECT_DAILY, "fetch-footystats", collect.EXIT_LEAGUE_FAILED, "lig"),
         (COLLECT_DAILY, "fetch-tff", collect.EXIT_SOURCE_FAILED, "kaynak"),
         (COLLECT_DAILY, "fetch-venues", 1, "beklenmedik"),
         (COLLECT_NEWS, None, 0, ""),
@@ -154,7 +154,6 @@ def _collect_run_body(path: Path) -> str:
     ],
     ids=[
         "daily-ok",
-        "daily-footystats-3",
         "daily-tff-7",
         "daily-venues-1",
         "news-ok",
@@ -204,3 +203,30 @@ def test_a_red_collector_does_not_stop_the_others_and_turns_the_run_red(
         assert any(failing in line and named in line for line in errors), (
             f"{path.name}: {failing} (exit {code}) adıyla ({named!r}) raporlanmıyor: {errors}"
         )
+
+
+WORKFLOWS = REPO / ".github/workflows"
+
+
+def _run_bodies(path: Path) -> list[str]:
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return [
+        str(step.get("run", ""))
+        for job in document["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+
+
+def test_footystats_is_not_collected_on_github_hosted_runners() -> None:
+    """İlk canlı `collect-daily` turunda (2026-09-22, run 35710579845) footystats'ın altı lig
+    sayfasının altısı da 403 döndü; aynı kod ve aynı kimlik Mac'ten 200 alıyor. Cloudflare
+    veri merkezi IP'lerini geri çeviriyor. Kimliği değiştirmek (R2) ya da bot korumasını
+    aşmak seçenek değil: iş Mac'te koşar (RUNBOOK §3.9). GitHub'a geri eklenirse tur her gün
+    kırmızı kalır ve açık alarm tff/venues arızalarını bildirimsiz bırakır (DEFERRED 10h).
+    """
+    offenders = [
+        path.name
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+        if any("fetch-footystats" in body for body in _run_bodies(path))
+    ]
+    assert offenders == [], f"footystats GitHub runner'ında koşturuluyor: {offenders}"

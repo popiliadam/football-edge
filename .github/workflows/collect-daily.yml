@@ -44,14 +44,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           # Biri düşse de diğerleri koşar: bir kaynağın arızası ötekilerin gözlemini kaçırtmaz.
+          # footystats burada YOK: GitHub runner'ları 403 alıyor (Cloudflare veri merkezi IP'lerini
+          # geri çeviriyor), iş Mac'te koşuyor — RUNBOOK §3.9.
           set +e
           failed=0
-          for command in fetch-footystats fetch-tff fetch-venues; do
+          for command in fetch-tff fetch-venues; do
             uv run python -m football_edge.collect "$command"
             code=$?
             case "$code" in
               0) ;;
-              3) echo "::error::$command: en az bir lig toplanamadı (exit 3) — diğerleri yazıldı" ;;
               7) echo "::error::$command: kaynak toplanamadı (exit 7) — ayrıntı yukarıdaki satırlarda" ;;
               *) echo "::error::$command beklenmedik kodla düştü (exit $code)" ;;
             esac
