@@ -384,3 +384,12 @@ da ölçülemeyen (403, 429, 5xx, bağlantı hatası) kaynağın tarihine dokunu
 Sapma görülürse (elle): canlı robots.txt'i oku. Beyan ettiğimiz yollara hâlâ izin veriyorsa
 `config/robots/<id>.txt`i canlı içerikle, `robots_verified_at`i bugünle güncelle; izin
 vermiyorsa kaynağı `enabled: false` yap. Kapı gevşetilerek yeşil alınmaz.
+
+### 3.8 Loglarda sır
+`collect.py` log kurulumu (`configure_logging`) her çıktıyı — mesaj ve traceback — redakte eden bir
+biçimleyiciyle kurar: `ODDS_API_KEY`, `TYPESAFE_API_KEY`, `DATABASE_URL`in tamamı ve parolası
+(libpq'nun ayrıştırdığı ve URL'deki biçimler), ayrıca her `apikey=` sorgu değeri `***` olur.
+Yakalanmayan istisna da `sys.excepthook` ile aynı yoldan geçer; httpx istek satırları susturuldu.
+Depo public olduğu için Actions logları herkese açıktır: GitHub'ın maskesi yalnız secret'ın
+TAMAMINI tanır, bu katman parçaları da kapsar. Yeni bir kimlik bilgisi eklenirse
+`_log_secrets`e de eklenmeli (DEFERRED 10o).

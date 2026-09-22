@@ -2,7 +2,8 @@
 
 **Son güncelleme:** 2026-09-22 · **Durum:** **Faz 1 `main`'de; İz C (işletme) C1–C5 tamam** — mühür, snapshot ve toplayıcılar
 pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor, robots doğrulaması otomatik
-(RUNBOOK §3) · **Dal:** `main` · kapı **9 adım yeşil + `zincir` adıyla SKIP** (ölçüm §2)
+(RUNBOOK §3); loglarda sır yok; çıpa push'u yarışa dayanıklı · **Dal:** `main` · kapı **9 adım
+yeşil + `zincir` adıyla SKIP** (ölçüm §2)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -60,6 +61,8 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 **veritabanına UYGULANMADI** | `collect-*.yml` `main`e push'lanınca uygulanacak (GitHub `main`de olmayan workflow'u tetiklemez) |
 | Alarm ve bekçi | `ops-alert` issue'ları; bekçi tetikleri ve Odds API kredisini izler | kod `main`de, testli; hiçbir runner'da henüz koşmadı |
 | robots doğrulaması | otomatik (`sources-audit.yml`, RUNBOOK §3.7) | ilk otomatik ilerletme 2026-09-27 05:41 UTC turunda bekleniyor |
+| Loglarda sır | Odds/TypeSafe anahtarı, `DATABASE_URL` ve parolası redakte; yakalanmayan istisna da (C7) | uçtan uca bozuk DSN `verify-chain` → parola parçası stdout/stderr'de 0 (controller, 09-22) |
+| Çıpa push'u | yalnız commit varsa, merge ile en çok 3 deneme, checkout güncel uç (C6) | gerçek git sığ klon senaryoları; runner'da henüz koşmadı |
 | Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | Yalnız MockTransport testleri — runner'da ve gerçek GitHub'da **henüz koşmadı** |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
