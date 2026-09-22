@@ -28,10 +28,13 @@ log() {
 # gelsin (kişiye kendi eylemi için bildirim gitmez) ve her rapor bekçi için kalp atışıdır. GitHub
 # token'ı bu betiğin hiçbir sürecine girmez: `gh` kendi oturumunu kullanır.
 report() {
-  if gh workflow run "$REPORT" --repo "$REPOSITORY" --ref main -f result="$1" >/dev/null 2>&1; then
+  local error
+  if error="$(gh workflow run "$REPORT" --repo "$REPOSITORY" --ref main -f result="$1" 2>&1 >/dev/null)"; then
     return 0
   fi
-  log "HATA: sonuç ($1) GitHub'a iletilemedi — gh oturumu ya da ağ yok"
+  # gh'nin ilk hata satırı 404'ü, yetki hatasını ve ağ yokluğunu birbirinden ayırır.
+  error="${error%%$'\n'*}"
+  log "HATA: sonuç ($1) GitHub'a iletilemedi — ${error:-gh çıktı vermeden düştü}"
   if command -v osascript >/dev/null 2>&1; then
     osascript -e "display notification \"footystats turu: $1 — GitHub'a iletilemedi\"\
  with title \"football-edge\"" >/dev/null 2>&1
@@ -56,10 +59,22 @@ database_url() {
 }
 
 # Koşan kopya `main`in gerisindeyse kendini günceller; yeni sürüm SONRAKİ turdan geçerlidir.
-# `mv` dizin girdisini değiştirir: koşan bash eski dosyayı okumayı sürdürür.
+# `mv` dizin girdisini değiştirir: koşan bash eski dosyayı okumayı sürdürür. Bir deponun kendi
+# `scripts/` kopyası (elle koşulan geliştirme ağacı) güncellenmez: commit'lenmemiş değişiklik
+# sessizce silinirdi. Sözdizimi bozuk bir sürüm de kurulmaz: iş kendini onaramazdı.
 follow_main() {
   [ -f scripts/footystats_daily.sh ] || return 0
   cmp -s scripts/footystats_daily.sh "$INSTALLED" && return 0
+  local parent
+  parent="$(dirname "$INSTALLED")"
+  if [ "$(basename "$parent")" = scripts ] && [ -e "$(dirname "$parent")/.git" ]; then
+    log "UYARI: bu kopya bir deponun kendi betiği ($INSTALLED) — main'e güncellenmedi"
+    return 0
+  fi
+  if ! bash -n scripts/footystats_daily.sh; then
+    log "UYARI: main'deki betik sözdizimi denetiminden geçmedi — kurulmadı"
+    return 0
+  fi
   if cp scripts/footystats_daily.sh "$INSTALLED.new" && chmod 755 "$INSTALLED.new" &&
     mv -f "$INSTALLED.new" "$INSTALLED"; then
     log "betik main'e güncellendi — sonraki turdan geçerli"

@@ -33,6 +33,7 @@ RUN_URL = "https://github.com/sahip/football-edge/actions/runs/42"
 SEAL_ALARM = "🔴 seal kırmızı"
 SNAPSHOT_ALARM = "🔴 snapshot kırmızı"
 WATCHDOG_ALARM = "🔴 bekçi kırmızı"
+MAC_ALARM = "🔴 footystats-local kırmızı"
 
 
 def _load_script() -> ModuleType:
@@ -368,13 +369,8 @@ def test_stale_snapshot_is_named_in_the_watchdog_alarm() -> None:
             timedelta(hours=4, minutes=1),
             ("son tur 4 sa 1 dk önce", "eşik 4 sa 0 dk", "collect-news-dispatch"),
         ),
-        (
-            "footystats-local.yml",
-            timedelta(hours=73),
-            ("son workflow_dispatch turu 73 sa 0 dk önce", "eşik 72 sa 0 dk", "RUNBOOK §3.9"),
-        ),
     ],
-    ids=["collect-daily", "collect-news", "footystats-local"],
+    ids=["collect-daily", "collect-news"],
 )
 def test_a_stale_collect_trigger_is_named_in_the_watchdog_alarm(
     workflow: str, age: timedelta, needles: tuple[str, ...]
@@ -409,9 +405,8 @@ def test_collect_triggers_just_inside_their_thresholds_are_read_and_stay_fresh()
         ("seal.yml", []),
         ("seal.yml", [_workflow_run("schedule", timedelta(minutes=1))]),
         ("snapshot.yml", []),
-        ("footystats-local.yml", []),
     ],
-    ids=["seal-hic-tur", "seal-yalniz-schedule", "snapshot-hic-tur", "mac-hic-rapor"],
+    ids=["seal-hic-tur", "seal-yalniz-schedule", "snapshot-hic-tur"],
 )
 def test_a_trigger_that_never_ran_opens_the_watchdog_alarm(
     workflow: str, runs: list[dict[str, Any]]
@@ -424,6 +419,63 @@ def test_a_trigger_that_never_ran_opens_the_watchdog_alarm(
     (alarm,) = fake.issues
     assert alarm["title"] == WATCHDOG_ALARM
     assert f"{workflow}: hiç" in alarm["body"]
+
+
+@pytest.mark.parametrize(
+    ("runs", "needles"),
+    [
+        (
+            [_workflow_run("workflow_dispatch", timedelta(hours=73))],
+            ("son workflow_dispatch turu 73 sa 0 dk önce", "eşik 72 sa 0 dk", "RUNBOOK §3.9"),
+        ),
+        ([], ("footystats-local.yml: hiç workflow_dispatch turu yok",)),
+    ],
+    ids=["73-sa", "hic-rapor"],
+)
+def test_a_silent_mac_opens_its_own_alarm_not_the_watchdogs(
+    runs: list[dict[str, Any]], needles: tuple[str, ...]
+) -> None:
+    """Mac'in kalp atışı (R74) bekçi alarmını PAYLAŞMAZ: tatilde açık kalan bir bekçi alarmı,
+    sonradan ölen bir mühür tetiğini yalnız gövde güncellemesiyle, yani bildirimsiz bırakırdı."""
+    fake = FakeGitHub(runs={**FRESH, "footystats-local.yml": runs})
+
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == MAC_ALARM
+    for needle in needles:
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def test_a_dead_seal_trigger_still_notifies_while_the_mac_is_away() -> None:
+    """Mac'in alarmı zaten açıkken mühür tetiği ölürse bekçi alarmı YENİ bir issue olarak açılır
+    (bildirim üretir); Mac'in alarmına yalnız gövde düzenlemesi düşer."""
+    mac_alarm = _issue(3, MAC_ALARM, body="Mac raporlamıyor")
+    runs = {
+        **FRESH,
+        "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=61))],
+        "footystats-local.yml": [_workflow_run("workflow_dispatch", timedelta(hours=100))],
+    }
+    fake = FakeGitHub(issues=[mac_alarm], runs=runs)
+
+    assert _watchdog(fake) == 0
+
+    assert ("POST", "/issues") in fake.writes, "bekçi alarmı açılmadı"
+    watchdog_alarm = next(issue for issue in fake.issues if issue["title"] == WATCHDOG_ALARM)
+    assert "seal.yml" in watchdog_alarm["body"]
+    assert "footystats-local.yml" not in watchdog_alarm["body"]
+
+
+def test_a_fresh_heartbeat_leaves_the_macs_alarm_to_its_ok_report() -> None:
+    """Açık Mac alarmı kırmızı bir toplayıcı raporundan da gelebilir: onu kapatmak yalnız işin
+    yeşil (`ok`) raporunun işidir. Bekçi taze kalp atışında ona dokunmaz."""
+    mac_alarm = _issue(3, MAC_ALARM, body="fetch-footystats exit 3")
+    fake = FakeGitHub(issues=[mac_alarm], runs=FRESH)
+
+    assert _watchdog(fake) == 0
+
+    assert fake.issue(3) == mac_alarm
+    assert fake.writes == []
 
 
 def test_stale_watchdog_only_edits_the_body_of_its_open_alarm() -> None:

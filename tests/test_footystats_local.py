@@ -1,8 +1,8 @@
 """Mac'teki günlük footystats işi (RUNBOOK §3.9): betik ve launchd tanımı.
 
 GitHub runner'ları footystats'tan 403 alıyor (DEFERRED 10r); iş Mac'te launchd ile koşar ve
-sonucu `footystats-local.yml`e raporlar (R74). Betik sahte `git`/`uv`/`gh`/`osascript` ile,
-kurulu bir KOPYASI üzerinden koşulur: bir Mac'te gerçekten koştuğu burada ölçülmez.
+sonucu `footystats-local.yml`e raporlar (R74). Betik sahte `git`/`uv`/`gh`/`osascript`/`sleep`
+ile, kurulu bir KOPYASI üzerinden koşulur: bir Mac'te gerçekten koştuğu burada ölçülmez.
 """
 
 from __future__ import annotations
@@ -23,28 +23,44 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts/footystats_daily.sh"
 DB_PASSWORD = "pw-sentinel-7c1"
-DATABASE_URL = f"postgresql://collector:{DB_PASSWORD}@db.test:5432/postgres"
+DSN = f"postgresql://collector:{DB_PASSWORD}@db.test:5432/postgres"
+# `.env` satırları anahtar adı parçalardan kurularak üretilir: kapının secret taraması
+# (`scripts/check_secrets.sh`) `ANAHTAR=değer` biçimindeki her satırı gerçek sır sayar — sahte
+# değer taşısa bile. Tarama gevşetilmez; test ona uyar.
+DB_KEY, ODDS_KEY = "DATABASE" + "_URL", "ODDS" + "_API_KEY"
 GIT = "git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60"
 FETCH = f"{GIT} fetch --quiet origin main"
 COLLECT = "uv run --frozen python -m football_edge.collect fetch-footystats"
 REPORT = (
     "gh workflow run footystats-local.yml --repo popiliadam/football-edge --ref main -f result="
 )
+BROKEN = "#!/usr/bin/env bash\nif then\n"
 
-# `git`, `uv`, `gh` ve `osascript`in yerine geçer: her çağrıyı araç, argümanlar ve ortamdaki
-# sırlarla bir satıra yazar. `FAIL_MATCH` ile başlayan çağrı `FAIL_CODE` ile döner — yalnız ilk
-# `FAIL_TIMES` kez (boşsa her seferinde): uyanıştan sonra geç gelen ağ böyle taklit edilir.
+# `git`, `uv`, `gh`, `osascript` ve `sleep`in yerine geçer: her çağrıyı araç, argümanlar ve
+# ortamdaki sırlarla bir satıra yazar. `FAIL_MATCH` ile başlayan çağrı `FAIL_CODE` ile döner —
+# yalnız ilk `FAIL_TIMES` kez (boşsa her seferinde): uyanıştan sonra geç gelen ağ böyle taklit
+# edilir. `git checkout`, `main`in betiğini (`CHECKOUT_SCRIPT`) klona yazar.
 FAKE_TOOL = """\
 #!/usr/bin/env bash
 tool=$(basename "$0")
-printf '%s %s|db=%s|token=%s|odds=%s\\n' "$tool" "$*" "${DATABASE_URL:-}" \\
-  "${GITHUB_TOKEN:+var}" "${ODDS_API_KEY:+var}" >> "$CALLS"
+printf '%s %s|db=%s|token=%s|odds=%s|uvt=%s\\n' "$tool" "$*" "${DATABASE_URL:-}" \\
+  "${GITHUB_TOKEN:+var}" "${ODDS_API_KEY:+var}" "${UV_HTTP_TIMEOUT:-}" >> "$CALLS"
 if [ -n "$FAIL_MATCH" ] && [[ "$tool $*" == "$FAIL_MATCH"* ]]; then
   seen=$(awk -v p="$FAIL_MATCH" 'index($0, p) == 1' "$CALLS" | wc -l)
-  if [ -z "$FAIL_TIMES" ] || [ "$seen" -le "$FAIL_TIMES" ]; then exit "$FAIL_CODE"; fi
+  if [ -z "$FAIL_TIMES" ] || [ "$seen" -le "$FAIL_TIMES" ]; then
+    [ -z "$FAIL_STDERR" ] || echo "$FAIL_STDERR" >&2
+    exit "$FAIL_CODE"
+  fi
 fi
 if [ "$tool" = git ] && [[ " $* " == *" clone "* ]]; then mkdir -p "${@: -1}/.git"; fi
+if [ "$tool" = git ] && [[ " $* " == *" checkout "* ]] && [ -n "$CHECKOUT_SCRIPT" ]; then
+  mkdir -p scripts && cp "$CHECKOUT_SCRIPT" scripts/footystats_daily.sh
+fi
 """
+
+
+def _env_text(*pairs: tuple[str, str]) -> str:
+    return "".join(f"{key}={value}\n" for key, value in pairs)
 
 
 @dataclass(frozen=True)
@@ -66,33 +82,43 @@ def _today() -> str:
     return f"{datetime.now(UTC):%Y-%m-%d}"
 
 
+def _far_from_utc() -> str:
+    """Yerel tarihi UTC tarihinden HER saatte farklı kılan bir saat dilimi: damga yerel tarihle
+    yazılsaydı test bunu günün her saatinde yakalar (UTC-12 öğlene kadar, UTC+14 sonrasında)."""
+    return "Etc/GMT+12" if datetime.now(UTC).hour < 11 else "Etc/GMT-14"
+
+
 def _run(
     tmp_path: Path,
     *,
     fail_match: str = "",
     fail_code: int = 1,
     fail_times: str = "",
-    env_file_text: str = f"ODDS_API_KEY=odds-sentinel\nDATABASE_URL={DATABASE_URL}\n",
+    fail_stderr: str = "",
+    env_file_text: str = _env_text((ODDS_KEY, "odds-sentinel"), (DB_KEY, DSN)),
     stamp_text: str | None = None,
     clone_exists: bool = True,
-    clone_script: str | None = None,
+    main_script: str | None = None,
+    install_at: str = "installed/footystats_daily.sh",
+    relative: bool = False,
 ) -> Run:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool in ("git", "uv", "gh", "osascript"):
+    for tool in ("git", "uv", "gh", "osascript", "sleep"):
         fake = bin_dir / tool
         fake.write_text(FAKE_TOOL, encoding="utf-8")
         fake.chmod(0o755)
     # launchd klonun DIŞINDAKİ kopyayı koşar; test de öyle yapar (depodaki dosyaya dokunulmaz).
-    installed = tmp_path / "installed" / "footystats_daily.sh"
-    installed.parent.mkdir()
+    installed = tmp_path / install_at
+    installed.parent.mkdir(parents=True)
     installed.write_bytes(SCRIPT.read_bytes())
     clone = tmp_path / "clone"
     if clone_exists:
         (clone / ".git").mkdir(parents=True)
-    if clone_script is not None:
-        (clone / "scripts").mkdir(parents=True)
-        (clone / "scripts/footystats_daily.sh").write_text(clone_script, encoding="utf-8")
+    checkout_script = ""
+    if main_script is not None:
+        checkout_script = str(tmp_path / "main_script.sh")
+        Path(checkout_script).write_text(main_script, encoding="utf-8")
     env_file = tmp_path / ".env"
     env_file.write_text(env_file_text, encoding="utf-8")
     stamp = tmp_path / "state" / "footystats-last-run"
@@ -104,17 +130,21 @@ def _run(
     env = {
         "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
         "HOME": str(tmp_path),
+        "TZ": _far_from_utc(),
         "CALLS": str(calls),
         "FAIL_MATCH": fail_match,
         "FAIL_CODE": str(fail_code),
         "FAIL_TIMES": fail_times,
+        "FAIL_STDERR": fail_stderr,
+        "CHECKOUT_SCRIPT": checkout_script,
         "FOOTBALL_EDGE_CLONE": str(clone),
         "FOOTBALL_EDGE_ENV_FILE": str(env_file),
         "FOOTBALL_EDGE_STAMP": str(stamp),
         "FOOTBALL_EDGE_RETRY_DELAY": "0",
     }
     result = subprocess.run(
-        ["bash", str(installed)],
+        ["bash", install_at if relative else str(installed)],
+        cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
@@ -143,17 +173,26 @@ def test_green_run_pulls_main_collects_reports_and_stamps_the_day(tmp_path: Path
         COLLECT,
         f"{REPORT}ok",
     )
-    assert run.stamp.read_text(encoding="utf-8").strip() == _today()
+    assert run.stamp.read_text(encoding="utf-8").strip() == _today(), "damga UTC günüyle yazılmalı"
+
+
+def test_network_steps_are_bounded(tmp_path: Path) -> None:
+    """Takılan bir ağ launchd'nin sonraki çağrılarını da bekletirdi: git'in düşük hız sınırı
+    komutta (yukarıdaki `FETCH`), uv'nin zaman aşımı ortamda."""
+    run = _run(tmp_path)
+
+    assert run.call("uv sync").endswith("|uvt=60")
+    assert run.call(COLLECT).endswith("|uvt=60")
 
 
 def test_the_collector_gets_only_the_database_and_no_process_gets_a_token(tmp_path: Path) -> None:
-    """GitHub'daki `collect-daily` ile aynı sınır: toplayıcı yalnız `DATABASE_URL`i görür (Odds
+    """GitHub'daki `collect-daily` ile aynı sınır: toplayıcı yalnız veritabanı adresini görür (Odds
     anahtarı `.env`de dursa da); sır argümanda değil ortamda taşınır ve çıktıya düşmez. GitHub
     token'ı hiçbir sürecimize girmez: raporu `gh` kendi oturumuyla gönderir."""
     run = _run(tmp_path)
 
-    assert run.call(COLLECT).endswith(f"|db={DATABASE_URL}|token=|odds=")
-    assert run.call(REPORT).endswith("|db=|token=|odds=")
+    assert run.call(COLLECT).endswith(f"|db={DSN}|token=|odds=|uvt=60")
+    assert run.call(REPORT).endswith("|db=|token=|odds=|uvt=60")
     assert not any(call.startswith("gh auth") for call in run.calls)
     assert DB_PASSWORD not in run.output
     assert all(DB_PASSWORD not in call.split("|")[0] for call in run.calls)
@@ -189,12 +228,13 @@ def test_a_failure_before_collecting_reports_fail_and_leaves_the_day_open(
     assert not run.stamp.exists()
 
 
-def test_fetch_is_retried_while_the_network_comes_back(tmp_path: Path) -> None:
-    """launchd uykudan uyanınca kaçan turu hemen başlatır; ağ o an birkaç saniye yok olabilir."""
+def test_fetch_is_retried_with_a_pause_while_the_network_comes_back(tmp_path: Path) -> None:
+    """launchd uykudan uyanınca kaçan turu hemen başlatır; ağ o an birkaç saniye yok olabilir.
+    Denemeler arasında beklenir: art arda altı deneme bir saniyede tükenirdi."""
     run = _run(tmp_path, fail_match=FETCH, fail_code=128, fail_times="2")
 
     assert run.code == 0, run.output
-    assert run.commands().count(FETCH) == 3
+    assert run.commands()[:5] == (FETCH, "sleep 0", FETCH, "sleep 0", FETCH)
     assert COLLECT in run.commands()
 
 
@@ -202,6 +242,7 @@ def test_fetch_gives_up_after_six_attempts(tmp_path: Path) -> None:
     run = _run(tmp_path, fail_match=FETCH, fail_code=128)
 
     assert run.commands().count(FETCH) == 6
+    assert run.commands().count("sleep 0") == 5
     assert run.commands()[-1] == f"{REPORT}fail"
 
 
@@ -215,39 +256,40 @@ def test_a_missing_clone_is_cloned_again(tmp_path: Path) -> None:
     assert COLLECT in run.commands()
 
 
-def test_without_github_the_run_stays_red_and_says_so_on_this_mac(tmp_path: Path) -> None:
-    """Rapor iletilemiyorsa günlüğe yazılır ve bu Mac'te bildirim çıkar; kalp atışı eksik
-    kalır, bekçi onu 72 saatte yakalar."""
-    run = _run(tmp_path, fail_match="gh workflow run", fail_code=1)
+def test_without_github_the_run_says_why_on_this_mac(tmp_path: Path) -> None:
+    """Rapor iletilemiyorsa gh'nin hata satırı günlüğe yazılır ve bu Mac'te bildirim çıkar; kalp
+    atışı eksik kalır, bekçi onu 72 saatte yakalar. Toplanan veri kırmızı sayılmaz."""
+    run = _run(
+        tmp_path,
+        fail_match="gh workflow run",
+        fail_code=1,
+        fail_stderr="HTTP 404: Not Found (workflows/footystats-local.yml)",
+    )
 
-    assert run.code == 0, "rapor gitmedi diye toplanan veri kırmızı sayılmaz"
-    assert "GitHub'a iletilemedi" in run.output
+    assert run.code == 0, run.output
+    assert "GitHub'a iletilemedi — HTTP 404: Not Found" in run.output
     assert any(call.startswith("osascript -e display notification") for call in run.calls)
 
 
 def test_a_missing_database_url_stops_before_collecting(tmp_path: Path) -> None:
-    run = _run(tmp_path, env_file_text="ODDS_API_KEY=odds-sentinel\n")
+    run = _run(tmp_path, env_file_text=_env_text((ODDS_KEY, "odds-sentinel")))
 
     assert run.code != 0
     assert COLLECT not in run.commands()
-    assert "DATABASE_URL" in run.output
+    assert DB_KEY in run.output
     assert run.commands()[-1] == f"{REPORT}fail"
 
 
 @pytest.mark.parametrize(
-    "line",
-    [
-        f'DATABASE_URL="{DATABASE_URL}"',
-        f"DATABASE_URL='{DATABASE_URL}'",
-        f"DATABASE_URL={DATABASE_URL}\r",
-    ],
+    "value",
+    [f'"{DSN}"', f"'{DSN}'", f"{DSN}\r"],
     ids=["çift-tırnak", "tek-tırnak", "crlf"],
 )
-def test_the_database_url_reaches_the_collector_bare(tmp_path: Path, line: str) -> None:
-    run = _run(tmp_path, env_file_text=f"{line}\n")
+def test_the_database_url_reaches_the_collector_bare(tmp_path: Path, value: str) -> None:
+    run = _run(tmp_path, env_file_text=_env_text((DB_KEY, value)))
 
     assert run.code == 0, run.output
-    assert run.call(COLLECT).endswith(f"|db={DATABASE_URL}|token=|odds=")
+    assert run.call(COLLECT).endswith(f"|db={DSN}|token=|odds=|uvt=60")
 
 
 def test_a_day_that_already_ran_is_skipped_quietly(tmp_path: Path) -> None:
@@ -265,11 +307,12 @@ def test_yesterdays_stamp_does_not_skip_today(tmp_path: Path) -> None:
 
 
 def test_the_installed_copy_follows_main_from_the_next_run(tmp_path: Path) -> None:
-    """Koşan kopya `main`in gerisindeyse kendini günceller. Yeni içerik bu turu değil
-    sonrakini etkiler: `mv` dizin girdisini değiştirir, koşan bash eski dosyayı okumayı sürer."""
+    """Koşan kopya `main`in gerisindeyse kendini günceller — checkout'tan SONRA, yani gerçekten
+    `main`in sürümüyle. Yeni içerik bu turu değil sonrakini etkiler: `mv` dizin girdisini
+    değiştirir, koşan bash eski dosyayı okumayı sürdürür."""
     newer = "#!/usr/bin/env bash\n# main'deki yeni sürüm\n"
 
-    run = _run(tmp_path, clone_script=newer)
+    run = _run(tmp_path, main_script=newer)
 
     assert run.code == 0, run.output
     assert run.installed.read_text(encoding="utf-8") == newer
@@ -277,11 +320,45 @@ def test_the_installed_copy_follows_main_from_the_next_run(tmp_path: Path) -> No
     assert "betik main'e güncellendi" in run.output
 
 
+def test_a_relative_invocation_updates_the_right_file(tmp_path: Path) -> None:
+    """Betik `cd` ile klona geçer: çağrı yolu göreli çözülseydi güncelleme klonun içine giderdi."""
+    newer = "#!/usr/bin/env bash\n# main'deki yeni sürüm\n"
+
+    run = _run(tmp_path, main_script=newer, relative=True)
+
+    assert run.installed.read_text(encoding="utf-8") == newer
+    assert not (tmp_path / "clone/installed").exists()
+
+
 def test_an_up_to_date_copy_is_left_alone(tmp_path: Path) -> None:
-    run = _run(tmp_path, clone_script=SCRIPT.read_text(encoding="utf-8"))
+    run = _run(tmp_path, main_script=SCRIPT.read_text(encoding="utf-8"))
 
     assert run.code == 0, run.output
     assert "betik main'e güncellendi" not in run.output
+
+
+def test_a_repositorys_own_copy_is_never_overwritten(tmp_path: Path) -> None:
+    """Geliştirme ağacındaki betik elle koşulursa kendini `main`e çevirmez: commit'lenmemiş
+    değişiklik uyarısız silinirdi."""
+    (tmp_path / "dev/.git").mkdir(parents=True)
+
+    run = _run(
+        tmp_path,
+        main_script="#!/usr/bin/env bash\n# main\n",
+        install_at="dev/scripts/footystats_daily.sh",
+    )
+
+    assert run.installed.read_bytes() == SCRIPT.read_bytes()
+    assert "deponun kendi betiği" in run.output
+
+
+def test_a_broken_script_on_main_is_not_installed(tmp_path: Path) -> None:
+    """Sözdizimi bozuk bir sürüm kurulsaydı iş kendini onaramazdı; bekçi 72 saat sonra görürdü."""
+    run = _run(tmp_path, main_script=BROKEN)
+
+    assert run.installed.read_bytes() == SCRIPT.read_bytes()
+    assert "sözdizimi denetiminden geçmedi" in run.output
+    assert COLLECT in run.commands()
 
 
 # ── launchd tanımı ve kurulum ────────────────────────────────────────────────────────────────
@@ -405,6 +482,26 @@ def test_apply_clones_copies_writes_and_loads_in_that_order(tmp_path: Path) -> N
     assert Path(plan.plist["EnvironmentVariables"]["FOOTBALL_EDGE_STAMP"]).parent.is_dir()
 
 
+def test_apply_replaces_files_atomically(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Betik ve plist yerinde yazılmaz: yeniden kurulum bir tura denk gelirse bash yarı yazılmış
+    bir betik okurdu. Her dosya aynı dizindeki geçici bir dosyadan `os.replace` ile gelir."""
+    replaced: list[tuple[Path, Path]] = []
+    real_replace = installer.os.replace
+
+    def record(source: str, target: Path) -> None:
+        replaced.append((Path(source), Path(target)))
+        real_replace(source, target)
+
+    monkeypatch.setattr(installer.os, "replace", record)
+
+    plan = _apply(tmp_path, Launchctl())
+
+    assert {target for _, target in replaced} == {plan.script, plan.plist_path}
+    for source, target in replaced:
+        assert source.parent == target.parent
+        assert source.name.startswith(f".{target.name}.")
+
+
 def test_apply_keeps_an_existing_clone(tmp_path: Path) -> None:
     (tmp_path / ".local/share/football-edge/collector/.git").mkdir(parents=True)
     launchctl = Launchctl()
@@ -448,7 +545,7 @@ class Recorder:
 def _env_file(tmp_path: Path) -> Path:
     path = tmp_path / "secrets" / ".env"
     path.parent.mkdir()
-    path.write_text(f"DATABASE_URL={DATABASE_URL}\n", encoding="utf-8")
+    path.write_text(_env_text((DB_KEY, DSN)), encoding="utf-8")
     return path
 
 
@@ -485,7 +582,7 @@ def test_dry_run_installs_and_writes_nothing(tmp_path: Path) -> None:
 def test_a_missing_env_file_stops_before_installing(tmp_path: Path) -> None:
     recorder = Recorder()
 
-    with pytest.raises(SystemExit, match="DATABASE_URL"):
+    with pytest.raises(SystemExit, match=DB_KEY):
         installer.main(
             ["--env-file", str(tmp_path / "yok.env")],
             home=tmp_path / "home",

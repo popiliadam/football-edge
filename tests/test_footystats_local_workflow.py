@@ -91,6 +91,7 @@ def test_the_watchdog_counts_its_dispatches_as_the_macs_heartbeat() -> None:
     assert trigger is not None, "bekçi footystats-local.yml'i izlemiyor"
     assert trigger.event == "workflow_dispatch"
     assert trigger.max_age == timedelta(hours=72)
+    assert trigger.alarm == "footystats-local", "kalp atışı bekçi alarmını paylaşmamalı"
 
 
 def test_report_path_is_what_the_local_job_dispatches() -> None:
@@ -100,3 +101,11 @@ def test_report_path_is_what_the_local_job_dispatches() -> None:
 
     assert f'REPORT="{Path(REPORT).name}"' in script
     assert 'gh workflow run "$REPORT"' in script
+
+
+def test_a_running_report_is_never_cancelled() -> None:
+    """Koşan bir rapor iptal edilseydi alarm yarıda açılır ya da kapanırdı. Kuyruktaki eski rapor
+    yenisi gelince düşer (GitHub grupta tek bekleyen tur tutar): son durum en yeni rapordur."""
+    document = yaml.safe_load(REPORT.read_text(encoding="utf-8"))
+
+    assert document["concurrency"] == {"group": "footystats-local", "cancel-in-progress": False}
