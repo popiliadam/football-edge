@@ -692,8 +692,9 @@ def test_a_github_error_fails_the_step_with_a_named_message(
 
 
 def test_every_watched_workflow_exists() -> None:
-    """Bekçi depoda olmayan bir workflow'un tur listesini sorarsa GitHub 404 döner, bekçi adımı ve
-    onunla seal turu düşer. Ad değişikliği ya da silinen workflow runner'da değil CI'da yakalansın."""
+    """Bekçi depoda olmayan bir workflow'un tur listesini sorarsa GitHub 404 döner, bekçi adımı
+    ve onunla seal turu düşer. Ad değişikliği ya da silinen workflow runner'da değil CI'da
+    yakalansın."""
     missing = [
         trigger.workflow
         for trigger in ops_alert.TRIGGERS
