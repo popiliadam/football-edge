@@ -641,3 +641,12 @@ def test_invalid_probabilities_propagate_instead_of_becoming_unmeasurable(
     with pytest.raises(ValueError) as caught:
         league_efficiency(MAIN_LEAGUE, BASE, method=SHIN, resamples=FAST)
     assert not isinstance(caught.value, Unmeasurable)
+
+
+def test_a_main_league_whose_totals_fit_separates_is_unmeasurable() -> None:
+    # Ü/A 2.5 fiti de `_fit`ten geçer: tek maçlık Ü/A örneği ayrışır → lig ölçülemez (düz
+    # ValueError raporu düşürürdü). N yine 1X2'ninkidir.
+    totals = (with_prices(BASE[0], {("Avg", TOTALS_25, CLOSING): TOTAL_SETS[0]}), *BASE[1:])
+    with pytest.raises(Unmeasurable, match="M1") as caught:
+        league_efficiency(MAIN_LEAGUE, totals, method=SHIN, resamples=FAST)
+    assert caught.value.n == 56
