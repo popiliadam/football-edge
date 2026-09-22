@@ -1,7 +1,8 @@
 # Faz 2 — Tarihsel taban, backtest harness, piyasa verimliliği · Tasarım
 
-**Tarih:** 2026-09-22 · **Durum:** kullanıcı onayı bekliyor (onay kapısı: bu belge onaylanmadan TDD
-planı yazılmaz, plan onaylanmadan Faz 2 kodu yazılmaz) · **Spec:** `2026-09-19-football-edge-design.md`
+**Tarih:** 2026-09-22 · **Durum:** **ONAYLANDI** (kullanıcı, 2026-09-22 — §14/1 holdout politikası
+dahil; spec §5.2, §6.2, §6.3, §7, §10/2 buna göre güncellendi). Sıradaki onay kapısı: TDD planı; plan
+onaylanmadan Faz 2 kodu yazılmaz · **Spec:** `2026-09-19-football-edge-design.md`
 · **Girdi:** `2026-09-22-faz2-olcumler-ve-kararlar.md` (bütün sayılar oradaki komutlarla ölçüldü) ·
 **Yol haritası:** `../plans/2026-09-19-faz-1-7-yol-haritasi.md` (Faz 2 görevleri),
 `../plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` (sıra ve süreç)

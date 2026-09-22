@@ -68,7 +68,7 @@ tek başına en iyi tahmindir. Dolayısıyla model **mutlak olasılık** değil,
 
 | Katman | Kaynak | Kapsam | Lisans / robots |
 |---|---|---|---|
-| Eğitim geçmişi | `xgabora/Club-Football-Match-Data` | 38 lig, 238.858 maç, ClubElo + form birleşik | **MIT** |
+| Eğitim geçmişi | ~~`xgabora/Club-Football-Match-Data`~~ → football-data.co.uk (Faz 2 tasarımı D1, 2026-09-22) | 22 ana lig (2005/06→) + 16 ek lig (2012→); kapanış `AvgC` 2019/20+, `PSC` 2012/13+ | §10/2 |
 | Tarihsel kapanış oranı | football-data.co.uk | 22 Avrupa + 16 dünya, 1993/94→, C-prefix kapanış + O/U + AH | Özel kullanım kısıtı — yalnız doğrulama/karşılaştırma için, **ticari türev veri tabanı DEĞİL** |
 | Canlı + kapanış oranı | The Odds API ($30/ay) | 40+ futbol anahtarı, 28 AB kitabı + Betfair Exchange | Ticari hizmet; **"lisanslı" iddiası yok** — sitede böyle bir beyan yok |
 | xG (6 lig) | Understat | EPL/LaLiga/Bundesliga/SerieA/Ligue1/RFPL, 2014/15→ | Kısıt yok. **JS render gerekir** (eski `var teamsData` deseni kalktı) |
@@ -202,8 +202,10 @@ Haiku hiçbir katmanda kullanılmaz.
 Varsa sorulmaz. Eşanlamlı sorular eşdoğrusallık yaratır: bilgi eklemeden varyans şişirir.
 
 **Sayısal disiplin:** ~35 soru sorulur, modele giren özellik sayısı **≤15**. Hangi 15
-olduğuna dondurulmuş holdout üzerindeki marjinal CLV karar verir. Çoklu test için
-Benjamini-Hochberg FDR düzeltmesi. Düşük `confidence` cevapları sıfırlanır.
+olduğuna geliştirme dönemi içindeki ileri yürüyen doğrulamanın (walk-forward) marjinal CLV'si
+karar verir; dondurulmuş holdout seçimi yalnız faz kapısında doğrular (holdout kullanım politikası,
+§6.2 — kullanıcı onayı 2026-09-22). Çoklu test için Benjamini-Hochberg FDR düzeltmesi. Düşük
+`confidence` cevapları sıfırlanır.
 
 **Neden cömert sormak güvenli:** ham cevaplar saklandığı sürece ağırlık/filtre değişimi
 yeniden çıkarım gerektirmez. Bugün sorulmayan soru ise o maç için kalıcı olarak kayıptır.
@@ -235,9 +237,16 @@ testi** dahildir: dil başına ~100 elle etiketlenmiş haber, Jev cevaplarıyla 
 ### 6.2 Kapı (bu projenin `qa-loop` kapısı)
 1. Birim testler
 2. Veri sözleşmesi kontrolleri (şema + tazelik iddiaları)
-3. **Dondurulmuş holdout üzerinde CLV** — bozulursa değişiklik geri alınır
-4. **Sızıntı kontrolü** — özellikler yalnız `observed_at < kickoff` veriden
+3. **Geliştirme dönemi walk-forward CLV'si** — bozulursa değişiklik geri alınır
+4. **Sızıntı kontrolü** — özellikler yalnız karar anından önce bilinen veriden (`observed_at <
+   karar anı`; tarihsel tabanda karar anı kapanış öncesi fiyatın toplandığı an — Faz 2 tasarımı §4.5)
 5. Secret taraması
+
+**Holdout kullanım politikası (kullanıcı onayı 2026-09-22, Faz 2 tasarımı §14/1):** dondurulmuş
+holdout günlük kapıda ve özellik seçiminde KULLANILMAZ — onu bir doğrulama kümesine çevirmek p-hacking'e
+karşı tek korumayı harcar. Holdout yalnız faz kapılarında (Faz 3, 4, 5 — en çok üç açılış), önceden
+yazılmış karşılaştırmalarla açılır; her açılış `holdout_access_log`a kayıt düşer ve açılış sayısı her faz
+HANDOFF'unda yazılır. `≥ 2026-07-01` "sonrası" dönemi dokunulmamış son ileri testtir.
 
 "Daha iyi göründü" geçerli gerekçe değildir. Kapı çıktısı dosyadan okunur, özeti değil.
 Her faz handoff'unda **kapının neyi ölçmediği** açıkça yazılır.
@@ -245,7 +254,8 @@ Her faz handoff'unda **kapının neyi ölçmediği** açıkça yazılır.
 ### 6.3 Sızıntıya karşı yapısal önlemler
 - Her satırda `observed_at`; append-only.
 - Backtest ve canlı **aynı özellik kodunu** çağırır — iki ayrı yol yazılmaz.
-- Sona kadar dokunulmayan dondurulmuş holdout dönemi.
+- Sona kadar dokunulmayan dondurulmuş holdout dönemi; satır özetleri depoda kilitli, açılışlar kayıtlı
+  (Faz 2 tasarımı §5).
 - Her fazda Opus red-team denetimi: "bu backtest'te sızıntıyı bul".
 
 ## 7. Teknik yığın
@@ -257,7 +267,9 @@ Her faz handoff'unda **kapının neyi ölçmediği** açıkça yazılır.
   - **Not:** runner konumu *erişim* sorununu çözer, *uyum* sorununu çözmez (bkz. Football Dataco v Sportradar, C-173/11)
 - **Site:** Next.js · Netlify
 - **Bilinen tuzaklar:**
-  - football-data.co.uk apex'inin HTTPS dinleyicisi yok → daima `https://www.` ile doğrudan çek, yönlendirme izleme
+  - ~~football-data.co.uk apex'inin HTTPS dinleyicisi yok → daima `https://www.` ile doğrudan çek~~
+    ESKİDİ (2026-09-22 runner ölçümü): `www` (http ve https) kök alan adına 302 veriyor; kanonik adres
+    `https://football-data.co.uk`
   - TFF sayfaları `windows-1254`
   - Bazı RSS uçları 200 dönüp yanlış içerik verir → `content_type` + içerik doğrulaması zorunlu
   - Understat XHR uçları POST → `outward_action_gate` `net_post` olarak engeller, geliştirmede onay gerekir
@@ -302,6 +314,11 @@ sonraki fazın ön koşulları · açık sorular.
    lisansı ticari/otomatik türev ürünleri dışlıyor. MIT yeniden lisanslaması bu zinciri
    temizler mi — **ticari lansman öncesi avukata sorulacak.** Şimdilik: eğitim verisi
    olarak kullanılır, ham satırları yeniden yayınlanmaz.
+   **2026-09-22 güncellemesi (Faz 2 tasarımı D1, D18):** xgabora bırakıldı; tarihsel taban
+   doğrudan football-data.co.uk. Sitenin `disclaimer.php`si okundu: yalnız sorumluluk reddi, veri
+   lisansı ya da ticari kullanım maddesi içermiyor. Soru artık doğrudan football-data içindir:
+   ticari lansmandan önce avukat ve site sahibinden yazılı izin (§3.2.1 "kaynaktan izin istemek").
+   O güne kadar: özel depolama, yalnız türetilmiş sayısal özellik, ham satır yayımlanmaz.
 3. **Transfermarkt robots.txt** doğrulanmadı (Faz 1).
 4. **Jev'in çok dilli doğruluğu** ölçülmedi (Faz 1).
 5. **Highlightly** $9.49 planında oran var mı — teyit alınmadı. The Odds API $30 seçildiği
