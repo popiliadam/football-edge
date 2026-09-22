@@ -17,15 +17,16 @@ import pytest
 import yaml
 
 from football_edge import collect
+from football_edge.backtest import __main__ as backtest_cli
 from tests import test_collect_workflows as collect_rules
 from tests import test_workflows as workflow_rules
 from tests.workflow_helpers import REPO, _index_of, _steps, _triggers
 
 HISTORY = REPO / ".github/workflows/history.yml"
 SYNC = "football_edge.history sync"
-# DATABASE_URL'i alan adımlar, adlarıyla. Task 10 `selftest` adımını buraya ekler; başka hiçbir
-# adım (checkout, secret taraması, üçüncü taraf setup-uv, `uv sync`, alarm) secret görmez.
-DATABASE_STEPS: tuple[str, ...] = ("Senkron",)
+# DATABASE_URL'i alan adımlar, adlarıyla: senkron ve bilinen sonuçlar. Başka hiçbir adım
+# (checkout, secret taraması, üçüncü taraf setup-uv, `uv sync`, alarm) secret görmez.
+DATABASE_STEPS: tuple[str, ...] = ("Senkron", "Bilinen sonuçlar")
 
 
 def _document() -> dict[str, Any]:
@@ -163,3 +164,76 @@ def test_a_red_sync_turns_the_run_red_and_names_the_failure(
 
     assert returned == code, "senkronun kodu yutuldu: alarm adımı kırmızıyı görmez"
     assert any(line.startswith("::error::") and named in line for line in out.splitlines()), out
+
+
+# ── Bilinen sonuçlar adımı (Task 10) ─────────────────────────────────────────────────────────
+# Tek job, tek alarm: selftest senkrondan SONRA, alarm adımlarından ÖNCE koşar. Kırmızı senkron
+# selftest'i hiç koşturmaz (örtük `success()`); kırmızı selftest turu kırmızıya çevirir.
+
+SELFTEST = "football_edge.backtest selftest"
+
+
+def _selftest_index() -> int:
+    index = _index_of(_steps(HISTORY), SELFTEST)
+    assert index is not None, "history.yml bilinen sonuçları (selftest) hiç koşmuyor"
+    return index
+
+
+def test_selftest_runs_after_the_sync_and_before_the_alarm_steps() -> None:
+    steps = _steps(HISTORY)
+    opens = _index_of(steps, "scripts/ops_alert.py fail --workflow history ")
+    closes = _index_of(steps, "scripts/ops_alert.py ok --workflow history ")
+
+    assert opens is not None and closes is not None
+    assert _sync_index() < _selftest_index() < opens < closes
+    assert (opens, closes) == (len(steps) - 2, len(steps) - 1), "alarm son iki adım değil"
+
+
+def test_selftest_reads_the_database_only_after_a_green_sync() -> None:
+    step = _steps(HISTORY)[_selftest_index()]
+
+    assert step.get("env") == {"DATABASE_URL": "${{ secrets.DATABASE_URL }}"}
+    assert "if" not in step, "selftest kırmızı senkrondan sonra da koşar: yarım önbellek ölçülür"
+    assert not step.get("continue-on-error"), "kırmızı selftest turu yeşil bırakır"
+
+
+def _run_selftest_step(tmp_path: Path, *, code: int) -> tuple[int, list[str], str]:
+    fake = tmp_path / "uv"
+    fake.write_text(FAKE_UV, encoding="utf-8")
+    fake.chmod(0o755)
+    calls = tmp_path / "calls"
+    calls.touch()
+    env = {
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "FAIL_CODE": str(code),
+    }
+    body = str(_steps(HISTORY)[_selftest_index()]["run"])
+    result = subprocess.run(
+        ["bash", "-e", "-c", body], env=env, capture_output=True, text=True, timeout=30, check=False
+    )
+    return result.returncode, calls.read_text(encoding="utf-8").splitlines(), result.stdout
+
+
+@pytest.mark.parametrize(
+    ("code", "named"),
+    [
+        (0, ""),
+        (backtest_cli.EXIT_GATE_FAILED, "kapı"),
+        (backtest_cli.EXIT_LOCK_VIOLATION, "kilit"),
+        (3, "beklenmedik"),
+    ],
+    ids=["yesil", "kapi", "kilit", "beklenmedik"],
+)
+def test_selftest_names_every_exit_code_and_keeps_the_run_red(
+    tmp_path: Path, code: int, named: str
+) -> None:
+    returned, calls, out = _run_selftest_step(tmp_path, code=code)
+
+    errors = [line for line in out.splitlines() if line.startswith("::error::")]
+    assert calls == [f"run python -m {SELFTEST}"]
+    assert returned == code, "selftest'in kodu yutuldu: alarm adımı kırmızıyı görmez"
+    if code == 0:
+        assert errors == []
+    else:
+        assert len(errors) == 1 and named in errors[0] and f"exit {code}" in errors[0], errors
