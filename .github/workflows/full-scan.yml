@@ -31,6 +31,8 @@ jobs:
           # Çıpa eksikliği kontrolü `git log` okur; sığ klon geçmişi görmez ve kontrol
           # SESSİZCE atlanır. Atlanan kontrol geçmek değildir — bu yüzden tam geçmiş.
           fetch-depth: 0
+          # Yalnız yerel `git log` okunur, push yok: token `.git/config`te kalmasın.
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"

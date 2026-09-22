@@ -619,7 +619,10 @@ def _pushes(path: Path) -> bool:
     )
 
 
-@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+ALL_WORKFLOWS = tuple(sorted((REPO / ".github/workflows").glob("*.y*ml")))
+
+
+@pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda path: path.name)
 def test_only_a_pushing_workflow_keeps_the_checkout_token_on_disk(path: Path) -> None:
     """`actions/checkout` job token'ını varsayılan olarak `.git/config`e yazar; sonraki her adım
     (üçüncü taraf `setup-uv` eylemi dâhil) onu diskten okuyabilir. Push'lamayan workflow

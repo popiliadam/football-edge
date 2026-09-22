@@ -28,6 +28,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Bu iş push'lamaz: token `.git/config`te kalmasın (üçüncü taraf adımlar okuyabilir).
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
