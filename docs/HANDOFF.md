@@ -55,7 +55,7 @@ kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, t
 | **Hava yolu** | **HİÇ ÇALIŞMADI** | veritabanında uygun maç yok (R46) — olmuş gibi sayılmadı |
 | **`fetch-results`** | **HİÇ KOŞMADI** | bilinçli (R45): API kredisi yakar |
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
-| Kapı | 9 adım PASS + `zincir` SKIP | Birleşik `main` (`668ec61`) taze klonda + CI push koşusu |
+| Kapı | 9 adım PASS + `zincir` SKIP · 542 passed, 2 skipped | `d086d4f` ağacı, taze klon, secret'sız, log dosyasından okundu (09-22) |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
 | Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 **veritabanına UYGULANMADI** | `collect-*.yml` `main`e push'lanınca uygulanacak (GitHub `main`de olmayan workflow'u tetiklemez) |
