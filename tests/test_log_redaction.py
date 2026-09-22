@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,8 +35,10 @@ PIPELINE_ENV: dict[str, str | None] = {
     "TYPESAFE_API_KEY": FAKE_TYPESAFE,
     "DATABASE_URL": FAKE_DSN,
 }
+DSN_HOST = "db.sahte.invalid:5432/postgres"
 QUIET = ("httpx", "httpcore")
 LOGGER = logging.getLogger(__name__)
+SRC_DIR = Path(collect.__file__).resolve().parents[1]
 
 LEAGUES_YAML = """
 leagues:
@@ -91,16 +96,19 @@ def _bare_root_logger() -> Iterator[None]:
     """Kökü pytest'in handler'larından arındırır; çıkışta hepsini geri koyar.
 
     pytest çağrı evresinde köke kendi handler'larını takar: o hâlde `basicConfig` no-op olur
-    ve test üretimdeki kurulumu hiç görmez. httpx seviyeleri de sıfırlanır — `collect.main()`i
-    çağıran başka bir test onları WARNING'de bırakmış olabilir, mutasyon o sızıntıyla gizlenir.
+    ve test üretimdeki kurulumu hiç görmez. httpx seviyeleri ve `sys.excepthook` da sıfırlanır —
+    `collect.main()`i çağıran başka bir test onları değiştirmiş olabilir, mutasyon o sızıntıyla
+    gizlenir.
     """
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
     saved_levels = {name: logging.getLogger(name).level for name in ("", *QUIET)}
+    saved_hook = sys.excepthook
     for handler in saved_handlers:
         root.removeHandler(handler)
     for name in QUIET:
         logging.getLogger(name).setLevel(logging.NOTSET)
+    sys.excepthook = sys.__excepthook__
     try:
         yield
     finally:
@@ -111,6 +119,7 @@ def _bare_root_logger() -> Iterator[None]:
             root.addHandler(handler)
         for name, level in saved_levels.items():
             logging.getLogger(name).setLevel(level)
+        sys.excepthook = saved_hook
 
 
 def _status_error() -> httpx.HTTPStatusError:
@@ -188,6 +197,115 @@ def test_an_unparsable_dsn_does_not_break_logging_and_is_still_masked_whole(
         urlsplit(dsn)  # ön koşul: bu DSN gerçekten ayrıştırılamıyor
     out = _logged(monkeypatch, {"DATABASE_URL": dsn}, dsn)
     assert out.endswith("WARNING değer: ***\n"), out
+
+
+@pytest.mark.parametrize(
+    ("dsn", "password"),
+    [
+        pytest.param(f"postgresql://sahte:Sahte#Parola@{DSN_HOST}", "Sahte#Parola", id="diyez"),
+        pytest.param(f"postgresql://sahte:Sahte?Parola@{DSN_HOST}", "Sahte?Parola", id="soru"),
+        pytest.param(
+            f"postgresql://sahte@{DSN_HOST}?password=SorguParolasi", "SorguParolasi", id="sorgu"
+        ),
+        pytest.param(
+            "host=db.sahte.invalid user=sahte password=AnahtarDeger dbname=postgres",
+            "AnahtarDeger",
+            id="anahtar-deger",
+        ),
+        # libpq `%ZZ`de düşer ve hatasında parçayı URL'deki hâliyle basar: iki hâl de gizli.
+        pytest.param(
+            f"postgresql://sahte:p%40ss%ZZ-Sahte@{DSN_HOST}",
+            "p%40ss%ZZ-Sahte",
+            id="libpq-ayristiramaz-ham",
+        ),
+        pytest.param(
+            f"postgresql://sahte:p%40ss%ZZ-Sahte@{DSN_HOST}",
+            "p@ss%ZZ-Sahte",
+            id="libpq-ayristiramaz-cozulmus",
+        ),
+        pytest.param(
+            f"postgresql://sahte:GizliParola@{DSN_HOST}?password=",
+            "GizliParola",
+            id="libpq-parolasi-bos",
+        ),
+    ],
+)
+def test_the_dsn_password_is_masked_in_every_form_psycopg_connects_with(
+    dsn: str, password: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Parola `connect()`in ayrıştırıcısından (libpq) gelmeli: `urlsplit` `#`/`?` içeren parolayı,
+    # `?password=` biçimini ve `key=value` DSN'i kaçırır. libpq ayrıştıramaz ya da parola
+    # görmezse (boş `?password=` kullanıcı bilgisindekini ezer) URL hâli yedektir.
+    out = _logged(monkeypatch, {"DATABASE_URL": dsn}, password)
+    assert out.endswith("WARNING değer: ***\n"), out
+
+
+def test_a_handler_installed_before_configure_logging_is_redacted_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Kök önceden yapılandırılmışsa `basicConfig` hiçbir şey kurmaz: fail-open olmamalı.
+    monkeypatch.setenv("ODDS_API_KEY", FAKE_KEY)
+    plain = io.StringIO()
+
+    with _bare_root_logger():
+        logging.getLogger().addHandler(logging.StreamHandler(plain))
+        collect.configure_logging(io.StringIO())
+        LOGGER.warning("değer: %s", FAKE_KEY)
+
+    assert plain.getvalue() == "değer: ***\n", "anahtar gizlenmeli, handler'ın biçimi korunmalı"
+
+
+def _rollback_fails() -> None:
+    raise RuntimeError("rollback de düştü")
+
+
+def test_the_excepthook_redacts_a_double_fault_whose_context_carries_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `except` içinde `conn.rollback()` da düşerse httpx hatası `__context__`te yukarı taşınır.
+    monkeypatch.setenv("ODDS_API_KEY", FAKE_KEY)
+    stream = io.StringIO()
+
+    with _bare_root_logger():
+        collect.configure_logging(stream)
+        try:
+            try:
+                raise _status_error()
+            except httpx.HTTPStatusError:
+                _rollback_fails()
+        except RuntimeError as exc:
+            sys.excepthook(type(exc), exc, exc.__traceback__)
+
+    out = stream.getvalue()
+    assert "rollback de düştü" in out and "HTTPStatusError" in out, out
+    assert FAKE_KEY not in out, out
+
+
+def test_an_uncaught_exception_goes_through_redaction_and_still_exits_1(tmp_path: Path) -> None:
+    """`main()`den kaçan istisnayı varsayılan excepthook stderr'e DÜZ basar: libpq'nun ayrıştırma
+    hatası parolanın parçasını taşır, GitHub ise yalnız secret'ın tamamını maskeler."""
+    fragment = "p%ZZss-SahteParola"
+    env = {
+        **{name: value for name, value in os.environ.items() if name not in PIPELINE_ENV},
+        "DATABASE_URL": f"postgresql://sahte:{fragment}@{DSN_HOST}",
+        "PYTHONPATH": str(SRC_DIR),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "football_edge.collect", "verify-chain"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+    assert proc.returncode == 1, proc.stderr
+    assert "CRITICAL" in proc.stderr and "ProgrammingError" in proc.stderr, proc.stderr
+    assert fragment not in proc.stderr, proc.stderr
+    assert fragment not in proc.stdout, proc.stdout
 
 
 def test_configure_logging_keeps_root_at_info_and_raises_httpx_to_warning() -> None:

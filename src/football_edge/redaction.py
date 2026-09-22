@@ -11,6 +11,9 @@ import re
 from collections.abc import Iterable
 from urllib.parse import unquote, urlsplit
 
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
+
 REDACTED = "***"
 
 # Değer `&`, boşluk, tırnak ya da satır sonunda biter; yüzde-kodlu değer (`%0A`) de dâhil.
@@ -28,10 +31,23 @@ def redact(text: str, secrets: Iterable[str]) -> str:
 
 
 def dsn_password_forms(dsn: str) -> tuple[str, ...]:
-    """DSN parolasının URL'deki (yüzde-kodlu) ve çözülmüş hâli; parola yoksa boş.
+    """DSN parolasının libpq'nun gördüğü hâli ve URL'deki (yüzde-kodlu/çözülmüş) hâlleri.
 
-    psycopg/pooler hataları DSN parçalarını, parolayı çözülmüş hâliyle de basabilir.
+    Parola `connect()`in ayrıştırıcısından (libpq) alınır: `urlsplit` `#`/`?` içeren parolayı,
+    `?password=` biçimini ve `key=value` DSN'i kaçırır. URL hâlleri de kalır: libpq yalnız
+    çözülmüş hâli verir, ayrıştıramadığında ise psycopg hatası parçayı URL'deki hâliyle basar.
     """
+    url_forms = _url_password_forms(dsn)
+    try:
+        password = conninfo_to_dict(dsn).get("password")
+    except (psycopg.Error, ValueError):
+        return url_forms
+    libpq_forms = (password,) if isinstance(password, str) and password else ()
+    return (*libpq_forms, *url_forms)
+
+
+def _url_password_forms(dsn: str) -> tuple[str, ...]:
+    """`urlsplit` parolasının URL'deki (yüzde-kodlu) ve çözülmüş hâli; parola yoksa boş."""
     try:
         password = urlsplit(dsn).password
     except ValueError:
