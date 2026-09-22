@@ -1,0 +1,52 @@
+# Faz 2 tarihsel lig kataloğu (tasarım §4.2, D19): football-data.co.uk kodu → bizim lig kimliğimiz.
+# Canlı `config/leagues.yaml` DEĞİŞMEZ; Faz 2'nin çıktısı hangi ligin oraya terfi edeceğinin
+# önerisidir (§8.4). Sezon kodları TIRNAKLI: YAML 1.1 tırnaksız `0506`yı sekizlik sayı (326) okur;
+# yükleyici dize olmayan sezonu reddeder.
+#
+# main : sezon başına dosya /mmz4281/<sezon>/<kod>.csv, 2005/06'dan `current_season`a.
+# extra: bütün yılları taşıyan tek dosya /new/<kod>.csv, yalnız kapanış oranları; first_season "".
+# `current_season` her yeni sezonda elle ilerletilir; ardından config/sources.yaml'daki
+# `football-data` declared_paths'i yeniden üretilir (tests/test_history_registry.py eşitliği zorlar).
+# odds_api_key: The Odds API'nin o lig için sunduğu anahtar (R95 — `/v4/sports?all=true`, 0 kredi,
+# ölçüm belgesi §2.5); sunulmayan ligde "". Canlı altı ligin anahtarı config/leagues.yaml ile aynı,
+# boş olmayan anahtarlar tekil (tests/test_history_catalog.py zorlar).
+current_season: "2627"
+leagues:
+  - {code: E0,  league_id: eng.1, name: "Premier League",   country: England,     tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_epl"}
+  - {code: E1,  league_id: eng.2, name: "Championship",     country: England,     tier: 2, kind: main,  first_season: "0506", odds_api_key: "soccer_efl_champ"}
+  - {code: E2,  league_id: eng.3, name: "League One",       country: England,     tier: 3, kind: main,  first_season: "0506", odds_api_key: "soccer_england_league1"}
+  - {code: E3,  league_id: eng.4, name: "League Two",       country: England,     tier: 4, kind: main,  first_season: "0506", odds_api_key: "soccer_england_league2"}
+  - {code: EC,  league_id: eng.5, name: "National League",  country: England,     tier: 5, kind: main,  first_season: "0506", odds_api_key: ""}
+  - {code: SC0, league_id: sco.1, name: "Premiership",      country: Scotland,    tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_spl"}
+  - {code: SC1, league_id: sco.2, name: "Championship",     country: Scotland,    tier: 2, kind: main,  first_season: "0506", odds_api_key: ""}
+  - {code: SC2, league_id: sco.3, name: "League One",       country: Scotland,    tier: 3, kind: main,  first_season: "0506", odds_api_key: ""}
+  - {code: SC3, league_id: sco.4, name: "League Two",       country: Scotland,    tier: 4, kind: main,  first_season: "0506", odds_api_key: ""}
+  - {code: D1,  league_id: ger.1, name: "Bundesliga",       country: Germany,     tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_germany_bundesliga"}
+  - {code: D2,  league_id: ger.2, name: "2. Bundesliga",    country: Germany,     tier: 2, kind: main,  first_season: "0506", odds_api_key: "soccer_germany_bundesliga2"}
+  - {code: I1,  league_id: ita.1, name: "Serie A",          country: Italy,       tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_italy_serie_a"}
+  - {code: I2,  league_id: ita.2, name: "Serie B",          country: Italy,       tier: 2, kind: main,  first_season: "0506", odds_api_key: "soccer_italy_serie_b"}
+  - {code: SP1, league_id: esp.1, name: "La Liga",          country: Spain,       tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_spain_la_liga"}
+  - {code: SP2, league_id: esp.2, name: "Segunda Division", country: Spain,       tier: 2, kind: main,  first_season: "0506", odds_api_key: "soccer_spain_segunda_division"}
+  - {code: F1,  league_id: fra.1, name: "Ligue 1",          country: France,      tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_france_ligue_one"}
+  - {code: F2,  league_id: fra.2, name: "Ligue 2",          country: France,      tier: 2, kind: main,  first_season: "0506", odds_api_key: "soccer_france_ligue_two"}
+  - {code: N1,  league_id: ned.1, name: "Eredivisie",       country: Netherlands, tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_netherlands_eredivisie"}
+  - {code: B1,  league_id: bel.1, name: "First Division A", country: Belgium,     tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_belgium_first_div"}
+  - {code: P1,  league_id: por.1, name: "Primeira Liga",    country: Portugal,    tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_portugal_primeira_liga"}
+  - {code: T1,  league_id: tur.1, name: "Super Lig",        country: Turkey,      tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_turkey_super_league"}
+  - {code: G1,  league_id: gre.1, name: "Super League",     country: Greece,      tier: 1, kind: main,  first_season: "0506", odds_api_key: "soccer_greece_super_league"}
+  - {code: ARG, league_id: arg.1, name: "Liga Profesional", country: Argentina,   tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_argentina_primera_division"}
+  - {code: AUT, league_id: aut.1, name: "Bundesliga",       country: Austria,     tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_austria_bundesliga"}
+  - {code: BRA, league_id: bra.1, name: "Serie A",          country: Brazil,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_brazil_campeonato"}
+  - {code: CHN, league_id: chn.1, name: "Super League",     country: China,       tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_china_superleague"}
+  - {code: DNK, league_id: den.1, name: "Superliga",        country: Denmark,     tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_denmark_superliga"}
+  - {code: FIN, league_id: fin.1, name: "Veikkausliiga",    country: Finland,     tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_finland_veikkausliiga"}
+  - {code: IRL, league_id: irl.1, name: "Premier Division", country: Ireland,     tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_league_of_ireland"}
+  - {code: JPN, league_id: jpn.1, name: "J1 League",        country: Japan,       tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_japan_j_league"}
+  - {code: MEX, league_id: mex.1, name: "Liga MX",          country: Mexico,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_mexico_ligamx"}
+  - {code: NOR, league_id: nor.1, name: "Eliteserien",      country: Norway,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_norway_eliteserien"}
+  - {code: POL, league_id: pol.1, name: "Ekstraklasa",      country: Poland,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_poland_ekstraklasa"}
+  - {code: ROU, league_id: rou.1, name: "Liga I",           country: Romania,     tier: 1, kind: extra, first_season: "",  odds_api_key: ""}
+  - {code: RUS, league_id: rus.1, name: "Premier League",   country: Russia,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_russia_premier_league"}
+  - {code: SWE, league_id: swe.1, name: "Allsvenskan",      country: Sweden,      tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_sweden_allsvenskan"}
+  - {code: SWZ, league_id: sui.1, name: "Super League",     country: Switzerland, tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_switzerland_superleague"}
+  - {code: USA, league_id: usa.1, name: "MLS",              country: USA,         tier: 1, kind: extra, first_season: "",  odds_api_key: "soccer_usa_mls"}
