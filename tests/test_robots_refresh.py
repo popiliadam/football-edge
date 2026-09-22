@@ -8,10 +8,12 @@ değeri: sapan ya da ölçülemeyen kaynağın tarihi yerinde kalır, tur kırm�
 
 from __future__ import annotations
 
+import builtins
 import dataclasses
 import errno
 import importlib.util
 import io
+import os
 import re
 import shutil
 import stat
@@ -322,6 +324,51 @@ def test_a_failed_write_leaves_the_registry_byte_for_byte_intact(
 
     assert registry.read_bytes() == original.encode("utf-8")
     assert [path.name for path in tmp_path.iterdir()] == ["sources.yaml"], "geçici dosya kaldı"
+
+
+def test_the_registry_is_never_opened_for_writing_only_replaced_by_rename(tmp_path: Path) -> None:
+    """Son yerleştirme de atomik olmalı: yukarıdaki arıza geçici dosyanın yazımında düşer,
+    kayıt defterine hiç ulaşmaz — yerinde bir kopya (`write_bytes`) orada görünmezdi. Burada
+    her açılış kaydedilir (`io.open`: `Path.open`/`os.fdopen`; `builtins.open`: `open()`/
+    `shutil`; `os.open`: `mkstemp`) ve çağrı geçirilir: yazma kipindeki TEK açılış geçici
+    dosyadır ve onu kayıt defterinin yerine `os.replace` koyar."""
+    registry = tmp_path / "sources.yaml"
+    registry.write_text(_registry(alpha=STALE, beta=FRESH), encoding="utf-8")
+    verified = _alpha(registry)
+    target = registry.resolve()
+    writes: list[Path] = []
+    renames: list[tuple[Path, Path]] = []
+    real_open, real_os_open, real_replace = io.open, os.open, os.replace
+    writing = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
+
+    def recording_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if isinstance(file, str | os.PathLike) and any(flag in mode for flag in "wax+"):
+            writes.append(Path(file).resolve())
+        return real_open(file, mode, *args, **kwargs)
+
+    def recording_os_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if flags & writing:
+            writes.append(Path(path).resolve())
+        return real_os_open(path, flags, *args, **kwargs)
+
+    def recording_replace(source: Any, destination: Any, *args: Any, **kwargs: Any) -> None:
+        renames.append((Path(source).resolve(), Path(destination).resolve()))
+        real_replace(source, destination, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(io, "open", recording_open)
+        patch.setattr(builtins, "open", recording_open)
+        patch.setattr(os, "open", recording_os_open)
+        patch.setattr(os, "replace", recording_replace)
+        robots_drift.refresh(registry, verified, TODAY)
+
+    assert registry.read_bytes() == _registry(alpha=TODAY, beta=FRESH).encode("utf-8")
+    assert target not in writes, f"kayıt defteri yazma kipinde açıldı: {writes}"
+    assert len(renames) == 1, f"yerleştirme os.replace ile yapılmadı: {renames}"
+    ((source, destination),) = renames
+    assert destination == target
+    assert source.parent == target.parent and source != target, "aynı dizinde değil: atomik değil"
+    assert writes == [source], f"yazma kipindeki tek açılış geçici dosya olmalı: {writes}"
 
 
 @pytest.mark.parametrize(
