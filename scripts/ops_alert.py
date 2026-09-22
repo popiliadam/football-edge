@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Kırmızı `seal`/`snapshot` turları için GitHub issue alarmı; pg_cron dispatch ve kredi bekçisi.
+"""Kırmızı workflow turları için GitHub issue alarmı; pg_cron tetik ve Odds API kredi bekçisi.
 
     fail --workflow <ad> --run-url <url>   `🔴 <ad> kırmızı` issue'sunu açar; açıksa
                                            yalnız gövdesini son tura göre günceller
     ok   --workflow <ad> --run-url <url>   açık alarmı "yeşile döndü" yorumuyla kapatır
     watchdog --run-url <url> [--min-credits N]
-                                           tetik bayatsa ya da Odds API kredisi N'nin
-                                           (varsayılan 60) altındaysa ya da ölçülemediyse
-                                           `🔴 bekçi kırmızı`yı açar ya da günceller, hepsi
-                                           yolundaysa kapatır; iki durumda da exit 0
+                                           `TRIGGERS`teki bir tetik bayatsa ya da Odds API
+                                           kredisi N'nin (varsayılan 60) altındaysa ya da
+                                           ölçülemediyse `🔴 bekçi kırmızı`yı açar ya da
+                                           günceller, hepsi yolundaysa kapatır; iki durumda
+                                           da exit 0
 
 Her komut yalnız kendi başlığındaki alarma dokunur. GitHub API'nin kendisi düşerse exit 1.
 `GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur; bekçi `ODDS_API_KEY`i de okur ve onu
@@ -61,6 +62,20 @@ TRIGGERS = (
         max_age=timedelta(hours=30),
         hint="pg_cron snapshot-dispatch durmuş olabilir — RUNBOOK §3.3",
     ),
+    # Toplayıcıların TEK tetiği pg_cron'dur (0005): her turları dispatch turudur. Eşik = kadans
+    # + pay: günlük (07:10) 30 sa, iki saatte bir (:07) 4 sa.
+    Trigger(
+        workflow="collect-daily.yml",
+        event=None,
+        max_age=timedelta(hours=30),
+        hint="pg_cron collect-daily-dispatch durmuş olabilir — RUNBOOK §3.3",
+    ),
+    Trigger(
+        workflow="collect-news.yml",
+        event=None,
+        max_age=timedelta(hours=4),
+        hint="pg_cron collect-news-dispatch durmuş olabilir — RUNBOOK §3.3",
+    ),
 )
 
 
@@ -108,7 +123,7 @@ def _ensure_label(client: httpx.Client) -> None:
     if response.status_code != httpx.codes.NOT_FOUND:
         response.raise_for_status()
         return
-    label = {"name": LABEL, "color": "b60205", "description": "seal/snapshot kırmızı tur alarmı"}
+    label = {"name": LABEL, "color": "b60205", "description": "kırmızı tur ve bekçi alarmı"}
     _json(client.post("/labels", json=label))
 
 
@@ -180,7 +195,7 @@ def _staleness(client: httpx.Client, trigger: Trigger, now: datetime) -> str | N
 
 
 def watchdog(client: httpx.Client, now: datetime) -> list[str]:
-    """Bayat tetiklerin satırları; boş liste iki tetiğin de canlı olduğu demektir."""
+    """Bayat tetiklerin satırları; boş liste tüm tetiklerin canlı olduğu demektir."""
     return [line for trigger in TRIGGERS if (line := _staleness(client, trigger, now)) is not None]
 
 
@@ -222,7 +237,7 @@ def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
         f"Teşhis:\n{diagnosis}\n"
         f"Bekçi turu: {run_url}\n"
         f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
-        "Bu issue'yu yalnız iki tetiği de taze ve Odds API kredisini eşikte ya da üstünde ölçen\n"
+        "Bu issue'yu yalnız tüm tetikleri taze ve Odds API kredisini eşikte ya da üstünde ölçen\n"
         "bir bekçi turu kapatır; seal'in yeşil turu kapatmaz. Prosedür: docs/RUNBOOK.md §3.6.\n"
     )
 
@@ -236,7 +251,7 @@ def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: s
     """
     problems = [line for line in (*watchdog(client, now), credit) if line is not None]
     if not problems:
-        healthy = "bekçi: dispatch ve snapshot taze, Odds API kredisi yeterli\n"
+        healthy = "bekçi: tüm tetikler taze, Odds API kredisi yeterli\n"
         return healthy + clear_alarm(client, WATCHDOG, run_url)
     # `::warning::` turun özet sayfasına düşer; adım bilerek yeşil kalır.
     warnings = "".join(f"::warning::{line}\n" for line in problems)
@@ -244,7 +259,7 @@ def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: s
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="seal/snapshot alarmı; dispatch ve kredi bekçisi")
+    parser = argparse.ArgumentParser(description="kırmızı tur alarmı; tetik ve kredi bekçisi")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("fail", "ok"):
         command = commands.add_parser(name)

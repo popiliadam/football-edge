@@ -280,11 +280,14 @@ def test_ok_without_an_open_alarm_writes_nothing() -> None:
 # ── watchdog: pg_cron tetikleri canlı mı? ───────────────────────────────────────────────────
 # Bekçinin raporu KENDİ issue'sudur (`🔴 bekçi kırmızı`) ve adım bayat tetikte de 0 döner:
 # seal job'ını düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı geri alırdı. Eşikler
-# sınırın iki yanından sınanır (59/61 dk, 29/31 sa).
+# sınırın iki yanından sınanır: seal 59/61 dk, snapshot ve collect-daily 29/31 sa,
+# collect-news 3 sa 59 dk/4 sa 1 dk.
 
 FRESH = {
     "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=59))],
     "snapshot.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
+    "collect-daily.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
+    "collect-news.yml": [_workflow_run("workflow_dispatch", timedelta(hours=3, minutes=59))],
 }
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
@@ -336,6 +339,49 @@ def test_stale_snapshot_is_named_in_the_watchdog_alarm() -> None:
 
 
 @pytest.mark.parametrize(
+    ("workflow", "age", "needles"),
+    [
+        (
+            "collect-daily.yml",
+            timedelta(hours=31),
+            ("son tur 31 sa 0 dk önce", "eşik 30 sa 0 dk", "collect-daily-dispatch"),
+        ),
+        (
+            "collect-news.yml",
+            timedelta(hours=4, minutes=1),
+            ("son tur 4 sa 1 dk önce", "eşik 4 sa 0 dk", "collect-news-dispatch"),
+        ),
+    ],
+    ids=["collect-daily", "collect-news"],
+)
+def test_a_stale_collect_trigger_is_named_in_the_watchdog_alarm(
+    workflow: str, age: timedelta, needles: tuple[str, ...]
+) -> None:
+    """Toplayıcıların tek tetiği pg_cron'dur (0005): durursa geriye bu alarm kalır."""
+    fake = FakeGitHub(runs={**FRESH, workflow: [_workflow_run("workflow_dispatch", age)]})
+
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in (f"{workflow}: ", *needles):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def test_collect_triggers_just_inside_their_thresholds_are_read_and_stay_fresh() -> None:
+    """FRESH, toplayıcıları eşiklerinin hemen içinde tutar (29 sa, 3 sa 59 dk). Okunmamış bir
+    tetik de alarm yazmaz: turların GERÇEKTEN sorulduğu ayrıca doğrulanır."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake) == 0
+
+    assert fake.writes == [], "eşiğin içindeki toplayıcı alarm yazdı"
+    asked = {path for method, path in fake.requests if method == "GET"}
+    for workflow in ("collect-daily.yml", "collect-news.yml"):
+        assert f"/actions/workflows/{workflow}/runs" in asked, f"{workflow} izlenmiyor"
+
+
+@pytest.mark.parametrize(
     ("workflow", "runs"),
     [
         ("seal.yml", []),
@@ -371,7 +417,7 @@ def test_stale_watchdog_only_edits_the_body_of_its_open_alarm() -> None:
 
 
 def test_fresh_watchdog_closes_its_own_alarm_and_leaves_the_seal_alarm() -> None:
-    """Bekçi alarmını YALNIZ iki tetiği de taze bulan bir bekçi turu kapatır."""
+    """Bekçi alarmını YALNIZ tüm tetikleri taze bulan bir bekçi turu kapatır."""
     fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM), _issue(5, SEAL_ALARM)], runs=FRESH)
 
     assert _watchdog(fake) == 0
