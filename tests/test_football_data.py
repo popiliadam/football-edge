@@ -372,6 +372,17 @@ def test_a_trimmed_record_still_faces_every_row_check() -> None:
     assert (result.price_cells, result.trimmed_rows) == (18, 1)
 
 
+def test_a_trimmed_record_rejected_as_a_duplicate_still_counts_as_trimmed() -> None:
+    """Yineleme reddi kaydı yeniden kurar; kırpma bayrağı o sırada kaybolursa sayı eksik kalır."""
+    rows = [main_row(0), main_row(0), main_row(2)]
+
+    result = parse_file(widen(csv_bytes(MAIN_2526, rows), 2, ",,,"), league=E0, season="2526")
+
+    assert [match.source_line for match in result.matches] == [1, 3]
+    assert result.rejected == (Rejected(line=2, reason=REASON_DUPLICATE),)
+    assert result.trimmed_rows == 1
+
+
 _UNCLOSED_LAST = [*(main_row(n) for n in range(4)), main_row(4, {"HomeTeam": '"Ev 4'})]
 _QUOTE_PAIR = [
     main_row(0),

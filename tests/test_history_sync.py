@@ -191,6 +191,24 @@ def test_trimmed_rows_are_logged_per_file_as_a_count_only(
     assert not any("Gizli" in record.getMessage() for record in caplog.records)
 
 
+def test_a_file_that_fails_the_contract_still_logs_its_trim_count(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Kırpma satırı sözleşme denetiminden ÖNCE yazılır: düşen dosyanın kırpma sayısı da görünür."""
+    rows = [main_row(0), *(main_row(n, {"FTR": "A", "HomeTeam": f"Gizli {n}"}) for n in (1, 2))]
+    widened = widen(csv_bytes(MAIN_2526, rows), 1, ",,,")
+    db = FakeHistDb()
+
+    with caplog.at_level("INFO", logger="football_edge.history.sync"):
+        report = run(db, Site({**FILES, OLD: widened}), (OLD,))
+
+    ((path, reason),) = report.failed
+    assert path == OLD and "ContractViolation" in reason and "reddedilen satır" in reason
+    trimmed = [record for record in caplog.records if "kırpıldı" in record.getMessage()]
+    assert [(record.levelname, record.args) for record in trimmed] == [("INFO", (OLD, 1))]
+    assert not any("Gizli" in record.getMessage() for record in trimmed)
+
+
 def test_a_file_without_trimmed_rows_logs_no_trim_line(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("INFO", logger="football_edge.history.sync"):
         run(FakeHistDb(), Site(FILES))
