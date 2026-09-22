@@ -2,7 +2,10 @@
 
 Kısmî kayıp sessiz geçemez (Ruling 6): düşürülen her satır nedeniyle `rejected`e, yok sayılan her
 fiyat hücresi `dropped_prices`e sayılır; `check_quality` payları `REJECT_LIMIT`e karşı sorar.
-Oransız satır reddedilmez (T1 2022/23'te %8) — oransız kayıt olarak geçer.
+Oransız satır reddedilmez (T1 2022/23'te %8) — oransız kayıt olarak geçer. Genişliği başlıktan
+farklı kayıt (tırnaksız virgül, "2,5" fiyatı, eksik hücre) fiyatları yanlış sütuna taşırdı: satır
+olarak reddedilir. CSV'nin kendisi bozuksa (dengesiz tırnak) kısmî ayrıştırma yoktur — `parse_file`
+dosyayı adlandıran bir `ContractViolation` fırlatır.
 
 Sütun adları football-data'nın başlıklarıdır; ana (`/mmz4281/`) ve ek (`/new/`) dosyalar farklı
 adlar taşır, `_LAYOUTS` ikisini aynı kayda indirir. Oran sütunu adları (kitap, market, sonuç,
@@ -24,7 +27,7 @@ from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
 from football_edge.collector import ContractViolation
-from football_edge.history.catalog import EXTRA, MAIN, HistoryLeague
+from football_edge.history.catalog import EXTRA, MAIN, HistoryLeague, season_codes
 from football_edge.history.types import (
     CLOSING,
     H2H,
@@ -56,6 +59,9 @@ STAT_COLUMNS: tuple[str, ...] = (
 # `AvgC*` 2019/20'den beri her ana lig dosyasında var (ölçüm belgesi §2.4); yoksa sütun kaymıştır.
 CLOSING_ERA: str = "1920"
 CLOSING_REFERENCE: tuple[str, ...] = ("AvgCH", "AvgCD", "AvgCA")
+# Ölçülen doluluk 2019/20'den %100 (T1 2022/23 %92): sütun var ama fiyatların çoğu boşsa kapanış
+# referansı (D3) yoktur.
+CLOSING_COVERAGE: float = 0.5
 
 REASON_DATE = "tarih çözülemedi"
 REASON_TIME = "saat çözülemedi"
@@ -64,11 +70,23 @@ REASON_GOALS = "gol çözülemedi"
 REASON_RESULT = "sonuç gollerle tutarsız"
 REASON_SEASON = "sezon boş"
 REASON_DUPLICATE = "yinelenen maç (tarih, ev, deplasman)"
+REASON_WIDTH = "sütun sayısı başlıkla uyuşmuyor"
+REASON_DIVISION = "Div lig koduyla uyuşmuyor"
+REASON_WINDOW = "tarih sezon penceresinin dışında"
+REASON_SEASON_FORMAT = "sezon biçimi tanınmıyor"
 
 _LONDON = ZoneInfo("Europe/London")
 _DATE = re.compile(r"(\d{2})/(\d{2})/(\d{2}|\d{4})")
+# İki haneli yıl POSIX `%y` kuralıyla (`datetime.strptime` ile aynı): 69–99 → 19xx, 00–68 → 20xx.
+# football-data'da iki haneli yıl 2005/06–2016/17 dosyalarındadır (ölçüm belgesi §2.4).
+_CENTURY_PIVOT = 69
 _TIME = re.compile(r"(\d{2}):(\d{2})")
 _COUNT = re.compile(r"\d+")
+# Ana lig sezonu "YYyy" → [YYYY-06-01, YYYY+1-07-31]; uzatılmış 2019/20 (26/07/2020) de sığar.
+_WINDOW_OPENS = (6, 1)
+_WINDOW_CLOSES = (7, 31)
+_EXTRA_SEASON = re.compile(r"(\d{4})(?:/(\d{4}))?")
+_SEASON_YEARS = range(2000, 2101)  # ek lig Season yılları [2000, 2100]
 # Pinnacle'ın 1X2 sütunları `PS…`, Ü/A sütunları `P…` önekini taşır.
 _TOTALS_PREFIX: Mapping[str, str] = MappingProxyType({"PS": "P"})
 _TOTALS_SUFFIX: Mapping[str, str] = MappingProxyType({"over": ">2.5", "under": "<2.5"})
@@ -82,12 +100,13 @@ class _Layout:
     away_goals: str
     result: str
     season: str | None  # ek dosyada sezon satırdadır
+    division: str | None  # ana lig dosyasında satırın lig kodu (dosya koduyla aynı olmalı)
 
 
 _LAYOUTS: Mapping[str, _Layout] = MappingProxyType(
     {
-        MAIN: _Layout("HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", None),
-        EXTRA: _Layout("Home", "Away", "HG", "AG", "Res", "Season"),
+        MAIN: _Layout("HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR", None, division="Div"),
+        EXTRA: _Layout("Home", "Away", "HG", "AG", "Res", "Season", division=None),
     }
 )
 
@@ -108,6 +127,7 @@ ODDS_COLUMNS: Mapping[str, OddsKey] = MappingProxyType(
         for phase in (PRE_CLOSING, CLOSING)
     }
 )
+_REFERENCE_KEYS: tuple[OddsKey, ...] = tuple(ODDS_COLUMNS[name] for name in CLOSING_REFERENCE)
 
 
 @dataclass(frozen=True)
@@ -131,6 +151,8 @@ class _Context:
     league: HistoryLeague
     season: str | None
     layout: _Layout
+    width: int  # başlığın alan sayısı; her kayıt tam bu genişlikte olmalı
+    window: tuple[date, date] | None  # ana lig sezonunun tarih penceresi; ek ligde None
     index: Mapping[str, int]
     odds: tuple[tuple[int, OddsKey], ...]
     stats: tuple[tuple[int, str], ...]
@@ -162,6 +184,50 @@ def _decode(content: bytes) -> tuple[str, str]:
         return content.decode("latin-1"), "latin-1"
 
 
+def _source_path(league: HistoryLeague, season: str | None) -> str:
+    """İhlal mesajının adlandırdığı dosya (`catalog.file_paths`in yol şablonu): `parse_file`
+    sözleşmesi yol almaz, yol lig ve sezondan bellidir."""
+    if league.kind == EXTRA:
+        return f"/new/{league.code}.csv"
+    return f"/mmz4281/{season}/{league.code}.csv"
+
+
+def _records(text: str, path: str) -> list[list[str]]:
+    """Katı CSV: dengesiz tırnak kısmî ayrıştırma değil, dosyayı adlandıran bir ihlaldir."""
+    reader = csv.reader(io.StringIO(text, newline=""), strict=True)
+    try:
+        records = list(reader)
+    except csv.Error as error:
+        raise ContractViolation(
+            f"{path}: CSV çözülemedi (fiziksel satır {reader.line_num}): {error}"
+        ) from error
+    # Kayıtlar arasında kapanan bir tırnak çifti aradaki satırları tek hücreye yutar ve katı okuyucu
+    # bunu hata saymaz; football-data'da çok satırlı hücre yoktur.
+    spanning = [
+        number
+        for number, record in enumerate(records)
+        if any("\n" in cell or "\r" in cell for cell in record)
+    ]
+    if spanning:
+        raise ContractViolation(
+            f"{path}: CSV kaydı {spanning[0]} birden çok satıra yayılıyor — dengesiz tırnak"
+        )
+    return records
+
+
+def _season_window(season: str) -> tuple[date, date]:
+    """Ana lig sezonunun tarih penceresi, iki uç dahil; bozuk sezon kodu `ValueError`."""
+    (code,) = season_codes(season, season)
+    start = 2000 + int(code[:2])  # sezon kodları yalnız 2000–2099 (catalog)
+    return date(start, *_WINDOW_OPENS), date(start + 1, *_WINDOW_CLOSES)
+
+
+def _is_extra_season(text: str) -> bool:
+    """Ek lig `Season`ı "YYYY" ya da "YYYY/YYYY"; yıllar [2000, 2100]."""
+    found = _EXTRA_SEASON.fullmatch(text)
+    return found is not None and all(int(year) in _SEASON_YEARS for year in found.groups() if year)
+
+
 def _cell(row: Sequence[str], position: int | None) -> str:
     if position is None or position >= len(row):
         return ""
@@ -185,9 +251,15 @@ def _date(text: str) -> date | None:
         return None
     day, month, year = found.groups()
     try:
-        return date(int(year) + (2000 if len(year) == 2 else 0), int(month), int(day))
+        return date(_full_year(year), int(month), int(day))
     except ValueError:
         return None
+
+
+def _full_year(year: str) -> int:
+    if len(year) == 4:
+        return int(year)
+    return int(year) + (1900 if int(year) >= _CENTURY_PIVOT else 2000)
 
 
 def _clock(text: str) -> time | None:
@@ -232,9 +304,13 @@ def _winner(home_goals: int, away_goals: int) -> str:
 def _fields(line: int, row: Sequence[str], ctx: _Context) -> _Fields | Rejected:
     """Satırın maç alanları; ilk bozuk alanın nedeniyle `Rejected`."""
     get = ctx.index.get
+    if ctx.layout.division and _cell(row, get(ctx.layout.division)) != ctx.league.code:
+        return Rejected(line, REASON_DIVISION)
     match_date = _date(_cell(row, get("Date")))
     if match_date is None:
         return Rejected(line, REASON_DATE)
+    if ctx.window is not None and not ctx.window[0] <= match_date <= ctx.window[1]:
+        return Rejected(line, REASON_WINDOW)
     clock_text = _cell(row, get("Time"))
     clock = _clock(clock_text) if clock_text else None
     if clock_text and clock is None:
@@ -252,11 +328,16 @@ def _fields(line: int, row: Sequence[str], ctx: _Context) -> _Fields | Rejected:
     season = ctx.season if ctx.layout.season is None else _cell(row, get(ctx.layout.season))
     if not season:
         return Rejected(line, REASON_SEASON)
+    if ctx.layout.season is not None and not _is_extra_season(season):
+        return Rejected(line, REASON_SEASON_FORMAT)
     kickoff = None if clock is None else _kickoff_utc(match_date, clock)
     return _Fields(season, match_date, kickoff, home, away, home_goals, away_goals, result)
 
 
 def _row(line: int, row: Sequence[str], ctx: _Context) -> _Row:
+    if len(row) != ctx.width:
+        # Kaymış kaydın hücresi hangi sütuna ait bilinmez: satır düşer, hücresi fiyat sayılmaz.
+        return _Row(Rejected(line, REASON_WIDTH), 0, 0)
     odds, cells, dropped = _prices(row, ctx)
     fields = _fields(line, row, ctx)
     if isinstance(fields, Rejected):
@@ -278,7 +359,12 @@ def _row(line: int, row: Sequence[str], ctx: _Context) -> _Row:
     return _Row(match, cells, dropped)
 
 
-def _context(header: Sequence[str], league: HistoryLeague, season: str | None) -> _Context:
+def _context(
+    header: Sequence[str],
+    league: HistoryLeague,
+    season: str | None,
+    window: tuple[date, date] | None,
+) -> _Context:
     names = [name.strip() for name in header]
     # Yinelenen başlıkta İLK sütun geçerli: ters sırada kurulan sözlükte öndeki konum kazanır.
     index = {name: position for position, name in reversed(list(enumerate(names))) if name}
@@ -286,6 +372,8 @@ def _context(header: Sequence[str], league: HistoryLeague, season: str | None) -
         league=league,
         season=season,
         layout=_LAYOUTS[league.kind],
+        width=len(header),
+        window=window,
         index=MappingProxyType(index),
         odds=tuple((index[name], key) for name, key in ODDS_COLUMNS.items() if name in index),
         stats=tuple((index[name], name) for name in STAT_COLUMNS if name in index),
@@ -322,11 +410,12 @@ def _check_season_argument(league: HistoryLeague, season: str | None) -> None:
 
 def parse_file(content: bytes, *, league: HistoryLeague, season: str | None) -> ParseResult:
     _check_season_argument(league, season)
+    window = None if season is None else _season_window(season)
     text, encoding = _decode(content)
-    records = list(csv.reader(io.StringIO(text, newline="")))
+    records = _records(text, _source_path(league, season))
     if not records:
         return ParseResult((), (), 0, 0, encoding, ())
-    ctx = _context(records[0], league, season)
+    ctx = _context(records[0], league, season, window)
     rows = _without_duplicates(
         tuple(
             _row(line, record, ctx)
@@ -350,6 +439,18 @@ def _required(league: HistoryLeague) -> tuple[str, ...]:
     return (*(name for name in names if name), layout.home_goals, layout.away_goals, layout.result)
 
 
+def _check_closing_coverage(result: ParseResult, *, path: str, season: str) -> None:
+    """Sütunlar var ama maçların çoğunda AvgC 1X2 boşsa dosya kapanış referansı taşımıyor."""
+    if not result.matches:
+        return  # payda yok: reddedilen satır payı ya da "hiç maç yok" konuşur
+    complete = sum(all(key in match.odds for key in _REFERENCE_KEYS) for match in result.matches)
+    if complete / len(result.matches) < CLOSING_COVERAGE:
+        raise ContractViolation(
+            f"{path}: {season} dönem beklentisi — AvgC 1X2 {complete}/{len(result.matches)} maçta "
+            f"tam (< {CLOSING_COVERAGE:.0%})"
+        )
+
+
 def check_quality(
     result: ParseResult, *, path: str, league: HistoryLeague, season: str | None
 ) -> None:
@@ -361,6 +462,7 @@ def check_quality(
         absent = [name for name in CLOSING_REFERENCE if name not in result.columns]
         if absent:
             raise ContractViolation(f"{path}: {season} dönem beklentisi — {absent} sütunu yok")
+        _check_closing_coverage(result, path=path, season=season)
     rows = len(result.matches) + len(result.rejected)
     if rows and len(result.rejected) / rows > REJECT_LIMIT:
         reasons = Counter(entry.reason for entry in result.rejected).most_common()

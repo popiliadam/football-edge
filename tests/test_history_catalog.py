@@ -169,6 +169,18 @@ def test_file_paths_give_one_file_per_main_season_and_one_file_per_extra_league(
     assert file_paths(BRA, current_season="2627") == ("/new/BRA.csv",)
 
 
+def test_a_main_league_first_played_in_the_current_season_declares_one_file(
+    tmp_path: Path,
+) -> None:
+    """`first_season == current_season` geçerlidir: kataloğa yeni giren ligin tek dosyası olur."""
+    text = VALID.replace('first_season: "2425"', 'first_season: "2627"', 1)
+
+    assert declared_paths(load_catalog(write(tmp_path, text))) == (
+        "/mmz4281/2627/E0.csv",
+        "/new/BRA.csv",
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "season"),
     [

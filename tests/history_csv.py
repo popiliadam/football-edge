@@ -1,4 +1,8 @@
-"""Sentetik football-data CSV'leri: GERÇEK başlıklar, programla kurulan SENTETİK satırlar.
+"""Sentetik football-data CSV'leri: ölçülen sütun adları, programla kurulan SENTETİK satırlar.
+
+Ölçülen başlığın kendisi yalnız `MAIN_2526` (ölçüm belgesi §2.2) ve 25 sütunlu `EXTRA_NEW`dir
+(§2.2). `MAIN_2627`, `MAIN_OLD` ve `EXTRA_RUS` ölçülen sütun AİLELERİNDEN kurulur (§2.2/§2.4):
+o dönemin biçimini taşırlar ama gerçek bir dosyanın başlığı değildirler.
 
 Sütun adları içerik değildir; takım adları ("Ev 3"), tarihler ve fiyatlar uydurmadır. Depoya,
 loga ya da artifact'e gerçek maç/oran satırı girmez (tasarım §4.3, Ruling 4).
@@ -44,7 +48,8 @@ def _season_2627() -> tuple[str, ...]:
 
 MAIN_2627: tuple[str, ...] = _season_2627()
 
-# 2012/13–2018/19 biçimi: Time yok; kapanış öncesi Betbrain ortalaması/en iyisi (BbAv/BbMx),
+# 2012/13–2018/19 biçimi, ölçülen sütun ailelerinden kurulmuş (§2.4 tarihçesi; ölçülen bir
+# dosyanın başlığı DEĞİL): Time yok; kapanış öncesi Betbrain ortalaması/en iyisi (BbAv/BbMx),
 # Pinnacle kapanışı (PSC) 2012/13'ten; AvgC/MaxC henüz yok.
 _MAIN_OLD = (
     "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,Referee,HS,AS,HST,AST,HF,AF,HC,"
