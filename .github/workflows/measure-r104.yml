@@ -1,0 +1,24 @@
+name: measure-r104
+
+# Geçici ölçüm (R104): genişlik reddi alan 5 dosyanın biçimi. Yalnız bu dalın push'unda koşar,
+# main'e girmez. Yerel ağ football-data'ya ulaşamıyor (bağlantı sıfırlanıyor); runner ulaşıyor.
+on:
+  push:
+    branches: [measure/r104-width]
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - run: uv run python scripts/measure_r104.py
