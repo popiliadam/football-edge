@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 import pytest
 
-from football_edge.backtest.evaluate import evaluate
+from football_edge.backtest.evaluate import clv_values, evaluate
 from football_edge.backtest.harness import Bet, Outcome, Prediction, ReplayResult, replay
 from football_edge.backtest.strategies import Placebo
 from football_edge.history.types import CLOSING, PRE_CLOSING, RESULTS, OddsKey
@@ -186,3 +186,19 @@ def test_evaluate_reads_a_placebo_replay_end_to_end() -> None:
     assert (evaluation.n, evaluation.bets) == (9, 8)
     assert evaluation.clv is not None
     assert evaluation.clv.estimate == pytest.approx(1 / sum(1 / price for price in prices) - 1)
+
+
+def test_the_clv_interval_honours_the_requested_resamples() -> None:
+    prices = {"H": 2.2, "D": 3.6, "A": 4.4}
+    result = _replay(
+        bets={
+            position: Bet(outcome, prices[outcome] + position / 10, "Avg")
+            for position, outcome in enumerate(RESULTS * 4)
+        }
+    )
+
+    evaluation = evaluate(result, method=MULTIPLICATIVE, resamples=500)
+
+    values = clv_values(result, method=MULTIPLICATIVE)
+    assert evaluation.clv == bootstrap_mean(values, resamples=500)
+    assert evaluation.clv != bootstrap_mean(values, resamples=2000)

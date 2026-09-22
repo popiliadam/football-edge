@@ -20,7 +20,7 @@ from football_edge.backtest.strategies import Placebo
 from football_edge.backtest.timeline import LONDON
 from football_edge.history.holdout import DEV, HoldoutKey
 from football_edge.history.types import CLOSING, PRE_CLOSING, RESULTS, HistMatch, OddsKey
-from football_edge.market.devig import METHODS, MULTIPLICATIVE, devig
+from football_edge.market.devig import METHODS, MULTIPLICATIVE, SHIN, devig
 from tests.backtest_builders import hist_match, quote
 
 RESAMPLES = 500
@@ -453,3 +453,168 @@ def test_k4_and_d1_measure_only_the_main_leagues() -> None:
 
     assert "bahis=35" in mixed["K4"].detail
     assert (mixed["K4"], mixed["D1"]) == (clean["K4"], clean["D1"])
+
+
+# ── Düzeltme turu 1: aralık ölçütü, yöntem, havuz sırası, resamples, K2 kabulü ──────────────
+INTERVAL = re.compile(r"\) (\S+) \[%95 (\S+), (\S+)\]")
+THIN: Prices = (2.5, 3.6, 3.6)  # Σ 1/o < 1: çarpımsal ve power kabul eder, Shin reddeder
+
+
+def _interval_of(detail: str) -> tuple[float, float, float]:
+    found = INTERVAL.search(detail)
+    assert found is not None, detail
+    estimate, low, high = (float(number) for number in found.groups())
+    return estimate, low, high
+
+
+def _mixed_rows(
+    code: str, gaps: Sequence[tuple[str, bool]], *, sharp: bool, season: str = "2324"
+) -> tuple[HistMatch, ...]:
+    """(sonuç, ters) satırları: ters satırın ΔLL'si aynı sonuçlu düz satırınkinin tam negatifidir.
+    `sharp` iken ölçülen AvgC − PSC (K3), değilse kapanış öncesi − kapanış (K1)."""
+    kickoffs = _saturdays(len(gaps), date(2023, 8, 5))
+    rows = []
+    for index, (kickoff, (result, swapped)) in enumerate(zip(kickoffs, gaps, strict=True)):
+        first, second = (TOWARD[result], SHARPER[result]) if sharp else (PRE, TOWARD[result])
+        if swapped:
+            first, second = second, first
+        rows.append(
+            _match(
+                code,
+                kickoff,
+                result,
+                pre=None if sharp else first,
+                close=first if sharp else second,
+                sharp=second if sharp else None,
+                season=season,
+                line=index + 1,
+            )
+        )
+    return tuple(rows)
+
+
+def _cancelling(extra: int) -> list[tuple[str, bool]]:
+    """Her sonuç için bir düz + bir ters satır (ΔLL'ler birbirini götürür) ve `extra` düz H."""
+    return [(result, swapped) for swapped in (False, True) for result in RESULTS] + [
+        ("H", False)
+    ] * extra
+
+
+@pytest.mark.parametrize(("extra", "passed"), [(1, False), (3, True)], ids=["touches", "clear"])
+def test_k1_needs_the_pooled_interval_above_zero_not_just_a_positive_mean(
+    extra: int, passed: bool
+) -> None:
+    history = {code: _mixed_rows(code, _cancelling(extra), sharp=False) for code in MAIN_LEAGUES}
+
+    k1 = _run(history)["K1"]
+
+    estimate, low, _ = _interval_of(k1.detail)
+    assert "22/22" in k1.detail, k1.detail
+    assert estimate > 0, k1.detail
+    assert (low > 0) is passed, k1.detail
+    assert k1.passed is passed
+
+
+@pytest.mark.parametrize(
+    ("gaps", "passed"),
+    [(_cancelling(1), False), ([(result, False) for result in RESULTS * 3], True)],
+    ids=["touches", "clear"],
+)
+def test_k3_needs_the_interval_above_zero_not_just_a_positive_mean(
+    gaps: list[tuple[str, bool]], passed: bool
+) -> None:
+    k3 = _run({"E0": _mixed_rows("E0", gaps, sharp=True)})["K3"]
+
+    estimate, low, _ = _interval_of(k3.detail)
+    assert "lig-sezon 1/1" in k3.detail, k3.detail
+    assert estimate > 0, k3.detail
+    assert (low > 0) is passed, k3.detail
+    assert k3.passed is passed
+
+
+def test_k4_uses_the_requested_devig_method_for_the_placebo_and_the_clv() -> None:
+    """Shin kapanış öncesi THIN'i reddeder (tahmin yok) ve FAVOURITE_CLOSE'u çarpımsaldan farklı
+    temizler: iki yolun biri çarpımsala sabitlenirse bahis sayısı ya da CLV değişir."""
+    count, thin = 30, 3
+    kickoffs = _saturdays(count, date(2023, 8, 5))
+    history = {
+        "E0": tuple(
+            _match(
+                "E0",
+                kickoff,
+                result,
+                pre=THIN if index < thin else PRE,
+                close=FAVOURITE_CLOSE,
+                line=index + 1,
+            )
+            for index, (kickoff, result) in enumerate(zip(kickoffs, _results(count), strict=True))
+        )
+    }
+
+    def expected(method: str) -> float:
+        fair = devig(FAVOURITE_CLOSE, method)
+        values = [
+            PRE[RESULTS.index(pick)] * fair[RESULTS.index(pick)] - 1
+            for pick in map(_placebo_pick, range(thin, count))
+        ]
+        return sum(values) / len(values)
+
+    checks = run_selftest(history, method=SHIN, main_codes=MAIN_CODES, resamples=RESAMPLES)
+    k4 = {check.id: check for check in checks}["K4"]
+
+    assert f"{expected(SHIN):.4f}" != f"{expected(MULTIPLICATIVE):.4f}"
+    assert "bahis=27" in k4.detail and f"tahmin yok {thin}" in k4.detail, k4.detail
+    assert _interval_of(k4.detail)[0] == pytest.approx(expected(SHIN), abs=5e-5), k4.detail
+
+
+def test_k4_pool_does_not_depend_on_the_order_of_the_leagues() -> None:
+    """Placebo maçın havuzdaki SIRASIYLA tohumlanır: havuz lig koduna göre sıralı olmalı."""
+    count = 12
+    kickoffs = _saturdays(count, date(2023, 8, 5))
+
+    def league(code: str, shift: int) -> tuple[HistMatch, ...]:
+        return tuple(
+            _match(
+                code,
+                kickoff,
+                RESULTS[(index + shift) % 3],
+                pre=PRE,
+                close=TOWARD[RESULTS[(index + shift) % 3]],
+                line=index + 1,
+            )
+            for index, kickoff in enumerate(kickoffs)
+        )
+
+    forward = {"E0": league("E0", 0), "B1": league("B1", 1)}
+    backward = {"B1": forward["B1"], "E0": forward["E0"]}
+
+    assert _run(forward)["K4"] == _run(backward)["K4"]
+
+
+def test_the_requested_resamples_reach_every_bootstrap(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked: list[int] = []
+    real = selftest.bootstrap_mean
+
+    def spy(values: Sequence[float], *, resamples: int = 2000) -> selftest.Interval:
+        asked.append(resamples)
+        return real(values, resamples=resamples)
+
+    monkeypatch.setattr(selftest, "bootstrap_mean", spy)
+
+    _run(_k1_history())  # K1 ve K4 ölçülür; K3 için PSC yok
+
+    assert asked == [RESAMPLES, RESAMPLES]
+
+
+def test_k2_admits_only_matches_that_every_devig_method_accepts() -> None:
+    clean = _k2_history("HHHHHHHHDA")
+    kickoffs = _saturdays(3, date(2023, 8, 5))
+    refused = tuple(
+        _match("BRA", kickoff, "H", close=THIN, season="2023", line=20 + index)
+        for index, kickoff in enumerate(kickoffs)
+    )
+
+    mixed = _run({"BRA": clean["BRA"] + refused})["K2"]
+
+    assert "n=10" in mixed.detail, mixed.detail
+    assert mixed == _run(clean)["K2"]
