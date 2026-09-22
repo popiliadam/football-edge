@@ -34,6 +34,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Secret taraması
         # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
         # halka açılır ve geri alınamaz — push'lanmış anahtar yanmıştır, silmek yetmez.
