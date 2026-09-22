@@ -111,6 +111,7 @@ jobs:
         if: ${{ !cancelled() && github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python scripts/ops_alert.py watchdog --run-url "$RUN_URL"
       - name: Alarm aç

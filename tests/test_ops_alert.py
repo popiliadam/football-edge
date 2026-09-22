@@ -1,16 +1,18 @@
-"""Kırmızı tur alarmı ve pg_cron dispatch bekçisi — `scripts/ops_alert.py`.
+"""Kırmızı tur alarmı, pg_cron dispatch ve Odds API kredi bekçisi — `scripts/ops_alert.py`.
 
-GitHub'a hiç çıkılmaz: `httpx.MockTransport` üstünde küçük bir sahte GitHub gelen istekleri
-kaydeder ve kendi durumunu (issue, etiket, tur) günceller; assertion'lar o duruma bakar.
-Betik, workflow adımının çağırdığı yoldan — `main(argv)` — sınanır.
+Ne GitHub'a ne Odds API'ye çıkılır: `httpx.MockTransport` üstünde küçük bir sahte GitHub gelen
+istekleri kaydeder ve kendi durumunu (issue, etiket, tur) günceller; assertion'lar o duruma
+bakar. Bekçinin kredi isteği host'una göre sahte bir Odds API'ye gider. Betik, workflow
+adımının çağırdığı yoldan — `main(argv)` — sınanır.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +25,9 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 REPOSITORY = "sahip/football-edge"
 TOKEN = "test-token"
+ODDS_KEY = "sahte-odds-anahtari-c5-0123456789"
+# URL'de kodlanan karakter taşır (`+` → `%2B`): istekte düz ya da kırpılmış hâli hiç görünmez.
+SYMBOL_KEY = "sahte+odds+anahtari+c5"
 NOW = datetime(2026, 9, 22, 8, 15, tzinfo=UTC)
 RUN_URL = "https://github.com/sahip/football-edge/actions/runs/42"
 SEAL_ALARM = "🔴 seal kırmızı"
@@ -152,11 +157,58 @@ class FakeGitHub:
         return httpx.Response(200, json={"total_count": len(matching), "workflow_runs": page})
 
 
+@dataclass
+class FakeOddsApi:
+    """Kota harcamayan `GET /v4/sports`un taklidi: kalan kredi `x-requests-remaining`da, bu
+    çağrının bedeli `x-requests-last`tedir (gerçek uçta 0).
+
+    `None` verilen başlık hiç gönderilmez; `failure` verilirse her istek o yoldan düşer.
+    Yanlış uç ya da anahtar, gerçek API gibi 401 alır — sessiz geçmez.
+    """
+
+    remaining: str | None = "200"
+    last: str | None = "0"
+    failure: Callable[[httpx.Request], httpx.Response] | None = None
+    requests: list[httpx.Request] = field(default_factory=list)
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.failure is not None:
+            return self.failure(request)
+        endpoint = (request.method, request.url.path) == ("GET", "/v4/sports")
+        if not endpoint or request.url.params.get("apiKey") != ODDS_KEY:
+            return httpx.Response(401, json={"message": "API key is not valid"})
+        quota = {"x-requests-remaining": self.remaining, "x-requests-last": self.last}
+        headers = {name: value for name, value in quota.items() if value is not None}
+        return httpx.Response(200, headers=headers, json=[])
+
+
+def _hosts(github: FakeGitHub, odds: FakeOddsApi) -> Callable[[httpx.Request], httpx.Response]:
+    """Bekçi iki API'ye çıkar: istek, host'una göre ilgili taklide gider."""
+
+    def route(request: httpx.Request) -> httpx.Response:
+        return odds(request) if request.url.host == "api.the-odds-api.com" else github(request)
+
+    return route
+
+
 @pytest.fixture(autouse=True)
-def _github_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Runner `GITHUB_REPOSITORY`yi kendisi verir; `GITHUB_TOKEN`ı adımın `env`i verir."""
+def _step_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runner `GITHUB_REPOSITORY`yi kendisi verir; `GITHUB_TOKEN`ı ve bekçinin `ODDS_API_KEY`ini
+    adımın `env`i verir. Anahtar sahtedir: kabukta gerçeği tanımlı olsa bile ezilir."""
     monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
+    monkeypatch.setenv("ODDS_API_KEY", ODDS_KEY)
+
+
+@pytest.fixture(autouse=True)
+def _http_log_levels() -> Iterator[None]:
+    """`main` httpx/httpcore loglarını süreç genelinde kısar: bu, başka testlere taşmasın."""
+    loggers = [logging.getLogger(name) for name in ("httpx", "httpcore")]
+    levels = [logger.level for logger in loggers]
+    yield
+    for logger, level in zip(loggers, levels, strict=True):
+        logger.setLevel(level)
 
 
 def _main(handler: Callable[[httpx.Request], httpx.Response], *argv: str) -> int:
@@ -244,17 +296,22 @@ def test_ok_without_an_open_alarm_writes_nothing() -> None:
 # ── watchdog: pg_cron tetikleri canlı mı? ───────────────────────────────────────────────────
 # Bekçinin raporu KENDİ issue'sudur (`🔴 bekçi kırmızı`) ve adım bayat tetikte de 0 döner:
 # seal job'ını düşürseydi seal'in sonraki yeşil turu (≤15 dk) alarmı geri alırdı. Eşikler
-# sınırın iki yanından sınanır (59/61 dk, 29/31 sa).
+# sınırın iki yanından sınanır: seal 59/61 dk, snapshot ve collect-daily 29/31 sa,
+# collect-news 3 sa 59 dk/4 sa 1 dk.
 
 FRESH = {
     "seal.yml": [_workflow_run("workflow_dispatch", timedelta(minutes=59))],
     "snapshot.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
+    "collect-daily.yml": [_workflow_run("workflow_dispatch", timedelta(hours=29))],
+    "collect-news.yml": [_workflow_run("workflow_dispatch", timedelta(hours=3, minutes=59))],
 }
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
 
-def _watchdog(fake: FakeGitHub) -> int:
-    return _main(fake, "watchdog", "--run-url", RUN_URL)
+def _watchdog(fake: FakeGitHub, odds: FakeOddsApi | None = None, *argv: str) -> int:
+    """Kredisi verilmeyen tur yeterli krediyle (200) koşar: tetik testleri krediye bakmaz."""
+    wire = _hosts(fake, odds if odds is not None else FakeOddsApi())
+    return _main(wire, "watchdog", "--run-url", RUN_URL, *argv)
 
 
 def test_fresh_watchdog_without_an_open_alarm_writes_nothing() -> None:
@@ -298,6 +355,49 @@ def test_stale_snapshot_is_named_in_the_watchdog_alarm() -> None:
 
 
 @pytest.mark.parametrize(
+    ("workflow", "age", "needles"),
+    [
+        (
+            "collect-daily.yml",
+            timedelta(hours=31),
+            ("son tur 31 sa 0 dk önce", "eşik 30 sa 0 dk", "collect-daily-dispatch"),
+        ),
+        (
+            "collect-news.yml",
+            timedelta(hours=4, minutes=1),
+            ("son tur 4 sa 1 dk önce", "eşik 4 sa 0 dk", "collect-news-dispatch"),
+        ),
+    ],
+    ids=["collect-daily", "collect-news"],
+)
+def test_a_stale_collect_trigger_is_named_in_the_watchdog_alarm(
+    workflow: str, age: timedelta, needles: tuple[str, ...]
+) -> None:
+    """Toplayıcıların tek tetiği pg_cron'dur (0005): durursa geriye bu alarm kalır."""
+    fake = FakeGitHub(runs={**FRESH, workflow: [_workflow_run("workflow_dispatch", age)]})
+
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in (f"{workflow}: ", *needles):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def test_collect_triggers_just_inside_their_thresholds_are_read_and_stay_fresh() -> None:
+    """FRESH, toplayıcıları eşiklerinin hemen içinde tutar (29 sa, 3 sa 59 dk). Okunmamış bir
+    tetik de alarm yazmaz: turların GERÇEKTEN sorulduğu ayrıca doğrulanır."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake) == 0
+
+    assert fake.writes == [], "eşiğin içindeki toplayıcı alarm yazdı"
+    asked = {path for method, path in fake.requests if method == "GET"}
+    for workflow in ("collect-daily.yml", "collect-news.yml"):
+        assert f"/actions/workflows/{workflow}/runs" in asked, f"{workflow} izlenmiyor"
+
+
+@pytest.mark.parametrize(
     ("workflow", "runs"),
     [
         ("seal.yml", []),
@@ -333,7 +433,7 @@ def test_stale_watchdog_only_edits_the_body_of_its_open_alarm() -> None:
 
 
 def test_fresh_watchdog_closes_its_own_alarm_and_leaves_the_seal_alarm() -> None:
-    """Bekçi alarmını YALNIZ iki tetiği de taze bulan bir bekçi turu kapatır."""
+    """Bekçi alarmını YALNIZ tüm tetikleri taze bulan bir bekçi turu kapatır."""
     fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM), _issue(5, SEAL_ALARM)], runs=FRESH)
 
     assert _watchdog(fake) == 0
@@ -352,6 +452,206 @@ def test_green_seal_run_leaves_the_watchdog_alarm_open() -> None:
 
     assert fake.writes == []
     assert fake.issue(4)["state"] == "open"
+
+
+# ── watchdog: Odds API kredisi ──────────────────────────────────────────────────────────────
+# Kredi tükenince mühür turu `EXIT_QUOTA_EXHAUSTED` (2) verir; o an mühür çoktan kaçmıştır.
+# Bekçi kalanı kota harcamayan `/v4/sports`un `x-requests-remaining` başlığından önceden okur
+# ve sorunu kendi alarmına yazar. Eşik sınırın iki yanından sınanır (60/59).
+
+
+@pytest.mark.parametrize("remaining", ["200", "60"], ids=["bol", "esikte"])
+def test_enough_credit_is_measured_and_stays_out_of_the_diagnosis(remaining: str) -> None:
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(remaining=remaining)
+
+    assert _watchdog(fake, odds) == 0
+
+    assert fake.writes == [], "yeterli kredi alarm yazdı"
+    (request,) = odds.requests  # ölçülmemiş kredi "yeterli" sayılamaz
+    assert (request.method, request.url.path) == ("GET", "/v4/sports"), "kota harcayan uç"
+    assert request.url.params.get("apiKey") == ODDS_KEY
+    assert "authorization" not in request.headers, "GitHub token'ı Odds API'ye gitti"
+
+
+@pytest.mark.parametrize(
+    ("remaining", "argv", "line"),
+    [
+        ("59", (), "kredi az: 59 kaldı (eşik 60)"),
+        ("40", (), "kredi az: 40 kaldı (eşik 60)"),
+        ("80", ("--min-credits", "100"), "kredi az: 80 kaldı (eşik 100)"),
+    ],
+    ids=["esigin-alti", "az", "min-credits"],
+)
+def test_low_credit_opens_the_watchdog_alarm_and_the_step_stays_green(
+    remaining: str, argv: tuple[str, ...], line: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining=remaining), *argv) == 0, "kredi job'ı düşürdü"
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    assert f"Odds API: {line}" in alarm["body"], "gövdede kredi teşhisi yok"
+    assert f"::warning::Odds API: {line}" in capsys.readouterr().out, "tur özetinde uyarı yok"
+
+
+def test_low_credit_keeps_the_open_watchdog_alarm_open() -> None:
+    """Tetikler taze diye alarm kapanmaz: onu yalnız her şeyi yolunda bulan bekçi turu kapatır."""
+    fake = FakeGitHub(issues=[_issue(4, WATCHDOG_ALARM, body="eski teşhis")], runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining="40")) == 0
+
+    assert fake.writes == [("PATCH", "/issues/4")], "kredi az iken alarm kapandı ya da çoğaldı"
+    assert fake.issue(4)["state"] == "open"
+    assert "kredi az: 40 kaldı (eşik 60)" in fake.issue(4)["body"]
+
+
+@pytest.mark.parametrize("remaining", [None, "bilinmiyor"], ids=["baslik-yok", "sayi-degil"])
+def test_an_unreadable_credit_header_is_named_unmeasured(remaining: str | None) -> None:
+    """Ölçülemeyen kredi "yeterli" sayılmaz: bekçi onu adıyla alarma yazar."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(remaining=remaining)) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", "x-requests-remaining"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["tanimsiz", "bos-secret"])
+def test_a_missing_key_is_named_unmeasured_without_a_request(
+    value: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tanımsız repo secret'ı adımın `env`ine boş dize olarak gelir: o da "anahtar yok"tur."""
+    if value is None:
+        monkeypatch.delenv("ODDS_API_KEY")
+    else:
+        monkeypatch.setenv("ODDS_API_KEY", value)
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi()
+
+    assert _watchdog(fake, odds) == 0
+
+    assert odds.requests == [], "anahtarsız istek atıldı"
+    (alarm,) = fake.issues
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", "ODDS_API_KEY"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def _unauthorized(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(401, json={"message": "API key is not valid"})
+
+
+def _connection_lost(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError(f"bağlantı koptu: {request.url}", request=request)
+
+
+def _echoes_the_key(request: httpx.Request) -> httpx.Response:
+    raise httpx.ProxyError(f"vekil reddetti: {request.url.params['apiKey']}", request=request)
+
+
+def _key_in_reason_phrase(request: httpx.Request) -> httpx.Response:
+    # Sunucu anahtarı durum satırında yankılar; durum satırı satır sonu taşıyamaz.
+    echoed = request.url.params["apiKey"].strip()
+    return httpx.Response(401, extensions={"reason_phrase": f"Invalid key {echoed}".encode()})
+
+
+def _redirect_with_lowercase_apikey(request: httpx.Request) -> httpx.Response:
+    # httpx yönlendirmeyi izlemez ama `Location`ı hata mesajına koyar.
+    query = request.url.query.decode().replace("apiKey=", "apikey=")
+    location = f"https://api.the-odds-api.com/v4/sports/?{query}"
+    return httpx.Response(302, headers={"Location": location})
+
+
+def _url_form(secret: str) -> str:
+    """Anahtarın istek sorgusundaki hâli — httpx'in kendi kodlaması."""
+    return str(httpx.QueryParams({"apiKey": secret})).partition("=")[2]
+
+
+@pytest.mark.parametrize(
+    ("secret", "failure", "reason"),
+    [
+        (ODDS_KEY, _unauthorized, "401 Unauthorized"),
+        (ODDS_KEY, _connection_lost, "ConnectError"),
+        (f"{ODDS_KEY}\n", _unauthorized, "401 Unauthorized"),
+        (ODDS_KEY, _echoes_the_key, "ProxyError"),
+        (f"{ODDS_KEY}\n", _key_in_reason_phrase, "401 Invalid key"),
+        (f"{SYMBOL_KEY}\n", _redirect_with_lowercase_apikey, "302 Found"),
+        (" ", _unauthorized, "401 Unauthorized"),
+    ],
+    ids=[
+        "http-401",
+        "ag-hatasi",
+        "satir-sonlu-secret",
+        "duz-anahtar",
+        "durum-satirinda-kirpilmis-anahtar",
+        "yonlendirmede-kucuk-harf-apikey",
+        "yalniz-bosluk-secret",
+    ],
+)
+def test_a_failed_credit_request_is_named_without_leaking_the_key(
+    secret: str,
+    failure: Callable[[httpx.Request], httpx.Response],
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """httpx'in hata mesajı isteğin URL'sini, yani sorgudaki anahtarı taşır ve httpx her isteği
+    INFO'da URL'siyle loglar. Satır sonuyla yapıştırılmış secret URL'de `%0A` olur, çıplak hâli
+    durum satırında görünebilir; kodlanan karakter taşıyan anahtar yönlendirmenin küçük harfli
+    `apikey=` yankısına düşer. Teşhis PUBLIC issue'ya yazılır ve GitHub'ın secret maskelemesi
+    issue'yu kapsamaz: anahtar hiçbir yoldan — log dâhil — çıkmamalı. İstekteki anahtar
+    KIRPILMAZ: bekçi seal'in düşeceği gibi düşmeli. Hata yine adıyla, tek satırda raporlanır;
+    yalnız boşluktan oluşan secret raporu bozmaz."""
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setenv("ODDS_API_KEY", secret)
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(failure=failure)
+
+    assert _watchdog(fake, odds) == 0, "kredi hatası job'ı düşürdü"
+
+    (request,) = odds.requests
+    assert request.url.params["apiKey"] == secret, "istekteki anahtar kırpıldı"
+    out = capsys.readouterr()
+    written = json.dumps([fake.issues, fake.comments], ensure_ascii=False)
+    channels = {"stdout": out.out, "stderr": out.err, "GitHub": written, "log": caplog.text}
+    bare = secret.strip()
+    for form in {form for form in (bare, _url_form(bare)) if form}:
+        for channel, text in channels.items():
+            assert form not in text, f"anahtar {channel} yoluyla sızdı: {form!r}"
+    for name in ("httpx", "httpcore"):
+        level = logging.getLogger(name).getEffectiveLevel()
+        assert level >= logging.WARNING, f"{name} INFO/DEBUG loglar: istek URL'si anahtarı taşır"
+    (alarm,) = fake.issues
+    for needle in ("Odds API: kredi ÖLÇÜLEMEDİ", reason):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+    for printed in out.out.splitlines():
+        assert printed.startswith(("::warning::", "alarm ")), f"uyarı satırı bölündü: {printed!r}"
+
+
+@pytest.mark.parametrize("last", ["0", None], ids=["ucretsiz", "baslik-yok"])
+def test_a_free_or_unreported_measurement_stays_out_of_the_diagnosis(last: str | None) -> None:
+    fake, odds = FakeGitHub(runs=FRESH), FakeOddsApi(last=last)
+
+    assert _watchdog(fake, odds) == 0
+
+    assert len(odds.requests) == 1, "kredi ölçülmedi"
+    assert fake.writes == [], "ücretsiz ölçüm alarm yazdı"
+
+
+def test_a_charged_measurement_is_named_in_the_watchdog_alarm(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Her yanıt kendi bedelini `x-requests-last`te taşır. Ücretsiz sanılan uç kredi yiyorsa
+    bekçi her turda sessizce kredi tüketirdi: ölçümün bedeli teşhise girer."""
+    fake = FakeGitHub(runs=FRESH)
+
+    assert _watchdog(fake, FakeOddsApi(last="1")) == 0
+
+    line = "kredi ölçümü ücretli: x-requests-last=1 — /v4/sports ücretsiz sanılıyordu"
+    (alarm,) = fake.issues
+    assert f"Odds API: {line}" in alarm["body"], "gövdede ölçümün bedeli yok"
+    assert f"::warning::Odds API: {line}" in capsys.readouterr().out, "tur özetinde uyarı yok"
 
 
 # ── Hata yolları: alarm düşerse adım da düşer, sessizce "tamam" demez ──────────────────────
