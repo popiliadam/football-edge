@@ -502,6 +502,11 @@ ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştir
 - **P8, P9** — §6.3, §9 G4: lig kendi eğitim satırı < 1.000 ise havuzlanmış ağırlık; W1 = ortalama ΔLL ≤ δ = 0.001.
 - **P11** — §6.1: Elo'nun 1X2 eşlemesi sıralı lojit değil `P(D) = δ·4E(1−E)` (tek parametre, kapalı biçim fit).
 - **P20** — §11: görev numaraları — gölge Task 11, modelin bilinen sonuçları Task 12.
+- **R141** (controller, plan incelemesi I1) — §7.3: bayat durum koruması modelin BÜTÜN grup liglerine genişler;
+  defterde fikstürü olmayan ligler (E1–E3, D2, I2, SP2, F2 …) için football-data'nın kendi tarihlerinden
+  (sezgisel: olağan maç günü aralığının %95'liği + 1 gün).
+- **Plan incelemesi C1** — §8.3: yinelenen maç denetimi `history/` içinde, BÜTÜN dönemlerde (holdout dahil) ve
+  anahtar yokken koşar; holdout'taki bir yineleme açılışı harcamaz (exit 12). I4: açılış sonrası her arıza exit 14.
 - **P25** — §10: haftalık gölge CLV raporu Faz 3'te yazılmaz (Faz 4'ün ilk görevi); R128'nin boşluk cezası bu fazda
   DEV simülasyonu (`walkforward --gap`) ve `final_eval` C6 ile ölçülür, canlı ayağı o rapora kadar ölçülmez.
 
