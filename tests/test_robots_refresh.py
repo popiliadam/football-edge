@@ -219,18 +219,34 @@ def test_without_refresh_the_run_only_reports(
     assert capsys.readouterr().out == "sapma yok: alpha\nsapma yok: beta\n"
 
 
-def test_an_ambiguous_date_is_never_guessed(workspace: Path) -> None:
-    """Aynı kayıtta iki `robots_verified_at` (YAML'da son yazılan kazanır): hangi satırın
-    düzeltileceği tahmin edilmez, hiçbir şey yazılmaz ve tur düşer — sessizce atlanan bir
-    tarih 30 gün sonra kapıyı kırmızıya düşürürdü."""
-    original = _registry(alpha=STALE, beta=FRESH).replace(
-        f"    robots_verified_at: {STALE}\n",
-        f"    robots_verified_at: {STALE}\n    robots_verified_at: {STALE}\n",
-        1,
+def _duplicate_key(original: str) -> str:
+    """alpha'da iki `robots_verified_at`: YAML sessizce sonuncuyu alır, hangisi düzeltilir?"""
+    line = f"    robots_verified_at: {STALE}\n"
+    return original.replace(line, line * 2, 1)
+
+
+def _shared_anchor(original: str) -> str:
+    """alpha'nın tarihi bir YAML çapası, beta'nınki onun takma adı: ikisi TEK düğümdür ve alpha
+    için yapılan düzenleme sapan beta'nın tarihini de değiştirirdi."""
+    anchored = original.replace(
+        f"    robots_verified_at: {STALE}\n", f"    robots_verified_at: &dogrulama {STALE}\n", 1
+    )
+    return anchored.replace(
+        f"    robots_verified_at: {FRESH}\n", "    robots_verified_at: *dogrulama\n", 1
     )
 
+
+@pytest.mark.parametrize(
+    "mangle", [_duplicate_key, _shared_anchor], ids=["yinelenen-anahtar", "paylaşılan-çapa"]
+)
+def test_an_ambiguous_date_is_never_guessed(workspace: Path, mangle: Callable[[str], str]) -> None:
+    """Düzenlenecek değer tek anlamlı değilse tahmin edilmez: hiçbir şey yazılmaz ve tur düşer —
+    sessizce atlanan bir tarih 30 gün sonra kapıyı kırmızıya düşürürdü."""
+    original = mangle(_registry(alpha=STALE, beta=FRESH))
+    assert original != _registry(alpha=STALE, beta=FRESH), "bozma işlevi hiçbir şeyi değiştirmedi"
+
     with pytest.raises(ValueError, match="robots_verified_at"):
-        _run(original, {"alpha.example": _same(ALPHA_ROBOTS), "beta.example": _same(BETA_ROBOTS)})
+        _run(original, {"alpha.example": _same(ALPHA_ROBOTS), "beta.example": _same(ALPHA_ROBOTS)})
 
     assert REGISTRY.read_bytes() == original.encode("utf-8")
 
