@@ -41,8 +41,16 @@ adıyla SKIP** (ölçüm §2)
    bot commit'i push'lar. Runner'ın footystats robots.txt'ini okuyabildiği ölçüldü (09-22).
 
 **Sıradaki iş: yol haritası v2 (`docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`)**
-- **İz A — Faz 2'nin tam TDD planı** (dalga 1: MIT yükleyici ∥ vig temizleme ∥ holdout ∥ harness
-  iskeleti). Bu oturumda ölçülen girdiler §6'da.
+- **İz A — Faz 2 tasarımı, sonra tam TDD planı.** Beyin fırtınası (mimari yol) başladı:
+  **`docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md` buradan başla** —
+  kullanıcı kararları (holdout `[2025-07-01, 2026-07-01)`; tasarım kararları asistanın önerisine
+  göre), plan-zamanı ölçümleri, tasarım önerileri ve sıra (§5). Onay kapısı: yazılı tasarım +
+  plan kullanıcıya sunulmadan Faz 2 kodu yazılmaz. Önemli ölçüm: birincil tarihsel kaynak
+  xgabora değil football-data.co.uk olmalı (kapanış oranları orada; ek ligler güncel; runner'dan
+  erişilir, TR'den erişilmez).
+- **Kullanıcı önerisi — Scrapling:** adaptive seçiciler "kendini onaran ayrıştırıcı" için aday;
+  bot korumasını aşan parçaları (`StealthyFetcher`) R2 ve spec §3.2 gereği kullanılmaz. Öneri ve
+  spike tanımı ölçüm belgesinin §4'ünde.
 - **İz B — Faz 6 iskeleti:** Netlify hesabı bağlı ama "football" adlı bir proje yok. Site ve
   alan adı kullanıcı kararı.
 
@@ -240,10 +248,10 @@ Faz 2 = tarihsel taban · backtest harness · piyasa verimliliği · sızıntı 
 `collect-news` ile pg_cron'dan tetikleniyor (0005 push'tan sonra uygulanacak — §0); `fetch-results`
 kredi harcadığı için elle (R67). Sıra ve paralellik: yol haritası v2 (§0/7).
 
-**2026-09-22'de ölçülen Faz 2 girdileri** (planın §0'ına girer):
-- `xgabora/Club-Football-Match-Data` (MIT, `main` 2026-09-06): `Matches.csv` 238.858 maç, `EloRatings.csv` 273.972 kayıt. Oranlar Bet365 (`OddHome/Draw/Away`, O/U 2.5, AH) ve `Max*`: **kapanış sütunu yok** — spec §1.4'ün tarihsel CLV referansı `AvgC*`/`BFEC*` yalnız football-data.co.uk'ta.
-- **football-data.co.uk bu makineden erişilemiyor:** `robots.txt` bile TLS `Connection reset by peer` (TR SNI engeli, spec §7). Kapanış yükleyicisi ve o kaynağın ilk ölçümü runner'da yapılmalı — footystats'ın tam tersi.
-- Sızıntı adayları (Task 6'nın ilk maddeleri): `C_*` küme olasılıkları maçın kendi istatistiklerinden türetilmiş görünüyor; 2025-06-15 sonrası Elo, yazarın "provisional continuation"ı (maçın kendisini içerip içermediği bilinmiyor); `MatchTime` "CET-1" etiketli (saat dilimi ölçülmeli). Veri seti periyodik güncelleniyor: yükleyici bir commit SHA'sına sabitlenmeli.
+**2026-09-22'de ölçülen Faz 2 girdileri:** `docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`
+(xgabora'da kapanış yok ve ek ligler 2024-12'de bitiyor; football-data.co.uk runner'dan tam
+erişilebilir, kapanış sütunları dolu, kanonik adres artık kök alan adı; `MatchTime` Europe/London).
+Aşağıdaki "birincil girdi" cümlesi bu ölçümle ESKİDİ: tasarım birincil kaynağı yeniden seçecek.
 
 **Faz 2'nin birincil girdisi `xgabora/Club-Football-Match-Data`dır ve lisans zinciri hâlâ
 açık bir sorudur** (MIT ilan ediyor, verisi football-data.co.uk'tan türemiş, o kaynağın
