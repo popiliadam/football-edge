@@ -264,11 +264,15 @@ fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron:
 |---|---|---|---|
 | `seal-dispatch` | her 15 dakikada | `ops.dispatch_seal()` | `seal.yml` |
 | `snapshot-dispatch` | her gün 06:22 UTC | `ops.dispatch_snapshot()` | `snapshot.yml` |
+| `collect-daily-dispatch` | her gün 07:10 UTC | `ops.dispatch_collect_daily()` | `collect-daily.yml` (`fetch-footystats`, `fetch-tff`, `fetch-venues`) |
+| `collect-news-dispatch` | 2 saatte bir, :07'de | `ops.dispatch_collect_news()` | `collect-news.yml` (`fetch-news`) |
 
-İkisi de `ops.dispatch_workflow()`a delege eder; o yalnız izinli listedeki bir adı GitHub
-API'si üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`).
-`seal.yml`in kendi `schedule`ı yedektir ve bekçiyi koşturur (§3.6). `snapshot.yml`in
-`schedule`ı **yok**: iki tetik aynı gün iki tur, yani iki kat kredi demektir.
+Hepsi `ops.dispatch_workflow()`a delege eder; o yalnız izinli listedeki bir adı GitHub API'si
+üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`,
+`0005_collect_dispatch.sql`). `seal.yml`in kendi `schedule`ı yedektir ve bekçiyi koşturur (§3.6);
+diğerlerinin `schedule`ı **yok**: iki tetik iki tur demektir, snapshot'ta iki kat kredi.
+`fetch-results` zamanlanmadı: `/scores` kredi harcar ve ayda 500 kredilik bütçe snapshot ile
+mühüre ayrılmış (R67) — elle koşulur.
 
 ### 3.2 Kurulum (tek sefer)
 1. **Token (GitHub):** hazır doldurulmuş form (ad, açıklama, sahip, süre ve **Actions: Read and
@@ -276,34 +280,35 @@ API'si üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workfl
    <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+and+snapshot.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
    Elle seçilen tek alan: Repository access → *Only select repositories* → `football-edge`.
    `expires_in=none` bilinçli: yıllık yenileme bir el işidir. Yetki tek depoda yalnız Actions;
-   süreli token istenirse tarih seçilir ve §3.4 devreye girer. Token artık **iki** workflow'u
-   tetikler: `seal.yml` ve `snapshot.yml`. Actions yetkisi depodaki her workflow'u tetikleyebilir;
+   süreli token istenirse tarih seçilir ve §3.4 devreye girer. Token izinli listedeki bütün
+   workflow'ları tetikler: `seal.yml`, `snapshot.yml`, `collect-daily.yml`, `collect-news.yml`. Actions yetkisi depodaki her workflow'u tetikleyebilir;
    sınırı `ops.dispatch_workflow`un izinli listesi çizer (`0004_workflow_dispatch.sql`).
 2. **Vault (Supabase):** panelde Vault sayfasında *Add new secret* → adı tam olarak
    `github_seal_dispatch`, değeri token. SQL editörü de olur ama token sorgu geçmişinde kalır:
    `select vault.create_secret('<token>', 'github_seal_dispatch');`
-3. **Migration:** `db/migrations/0003_seal_dispatch.sql`, ardından `0004_workflow_dispatch.sql`
-   SQL editöründe sırayla bir kez çalıştırılır. Yeniden çalıştırmak güvenlidir: işler adıyla
+3. **Migration:** `0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`, `0005_collect_dispatch.sql`
+   sırayla bir kez uygulanır (asistan Supabase aracıyla uygular). 0005, `collect-*.yml` dosyaları
+   `main`de olduktan SONRA uygulanır: GitHub `main`de olmayan bir workflow'u tetiklemez (404). Yeniden çalıştırmak güvenlidir: işler adıyla
    güncellenir, ikinci iş açılmaz. `snapshot.yml`den `schedule`ı kaldıran commit `main`e,
    0004 uygulanmadan gitmez — arada snapshot'ı tetikleyen hiçbir şey kalmaz.
 
 Secret yokken her iş `ops.dispatch_workflow: Vault secret github_seal_dispatch yok — <workflow>
 tetiklenmedi` hatası verir; secret eklendiği an kendiliğinden çalışmaya başlar. Secret'ın adı
-yalnız mührü anar ama iki workflow'a da hizmet eder.
+yalnız mührü anar ama izinli listedeki bütün workflow'lara hizmet eder.
 
 ### 3.3 Doğrulama
 ```sql
 select j.jobname, d.status, d.return_message, d.start_time
 from cron.job_run_details d join cron.job j using (jobid)
-where j.jobname in ('seal-dispatch', 'snapshot-dispatch')
+where j.jobname like '%-dispatch'
 order by d.start_time desc limit 10;
 
 select status_code, error_msg, created from net._http_response order by created desc limit 5;
 ```
 `204` = GitHub turu başlattı. `401` = token geçersiz ya da süresi dolmuş (§3.4). `403`/`404` =
 token bu depoya ya da Actions'a yetkili değil. `422` = workflow'da `workflow_dispatch` yok.
-GitHub tarafı: `gh run list --workflow seal.yml --event workflow_dispatch --limit 5` (snapshot
-için `--workflow snapshot.yml`).
+GitHub tarafı: `gh run list --workflow seal.yml --event workflow_dispatch --limit 5` (diğerleri
+için `--workflow snapshot.yml`, `collect-daily.yml`, `collect-news.yml`).
 
 **Beklenen kırmızı:** kaçmış bir maç, başlama saatinden sonra 24 saat boyunca her turda
 "kaçan mühür" olarak raporlanır (`rounds._seal_candidates`: `commence_time > now - 1 gün`).
@@ -312,8 +317,8 @@ O turlarda yeni maçların mühürlenip mühürlenmediğine logdan bakılır; k�
 alarmı (§3.6) — kendiliğinden biter.
 
 ### 3.4 Token yenileme
-Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) iki dispatch de `401` alır: mühür
-yalnız seyrek yedek `schedule`la koşar, snapshot hiç koşmaz. Bekçi yedek turda kendi alarmını
+Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) bütün dispatch'ler `401` alır: mühür
+yalnız seyrek yedek `schedule`la koşar; snapshot ve toplayıcılar hiç koşmaz. Bekçi yedek turda kendi alarmını
 (`🔴 bekçi kırmızı`) açar (§3.6). Yeni tokenı §3.2/1'deki gibi oluştur, sonra:
 ```sql
 select vault.update_secret((select id from vault.secrets where name = 'github_seal_dispatch'),
@@ -326,18 +331,26 @@ select cron.unschedule('seal-dispatch');       -- mührü durdur
 select cron.schedule('seal-dispatch', '*/15 * * * *', 'select ops.dispatch_seal()');       -- başlat
 select cron.unschedule('snapshot-dispatch');   -- snapshot'ı durdur
 select cron.schedule('snapshot-dispatch', '22 6 * * *', 'select ops.dispatch_snapshot()');  -- başlat
+select cron.unschedule('collect-daily-dispatch');  -- günlük toplayıcıları durdur
+select cron.schedule('collect-daily-dispatch', '10 7 * * *', 'select ops.dispatch_collect_daily()');
+select cron.unschedule('collect-news-dispatch');   -- haberi durdur
+select cron.schedule('collect-news-dispatch', '7 */2 * * *', 'select ops.dispatch_collect_news()');
 ```
 Durdurulan iş eşiği aşınca bekçi kendi alarmını açar (§3.6): bilinçli bir durdurma da görünür
-kalır. İş yeniden başlayıp bekçi iki tetiği taze bulunca alarm kendiliğinden kapanır.
+kalır. İş yeniden başlayıp bekçi bütün tetikleri taze bulunca alarm kendiliğinden kapanır.
 
 ### 3.6 Kırmızı tur alarmı ve bekçi
-`scripts/ops_alert.py` üç ayrı `ops-alert` issue'su tutar; her biri yalnız kendi başlığına dokunur:
+`scripts/ops_alert.py` her workflow ve bekçi için ayrı bir `ops-alert` issue'su tutar; her biri
+yalnız kendi başlığına dokunur:
 
 | Başlık | Açan ya da güncelleyen | Kapatan |
 |---|---|---|
 | `🔴 seal kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `seal.yml` turu | yeşil `seal.yml` turu |
 | `🔴 snapshot kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `snapshot.yml` turu | yeşil `snapshot.yml` turu |
-| `🔴 bekçi kırmızı` | bayat tetik bulan bekçi | iki tetiği de taze bulan bekçi |
+| `🔴 collect-daily kırmızı` | kırmızı ya da koşarken iptal edilen `collect-daily.yml` turu | yeşil `collect-daily.yml` turu |
+| `🔴 collect-news kırmızı` | kırmızı ya da koşarken iptal edilen `collect-news.yml` turu | yeşil `collect-news.yml` turu |
+| `🔴 sources-audit kırmızı` | `main`deki kırmızı ya da iptal edilen `sources-audit.yml` turu (§3.7) | `main`deki yeşil tur |
+| `🔴 bekçi kırmızı` | bayat tetik, az ya da ölçülemeyen kredi, ya da ücretli ölçüm bulan bekçi | hepsini temiz bulan bekçi |
 
 - Açık alarm varsa yenisi açılmaz, yalnız gövdesi güncellenir — gövde düzenlemesi bildirim
   üretmez. Kapanırken `yeşile döndü: <tur>` yorumu yazılır. Etiket yoksa ilk açılışta oluşturulur.
@@ -345,9 +358,11 @@ kalır. İş yeniden başlayıp bekçi iki tetiği taze bulunca alarm kendiliği
   döner. Kuyrukta beklerken iptal edilen tur hiç adım koşmaz, alarm da açmaz.
 - **Alarm kapat** `continue-on-error: true`: kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya
   dönmez; açık alarm sonraki yeşil turda kapanır.
-- **Bekçi** yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra koşar. `seal.yml`in son
-  `workflow_dispatch` turu 60 dakikadan, `snapshot.yml`in son turu 30 saatten eskiyse (ya da hiç
-  yoksa) kendi alarmını açar ve **0 döner**: seal job'ını düşürseydi seal'in sonraki yeşil turu
+- **Bekçi** yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra koşar. Eşikler: `seal.yml`in son
+  `workflow_dispatch` turu 60 dk, `snapshot.yml` 30 sa, `collect-daily.yml` 30 sa, `collect-news.yml`
+  4 sa (hiç tur yoksa da bayat). Ayrıca Odds API kalan kredisini ücretsiz `/v4/sports` ucundan ölçer:
+  60'ın altındaysa, ölçülemiyorsa ya da ölçüm ücretliyse (`x-requests-last` ≠ 0) de alarm. Anahtar
+  hiçbir çıktıya yazılmaz. Bulduğunda kendi alarmını açar ve **0 döner**: seal job'ını düşürseydi seal'in sonraki yeşil turu
   alarmı geri alırdı. Gövdede hangi tetiğin ne kadar bayat olduğu ve eşik yazar; teşhis §3.3.
   Ölü snapshot sessiz bir arızadır: maçları yalnız snapshot kaydeder; o durunca mühür de kayıtlı
   maçlar bitince "kaçan" raporu bile vermeden susar. GitHub API'nin kendisi düşerse bekçi düşer ve
@@ -356,3 +371,16 @@ kalır. İş yeniden başlayıp bekçi iki tetiği taze bulunca alarm kendiliği
 Haber GitHub'ın issue bildirimiyle gelir: e-posta, depo sahibinin bu depoyu izleme ayarına
 bağlıdır. Depo sayfasında *Watch* → *All Activity* (ya da *Custom* → *Issues*) seçili değilse
 issue açılır ama kimseye haber gitmez. Bilinen kör noktalar: `docs/DEFERRED.md` §10f.
+
+### 3.7 robots.txt yeniden doğrulaması (otomatik)
+`sources-audit.yml` her gün (GitHub `schedule`ı, 05:41 UTC; gecikme 30 günlük pencerede zararsız)
+her kaynağın canlı robots.txt'ini anlık görüntüsüyle (`config/robots/<id>.txt`) karşılaştırır.
+Satır sonları normalleştirilip baş/son boşluk atıldıktan sonra AYNIYSA ve `robots_verified_at` 7
+günden eskiyse bot o tarihi bugüne (UTC) çeker ve `main`e commit'ler — merge, en çok 3 deneme,
+asla force; `config/sources.yaml`in geri kalanı byte byte aynı kalır, yazım atomiktir. Sapma ya
+da ölçülemeyen (403, 429, 5xx, bağlantı hatası) kaynağın tarihine dokunulmaz; tur kırmızı olur ve
+`🔴 sources-audit kırmızı` açılır.
+
+Sapma görülürse (elle): canlı robots.txt'i oku. Beyan ettiğimiz yollara hâlâ izin veriyorsa
+`config/robots/<id>.txt`i canlı içerikle, `robots_verified_at`i bugünle güncelle; izin
+vermiyorsa kaynağı `enabled: false` yap. Kapı gevşetilerek yeşil alınmaz.

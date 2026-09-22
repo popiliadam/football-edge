@@ -4,8 +4,9 @@
 # önek DEĞİL (R7): bir önek, kapının hiç istenmeyecek bir yolu sınamasına yol açar — izinli
 # bir kaynağı yanlışlıkla kapatabilir ya da (daha kötü) izinsiz bir yolu yanlışlıkla geçirebilir.
 #
-# Ölçüm tarihi 2026-09-19. `robots_verified_at` 30 günden eskiyse kapı kırmızı verir —
-# tazelemek için Task 3 Step 5'teki komutu yeniden koş ve tarihleri güncelle.
+# `robots_verified_at` 30 günden eskiyse kapı kırmızı verir. `sources-audit.yml` her gün canlı
+# robots.txt'i anlık görüntüyle karşılaştırır; aynıysa tarihi kendisi ilerletir (docs/RUNBOOK.md
+# §3.7). Sapma varsa tarih ilerlemez ve tur kırmızı olur: robots'u elle incele.
 #
 # access_basis: `robots` (varsayılan) ya da `api_terms`. Spec §3.2 kendi içinde ayırıyor:
 # madde 1 robots.txt'i TARAYICILAR için tanımlar, madde 3 ise ToS'u AYRI bir sınama olarak ele

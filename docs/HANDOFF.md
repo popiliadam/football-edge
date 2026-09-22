@@ -1,8 +1,8 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 · **Durum:** **Faz 1 `main`'de; İz C (işletme) sürüyor** — mühür ve
-snapshot pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor (RUNBOOK §3)
-**Dal:** `main` · **405 test** (18'i contract) · kapı **9 adım yeşil + `zincir` adıyla SKIP**
+**Son güncelleme:** 2026-09-22 · **Durum:** **Faz 1 `main`'de; İz C (işletme) C1–C5 tamam** — mühür, snapshot ve toplayıcılar
+pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor, robots doğrulaması otomatik
+(RUNBOOK §3) · **Dal:** `main` · kapı **9 adım yeşil + `zincir` adıyla SKIP** (ölçüm §2)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -16,8 +16,10 @@ snapshot pg_cron'dan tetikleniyor, kırmızı tur `ops-alert` issue'su açıyor 
 **1. Tetikler canlı — yapman gereken bir şey yok.** `seal` (15 dakikada bir) ve `snapshot`
 (06:22 UTC) Supabase pg_cron'dan `workflow_dispatch` ile tetikleniyor (0003/0004, RUNBOOK §3);
 token Vault'ta `github_seal_dispatch` adıyla, süresiz. Kırmızı bir tur `ops-alert` etiketli bir
-issue açar, yeşil tur kapatır; tetikler durursa bekçi `🔴 bekçi kırmızı` açar. Haber almak için
-depoyu GitHub'da **Watch** etmen yeterli. (GitHub'ın `schedule`ı 51 saatte ~203 mühür turunun
+issue açar, yeşil tur kapatır; tetikler durursa bekçi `🔴 bekçi kırmızı` açar. Toplayıcılar da aynı
+yolla koşar: `collect-daily` (footystats, tff, venues; 07:10 UTC) ve `collect-news` (2 saatte bir);
+`fetch-results` kredi harcadığı için elle (R67). Bekçi kalan Odds API kredisini de izler. Haber
+almak için depoyu GitHub'da **Watch** etmen yeterli. (GitHub'ın `schedule`ı 51 saatte ~203 mühür turunun
 16'sını koşturmuş, 47 maçın kapanış fiyatı kalıcı kaçmıştı — DEFERRED §10.)
 
 **2. Push, merge ve migration'ları asistan yapar.** Bu projede SEO eklentisi (ve onun push kapısı)
@@ -25,10 +27,10 @@ depoyu GitHub'da **Watch** etmen yeterli. (GitHub'ın `schedule`ı 51 saatte ~20
 **Asla `--force`:** `seal.yml`in bot commit'leri zincir çıpalarıdır, force push onları siler.
 Push reddedilirse önce `git pull --no-rebase origin main`.
 
-**3. Bunu bil: ~2026-10-19'da kapı KENDİLİĞİNDEN kırmızı verecek.** `config/sources.yaml`
-içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politikası` adımı
-**30 günlük** tazelik istiyor. Bu tasarım, arıza değil: robots anlık görüntüleri yeniden
-çekilir ve tarihler güncellenir. **Kapı gevşetilerek yeşil alınmaz.**
+**3. robots.txt doğrulaması otomatik.** `kaynak-politikası` adımı `robots_verified_at` için
+**30 günlük** tazelik ister; `sources-audit.yml` canlı robots.txt anlık görüntüyle aynıysa tarihi
+kendisi ilerletir (RUNBOOK §3.7). Bir robots.txt değişirse tarih ilerlemez, tur kırmızı olur ve
+`🔴 sources-audit kırmızı` açılır: o zaman robots'u elle incele. **Kapı gevşetilerek yeşil alınmaz.**
 
 ---
 
@@ -55,6 +57,9 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | Kapı | 9 adım PASS + `zincir` SKIP | Birleşik `main` (`668ec61`) taze klonda + CI push koşusu |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
 | Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (her 15 dk) ve `snapshot-dispatch` (06:22 UTC) **canlı**; 0004 09-22 06:06 UTC uygulandı; `snapshot.yml`in `schedule`ı kalktı | seal 05:45/06:00/06:15 ve snapshot 06:22 → cron `succeeded` + `204` → turlar success (controller, 09-22) |
+| Toplayıcı tetikleri | `collect-daily-dispatch` (07:10 UTC), `collect-news-dispatch` (2 saatte bir) — 0005 **veritabanına UYGULANMADI** | `collect-*.yml` `main`e push'lanınca uygulanacak (GitHub `main`de olmayan workflow'u tetiklemez) |
+| Alarm ve bekçi | `ops-alert` issue'ları; bekçi tetikleri ve Odds API kredisini izler | kod `main`de, testli; hiçbir runner'da henüz koşmadı |
+| robots doğrulaması | otomatik (`sources-audit.yml`, RUNBOOK §3.7) | ilk otomatik ilerletme 2026-09-27 05:41 UTC turunda bekleniyor |
 | Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | Yalnız MockTransport testleri — runner'da ve gerçek GitHub'da **henüz koşmadı** |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 

@@ -10,10 +10,9 @@ gerekir; sonradan üretilemez.
 **Faz 0 = kayıt altyapısı · Faz 1 = toplayıcılar. Model hâlâ yok.** Sebebi tek cümle:
 **kaçırılan kapanış oranı geri gelmez.** Bu yüzden veri, model beklemeden birikir.
 
-> **Faz 1 toplayıcıları kütüphane + CLI olarak teslim edildi ve HİÇBİR ZAMANLAMAYA BAĞLI
-> DEĞİL.** `snapshot`/`seal` Supabase pg_cron'dan tetikleniyor (`docs/RUNBOOK.md` §3);
-> `fetch-*` komutları **elle** koşar.
-> Hiç koşmayan bir toplayıcı hiçbir şey toplamaz — ayrıntı:
+> **Tetikler Supabase pg_cron'da** (`docs/RUNBOOK.md` §3): `seal` 15 dakikada bir, `snapshot`
+> günde bir, `collect-daily` (footystats, tff, venues) günde bir, `collect-news` iki saatte bir;
+> `fetch-results` kredi harcadığı için elle koşar. Faz 1'in ölçülmeyenleri:
 > [`docs/phases/01-toplayicilar/HANDOFF.md`](docs/phases/01-toplayicilar/HANDOFF.md) §3.
 
 ## Nasıl çalışır
@@ -147,8 +146,8 @@ tükendi · `3` en az bir lig düştü · `4` lig aynası tazelenemedi · `5` **
 (`docs/RUNBOOK.md` §3). `seal.yml`in kendi `schedule`ı yalnız yedek ve bekçidir. Kırmızı bir
 tur `ops-alert` etiketli bir GitHub issue'su açar; yeşil tur kapatır.
 
-> **`fetch-*` komutlarının HİÇBİRİ zamanlanmış DEĞİL.** Bir toplayıcıyı cron'a bağlamak
-> Faz 1'in kapsamı dışında bırakıldı ve bu, Faz 2'nin ilk işidir. Bugün elle koşulurlar.
+> **`fetch-*` komutları** `collect-daily.yml` ve `collect-news.yml` ile pg_cron'dan tetiklenir;
+> yalnız `fetch-results` (kredi harcar, R67) elle koşar.
 
 ## Kapı
 
