@@ -12,6 +12,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, time
 from pathlib import Path
+from types import MappingProxyType
 
 from football_edge.collect import EXIT_SOURCE_FAILED, configure_logging
 from football_edge.collector import ContractViolation
@@ -32,7 +33,7 @@ from football_edge.market.devig import DEFAULT_METHOD, METHODS
 from football_edge.market.efficiency import (
     RESAMPLES,
     LeagueEfficiency,
-    NoClosingPrices,
+    Unmeasurable,
     best_method,
     candidates,
     league_efficiency,
@@ -81,10 +82,11 @@ def _measure(
     *,
     method: str,
     resamples: int,
-) -> tuple[tuple[LeagueEfficiency, ...], tuple[HistoryLeague, ...]]:
-    """Ölçülen satırlar ve ölçülemeyen ligler; biri raporun tamamını düşürmez (adıyla anılır)."""
+) -> tuple[tuple[LeagueEfficiency, ...], tuple[HistoryLeague, ...], Mapping[str, int]]:
+    """Ölçülen satırlar, ölçülemeyen ligler ve N'leri; biri raporu düşürmez (adıyla anılır)."""
     rows: list[LeagueEfficiency] = []
     unmeasured: list[HistoryLeague] = []
+    counts: dict[str, int] = {}
     for league in catalog.leagues:
         try:
             rows.append(
@@ -95,10 +97,11 @@ def _measure(
                     resamples=resamples,
                 )
             )
-        except NoClosingPrices as missing:
-            LOGGER.warning("lig=%s ölçülemedi — %s", league.code, missing)
+        except Unmeasurable as missing:
+            LOGGER.warning("lig=%s ölçülemedi (N=%d) — %s", league.code, missing.n, missing)
             unmeasured.append(league)
-    return tuple(rows), tuple(unmeasured)
+            counts[league.code] = missing.n
+    return tuple(rows), tuple(unmeasured), MappingProxyType(counts)
 
 
 def _efficiency(args: argparse.Namespace, now: datetime) -> int:
@@ -117,11 +120,19 @@ def _efficiency(args: argparse.Namespace, now: datetime) -> int:
     pooled = [match for matches in matches_by_league.values() for match in matches]
     scores = method_scores(pooled)
     method = best_method(scores)
-    rows, unmeasured = _measure(catalog, matches_by_league, method=method, resamples=args.resamples)
+    rows, unmeasured, counts = _measure(
+        catalog, matches_by_league, method=method, resamples=args.resamples
+    )
     ranking = rank(rows)
     chosen = candidates(rows, ranking, lock=lock, leagues=catalog.leagues)
     report = render_report(
-        rows, ranking, scores=scores, candidates=chosen, generated_at=now, unmeasured=unmeasured
+        rows,
+        ranking,
+        scores=scores,
+        candidates=chosen,
+        generated_at=now,
+        unmeasured=unmeasured,
+        unmeasured_counts=counts,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(report, encoding="utf-8")

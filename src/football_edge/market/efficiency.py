@@ -80,7 +80,15 @@ class Ranking:
     tiers: Mapping[str, str]
 
 
-class NoClosingPrices(ValueError):
+class Unmeasurable(ValueError):
+    """Lig ölçülemez: rapor onu DÜŞÜRMEZ, satırını `n` ve "—" hücreleriyle yazar (R100, R114)."""
+
+    def __init__(self, message: str, *, n: int = 0) -> None:
+        super().__init__(message)
+        self.n = n  # geliştirme penceresinde AvgC 1X2'si tam maç sayısı
+
+
+class NoClosingPrices(Unmeasurable):
     """Ligin geliştirme penceresinde AvgC 1X2'si tam tek maç yok: ölçülemez, rapor onu "—" yazar."""
 
 
@@ -211,6 +219,25 @@ def league_efficiency(
     close = _sample(rows, book=AVERAGE, market=H2H, phase=CLOSING, method=method)
     if not close.matches:
         raise NoClosingPrices(f"{league.code}: geliştirme penceresinde AvgC 1X2'si tam maç yok")
+    try:
+        return _measured(league, rows, close, method=method, resamples=resamples)
+    except ValueError as failure:
+        # Çok az maçta kalibrasyon fiti (ya da bir yeniden örneğinki) ayrışır: lig ölçülemez ama
+        # rapor düşmez (R114) — N'si ve "—" hücreleriyle yazılır.
+        n = len(close.matches)
+        raise Unmeasurable(
+            f"{league.code}: {n} maçla ölçütler kurulamadı — {failure}", n=n
+        ) from failure
+
+
+def _measured(
+    league: HistoryLeague,
+    rows: tuple[HistMatch, ...],
+    close: _Sample,
+    *,
+    method: str,
+    resamples: int,
+) -> LeagueEfficiency:
     main = league.kind == MAIN
     fit = calibration(close.probs, close.outcomes)
     margin = bootstrap_mean([overround(prices) for prices in close.prices], resamples=resamples)
@@ -364,6 +391,9 @@ _NOT_MEASURED = (
 )
 
 
+_NO_COUNTS: Mapping[str, int] = MappingProxyType({})
+
+
 def _number(value: float | None) -> str:
     return "—" if value is None else f"{value:.4f}"
 
@@ -422,12 +452,12 @@ def _league_line(row: LeagueEfficiency) -> str:
     return "| " + " | ".join(cells) + " |"
 
 
-def _unmeasured_line(league: HistoryLeague) -> str:
-    # Ölçülemeyen lig tablodan DÜŞMEZ: N = 0 ve her ölçüt "—" (kısmî kayıp sessiz geçmez).
+def _unmeasured_line(league: HistoryLeague, n: int) -> str:
+    # Ölçülemeyen lig tablodan DÜŞMEZ: N'si ve her ölçüt "—" (kısmî kayıp sessiz geçmez).
     metrics = _HEADER.count("|") - 1 - 4
     return (
         "| "
-        + " | ".join((league.code, league.league_id, league.kind, "0", *("—",) * metrics))
+        + " | ".join((league.code, league.league_id, league.kind, str(n), *("—",) * metrics))
         + " |"
     )
 
@@ -464,16 +494,19 @@ def render_report(
     candidates: Sequence[str],
     generated_at: datetime,
     unmeasured: Sequence[HistoryLeague] = (),
+    unmeasured_counts: Mapping[str, int] = _NO_COUNTS,
 ) -> str:
     """Markdown rapor: yöntem puanları, lig tablosu, iki sıralama, adaylar, ölçülmeyenler.
 
-    `unmeasured`: AvgC 1X2'si tam maçı olmayan ligler (`NoClosingPrices`) — satırları "—" ile.
+    `unmeasured`: ölçülemeyen ligler (`Unmeasurable`) — satırları "—" ile; N'leri
+    `unmeasured_counts`tan (yoksa 0: AvgC 1X2'si tam maç yok, `NoClosingPrices`).
     """
     lines = [
         "# Piyasa verimliliği — geliştirme dönemi",
         "",
         f"Üretildi: {generated_at.isoformat()} · Pencere: ana ligler {_window_text(MAIN_WINDOW)}, "
-        f"ek ligler {_window_text(EXTRA_WINDOW)} · holdout satırı okunmadı (doluluk kilitten).",
+        f"ek ligler {_window_text(EXTRA_WINDOW)} · holdout satırı ölçüme girmedi "
+        "(doluluk kilitteki özetten).",
         "",
         "Aralıklar %95 yüzdelik bootstrap (maç düzeyinde, sabit tohum). Yalnız toplu sayılar.",
         "",
@@ -483,7 +516,7 @@ def render_report(
         _HEADER,
         "|" + "---|" * (_HEADER.count("|") - 1),
         *(_league_line(row) for row in rows),
-        *(_unmeasured_line(league) for league in unmeasured),
+        *(_unmeasured_line(league, unmeasured_counts.get(league.code, 0)) for league in unmeasured),
         "",
         _VALUE_NOTE,
         "",

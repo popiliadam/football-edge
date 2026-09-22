@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from types import MappingProxyType
 
+import numpy as np
 import pytest
 
 from football_edge.history.catalog import EXTRA, MAIN, HistoryLeague
@@ -19,6 +20,7 @@ from football_edge.market.efficiency import (
     LeagueEfficiency,
     NoClosingPrices,
     Ranking,
+    Unmeasurable,
     best_method,
     candidates,
     league_efficiency,
@@ -40,9 +42,11 @@ from tests.efficiency_samples import (
     BASE,
     CLOSE_SETS,
     EXTRA_LEAGUE,
+    FAIR_HOMES,
     MAIN_LEAGUE,
     TOTAL_SETS,
     added,
+    calibrated,
     rich,
     synthetic,
 )
@@ -466,6 +470,9 @@ def test_report_has_every_section_and_only_aggregates() -> None:
     ):
         assert item in text, item
     assert "Team 0" not in text  # takım adı (ham satır) rapora giremez
+    # Kilit doğrulaması holdout satırlarını okuyup özetler; ölçüme ise hiçbiri girmez (R114).
+    assert "holdout satırı ölçüme girmedi" in text
+    assert "okunmadı" not in text
     assert text.endswith("\n")
 
 
@@ -496,3 +503,119 @@ def test_report_names_the_selected_method_and_flags_a_default_it_did_not_choose(
 
 def test_report_says_when_there_is_no_candidate() -> None:
     assert "Aday lig yok." in _report(SHIN_BEST, chosen=())
+
+
+# ── Düzeltme turu 1 (R114) ─────────────────────────────────────────────────────────────────
+
+
+def _population_slope(gamma: float) -> float:
+    """`calibrated` tasarımının GERÇEK havuzlanmış eğimi: her fiyat kümesinde sonuçlar q = p^γ
+    oranında (küme başına 30 000 maç) — örnekleme gürültüsü yok. γ'ya yakın ama eşit değil."""
+    probs: list[tuple[float, ...]] = []
+    outcomes: list[int] = []
+    for home in FAIR_HOMES:
+        fair = np.array((home, 0.25, 0.75 - home))
+        true = fair**gamma / np.sum(fair**gamma)
+        for outcome, share in enumerate(true):
+            copies = round(float(share) * 30_000)
+            probs.extend([tuple(float(p) for p in fair)] * copies)
+            outcomes.extend([outcome] * copies)
+    return calibration(probs, outcomes).slope
+
+
+@pytest.mark.parametrize("gamma", (0.6, 1.5), ids=("asiri-emin", "cekingen"))
+def test_slope_interval_brackets_a_known_calibration_slope_at_95_percent(gamma: float) -> None:
+    # Sonuçlar p^γ'dan çekilir: gerçek eğim bilinir. Kestirim ona yakın, aralık onu içerir.
+    truth = _population_slope(gamma)
+    assert truth == pytest.approx(gamma, abs=0.05)  # bozulma gerçekten eğimi değiştiriyor
+    matches = calibrated(900, gamma=gamma, seed=20260923)
+    result = league_efficiency(EXTRA_LEAGUE, matches, method=SHIN, resamples=200)
+    assert result.slope.estimate == pytest.approx(truth, abs=0.15)
+    assert result.slope.low < truth < result.slope.high
+    # Genişlik bağımsız bir başvuruyla sabitlenir: aynı tohum, maç ve sonuç BİRLİKTE yeniden
+    # örneklenir, %2.5–%97.5 yüzdelikleri. Hizasız örnekleme ya da dar düzey (%90, %80) tutmaz.
+    probs, outcomes = _closing_probs(matches, SHIN), _results(matches)
+    rng = np.random.default_rng(efficiency.SEED)
+    slopes = []
+    for _ in range(200):
+        picked = rng.integers(0, len(matches), size=len(matches))
+        refit = calibration([probs[i] for i in picked], [outcomes[i] for i in picked])
+        slopes.append(refit.slope)
+    low, high = np.percentile(slopes, [2.5, 97.5])
+    assert (result.slope.low, result.slope.high) == pytest.approx((low, high))
+
+
+@pytest.mark.parametrize("count", (1, 2, 3))
+def test_a_thin_league_is_unmeasurable_and_keeps_its_n(count: int) -> None:
+    # R114/I3: AvgC'si tam 1–3 maçta kalibrasyon kurulamaz; düz ValueError raporu düşürürdü.
+    # 1–2 maçta ana fit ayrışır; 3 maçta ana fit kurulur ama üretim tekrar sayısında (2000)
+    # bir yeniden örnek ayrışır — iki yol da aynı istisnaya çıkar. Bu yüzden varsayılan tekrar.
+    thin = synthetic(count, league="X1", season="2023")
+    with pytest.raises(Unmeasurable, match="X1") as caught:
+        league_efficiency(EXTRA_LEAGUE, thin, method=SHIN)
+    assert caught.value.n == count
+    assert not isinstance(caught.value, NoClosingPrices)
+
+
+def test_a_league_without_closing_prices_is_unmeasurable_with_n_zero() -> None:
+    bare = tuple(replace(match, odds=MappingProxyType({})) for match in BASE)
+    with pytest.raises(Unmeasurable) as caught:
+        league_efficiency(MAIN_LEAGUE, bare, method=SHIN, resamples=FAST)
+    assert isinstance(caught.value, NoClosingPrices)
+    assert caught.value.n == 0
+
+
+def test_an_unmeasurable_league_row_shows_its_n_and_dashes() -> None:
+    main = league_efficiency(MAIN_LEAGUE, BASE, method=SHIN, resamples=FAST)
+    text = render_report(
+        (main,),
+        rank((main,)),
+        scores=SHIN_BEST,
+        candidates=(),
+        generated_at=datetime(2026, 10, 5, 9, 0, tzinfo=UTC),
+        unmeasured=(UNMEASURED,),
+        unmeasured_counts=MappingProxyType({"X9": 2}),
+    )
+    (row,) = [line for line in text.splitlines() if line.startswith("| X9 ")]
+    assert row == "| X9 | x.9 | extra | 2 | " + " | ".join(["—"] * 14) + " |"
+
+
+def test_a_slope_interval_containing_one_is_tier_c_only_when_its_far_end_is_below_the_median() -> (
+    None
+):
+    # Uzaklık medyanı 0.1 (tahminler 0.4, 0.2, 0, 0). 1'i içeren iki aralığın alt ucu 0 → A olamaz;
+    # kademeyi ÜST uç, yani 1'den en uzak uç belirler: S1'in max(0.05, 0.4) = 0.4 → B,
+    # S2'nin max(0.02, 0.05) = 0.05 → C. Yakın uç (min) S1'i de C yapardı.
+    rows = (
+        _row("Q1", kind=EXTRA, slope=(0.6, 0.5, 0.7)),
+        _row("Q3", kind=EXTRA, slope=(1.2, 1.15, 1.25)),
+        _row("S1", kind=EXTRA, slope=(1.0, 0.95, 1.4)),
+        _row("S2", kind=EXTRA, slope=(1.0, 0.98, 1.05)),
+    )
+    assert dict(rank(rows).tiers) == {"Q1": "A", "Q3": "A", "S1": "B", "S2": "C"}
+
+
+def test_distance_of_an_interval_starting_exactly_at_one() -> None:
+    # Sınır: alt uç tam 1.0 iken iki dal da [0, high − 1] verir (R7 `>` ↔ `>=` eşdeğer mutant).
+    assert efficiency._distance(Interval(1.1, 1.0, 1.3)) == Interval(
+        pytest.approx(0.1), 0.0, pytest.approx(0.3)
+    )
+
+
+def test_book_gap_coverage_counts_matches_without_avgc_in_the_denominator() -> None:
+    # Doluluk paydası sezonun BÜTÜN geliştirme maçlarıdır, yalnız AvgC'si tam olanlar değil:
+    # 17 maçta AvgC + PSC, 3 maçta yalnız PSC → 17/20 = %85, sezon girmez.
+    full = synthetic(20, start=date(2021, 8, 7), season="2122", first=20)
+    thin = synthetic(20, start=date(2022, 8, 6), season="2223", first=40)
+    sharp = {("PS", H2H, CLOSING): (1.9, 3.8, 3.8)}
+    no_average = tuple(
+        with_prices(replace(match, odds=MappingProxyType({})), sharp) for match in thin[17:]
+    )
+    matches = (*added(full, sharp), *added(thin[:17], sharp), *no_average)
+    result = league_efficiency(MAIN_LEAGUE, matches, method=SHIN, resamples=FAST)
+    used = added(full, sharp)
+    average = per_match_log_loss(_closing_probs(used, SHIN), _results(used))
+    keen = per_match_log_loss(_closing_probs(used, SHIN, book="PS"), _results(used))
+    assert result.sharp_gap is not None
+    expected = math.fsum(a - s for a, s in zip(average, keen, strict=True)) / len(used)
+    assert result.sharp_gap.estimate == pytest.approx(expected)

@@ -22,7 +22,15 @@ from football_edge.history.types import CLOSING, H2H, HistMatch
 from football_edge.market import __main__ as market_main
 from football_edge.market import efficiency
 from football_edge.market.bridge import LiveClosing
-from tests.efficiency_samples import BASE, EXTRA_LEAGUE, MAIN_LEAGUE, rich, synthetic
+from football_edge.market.devig import DEFAULT_METHOD
+from tests.efficiency_samples import (
+    BASE,
+    EXTRA_LEAGUE,
+    MAIN_LEAGUE,
+    patterned,
+    rich,
+    synthetic,
+)
 from tests.market_factory import hist_match
 
 CATALOG = Catalog(current_season="2627", leagues=(MAIN_LEAGUE, EXTRA_LEAGUE))
@@ -336,3 +344,67 @@ def test_bridge_defaults_point_at_the_repository_config() -> None:
     assert args.catalog == Path("config/history_leagues.yaml")
     assert args.aliases == Path("config/history_aliases.yaml")
     assert args.method == "shin"
+
+
+# ── Düzeltme turu 1 (R114) ─────────────────────────────────────────────────────────────────
+
+
+def test_efficiency_measures_with_the_method_the_pooled_leagues_choose(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Aynı marjlı fiyat (1.5, 4.0, 7.0): M1'de favori kazanır → M1 TEK BAŞINA `power` seçer;
+    # X1'de sürpriz kazanır → iki lig HAVUZLANINCA `multiplicative`. İkisi de DEFAULT_METHOD değil.
+    main = patterned(
+        "HHHHHHHDDA", league="M1", season="2324", start=date(2023, 8, 5), repeats=8, first=0
+    )
+    extra = patterned(
+        "HAAADDAA", league="X1", season="2023", start=date(2023, 3, 4), repeats=8, first=500
+    )
+    assert efficiency.best_method(efficiency.method_scores(main)) == "power"
+    history = {"M1": main, "X1": extra}
+    lock_path, _ = _wire(monkeypatch, tmp_path, history, history)
+    methods: list[str] = []
+    real = efficiency.league_efficiency
+
+    def spy(league: Any, matches: Any, *, method: str, resamples: int) -> Any:
+        methods.append(method)
+        return real(league, matches, method=method, resamples=resamples)
+
+    monkeypatch.setattr(market_main, "league_efficiency", spy)
+    out = tmp_path / "rapor.md"
+    caplog.set_level(logging.INFO, logger="football_edge.market")
+
+    code = market_main.main(
+        ["efficiency", "--out", str(out), "--lock", str(lock_path), "--resamples", "20"]
+    )
+
+    assert code == 0
+    assert DEFAULT_METHOD != "multiplicative"
+    assert methods == ["multiplicative", "multiplicative"]
+    text = out.read_text(encoding="utf-8")
+    assert "Seçilen yöntem: **multiplicative**" in text
+    assert "UYARI" in text
+    assert "yöntem=multiplicative" in caplog.text
+
+
+@pytest.mark.parametrize("count", (1, 2, 3))
+def test_efficiency_keeps_a_thin_league_with_its_n(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    count: int,
+) -> None:
+    # R114/I3: AvgC'si tam 1–3 maçlı lig raporu düşürmez; N'si ve "—" hücreleriyle kalır.
+    # Varsayılan tekrar (2000): 3 maçta ana fit kurulur, ayrışan bir yeniden örnek düşürür.
+    history = {**_history(), "X1": synthetic(count, league="X1", season="2023")}
+    lock_path, _ = _wire(monkeypatch, tmp_path, history, history)
+    out = tmp_path / "rapor.md"
+    arguments = ["efficiency", "--out", str(out), "--lock", str(lock_path)]
+
+    code = market_main.main(arguments)
+
+    assert code == 0
+    text = out.read_text(encoding="utf-8")
+    assert "| M1 | m.1 | main | 56 |" in text
+    assert f"| X1 | x.1 | extra | {count} | " + " | ".join(["—"] * 14) + " |" in text
+    assert "lig=X1 ölçülemedi" in caplog.text
