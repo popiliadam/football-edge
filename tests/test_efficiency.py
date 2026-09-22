@@ -550,9 +550,11 @@ def test_a_thin_league_is_unmeasurable_and_keeps_its_n(count: int) -> None:
     # R114/I3: AvgC'si tam 1–3 maçta kalibrasyon kurulamaz; düz ValueError raporu düşürürdü.
     # 1–2 maçta ana fit ayrışır; 3 maçta ana fit kurulur ama üretim tekrar sayısında (2000)
     # bir yeniden örnek ayrışır — iki yol da aynı istisnaya çıkar. Bu yüzden varsayılan tekrar.
+    # R115/N1: pencerede AvgC'siz bir geliştirme maçı daha var — N onu SAYMAZ.
     thin = synthetic(count, league="X1", season="2023")
+    bare = replace(synthetic(1, league="X1", season="2023", first=50)[0], odds=MappingProxyType({}))
     with pytest.raises(Unmeasurable, match="X1") as caught:
-        league_efficiency(EXTRA_LEAGUE, thin, method=SHIN)
+        league_efficiency(EXTRA_LEAGUE, (*thin, bare), method=SHIN)
     assert caught.value.n == count
     assert not isinstance(caught.value, NoClosingPrices)
 
@@ -619,3 +621,23 @@ def test_book_gap_coverage_counts_matches_without_avgc_in_the_denominator() -> N
     assert result.sharp_gap is not None
     expected = math.fsum(a - s for a, s in zip(average, keen, strict=True)) / len(used)
     assert result.sharp_gap.estimate == pytest.approx(expected)
+
+
+# ── Düzeltme turu 2 (R115): yalnız kalibrasyon fiti "ölçülemez"e döner ──────────────────────
+
+
+def test_resamples_below_one_is_an_error_not_an_unmeasurable_league() -> None:
+    with pytest.raises(ValueError, match="yeniden örnekleme") as caught:
+        league_efficiency(MAIN_LEAGUE, BASE, method=SHIN, resamples=0)
+    assert not isinstance(caught.value, Unmeasurable)
+
+
+def test_invalid_probabilities_propagate_instead_of_becoming_unmeasurable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Toplamı 1.5 olan olasılık satırı bir hatadır, ince lig değil: girdiyi doğrulayan ölçüt onu
+    # fit'ten ÖNCE ve yakalamanın dışında reddeder.
+    monkeypatch.setattr(efficiency, "match_probs", lambda match, **options: (0.5, 0.5, 0.5))
+    with pytest.raises(ValueError) as caught:
+        league_efficiency(MAIN_LEAGUE, BASE, method=SHIN, resamples=FAST)
+    assert not isinstance(caught.value, Unmeasurable)

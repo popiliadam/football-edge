@@ -54,6 +54,14 @@ EXIT_LOCK_VIOLATION = 9
 EXIT_NO_PAIRS = 10
 
 
+def _resamples(text: str) -> int:
+    """`--resamples` ≥ 1: 0 her ligi "ölçülemedi" yapıp aday listesini boşaltırdı (R115)."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"tekrar sayısı ≥ 1 olmalı: {value}")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m football_edge.market")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -61,7 +69,7 @@ def _parser() -> argparse.ArgumentParser:
     efficiency.add_argument("--out", type=Path, required=True, help="yazılacak markdown rapor")
     efficiency.add_argument("--lock", type=Path, default=LOCK_PATH)
     efficiency.add_argument("--catalog", type=Path, default=CATALOG_PATH)
-    efficiency.add_argument("--resamples", type=int, default=RESAMPLES)
+    efficiency.add_argument("--resamples", type=_resamples, default=RESAMPLES)
     bridge = commands.add_parser("bridge", help="tarihsel ↔ canlı kapanış köprüsü raporu")
     bridge.add_argument("--out", type=Path, required=True, help="yazılacak markdown rapor")
     bridge.add_argument(

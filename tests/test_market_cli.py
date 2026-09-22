@@ -408,3 +408,14 @@ def test_efficiency_keeps_a_thin_league_with_its_n(
     assert "| M1 | m.1 | main | 56 |" in text
     assert f"| X1 | x.1 | extra | {count} | " + " | ".join(["—"] * 14) + " |" in text
     assert "lig=X1 ölçülemedi" in caplog.text
+
+
+@pytest.mark.parametrize("value", ("0", "-5"))
+def test_efficiency_rejects_fewer_than_one_resample(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    # R115: `--resamples 0` her ligi "ölçülemedi" yapıp "Aday lig yok" yazardı; argparse reddeder.
+    monkeypatch.setattr(market_main, "configure_logging", lambda: None)
+    with pytest.raises(SystemExit) as caught:
+        market_main.main(["efficiency", "--out", "rapor.md", "--resamples", value])
+    assert caught.value.code == 2

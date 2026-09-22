@@ -136,7 +136,23 @@ def _sample(
     )
 
 
-def _slope_interval(close: _Sample, estimate: float, *, resamples: int) -> Interval:
+def _fit(
+    probs: Sequence[Sequence[float]], outcomes: Sequence[int], *, code: str, n: int
+) -> Calibration:
+    """Kalibrasyon fiti; ayrışırsa (çok az maç, ayrışan örnek) lig ölçülemez (R114, R115).
+
+    YALNIZ fit çevrilir: satırlar buraya gelmeden girdiyi doğrulayan ölçütlerden geçmiştir, bozuk
+    girdi ya da geçersiz tekrar sayısı düz `ValueError` olarak yükselir.
+    """
+    try:
+        return calibration(probs, outcomes)
+    except ValueError as failure:
+        raise Unmeasurable(
+            f"{code}: {n} maçla kalibrasyon kurulamadı — {failure}", n=n
+        ) from failure
+
+
+def _slope_interval(close: _Sample, estimate: float, *, resamples: int, code: str) -> Interval:
     """Eğimin yüzdelik aralığı: maçlar yeniden örneklenir, fit her örnekte YENİDEN kurulur."""
     rng = np.random.default_rng(SEED)
     size = len(close.matches)
@@ -144,7 +160,8 @@ def _slope_interval(close: _Sample, estimate: float, *, resamples: int) -> Inter
     for _ in range(resamples):
         picked = rng.integers(0, size, size=size)
         probs = [close.probs[index] for index in picked]
-        slopes.append(calibration(probs, [close.outcomes[index] for index in picked]).slope)
+        outcomes = [close.outcomes[index] for index in picked]
+        slopes.append(_fit(probs, outcomes, code=code, n=size).slope)
     tail = (1.0 - LEVEL) / 2.0 * 100.0
     low, high = np.percentile(slopes, [tail, 100.0 - tail])
     return Interval(estimate=estimate, low=float(low), high=float(high))
@@ -200,7 +217,7 @@ def _book_gap(
 
 
 def _totals(
-    rows: Sequence[HistMatch], *, method: str, resamples: int
+    rows: Sequence[HistMatch], *, method: str, resamples: int, code: str, n: int
 ) -> tuple[Interval | None, Interval | None, Calibration | None]:
     """Ü/A 2.5 kapanışı (AvgC>2.5, AvgC<2.5): marj, log loss, kalibrasyon — tam satır yoksa None."""
     sample = _sample(rows, book=AVERAGE, market=TOTALS_25, phase=CLOSING, method=method)
@@ -208,7 +225,7 @@ def _totals(
         return None, None, None
     margin = bootstrap_mean([overround(prices) for prices in sample.prices], resamples=resamples)
     loss = bootstrap_mean(per_match_log_loss(sample.probs, sample.outcomes), resamples=resamples)
-    return margin, loss, calibration(sample.probs, sample.outcomes)
+    return margin, loss, _fit(sample.probs, sample.outcomes, code=code, n=n)
 
 
 def league_efficiency(
@@ -219,15 +236,7 @@ def league_efficiency(
     close = _sample(rows, book=AVERAGE, market=H2H, phase=CLOSING, method=method)
     if not close.matches:
         raise NoClosingPrices(f"{league.code}: geliştirme penceresinde AvgC 1X2'si tam maç yok")
-    try:
-        return _measured(league, rows, close, method=method, resamples=resamples)
-    except ValueError as failure:
-        # Çok az maçta kalibrasyon fiti (ya da bir yeniden örneğinki) ayrışır: lig ölçülemez ama
-        # rapor düşmez (R114) — N'si ve "—" hücreleriyle yazılır.
-        n = len(close.matches)
-        raise Unmeasurable(
-            f"{league.code}: {n} maçla ölçütler kurulamadı — {failure}", n=n
-        ) from failure
+    return _measured(league, rows, close, method=method, resamples=resamples)
 
 
 def _measured(
@@ -239,24 +248,29 @@ def _measured(
     resamples: int,
 ) -> LeagueEfficiency:
     main = league.kind == MAIN
-    fit = calibration(close.probs, close.outcomes)
+    n = len(close.matches)  # AvgC 1X2'si tam maçlar — penceredeki bütün satırlar değil
+    # Girdiyi doğrulayan ölçütler fit'ten ÖNCE ve hiçbir yakalamanın dışında (R115): bozuk olasılık
+    # satırı ya da tekrar sayısı < 1 düz `ValueError`dır; "ölçülemez"e yalnız `_fit` çevirir.
     margin = bootstrap_mean([overround(prices) for prices in close.prices], resamples=resamples)
+    loss = bootstrap_mean(per_match_log_loss(close.probs, close.outcomes), resamples=resamples)
+    brier_score, rps_score = brier(close.probs, close.outcomes), rps(close.probs, close.outcomes)
+    fit = _fit(close.probs, close.outcomes, code=league.code, n=n)
     ou25_margin, ou25_loss, ou25_fit = (
-        _totals(rows, method=method, resamples=resamples) if main else (None, None, None)
+        _totals(rows, method=method, resamples=resamples, code=league.code, n=n)
+        if main
+        else (None, None, None)
     )
     return LeagueEfficiency(
         code=league.code,
         league_id=league.league_id,
         kind=league.kind,
-        n=len(close.matches),
+        n=n,
         margin=margin,
-        log_loss=bootstrap_mean(
-            per_match_log_loss(close.probs, close.outcomes), resamples=resamples
-        ),
-        brier=brier(close.probs, close.outcomes),
-        rps=rps(close.probs, close.outcomes),
+        log_loss=loss,
+        brier=brier_score,
+        rps=rps_score,
         calibration=fit,
-        slope=_slope_interval(close, fit.slope, resamples=resamples),
+        slope=_slope_interval(close, fit.slope, resamples=resamples, code=league.code),
         late_info=_late_info(close, method=method, resamples=resamples) if main else None,
         value_rate=_value_rate(close, resamples=resamples) if main else None,
         sharp_gap=_book_gap(rows, book=SHARP, method=method, resamples=resamples),
