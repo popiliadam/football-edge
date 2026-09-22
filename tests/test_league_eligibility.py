@@ -18,6 +18,7 @@ import pytest
 
 from football_edge import collect, fetch, rounds
 from football_edge.collectors import footystats, news, results, tff, venues
+from football_edge.collectors.footystats import FootyStatsResult
 from football_edge.collectors.results import ResultsCollectResult
 from football_edge.history.catalog import load_catalog
 from football_edge.leagues import League, active_leagues, load_leagues
@@ -155,9 +156,10 @@ def test_seal_with_the_real_config_never_calls_an_inactive_league(
     requested: list[str] = []
     _patch_main(monkeypatch, db, requested)
 
-    collect.main(["seal"])
+    code = collect.main(["seal"])
 
     capsys.readouterr()
+    assert code == 0
     assert requested == ["soccer_turkey_super_league"]
 
 
@@ -181,6 +183,31 @@ def test_fetch_results_with_the_real_config_asks_only_the_six_live_leagues(
 
     capsys.readouterr()
     assert seen == [LIVE_KEYS]
+
+
+def test_fetch_footystats_with_the_real_config_asks_only_the_active_leagues_paths(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """I1 (inceleme): `fetch-footystats` komutunun kendisi pasif ligi süzmeli. Süzmezse Mac'teki
+    launchd işi `config/sources.yaml`de BEYAN EDİLMEMİŞ yolları ister — kapı bunu görmezdi."""
+    monkeypatch.setattr(fetch, "LEAGUES_PATH", LEAGUES_PATH)
+    seen: list[tuple[str | None, ...]] = []
+
+    def fake_collect_footystats(
+        conn: object, client: object, leagues: tuple[League, ...], **_: object
+    ) -> FootyStatsResult:
+        seen.append(tuple(league.footystats_path for league in leagues))
+        return FootyStatsResult(written=0, failed_leagues=())
+
+    monkeypatch.setattr(fetch, "collect_footystats", fake_collect_footystats)
+
+    assert fetch._fetch_footystats_command(object(), object(), datetime.now(UTC)) == 0
+
+    capsys.readouterr()
+    assert seen == [tuple(league.footystats_path for league in active_leagues(_configured()))]
+    assert not {league.footystats_path for league in NEW_LEAGUES if not league.active} & set(
+        seen[0]
+    )
 
 
 # ── Toplayıcı başına uygunluk ───────────────────────────────────────────────
