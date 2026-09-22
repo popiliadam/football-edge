@@ -251,52 +251,68 @@ kodu artık iki tabloya bakmak zorundadır. Bu borç `docs/DEFERRED.md`'ye yazı
 
 ---
 
-## 3. Mühür tetiği — pg_cron → `workflow_dispatch`
+## 3. Tetikler (pg_cron → `workflow_dispatch`) ve kırmızı tur alarmı
 
 ### 3.1 Neden var
 GitHub zamanlanmış workflow'ları garanti etmez. 2026-09-19 → 21 arasında `seal.yml`in `*/15`
 cron'u ~203 tur yerine 16 tur koştu; 20 dakikalık mühür penceresi yüzünden 47 maçın kapanış
-fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron: her 15 dakikada
-`ops.dispatch_seal()` GitHub API'si üzerinden `seal.yml`i çalıştırır
-(`db/migrations/0003_seal_dispatch.sql`). `seal.yml`in kendi `schedule`ı yedek olarak durur.
+fiyatı kalıcı olarak kaçtı. Asıl tetik artık Supabase'deki pg_cron:
+
+| İş | Ne zaman | Çağırdığı | Tetiklediği |
+|---|---|---|---|
+| `seal-dispatch` | her 15 dakikada | `ops.dispatch_seal()` | `seal.yml` |
+| `snapshot-dispatch` | her gün 06:22 UTC | `ops.dispatch_snapshot()` | `snapshot.yml` |
+
+İkisi de `ops.dispatch_workflow()`a delege eder; o yalnız izinli listedeki bir adı GitHub
+API'si üzerinden tetikler (`db/migrations/0003_seal_dispatch.sql`, `0004_workflow_dispatch.sql`).
+`seal.yml`in kendi `schedule`ı yedektir ve bekçiyi koşturur (§3.6). `snapshot.yml`in
+`schedule`ı **yok**: iki tetik aynı gün iki tur, yani iki kat kredi demektir.
 
 ### 3.2 Kurulum (tek sefer)
 1. **Token (GitHub):** hazır doldurulmuş form (ad, açıklama, sahip, süre ve **Actions: Read and
    write** gelir; başka izin yok):
-   <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
+   <https://github.com/settings/personal-access-tokens/new?name=football-edge+seal+dispatch&description=pg_cron+triggers+seal.yml+and+snapshot.yml+via+workflow_dispatch%3B+Supabase+Vault%3A+github_seal_dispatch&target_name=popiliadam&expires_in=none&actions=write>
    Elle seçilen tek alan: Repository access → *Only select repositories* → `football-edge`.
    `expires_in=none` bilinçli: yıllık yenileme bir el işidir. Yetki tek depoda yalnız Actions;
-   süreli token istenirse tarih seçilir ve §3.4 devreye girer.
+   süreli token istenirse tarih seçilir ve §3.4 devreye girer. Token artık **iki** workflow'u
+   tetikler: `seal.yml` ve `snapshot.yml`. Actions yetkisi depodaki her workflow'u tetikleyebilir;
+   sınırı `ops.dispatch_workflow`un izinli listesi çizer (`0004_workflow_dispatch.sql`).
 2. **Vault (Supabase):** panelde Vault sayfasında *Add new secret* → adı tam olarak
    `github_seal_dispatch`, değeri token. SQL editörü de olur ama token sorgu geçmişinde kalır:
    `select vault.create_secret('<token>', 'github_seal_dispatch');`
-3. **Migration:** `db/migrations/0003_seal_dispatch.sql`in tamamı SQL editöründe bir kez
-   çalıştırılır. Yeniden çalıştırmak güvenlidir: iş adıyla güncellenir, ikinci iş açılmaz.
+3. **Migration:** `db/migrations/0003_seal_dispatch.sql`, ardından `0004_workflow_dispatch.sql`
+   SQL editöründe sırayla bir kez çalıştırılır. Yeniden çalıştırmak güvenlidir: işler adıyla
+   güncellenir, ikinci iş açılmaz. `snapshot.yml`den `schedule`ı kaldıran commit `main`e,
+   0004 uygulanmadan gitmez — arada snapshot'ı tetikleyen hiçbir şey kalmaz.
 
-Secret yokken iş her 15 dakikada `ops.dispatch_seal: Vault secret github_seal_dispatch yok`
-hatası verir; secret eklendiği an kendiliğinden çalışmaya başlar.
+Secret yokken her iş `ops.dispatch_workflow: Vault secret github_seal_dispatch yok — <workflow>
+tetiklenmedi` hatası verir; secret eklendiği an kendiliğinden çalışmaya başlar. Secret'ın adı
+yalnız mührü anar ama iki workflow'a da hizmet eder.
 
 ### 3.3 Doğrulama
 ```sql
-select status, return_message, start_time from cron.job_run_details
-where jobid = (select jobid from cron.job where jobname = 'seal-dispatch')
-order by start_time desc limit 5;
+select j.jobname, d.status, d.return_message, d.start_time
+from cron.job_run_details d join cron.job j using (jobid)
+where j.jobname in ('seal-dispatch', 'snapshot-dispatch')
+order by d.start_time desc limit 10;
 
 select status_code, error_msg, created from net._http_response order by created desc limit 5;
 ```
 `204` = GitHub turu başlattı. `401` = token geçersiz ya da süresi dolmuş (§3.4). `403`/`404` =
-token bu depoya ya da Actions'a yetkili değil. `422` = `seal.yml`de `workflow_dispatch` yok.
-GitHub tarafı: `gh run list --workflow seal.yml --event workflow_dispatch --limit 5`.
+token bu depoya ya da Actions'a yetkili değil. `422` = workflow'da `workflow_dispatch` yok.
+GitHub tarafı: `gh run list --workflow seal.yml --event workflow_dispatch --limit 5` (snapshot
+için `--workflow snapshot.yml`).
 
 **Beklenen kırmızı:** kaçmış bir maç, başlama saatinden sonra 24 saat boyunca her turda
 "kaçan mühür" olarak raporlanır (`rounds._seal_candidates`: `commence_time > now - 1 gün`).
 Tetik düzeldikten sonra da turlar son kaçan maçın üstünden 24 saat geçene kadar `exit 5` verir.
-O turlarda yeni maçların mühürlenip mühürlenmediğine logdan bakılır; kırmızı kendiliğinden
-biter.
+O turlarda yeni maçların mühürlenip mühürlenmediğine logdan bakılır; kırmızı — ve `seal`
+alarmı (§3.6) — kendiliğinden biter.
 
 ### 3.4 Token yenileme
-Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) dispatch `401` alır ve yalnız seyrek yedek `schedule` kalır. Yeni tokenı
-§3.2/1'deki gibi oluştur, sonra:
+Token iptal edilirse (ya da süreli seçildiyse süresi dolarsa) iki dispatch de `401` alır: mühür
+yalnız seyrek yedek `schedule`la koşar, snapshot hiç koşmaz. Bekçi yedek turda kendi alarmını
+(`🔴 bekçi kırmızı`) açar (§3.6). Yeni tokenı §3.2/1'deki gibi oluştur, sonra:
 ```sql
 select vault.update_secret((select id from vault.secrets where name = 'github_seal_dispatch'),
                            '<yeni token>');
@@ -304,6 +320,37 @@ select vault.update_secret((select id from vault.secrets where name = 'github_se
 
 ### 3.5 Durdurma / yeniden başlatma
 ```sql
-select cron.unschedule('seal-dispatch');   -- durdur
-select cron.schedule('seal-dispatch', '*/15 * * * *', 'select ops.dispatch_seal()');  -- başlat
+select cron.unschedule('seal-dispatch');       -- mührü durdur
+select cron.schedule('seal-dispatch', '*/15 * * * *', 'select ops.dispatch_seal()');       -- başlat
+select cron.unschedule('snapshot-dispatch');   -- snapshot'ı durdur
+select cron.schedule('snapshot-dispatch', '22 6 * * *', 'select ops.dispatch_snapshot()');  -- başlat
 ```
+Durdurulan iş eşiği aşınca bekçi kendi alarmını açar (§3.6): bilinçli bir durdurma da görünür
+kalır. İş yeniden başlayıp bekçi iki tetiği taze bulunca alarm kendiliğinden kapanır.
+
+### 3.6 Kırmızı tur alarmı ve bekçi
+`scripts/ops_alert.py` üç ayrı `ops-alert` issue'su tutar; her biri yalnız kendi başlığına dokunur:
+
+| Başlık | Açan ya da güncelleyen | Kapatan |
+|---|---|---|
+| `🔴 seal kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `seal.yml` turu | yeşil `seal.yml` turu |
+| `🔴 snapshot kırmızı` | kırmızı ya da koşarken iptal edilen (zaman aşımı) `snapshot.yml` turu | yeşil `snapshot.yml` turu |
+| `🔴 bekçi kırmızı` | bayat tetik bulan bekçi | iki tetiği de taze bulan bekçi |
+
+- Açık alarm varsa yenisi açılmaz, yalnız gövdesi güncellenir — gövde düzenlemesi bildirim
+  üretmez. Kapanırken `yeşile döndü: <tur>` yorumu yazılır. Etiket yoksa ilk açılışta oluşturulur.
+- **Alarm aç** `if: failure() || cancelled()`: zaman aşımı turu iptal eder ve `failure()` yanlış
+  döner. Kuyrukta beklerken iptal edilen tur hiç adım koşmaz, alarm da açmaz.
+- **Alarm kapat** `continue-on-error: true`: kapatma düşerse (ör. GitHub 5xx) yeşil tur kırmızıya
+  dönmez; açık alarm sonraki yeşil turda kapanır.
+- **Bekçi** yalnız `seal.yml`in yedek `schedule` turunda, mühürden sonra koşar. `seal.yml`in son
+  `workflow_dispatch` turu 60 dakikadan, `snapshot.yml`in son turu 30 saatten eskiyse (ya da hiç
+  yoksa) kendi alarmını açar ve **0 döner**: seal job'ını düşürseydi seal'in sonraki yeşil turu
+  alarmı geri alırdı. Gövdede hangi tetiğin ne kadar bayat olduğu ve eşik yazar; teşhis §3.3.
+  Ölü snapshot sessiz bir arızadır: maçları yalnız snapshot kaydeder; o durunca mühür de kayıtlı
+  maçlar bitince "kaçan" raporu bile vermeden susar. GitHub API'nin kendisi düşerse bekçi düşer ve
+  `seal` alarmı açılır.
+
+Haber GitHub'ın issue bildirimiyle gelir: e-posta, depo sahibinin bu depoyu izleme ayarına
+bağlıdır. Depo sayfasında *Watch* → *All Activity* (ya da *Custom* → *Issues*) seçili değilse
+issue açılır ama kimseye haber gitmez. Bilinen kör noktalar: `docs/DEFERRED.md` §10f.

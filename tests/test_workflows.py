@@ -374,35 +374,202 @@ def test_no_workflow_besides_seal_and_snapshot_shares_the_odds_collect_group() -
     )
 
 
-# ── Mühürün asıl tetiği pg_cron'da (db/migrations/0003_seal_dispatch.sql) ────────────────────
+# ── Tetikler pg_cron'da (db/migrations/0003, 0004) ───────────────────────────────────────────
 # GitHub'ın `schedule`ı 51 saatte ~203 tur yerine 16 tur koştu ve 47 maçın kapanış mührü kaçtı.
 # Asıl tetik artık pg_cron → `workflow_dispatch`. İki uç birbirine yalnız bir dosya adıyla ve bir
-# tetik adıyla bağlı: `seal.yml` yeniden adlandırılırsa ya da `workflow_dispatch` kaldırılırsa
-# GitHub her çağrıyı reddeder ve geriye yalnız seyrek yedek `schedule` kalır.
+# tetik adıyla bağlı: izinli listedeki bir workflow yeniden adlandırılırsa ya da
+# `workflow_dispatch`i kaldırılırsa GitHub her çağrıyı reddeder ve o tur hiç koşmaz.
 
-SEAL_DISPATCH_MIGRATION = REPO / "db/migrations/0003_seal_dispatch.sql"
-
-
-def test_pg_cron_dispatch_targets_the_seal_workflow_on_main() -> None:
-    sql = SEAL_DISPATCH_MIGRATION.read_text(encoding="utf-8")
-    targets = re.findall(r"/actions/workflows/([\w.-]+)/dispatches", sql)
-
-    assert targets == [SEAL.name], f"pg_cron {targets} tetikliyor, {SEAL.name} değil"
-    assert "jsonb_build_object('ref', 'main')" in sql, "dispatch varsayılan dala gitmiyor"
+MIGRATIONS = REPO / "db/migrations"
+SNAPSHOT = REPO / ".github/workflows/snapshot.yml"
+GITHUB_TOKEN_PATTERN = re.compile(r"github_pat_|gh[pousr]_[A-Za-z0-9]{20,}")
 
 
-def test_seal_workflow_accepts_a_dispatch_without_inputs() -> None:
-    triggers = _triggers(SEAL)
+def _migrations() -> dict[str, str]:
+    texts = {
+        path.name: path.read_text(encoding="utf-8") for path in sorted(MIGRATIONS.glob("*.sql"))
+    }
+    assert texts, "db/migrations/*.sql bulunamadı — aşağıdaki taramalar boş geçerdi"
+    return texts
 
-    assert "workflow_dispatch" in triggers, "pg_cron'un çağırdığı tetik seal.yml'den kaldırılmış"
-    inputs = (triggers["workflow_dispatch"] or {}).get("inputs") or {}
-    required = sorted(name for name, spec in inputs.items() if (spec or {}).get("required"))
-    assert required == [], f"dispatch yalnız `ref` gönderiyor, zorunlu girdi reddedilir: {required}"
+
+def _dispatch_targets(sql: str) -> set[str]:
+    """Bir migration'ın tetikleyebildiği workflow'lar: URL'e gömülü hedef (0003) ya da URL'i
+    kuran fonksiyonun izinli listesi (0004: `array['seal.yml', ...]`)."""
+    in_urls = re.findall(r"/actions/workflows/([\w.-]+)/dispatches", sql)
+    in_lists = [
+        name
+        for listed in re.findall(r"array\[([^\]]*)\]", sql)
+        for name in re.findall(r"'([\w.-]+\.ya?ml)'", listed)
+    ]
+    return {*in_urls, *in_lists}
 
 
-def test_pg_cron_dispatch_reads_the_token_from_vault_not_from_the_file() -> None:
-    """Depo public ve `check_secrets.sh` GitHub token biçimini tanımıyor: bu dosyanın bekçisi."""
-    sql = SEAL_DISPATCH_MIGRATION.read_text(encoding="utf-8")
+def test_every_workflow_pg_cron_may_dispatch_exists_and_accepts_a_bare_dispatch() -> None:
+    """Dispatch yalnız `ref` gönderir: eksik tetik ya da zorunlu girdi o turu reddettirir."""
+    targets = set().union(*map(_dispatch_targets, _migrations().values()))
+    assert {"seal.yml", "snapshot.yml"} <= targets, f"izinli liste okunamadı: {sorted(targets)}"
 
-    assert "vault.decrypted_secrets" in sql
-    assert re.search(r"github_pat_|gh[pousr]_[A-Za-z0-9]{20,}", sql) is None, "migration'da token"
+    for name in sorted(targets):
+        path = REPO / ".github/workflows" / name
+        assert path.is_file(), f"pg_cron {name} tetikliyor ama workflow yok"
+        triggers = _triggers(path)
+        assert "workflow_dispatch" in triggers, f"{name}: pg_cron'un çağırdığı tetik kaldırılmış"
+        inputs = (triggers["workflow_dispatch"] or {}).get("inputs") or {}
+        required = sorted(key for key, spec in inputs.items() if (spec or {}).get("required"))
+        assert required == [], f"{name}: dispatch zorunlu girdiyle reddedilir: {required}"
+
+
+def test_every_dispatching_migration_targets_main_with_a_vault_token() -> None:
+    dispatching = {name: sql for name, sql in _migrations().items() if "/dispatches" in sql}
+    assert dispatching, "hiçbir migration workflow tetiklemiyor — test bayatladı"
+
+    for name, sql in dispatching.items():
+        assert "jsonb_build_object('ref', 'main')" in sql, f"{name}: varsayılan dala gitmiyor"
+        assert "vault.decrypted_secrets" in sql, f"{name}: token Vault'tan okunmuyor"
+
+
+def test_no_migration_carries_a_github_token() -> None:
+    """Depo public ve `check_secrets.sh` GitHub token biçimini tanımıyor: bekçi bu test."""
+    leaking = sorted(
+        name for name, sql in _migrations().items() if GITHUB_TOKEN_PATTERN.search(sql)
+    )
+
+    assert leaking == [], f"migration'da GitHub token'ı: {leaking}"
+
+
+def test_snapshot_is_triggered_by_pg_cron_alone() -> None:
+    """İki tetik aynı gün iki tur, yani iki kat kredi demek. Tek tetik pg_cron'daki
+    `snapshot-dispatch`; sessizce durmasına karşı koruma `seal.yml`deki bekçidir."""
+    assert "schedule" not in _triggers(SNAPSHOT), "snapshot.yml GitHub'dan da tetikleniyor"
+
+    scheduling = [
+        name
+        for name, sql in _migrations().items()
+        if re.search(r"cron\.schedule\(\s*'snapshot-dispatch'[^;]*ops\.dispatch_snapshot\(\)", sql)
+    ]
+    assert scheduling, "snapshot.yml'i ne GitHub ne pg_cron zamanlıyor: tur hiç koşmaz"
+
+
+def test_snapshot_dispatch_lands_between_two_seal_dispatches() -> None:
+    """Mühür ve snapshot aynı `odds-collect` grubunda sıraya girer ve grup tek bir BEKLEYEN tur
+    tutar: bir mühür dispatch'inin hemen ardından tetiklenen snapshot o turun arkasında bekler,
+    kuyruğa giren üçüncü bir tur onu sessizce iptal ettirir. Snapshot iki mühür dispatch'inin
+    ortasına düşmeli."""
+    sql = "\n".join(_migrations().values())
+    seal = re.search(r"cron\.schedule\(\s*'seal-dispatch',\s*'\*/(\d+) \* \* \* \*'", sql)
+    snapshot = re.search(r"cron\.schedule\(\s*'snapshot-dispatch',\s*'(\d+) \d+ \* \* \*'", sql)
+    assert seal is not None and snapshot is not None, "pg_cron zamanlamaları okunamadı"
+
+    period, minute = int(seal.group(1)), int(snapshot.group(1))
+    after_seal = minute % period
+    assert period // 3 <= after_seal <= period - period // 3, (
+        f"snapshot :{minute:02d}, bir mühür dispatch'inden {after_seal} dk sonra — kuyrukta "
+        "onun arkasında bekler"
+    )
+
+
+# ── Kırmızı tur alarmı (scripts/ops_alert.py) ──────────────────────────────────────────────
+# 15 kırmızı mühür turu iki gün fark edilmedi. Kırmızı tur `ops-alert` issue'su açar (açıksa
+# gövdesini günceller), yeşil tur kapatır. Burada ölçülen, adımların VAR ve DOĞRU YERDE
+# olduğudur; betiğin davranışı `tests/test_ops_alert.py`de.
+
+ALARMED = (SEAL, SNAPSHOT)
+
+
+def _condition(step: dict[str, Any]) -> str:
+    """Adımın `if:` ifadesi; varsa `${{ }}` sarmalı soyulmuş."""
+    text = str(step.get("if", "")).strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        return text[3:-2].strip()
+    return text
+
+
+def _alarm_steps(path: Path) -> tuple[list[dict[str, Any]], int | None, int | None]:
+    steps = _steps(path)
+    opens = _index_of(steps, f"scripts/ops_alert.py fail --workflow {path.stem} ")
+    closes = _index_of(steps, f"scripts/ops_alert.py ok --workflow {path.stem} ")
+    return steps, opens, closes
+
+
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_red_run_opens_the_alarm_and_green_run_closes_it(path: Path) -> None:
+    """`failure()`/`success()` yalnız ÖNCEKİ adımları görür: alarm adımları job'ın son iki
+    adımıdır, yoksa sonrasına eklenen bir adımın kırmızısı alarmsız kalır. Zaman aşımı turu
+    İPTAL eder ve `failure()` yanlış döner, bu yüzden alarm `cancelled()`da da açılır —
+    kuyrukta beklerken iptal edilen tur hiç adım koşmaz, gürültü üretmez."""
+    steps, opens, closes = _alarm_steps(path)
+
+    assert (opens, closes) == (len(steps) - 2, len(steps) - 1), (
+        f"{path.name}: alarm aç/kapat job'ın son iki adımı değil ({opens}, {closes})"
+    )
+    opens_on = {part.strip() for part in _condition(steps[opens]).split("||")}
+    assert opens_on == {"failure()", "cancelled()"}, (
+        f"{path.name}: alarm kırmızıda ya da zaman aşımında açılmıyor: {_condition(steps[opens])!r}"
+    )
+    assert _condition(steps[closes]) == "success()", f"{path.name}: alarm yeşilde kapanmıyor"
+    for step in (steps[opens], steps[closes]):
+        env = step.get("env") or {}
+        assert env.get("GITHUB_TOKEN") == "${{ github.token }}", f"{path.name}: token yok"
+        assert str(env.get("RUN_URL", "")).endswith("/actions/runs/${{ github.run_id }}"), (
+            f"{path.name}: alarm kırmızı tura bağlanmıyor"
+        )
+        assert '--run-url "$RUN_URL"' in str(step["run"])
+
+
+@pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
+def test_only_the_closing_step_may_fail_without_turning_the_run_red(path: Path) -> None:
+    """Yeşil turda `ok` düşerse (ör. GitHub 502) tur alarmsız kırmızıya dönerdi: `Alarm kapat`
+    `continue-on-error` taşır. Başka HİÇBİR adım taşımaz — alarm açan ya da bekçi düşerse tur
+    kırmızı kalmalı ki bozuk alarm yolu görünsün."""
+    steps, _, closes = _alarm_steps(path)
+    tolerant = [index for index, step in enumerate(steps) if step.get("continue-on-error")]
+
+    assert closes is not None and tolerant == [closes], (
+        f"{path.name}: continue-on-error taşıyan adımlar {tolerant}, beklenen yalnız [{closes}]"
+    )
+    assert steps[closes]["continue-on-error"] is True
+
+
+@pytest.mark.parametrize(
+    ("path", "contents"), [(SEAL, "write"), (SNAPSHOT, "read")], ids=["seal.yml", "snapshot.yml"]
+)
+def test_alarm_jobs_may_write_issues_and_read_runs(path: Path, contents: str) -> None:
+    """Job düzeyindeki `permissions:` üst düzeyi TAMAMEN ezer, listelenmeyen izin `none` olur:
+    `contents` açıkça yazılmazsa checkout düşer. Seal'in `write`ı çıpa commit'i içindir."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    (job,) = document["jobs"].values()
+    permissions = job.get("permissions") or {}
+
+    assert permissions.get("issues") == "write", f"{path.name}: alarm issue açamaz"
+    assert permissions.get("actions") == "read", f"{path.name}: turlar okunamaz"
+    assert _contents_permission(permissions) == contents, f"{path.name}: contents izni değişti"
+
+
+def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
+    """Bekçi pg_cron tetiklerini ölçer, bu yüzden GitHub'ın seyrek yedek `schedule`ında koşar:
+    mühürden SONRA (mührü asla engellemez). Bayat tetikte kendi alarmını açar ve 0 döner; GitHub
+    API'nin kendisi düşerse düşer ve seal alarmı açılır — alarm adımlarından ÖNCE olması bu
+    yüzden. Ölü dispatch'in seyrek turları çoğunlukla zaten kırmızıdır (kaçan mühür); örtük
+    `success()` bekçiyi tam o turlarda atlardı — `!cancelled()` bu yüzden."""
+    steps = _steps(SEAL)
+    seal = _index_of(steps, "football_edge.collect seal")
+    watchdog = _index_of(steps, "scripts/ops_alert.py watchdog")
+    alarm = _index_of(steps, "scripts/ops_alert.py fail")
+
+    assert "schedule" in _triggers(SEAL), "yedek schedule yok: bekçi hiç koşmaz"
+    assert watchdog is not None, "seal.yml bekçiyi koşmuyor"
+    assert seal is not None and alarm is not None
+    assert seal < watchdog < alarm, f"bekçinin yeri: mühür {seal}, bekçi {watchdog}, alarm {alarm}"
+    condition = _condition(steps[watchdog])
+    conjuncts = {part.strip() for part in condition.split("&&")}
+    assert "||" not in condition and "github.event_name == 'schedule'" in conjuncts, (
+        f"bekçi yalnız schedule turunda koşmuyor: {condition!r}"
+    )
+    assert "!cancelled()" in conjuncts, f"bekçi kırmızı mühür turunda atlanıyor: {condition!r}"
+    env = steps[watchdog].get("env") or {}
+    assert env.get("GITHUB_TOKEN") == "${{ github.token }}", "bekçiye token verilmiyor"
+    assert str(env.get("RUN_URL", "")).endswith("/actions/runs/${{ github.run_id }}"), (
+        "bekçi alarmı bekçi turuna bağlanmıyor"
+    )
+    assert '--run-url "$RUN_URL"' in str(steps[watchdog]["run"])

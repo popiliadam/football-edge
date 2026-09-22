@@ -54,7 +54,8 @@ içindeki yedi kaynağın `robots_verified_at`i `2026-09-19` ve `kaynak-politika
 | **Dil kalibrasyonu** | **HİÇBİR DİL ÖLÇÜLMEDİ** | `TYPESAFE_API_KEY` yok, insan etiketi yok |
 | Kapı | 9 adım PASS + `zincir` SKIP | Birleşik `main` (`668ec61`) taze klonda + CI push koşusu |
 | **Mühür (`seal.yml`)** | 09-19 14:39 → 09-21 14:15: **16 tur** (~203 beklenirdi), 15'i `exit 5`; **47 maç kalıcı kayıp** | `gh run list` + tur loglarındaki "kaçan mühür" listelerinin birleşimi |
-| Mühür tetiği | pg_cron → `workflow_dispatch`; migration depoda, **veritabanına UYGULANMADI** | Token + onay bekliyor (§1/1) |
+| Tetikler (pg_cron → `workflow_dispatch`) | `seal-dispatch` (0003) **canlı**; `snapshot-dispatch` (0004) depoda, **veritabanına UYGULANMADI** — `snapshot.yml`in `schedule`ı kalktı | seal: 09-22 05:00 UTC dispatch → `204` → tur success (controller); snapshot: uygulanınca RUNBOOK §3.3 |
+| Kırmızı tur alarmı | `ops-alert` issue + dispatch bekçisi (`scripts/ops_alert.py`, RUNBOOK §3.6) | Yalnız MockTransport testleri — runner'da ve gerçek GitHub'da **henüz koşmadı** |
 | Odds API | **494/500 kredi** | Faz 1 bir kredi bile harcamadı |
 
 `.env` (gitignored, izin 600): `ODDS_API_KEY`, `DATABASE_URL`. **`TYPESAFE_API_KEY` YOK.**

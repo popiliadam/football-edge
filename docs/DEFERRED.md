@@ -559,12 +559,14 @@ toplayıcısı yeni bir iştir, sayfa şekli ölçülerek başlar. HANDOFF §3.9
 
 `seal.yml` 2026-09-19 14:39'dan 09-21 14:15'e kadar 16 kez koştu (`*/15` cron'u ~203 tur
 beklerdi) ve bu turların 15'i `EXIT_MISSED_SEAL` verdi: 47 maçın kapanış fiyatı kalıcı olarak
-kayıp. Düzeltme: pg_cron → `workflow_dispatch` (`db/migrations/0003_seal_dispatch.sql`,
-`docs/RUNBOOK.md` §3). Açık kalanlar:
+kayıp. Düzeltme: pg_cron → `workflow_dispatch` (`db/migrations/0003_seal_dispatch.sql`; snapshot
+için `0004_workflow_dispatch.sql`; `docs/RUNBOOK.md` §3). Açık kalanlar:
 
 | # | Ne | Neden önemli |
 |---|---|---|
-| 10a | **Kırmızı bir tura bakan kimse yoktu.** 15 kırmızı tur iki gün fark edilmedi | Kaçan mühür kalıcı veri kaybıdır; bildirim kanalı (e-posta/webhook) bağlanmalı |
+| 10a | ~~**Kırmızı bir tura bakan kimse yoktu.**~~ **KAPANIYOR — ilk canlı kırmızı→yeşil döngüsü bekleniyor:** kırmızı `seal`/`snapshot` turu `ops-alert` issue'su açar (açıksa yalnız gövdesini günceller), yeşil tur kapatır; bayat pg_cron tetiği için bekçinin kendi alarmı var (RUNBOOK §3.6) | Alarm hiçbir runner'da koşmadı ve `GITHUB_TOKEN`ın issue açarken etiketi iliştirebildiği canlıda doğrulanmadı: satır ilk gerçek kırmızı→yeşil döngüsüyle kapanır. Haber GitHub'ın issue bildirimidir: e-posta, depo sahibinin bu depoyu izleme (Watch) ayarına bağlı — izleme kapalıysa issue açılır ama kimse haber almaz |
 | 10b | Kaçan maç 24 saat boyunca her turda yeniden raporlanıyor | Tek bir kayıp, bir gün boyunca her 15 dakikada bir kırmızı üretir; gerçek yeni kaybı gürültüde saklar. "Yalnız YENİ kayıp" ayrımı şema değişikliği ister (raporlandı damgası) |
-| 10c | Dispatch tokenı iptal edilebilir (süreli seçilirse süresi de dolar) | O durumda tek sinyal yedek `schedule`ın seyrek kırmızısıdır; varsayılan süresiz token (RUNBOOK §3.2) |
+| 10c | Dispatch tokenı iptal edilebilir (süreli seçilirse süresi de dolar) | O durumda mühür yalnız seyrek yedek `schedule`la koşar, snapshot hiç koşmaz; yedek turdaki bekçi kendi alarmını açar, ama o tur da seyrek olduğundan haber saatler sürebilir. Varsayılan süresiz token (RUNBOOK §3.2) |
 | 10d | Kredi bütçesi ilk kez gerçekten kullanılacak | Mühürler bugüne kadar çoğunlukla kaçtığı için ayda ~314 kredilik mühür payı hiç tüketilmedi; güvenilir tetikle ay sonuna doğru `EXIT_QUOTA_EXHAUSTED` görülebilir |
+| 10e | `snapshot.yml`in tek tetiği pg_cron (`snapshot-dispatch`); GitHub `schedule`ı kaldırıldı | İki tetik aynı gün iki tur, yani iki kat kredi demek. Bedeli: pg_cron durursa snapshot'ın yedeği yok — bekçi 30 saatte kendi alarmını açar |
+| 10f | Alarmın kör noktaları | (1) Bekçi yalnız GitHub'ın seyrek yedek `schedule` turunda koşar: bayat tetik saatler sonra görünür, bekçi alarmı da ancak iki tetiği taze bulan sonraki yedek turda kapanır. (2) Alarm açıkken yeni bir kırmızı yeni bildirim üretmez, yalnız gövdeyi günceller — 10b'nin "yalnız YENİ kayıp" ayrımı gelene kadar açık alarm "son tura bak" demektir. (3) Alarm adımı `uv run` ile koşar: `uv` kurulmadan önce düşen bir tur (checkout, secret taraması) alarm açamayabilir. (4) GitHub'ın kendi "run failed" e-postaları (dispatch'i tetikleyen hesaba, hesap ayarına göre) `ops-alert`in tekilleştirmesinin dışındadır: kırmızı sürdükçe her tur ayrı bir e-posta olabilir |
