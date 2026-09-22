@@ -66,8 +66,7 @@ jobs:
           name: verify-log
           path: ${{ runner.temp }}/football-edge-verify.log
           if-no-files-found: warn
-# BİLİNEN MALİYET (dal filtresi KASITLI olarak yok): `seal.yml` her mühür turunda
-# `ledger/` altına bir çıpa commit'leyip push'luyor, yani varsayılan dalda günde
-# ~96 ek CI koşusu doğuyor. Depo public → Actions dakikası ücretsiz. `paths-ignore`
-# ile susturulabilirdi ama kapıya filtre eklemek onu zayıflatmaktır; maliyet
-# susturulmak yerine ADIYLA yazıldı (docs/DEFERRED.md).
+# Dal filtresi KASITLI olarak yok: kapıya filtre eklemek onu zayıflatır. `seal.yml`in çıpa
+# commit'leri yine de CI koşusu DOĞURMAZ: bot `GITHUB_TOKEN` ile push'lar ve GitHub bu
+# push'lardan yeni workflow tetiklemez (2026-09-22 ölçüldü: CI yalnız insan push'larında
+# koştu). Çıpa da yalnız zincir başı değiştiğinde ya da yeni UTC gününde commit'lenir.

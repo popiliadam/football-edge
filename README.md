@@ -11,7 +11,8 @@ gerekir; sonradan üretilemez.
 **kaçırılan kapanış oranı geri gelmez.** Bu yüzden veri, model beklemeden birikir.
 
 > **Faz 1 toplayıcıları kütüphane + CLI olarak teslim edildi ve HİÇBİR ZAMANLAMAYA BAĞLI
-> DEĞİL.** `snapshot`/`seal` Faz 0'dan beri cron'da; `fetch-*` komutları **elle** koşar.
+> DEĞİL.** `snapshot`/`seal` Supabase pg_cron'dan tetikleniyor (`docs/RUNBOOK.md` §3);
+> `fetch-*` komutları **elle** koşar.
 > Hiç koşmayan bir toplayıcı hiçbir şey toplamaz — ayrıntı:
 > [`docs/phases/01-toplayicilar/HANDOFF.md`](docs/phases/01-toplayicilar/HANDOFF.md) §3.
 
@@ -44,7 +45,7 @@ zincirinin her adımı ayrıca sorulur. Bu kural kodda zorlanır, prose'da deği
 | `snapshot` | Aktif liglerin önümüzdeki 7 günlük maçlarının oranlarını yazar. |
 | `seal` | Başlamak üzere olan maçların (varsayılan 20 dk pencere) **kapanış** oranını yazar ve maçı mühürler. |
 | `verify-chain [--full]` | Zinciri ve dış çıpaları doğrular. `--full` defteri GENESIS'ten yeniden hash'ler ve HER çıpayı sorar. Kırıksa **exit 1** — ve çıpa yayını durur. |
-| `publish-head` | Zincirin o anki başını `ledger/` altına yazar. |
+| `publish-head` | Zincirin o anki başını `ledger/` altına yazar; baş o gün değişmediyse dosyaya dokunmaz (`zincir başı değişmedi`). |
 | `sources-audit` | Kaynak kayıt defterini robots anlık görüntülerine karşı ÇEVRİMDIŞI denetler. |
 | `fetch-footystats` | 6 ligin maç-başına xG/xGA tablosunu toplar. |
 | `fetch-tff` | TFF'den **bu haftanın** hakem atamalarını toplar (windows-1254). |
@@ -140,9 +141,11 @@ tükendi · `3` en az bir lig düştü · `4` lig aynası tazelenemedi · `5` **
 (kalıcı veri kaybı)** · `6` kaynak politikası ihlali · `7` en az bir kaynak düştü ·
 `8` ölçülmemiş bir dil üretime açık.
 
-`snapshot` ve `seal` komutlarını `.github/workflows/snapshot.yml` (günde bir) ve
-`seal.yml` (15 dakikada bir) koşturur. GitHub `schedule` tetiğini **yalnız varsayılan
-dalda** onurlandırır: dal merge edilmeden hiçbir cron çalışmaz.
+`snapshot` ve `seal` komutlarını `.github/workflows/snapshot.yml` (günde bir, 06:22 UTC) ve
+`seal.yml` (15 dakikada bir) koşturur. Tetik GitHub'ın `schedule`ı DEĞİL — o güvenilmez çıktı
+(51 saatte ~203 mühür turunun 16'sı koştu) — Supabase pg_cron → `workflow_dispatch`
+(`docs/RUNBOOK.md` §3). `seal.yml`in kendi `schedule`ı yalnız yedek ve bekçidir. Kırmızı bir
+tur `ops-alert` etiketli bir GitHub issue'su açar; yeşil tur kapatır.
 
 > **`fetch-*` komutlarının HİÇBİRİ zamanlanmış DEĞİL.** Bir toplayıcıyı cron'a bağlamak
 > Faz 1'in kapsamı dışında bırakıldı ve bu, Faz 2'nin ilk işidir. Bugün elle koşulurlar.
