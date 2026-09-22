@@ -16,6 +16,7 @@ canlı köprü `market/` altında saf fonksiyonlardır.
 **Tech Stack:** Python 3.11, uv, numpy (tek yeni bağımlılık), httpx, protego, psycopg3, PyYAML,
 pytest, ruff, mypy (strict), Supabase Postgres (pg_cron → `workflow_dispatch`), GitHub Actions.
 
+**Durum:** ONAYLANDI (kullanıcı, 2026-09-22) — yürütme defteri `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/`.
 **Spec:** `docs/superpowers/specs/2026-09-22-faz2-tarihsel-taban-design.md` (onaylı, D1–D20) — ana
 spec `docs/superpowers/specs/2026-09-19-football-edge-design.md` (§3.2.1, §6.2 holdout politikası).
 **Ölçümler:** `docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md` (§2.1–2.4, §4.1).

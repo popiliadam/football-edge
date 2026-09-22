@@ -1,10 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 (oturum 2) · **Durum:** **İz C canlıda doğrulandı** — push'landı,
-0005 uygulandı; mühür, snapshot ve toplayıcılar pg_cron'dan tetikleniyor (cron → `204` → yeşil tur
-uçtan uca ölçüldü); footystats Mac'te launchd ile koşuyor (GitHub runner'ları 403); ilk canlı alarm
-açıldı ve yeşil turla kapandı · **Dal:** `main` = `origin/main` · kapı **9 adım yeşil + `zincir`
-adıyla SKIP** (ölçüm §2)
+**Son güncelleme:** 2026-09-22 (oturum 3) · **Durum:** **Faz 2 yürütülüyor** — tasarım ve TDD planı
+kullanıcı onaylı; dalga 0 `main`de (`e521ed5`), dalga 1'in dört görevi izole worktree'lerde · İz C canlı
+(mühür, snapshot, toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı
+**9 adım yeşil + `zincir` adıyla SKIP** (dalga 1 sonunda `sızıntı` adımıyla 10 olur)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -13,78 +12,42 @@ adıyla SKIP** (ölçüm §2)
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 2 sonunda yazıldı)
+## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 3 sırasında yazıldı)
 
-**Başlangıç durumu**
-- `main` origin'de, CI yeşil (kod `6dccfa8`; bu devir onun üstünde). Açık dal ve worktree yok.
-  Defter (gitignored): `.superpowers/sdd/2026-09-22-isletme/progress.md` — bu oturumun kararları
-  R72–R76.
-- Canlı tetikler (hepsi pg_cron → `workflow_dispatch`, `204`): `seal` 15 dk, `snapshot` 06:22 UTC,
-  `collect-daily` 07:10 UTC (tff, venues), `collect-news` 2 saatte bir :07. İlk cron'lu toplayıcı
-  turu 10:07 UTC'de koştu ve yeşildi.
-- **footystats GitHub'da koşmuyor:** runner'lar 403 alıyor (Cloudflare), Mac 200. İş Mac'te
-  launchd ile koşar ve sonucu `footystats-local.yml`e bildirir; alarmı o workflow açar, bekçi
-  raporların yaşını 72 sa eşikle `footystats-local` başlığında izler (RUNBOOK §3.9, R73–R76).
-  Kuruldu 2026-09-22 10:57 UTC: ilk tur `main` `6dccfa8` ile **114 yeni gözlem**, exit 0; rapor →
-  `footystats-local.yml` yeşil (`açık alarm yok`).
-- İlk canlı alarm döngüsü: `🔴 collect-daily kırmızı` (#1) 09:29'da açıldı, 10:57:58'de yeşil
-  `collect-daily` turuyla (run 35718803834) "yeşile döndü" yorumuyla kapandı.
-- Son kapı (`6dccfa8`, taze klon): 9 adım PASS + `zincir` SKIP · 593 passed, 2 skipped ·
-  contract 18.
+**Faz 2 yürütülüyor — kaldığın yeri DEFTER söyler.**
+- Plan: `docs/superpowers/plans/2026-09-22-faz2-tarihsel-taban.md` (13 görev, onaylı, iki tur bağımsız
+  incelemeden geçti: planın kodu plan metninden tek ağaca kuruldu, her dalga yeşil). Tasarım:
+  `docs/superpowers/specs/2026-09-22-faz2-tarihsel-taban-design.md` (onaylı; §14/1 holdout politikası spec'e
+  işlendi). Ölçümler: `docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`.
+- **Defter (gitignored, bu makinede):** `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` —
+  `Task N: complete` satırı olan görev BİTMİŞTİR, yeniden dispatch edilmez; ilk tamamlanmamış görevden devam
+  (`superpowers:subagent-driven-development`). Planın hazırlık kararları (R78–R100):
+  `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md`.
+- Başlatmak için: "`docs/HANDOFF.md` §0'dan devam et" → defteri oku → açık worktree'leri (`git worktree list`)
+  ve dalları defterle karşılaştır.
+
+**Oturum 3'te bitenler** (hepsi `main`de, push'lu, CI yeşil)
+- 0a — R77 erişim kuralı testi (`c3aedaa`): yasak araçlar import edilemez, kilide ve kuruluma giremez;
+  Scrapling'in fetcher tarafı bütünüyle yasak (R80), CAPTCHA/IP döndürme araçları (R81). Kalan boşluklar DEFERRED §11.
+- 0b — ikinci runner ölçümü (ölçüm belgesi §2.4): kapanış öncesi oranlar cuma/salı öğleden sonra toplanıyor;
+  `disclaimer.php` veri lisansı içermiyor; kapanış tarihçesi (PSC 2012/13+, AvgC 2019/20+, BFEC 2024/25+); holdout
+  12.093 maç. The Odds API anahtarları (§2.5, 0 kredi): 38 ligin 31'i.
+- 0c — Scrapling denemesi: uyarlanabilir seçiciler TFF'de BENİMSENMEZ (§4.1: 1.979 yeniden bulmanın 0'ı doğru).
+- Adım 1–2 — tasarım (`acdc6b5`, spec güncellemesi `5b3addd`) ve plan (`f1bf664`, DEFERRED §11–12).
+- Dalga 0 — `e521ed5`: `history/types.py`, numpy, `leakage` işareti; taze klon 743 passed / 2 skipped.
 
 **İzlenecekler (kendiliğinden olmalı; olmazsa RUNBOOK §3)**
 1. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:
-   ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72);
-   hakemler açıklandığı gün sayı sıfırdan büyük olmalı.
+   ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72).
 2. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
-3. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir ve
-   bot commit'i push'lar. Runner'ın footystats robots.txt'ini okuyabildiği ölçüldü (09-22).
-
-**Sıradaki iş: yol haritası v2 (`docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`)**
-- **İz A — Faz 2 tasarımı, sonra tam TDD planı.** Beyin fırtınası (mimari yol) başladı:
-  **`docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md` buradan başla** —
-  kullanıcı kararları (holdout `[2025-07-01, 2026-07-01)`; tasarım kararları asistanın önerisine
-  göre), plan-zamanı ölçümleri, tasarım önerileri ve sıra (§5). Onay kapısı: yazılı tasarım +
-  plan kullanıcıya sunulmadan Faz 2 kodu yazılmaz. Önemli ölçüm: birincil tarihsel kaynak
-  xgabora değil football-data.co.uk olmalı (kapanış oranları orada; ek ligler güncel; runner'dan
-  erişilir, TR'den erişilmez).
-- **Erişim kuralı netleşti (R77, spec §3.2.1, kullanıcı onayı 09-22):** okumak serbest, aşmak
-  yasak. İlk iş kuralı koda taşımak: `src/` ve `scripts/`in yasak araçları (`StealthyFetcher`,
-  `camoufox`, `undetected_chromedriver`) import etmediğini sınayan bir test (kural prose'da kalmasın).
-- **Kullanıcı önerisi — Scrapling:** ayrıştırıcısı (adaptive seçiciler) ve dürüst kimlikli
-  tarayıcı fetcher'ı R77 ile izinli; `StealthyFetcher` yasak. Önerilen deneme (TFF ayrıştırıcısı)
-  ölçüm belgesinin §4'ünde.
-- **İz B — Faz 6 iskeleti:** Netlify hesabı bağlı ama "football" adlı bir proje yok. Site ve
-  alan adı kullanıcı kararı.
-
-**Taze oturumda çalışma sırası ve paralellik** — başlatmak için: "`docs/HANDOFF.md` §0'dan devam et".
-Kurallar yol haritası v2 §4'ten: aynı anda en çok 4 implementer, her biri izole worktree'de; her
-dalgadan önce tek-yazar taraması; ortak dosyalar (`collect.py` CLI kaydı, `verify.sh`,
-`pyproject.toml`/`uv.lock`) yalnız dalga sonu birleştirmede ya da dalgadan önce tek bir controller
-commit'inde değişir.
-
-| Adım | Ne | Paralellik | Onay |
-|---|---|---|---|
-| 0a | R77 kural testi (`tests/` altında yeni dosya) | 0b, 0c ile aynı anda | verildi (09-22) |
-| 0b | Runner ölçümü: `notes.txt`in tamamı, `disclaimer.php`, `HxG/AxG` doluluğu (tek kullanımlık dal) | 0a, 0c ile aynı anda | gerekmez |
-| 0c | Scrapling denemesi (TFF ayrıştırıcısı, atılabilir kod, worktree) | 0a, 0b ile aynı anda | kısa "tamam" |
-| 1 | Faz 2 tasarım belgesi (0b'nin sonucuyla) → kullanıcıya | controller, tek yazar | **onay kapısı** |
-| 2 | Tam TDD planı → bağımsız plan incelemesi (fable) → kullanıcıya | sıralı | **onay kapısı** |
-| 3 | Dalga 0: Faz 2'nin bütün yeni bağımlılıkları (numpy/scipy …) TEK controller commit'inde | — | plan onayı |
-| 4 | Dalga 1: T1 yükleyici ∥ T3 vig ∥ T5 holdout ∥ T2 harness iskeleti | 4 worktree | plan onayı |
-| 5 | Dalga 2: T4 verimlilik ∥ T2 bütünleşik (T7 canlı veri birikince) · Dalga 3: T6 sızıntı denetimi | worktree | — |
-| İz B | Faz 6 iskeleti (ayrı dizin; Python tarafıyla ortak dosya yok) | Faz 2'nin her adımıyla aynı anda | Netlify + alan adı |
-
-Her iş aynı yoldan geçer: brief → implementer → bağımsız inceleme (kabuğu olan ajan; K1 işlerde
-fable) → düzeltme turu → controller mutasyonu (`PYTHONDONTWRITEBYTECODE=1`) → **her commit'ten sonra
-`verify.sh`'ın tamamı** → `main`e `--no-ff` → taze klon kapısı → push.
+3. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir.
+4. CI'da bir kez `astral-sh/setup-uv` 10 dk takıldı (2026-09-22, rerun yeşil); tekrarlarsa adım düzeyi timeout.
 
 **Kullanıcıdan beklenenler**
-1. Depoyu GitHub'da **Watch** etmek (All Activity ya da Custom → Issues): alarm e-postaları buna
-   bağlı. Bu oturumda ölçülemedi — `gh` token'ında `notifications` yetkisi yok.
-2. DEFERRED 10t'ye karar: yerel işi yetkisiz ayrı bir macOS kullanıcısında koşturmak ister misin
-   (yönetici yetkisi gerekir)? Şimdilik kabul edildi.
+1. Depoyu GitHub'da **Watch** etmek (alarm e-postaları) — ölçülemedi (`gh` token'ında `notifications` yok).
+2. DEFERRED 10t kararı (yerel işi yetkisiz ayrı macOS kullanıcısında koşturmak) — şimdilik kabul.
 3. İz B için Netlify sitesi ve alan adı.
+4. Faz 2 Task 12'de lig önerisi (plan §8.4) — onay sorulacak.
 
 ---
 
