@@ -413,6 +413,9 @@ def test_a_main_row_of_another_division_is_rejected() -> None:
         ("2526", "31/05/2025", False),
         ("2526", "01/08/2026", False),
         ("2526", "16/08/2015", False),
+        ("1920", "02/08/2020", True),
+        ("1920", "31/08/2020", True),
+        ("1920", "01/09/2020", False),
     ],
     ids=[
         "pencere-basi",
@@ -421,13 +424,18 @@ def test_a_main_row_of_another_division_is_rejected() -> None:
         "pencereden-once",
         "pencereden-sonra",
         "baska-sezon",
+        "serie-a-2019-20-agustos",
+        "uzatilmis-pencere-sonu",
+        "uzatilmis-pencereden-sonra",
     ],
 )
 def test_a_main_row_is_kept_only_inside_its_season_window(
     season: str, day: str, kept: bool
 ) -> None:
-    """Sezon "YYyy" → [YYYY-06-01, YYYY+1-07-31]. Pencere dışı tarih başka sezonun satırıdır ve
-    dönem ayrımı tarihe bakar: 2025/26 dosyasındaki 2015 tarihi geliştirme dönemine sızardı."""
+    """Sezon "YYyy" → [YYYY-06-01, YYYY+1-07-31]; tek istisna COVID ile uzayan 2019/20, penceresi
+    31/08/2020'de kapanır (Serie A son haftası 1–2 Ağustos 2020, R105). İstisna yalnız o sezondur:
+    pencere dönem sınırını korur. Pencere dışı tarih başka sezonun satırıdır ve dönem ayrımı tarihe
+    bakar: 2025/26 dosyasındaki 2015 tarihi geliştirme dönemine sızardı."""
     result = parse_file(
         csv_bytes(MAIN_2526, [main_row(0, {"Date": day})]), league=E0, season=season
     )

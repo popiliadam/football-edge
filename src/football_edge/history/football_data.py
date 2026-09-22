@@ -82,9 +82,13 @@ _DATE = re.compile(r"(\d{2})/(\d{2})/(\d{2}|\d{4})")
 _CENTURY_PIVOT = 69
 _TIME = re.compile(r"(\d{2}):(\d{2})")
 _COUNT = re.compile(r"\d+")
-# Ana lig sezonu "YYyy" → [YYYY-06-01, YYYY+1-07-31]; uzatılmış 2019/20 (26/07/2020) de sığar.
+# Ana lig sezonu "YYyy" → [YYYY-06-01, YYYY+1-07-31]. Pencere dönem sınırını korur (holdout kaynağın
+# Date'iyle 2026-07-01'de biter), bu yüzden bütün sezonlar için genişletilmez.
 _WINDOW_OPENS = (6, 1)
 _WINDOW_CLOSES = (7, 31)
+# Tek istisna COVID ile uzayan 2019/20: Serie A son haftası 02/08/2020'de oynandı (R105).
+_EXTENDED_SEASON = "1920"
+_EXTENDED_CLOSES = (8, 31)
 _EXTRA_SEASON = re.compile(r"(\d{4})(?:/(\d{4}))?")
 _SEASON_YEARS = range(2000, 2101)  # ek lig Season yılları [2000, 2100]
 # Pinnacle'ın 1X2 sütunları `PS…`, Ü/A sütunları `P…` önekini taşır.
@@ -219,7 +223,8 @@ def _season_window(season: str) -> tuple[date, date]:
     """Ana lig sezonunun tarih penceresi, iki uç dahil; bozuk sezon kodu `ValueError`."""
     (code,) = season_codes(season, season)
     start = 2000 + int(code[:2])  # sezon kodları yalnız 2000–2099 (catalog)
-    return date(start, *_WINDOW_OPENS), date(start + 1, *_WINDOW_CLOSES)
+    closes = _EXTENDED_CLOSES if code == _EXTENDED_SEASON else _WINDOW_CLOSES
+    return date(start, *_WINDOW_OPENS), date(start + 1, *closes)
 
 
 def _is_extra_season(text: str) -> bool:
