@@ -48,6 +48,7 @@ from tests.history_csv import (
     extra_row,
     main_row,
     unique_prices,
+    widen,
 )
 
 # (kitap, evre) → sütunlar, sırayla H, D, A, Ü2.5, A2.5 — ölçülen 2025/26 başlığından elle yazıldı.
@@ -291,18 +292,27 @@ def test_a_bad_row_is_rejected_with_its_reason_and_the_others_survive(
     assert result.rejected == (Rejected(line=2, reason=reason),)
 
 
+# Son sütunu dolu kayıt: kayma son hücreyi başlığın dışına iter, fazla hücre DOLU kalır.
+_LAST_FILLED = {MAIN_2526[-1]: "1.90"}
+
+
 @pytest.mark.parametrize(
     "record",
     [
         pytest.param(main_line(main_row(1)).rsplit(",", 1)[0], id="kisa-satir"),
-        pytest.param(main_line(main_row(1)) + ",", id="uzun-satir-sonu-bos"),
-        pytest.param(main_line(main_row(1, {"HomeTeam": "Ev, 1"})), id="tirnaksiz-virgul"),
-        pytest.param(main_line(main_row(1, {"AvgH": "2,5"})), id="virgullu-fiyat"),
+        pytest.param(main_line(main_row(1)).rsplit(",", 3)[0], id="kisa-satir-uc-eksik"),
+        pytest.param(main_line(main_row(1)) + ",x", id="uzun-satir-sonu-dolu"),
+        pytest.param(main_line(main_row(1)) + ",,, x", id="uzun-satir-bos-sonra-dolu"),
+        pytest.param(
+            main_line(main_row(1, {**_LAST_FILLED, "HomeTeam": "Ev, 1"})), id="tirnaksiz-virgul"
+        ),
+        pytest.param(main_line(main_row(1, {**_LAST_FILLED, "AvgH": "2,5"})), id="virgullu-fiyat"),
     ],
 )
 def test_a_record_whose_width_differs_from_the_header_is_rejected(record: str) -> None:
-    """Kaymış kayıt fiyatları yanlış sütuna taşır: sayılır ve düşer, hücresi fiyat sayılmaz. Sondaki
-    boş hücreye hoşgörü yok — "2,5" kayması tam da boş bir son hücreyle biter."""
+    """Kaymış kayıt fiyatları yanlış sütuna taşır: sayılır ve düşer, hücresi fiyat sayılmaz. Kısa
+    kayda hoşgörü yok; uzun kayıt yalnız fazlası TÜMÜYLE boşsa kırpılır (R111) — fazlada tek dolu
+    hücre kaymanın izidir."""
     content = lines_bytes(
         ",".join(MAIN_2526), main_line(main_row(0)), record, main_line(main_row(2))
     )
@@ -312,6 +322,54 @@ def test_a_record_whose_width_differs_from_the_header_is_rejected(record: str) -
     assert [match.source_line for match in result.matches] == [1, 3]
     assert result.rejected == (Rejected(line=2, reason=REASON_WIDTH),)
     assert (result.price_cells, result.dropped_prices) == (12, 0), "kaymış kaydın hücresi sayılmış"
+    assert result.trimmed_rows == 0, "reddedilen kayıt kırpılmış sayıldı"
+
+
+_THREE = [main_row(n) for n in range(3)]
+
+
+@pytest.mark.parametrize(
+    "excess",
+    [
+        pytest.param(",", id="bir-bos"),
+        pytest.param(",,,", id="uc-bos-olculen-bicim"),
+        pytest.param(", ,\t,  ", id="yalniz-bosluk"),
+    ],
+)
+def test_a_longer_record_with_only_empty_excess_is_trimmed_and_parsed_like_a_normal_row(
+    excess: str,
+) -> None:
+    """R111: fazla hücreler sonda ve boşsa (`.strip()` sonrası) kayıt başlık genişliğine kırpılır;
+    sonuç, fazlasız aynı kaydın ayrıştırmasıyla birebir aynıdır."""
+    plain = parse_file(csv_bytes(MAIN_2526, _THREE), league=E0, season="2526")
+
+    result = parse_file(widen(csv_bytes(MAIN_2526, _THREE), 2, excess), league=E0, season="2526")
+
+    assert result.rejected == ()
+    assert result.matches == plain.matches
+    assert (result.price_cells, result.dropped_prices) == (18, 0)
+    assert result.trimmed_rows == 1
+    assert plain.trimmed_rows == 0
+
+
+def test_the_trimmed_count_is_per_record_not_a_flag() -> None:
+    content = csv_bytes(MAIN_2526, [main_row(n) for n in range(4)])
+
+    result = parse_file(widen(widen(content, 1, ",,,"), 3, ","), league=E0, season="2526")
+
+    assert (len(result.matches), result.rejected, result.trimmed_rows) == (4, (), 2)
+
+
+def test_a_trimmed_record_still_faces_every_row_check() -> None:
+    """Kırpma yalnız genişliği onarır: kırpılan kayıt öteki kurallardan aynen geçer ve hücreleri
+    normal kayıt gibi sayılır (R103 yalnız genişlik reddinde sıfır sayar)."""
+    rows = [main_row(0), main_row(1, {"FTR": "A"}), main_row(2)]
+
+    result = parse_file(widen(csv_bytes(MAIN_2526, rows), 2, ",,,"), league=E0, season="2526")
+
+    assert [match.source_line for match in result.matches] == [1, 3]
+    assert result.rejected == (Rejected(line=2, reason=REASON_RESULT),)
+    assert (result.price_cells, result.trimmed_rows) == (18, 1)
 
 
 _UNCLOSED_LAST = [*(main_row(n) for n in range(4)), main_row(4, {"HomeTeam": '"Ev 4'})]

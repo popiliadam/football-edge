@@ -104,6 +104,11 @@ def _sync_one(
     season = _season_for(league, path)
     response = _guarded_get(client, source, path, parser, timeout=TIMEOUT_SECONDS)
     result = parse_file(response.content, league=league, season=season)
+    if result.trimmed_rows:
+        # R111 kırpması sessiz geçmez; yalnız sayı — hücre değeri loga girmez (Ruling 4).
+        LOGGER.info(
+            "yol=%s: %d kaydın sondaki boş fazla hücreleri kırpıldı", path, result.trimmed_rows
+        )
     check_quality(result, path=path, league=league, season=season)
     changed = save_file(
         conn,
