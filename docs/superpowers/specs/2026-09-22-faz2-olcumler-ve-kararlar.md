@@ -1,7 +1,7 @@
 # Faz 2 — plan-zamanı ölçümleri ve verilen kararlar
 
-**Tarih:** 2026-09-22 · **Durum:** beyin fırtınası (mimari yol) sürüyor; tasarım belgesi ve TDD
-planı YAZILMADI · **Spec:** `2026-09-19-football-edge-design.md` · **Yol haritası:**
+**Tarih:** 2026-09-22 · **Durum:** ölçümler tamam (§2.4 ve §4.1 oturum 3'te eklendi); tasarım belgesi
+`2026-09-22-faz2-tarihsel-taban-design.md` kullanıcı onayı bekliyor, TDD planı YAZILMADI · **Spec:** `2026-09-19-football-edge-design.md` · **Yol haritası:**
 `../plans/2026-09-19-faz-1-7-yol-haritasi.md` (Faz 2), `../plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`
 
 Bu belge tasarımın girdisidir, yerine geçmez. Her sayı aşağıda yazan komutla ölçüldü; ölçülmeyen
@@ -49,7 +49,31 @@ loga ham satır basılmadı. Dal silindi, tur logları Actions'ta.
 | Ana lig 2026/27 (`/mmz4281/2627/E0.csv`) | 114 sütun · 50 maç (→ 20/09/2026) · **yeni `HxG`, `AxG` sütunları** (doluluk ÖLÇÜLMEDİ) |
 | Ek ligler (`/new/BRA.csv`, `/new/JPN.csv`) | 25 sütun: Country, League, Season, Date, Time, Home, Away, HG, AG, Res + YALNIZ kapanış (`PSC*` `MaxC*` `AvgC*` `BFEC*` `B365C*` …); BRA 5.597 maç 2012 → 20/09/2026, JPN 4.603 |
 | Saat | ana ve ek liglerde başlama saati dağılımı İngiltere saatiyle tutarlı (BRA 00–02 ve 19–23, JPN 04–11) |
-| Şartlar | `https://football-data.co.uk/disclaimer.php` ("All Rights Reserved") — içeriği OKUNMADI; lisans sorusu açık (spec §10/2) |
+| Şartlar | `https://football-data.co.uk/disclaimer.php` — §2.4'te OKUNDU: yalnız sorumluluk reddi, veri lisansı maddesi yok; lisans sorusu açık (spec §10/2) |
+
+### 2.4 football-data.co.uk — ikinci runner ölçümü (Actions 35726122375, oturum 3)
+Yöntem: tek kullanımlık dal (`olcum/football-data-2`, ölçümden sonra silindi), dürüst kimlik, robots
+`protego` ile, istekler arası 3 sn. Loga yalnız toplu sayılar basıldı. `notes.txt` ve `disclaimer.php`
+runner'da açık anahtarla (CMS, AES-256) şifrelenip artifact oldu, yerelde açılıp TAMAMI okundu. Depoya
+girmediler.
+
+| Ölçüm | Değer |
+|---|---|
+| Kapanış öncesi oranların toplandığı an (`notes.txt`) | Hafta sonu maçları **cuma öğleden sonra**, hafta içi maçları **salı öğleden sonra** |
+| `Time` (`notes.txt`) | "Time of match kick off" — **saat dilimi yazmıyor**. İngiltere yerel saati §2.1–2.2'deki dağılımdan çıkarıldı, belgeden değil |
+| `HxG`/`AxG` | `notes.txt`te **tanımı ve kaynağı yok** (belge 2026-07-31 tarihli) |
+| Kaynak teşekkürü (`notes.txt`) | Sonuçlar XScores; istatistik BBC, Flashscore vd.; oranlar Betbrain, Oddsportal, tek tek bahisçiler |
+| `disclaimer.php` | Yalnız sorumluluk reddi: doğruluk garanti edilmez, tavsiye değildir, bahsin yasak olduğu yerde site yalnız bilgi amaçlı kullanılır, 18+. **Veri lisansı, çoğaltma ya da ticari kullanım maddesi YOK** (ham HTML'de de "rights reserved/copyright/licence" geçmiyor) |
+| Kapanış sütunlarının tarihçesi (E0 0506→2627; T1, SC3, G1 yoklaması aynı) | `PSC*` 2012/13'ten · `AvgC*` `MaxC*` `B365C*` 2019/20'den · `BFEC*` 2024/25'ten · 2026/27'de `PS*` sütunları tamamen yok |
+| Kapanış öncesi sütunlar | `BbAv*` `BbMx*` 2005/06–2018/19 · `Avg*` `Max*` 2019/20'den · `PS*` 2012/13–2025/26 · `B365*` hep |
+| `Time` doluluğu | Ana liglerde 2019/20'den önce sütun YOK, sonra %100 · ek liglerde %100 |
+| Tarih biçimi | 2 haneli yıl 2005/06–2014/15 ve 2016/17, 4 haneli 2015/16 ve 2017/18'den; çözülemeyen tarih 0 |
+| Holdout (2025/26) — 22 ana lig | **7.647 maç** (xgabora'nın holdout sayısıyla birebir). `AvgC` `MaxC` `B365C` %100 · `BFEC` %92–98 · `PSC` %23–55 · kapanış öncesi `Avg` %98–100 |
+| Holdout — 16 ek lig | **4.446 maç**. `AvgC` %100 (RUS %67 — dosya 19 sütun, `BFEC` yok) · `PSC` %26–94 · `BFEC` %85–100 |
+| Geliştirme — ek ligler | 57.601 maç (2012 → 2025-06), yalnız kapanış sütunları |
+| 2026/27 `HxG`/`AxG` | 22 ana ligin **18'inde %100 dolu** (EC, SC1, SC2, SC3'te sütun yok) — footystats'ın altı ligi (E0, SP1, I1, D1, F1, T1) dahil |
+| Ek lig dosya adları | ARG AUT BRA CHN **DNK** FIN IRL JPN MEX NOR POL **ROU** RUS SWE **SWZ** USA |
+| Eksik oranlı satırlar | T1 2022/23: kapanış ve öncesi %92 (maçların %8'i oransız) — yükleyici oransız satırı saymalı, düşürmemeli |
 
 ### 2.3 Canlı defter ve kapasite (Supabase, 2026-09-22)
 Veritabanı 15 MB (ücretsiz sınır 500 MB). `odds_snapshots` 5.763 satır; **kapanışı mühürlenmiş maç 4**
@@ -85,11 +109,33 @@ Veritabanı 15 MB (ücretsiz sınır 500 MB). `odds_snapshots` 5.763 satır; **k
   zorlanır, istek katmanı projenin `_guarded_get`i kalır; ölçüt: fixture'lardan türetilmiş şekil
   değişikliklerinde ayrıştırıcı kaybını sessiz geçirmeden yakalıyor mu.
 
-## 5. Sonraki oturum — sıra
-1. Tasarım belgesi (`docs/superpowers/specs/2026-09-2x-faz2-tarihsel-taban-design.md`): §3'ün
-   kesinleşmesi + harness arayüzü, holdout kilidi (manifest + koddan zorlanan yasak), vig
-   yöntemleri, piyasa verimliliği metriği, sızıntı denetimi, kapının yeni adımları, "kapının
-   ölçmediği".
-2. `notes.txt`in tamamını ve `disclaimer.php`yi runner'dan oku; `HxG/AxG` doluluğunu ölç.
+### 4.1 Deneme sonucu (0c, oturum 3) — BENİMSENMEZ
+Atılabilir deneme (dal `spike/scrapling-tff`, main'e girmedi), scrapling 0.4.15 YALNIZ taban paketi, ağ
+yok, TFF fixture'ından programla türetilen 17 sayfa biçimi. Sonuç:
+- Yeniden bulunan **1.979 öğenin hiçbiri doğru değil**. TFF sayfası neredeyse özdeş kardeşlerden kurulu
+  bir ızgara: mutasyon, parmak izinin dayandığı özellikleri değiştiriyor, değişmeyen komşu (başlık satırı,
+  deplasman hücresi) daha yüksek puan alıyor. Yanlış seçimlerin puanı (%77,6–91,4) doğru öğeninkiyle
+  (%72,2–81,8) örtüşüyor: güvenli bir eşik yok.
+- İki biçimde (ev hücresinin sınıfı ya da etiketi değişince) bugünkü ayrıştırıcının **gürültülü hatası
+  62/62 sessiz yanlış gözleme** döndü (ev = deplasman ya da ev = hakem etiketi) — Ruling 6'nın en kötü sınıfı.
+- Scrapling hiçbir biçimde istisna fırlatmadı; bütün gürültülü sonuçlar projenin kendi R72 sayım
+  korumalarından geldi. DEFERRED 10s'yi (görevliler hücre dışına taşınırsa) kapatamaz.
+- `auto_save` açıkken tek yanlış yeniden bulma, 9 parmak izinin 4'ünü başlık satırınınkiyle değiştirdi:
+  depo zehirleniyor ve zehir kalıcı. Depo varsayılan olarak paketin içinde (SQLite) — runner'da her tur boş.
+- Uyarlanabilir mod kapalıyken Scrapling ayrıştırıcısı bs4 ile birebir aynı sonucu veriyor: altı paket
+  ekleyip işlevsel kazanç sıfır.
+- Fetcher varsayılanları (kaynak okundu, koşulmadı): `Fetcher` Chrome TLS taklidi + Google referer'ı;
+  `DynamicFetcher` HeadlessChrome UA'sını gerçek Chrome UA'sıyla değiştiriyor, `--enable-automation`ı
+  düşürüyor (kapatılamıyor), Google referer'ı; `StealthyFetcher` bunların üstüne patchright ve tespit
+  önleyici bayraklar. **Hiçbirinin varsayılan yolu dürüst kimlik taşımıyor** — R79 doğrulandı, R80 bütün
+  fetcher tarafını yasakladı. JS çizimli sayfa gerekirse dürüst yol düz Playwright'tır.
+- Spec §5.3 "kendini onaran ayrıştırıcı" yapıyla değil ANLAMLA (takım adı biçimi, `(H)` etiketi,
+  ev ≠ deplasman) doğrulanan adaylar ister — Faz 4'ün Jev işi; Scrapling aday listesi döndüren bir API
+  sunmuyor.
+
+## 5. Sıra
+1. ~~Tasarım belgesi~~ yazıldı: `2026-09-22-faz2-tarihsel-taban-design.md` (§3'ün önerileri orada
+   kesinleşti; §3/1 D1, §3/4 D4, §3/5 D16, §3/6 D15).
+2. ~~`notes.txt`, `disclaimer.php`, `HxG/AxG`~~ ölçüldü (§2.4).
 3. Kullanıcıya yazılı tasarımı sun → onay → `superpowers:writing-plans` ile tam TDD planı → plan
    incelemesi (mimari: fable) → onay → dalga 1.
