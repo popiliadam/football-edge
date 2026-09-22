@@ -1,0 +1,4 @@
+# The Odds API takım adı → football-data takım adı (tarihsel ↔ canlı köprü, tasarım §9).
+# Yalnız normalize edilmiş ad eşitliğinin (naming.normalise_team) tutmadığı çiftler girer.
+# Boş başlar: controller dalga 2 sonunda gerçek eşleşmeyen adlardan doldurur.
+aliases: {}
