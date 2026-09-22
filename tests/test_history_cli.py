@@ -58,14 +58,17 @@ sources:
 
 
 def _patch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, site: Site, *, sources: str = SOURCES_YAML
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    site: Site,
+    *,
+    sources: str = SOURCES_YAML,
+    robots: str = "User-agent: *\nDisallow:\n",
 ) -> FakeHistDb:
     (tmp_path / "catalog.yaml").write_text(CATALOG_YAML, encoding="utf-8")
     (tmp_path / "sources.yaml").write_text(sources, encoding="utf-8")
     (tmp_path / "robots").mkdir()
-    (tmp_path / "robots/football-data.txt").write_text(
-        "User-agent: *\nDisallow:\n", encoding="utf-8"
-    )
+    (tmp_path / "robots/football-data.txt").write_text(robots, encoding="utf-8")
     monkeypatch.setattr(cli, "CATALOG_PATH", tmp_path / "catalog.yaml")
     monkeypatch.setattr(cli, "SOURCES_PATH", tmp_path / "sources.yaml")
     monkeypatch.setattr(cli, "ROBOTS_DIR", tmp_path / "robots")
@@ -113,6 +116,19 @@ def test_a_failed_file_turns_the_run_red_with_the_source_code_and_its_name(
 
     assert f"başarısız: {CURRENT}" in caplog.text
     assert "1 başarısız" in caplog.text
+
+
+def test_sync_asks_the_committed_robots_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CLI ayrıştırıcıyı ROBOTS_DIR'deki anlık görüntüden kurar; boş politika her yolu açardı."""
+    site = Site(CLI_FILES)
+    _patch(monkeypatch, tmp_path, site, robots="User-agent: *\nDisallow: /new/\n")
+
+    assert cli.main(["sync"]) == collect.EXIT_SOURCE_FAILED
+
+    assert site.requested == [CURRENT]
+    assert EXTRA_FILE not in site.requested
 
 
 def test_a_disabled_source_is_never_fetched(

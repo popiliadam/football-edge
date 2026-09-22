@@ -184,6 +184,13 @@ def test_the_fetch_log_is_append_only_and_the_cache_is_not() -> None:
     )
 
     assert triggers == ["hist_fetches"]
+    # Satır tetikleyicisi TRUNCATE'i görmez; bu olmasa günlük tek komutla silinirdi (R110).
+    truncates = re.findall(
+        r"create trigger \w+\s+before truncate on (\w+)\s+for each statement execute "
+        r"function forbid_ledger_mutation\(\);",
+        sql,
+    )
+    assert truncates == ["hist_fetches"]
     assert "create or replace function forbid_ledger_mutation" not in sql, (
         "0001'deki yeniden yazıldı"
     )
@@ -195,6 +202,7 @@ def test_raw_content_tables_hide_their_rows_from_api_roles() -> None:
     for table in ("hist_files", "hist_fetches"):
         assert f"alter table {table} enable row level security;" in sql, table
     assert "create policy" not in sql, "politika API rollerine satır açar"
+    assert "force row level security" not in sql, "FORCE sahibi de politikaya bağlar"
 
 
 def test_the_store_writes_exactly_the_columns_the_migration_creates() -> None:

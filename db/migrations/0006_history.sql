@@ -38,3 +38,9 @@ drop trigger if exists hist_fetches_append_only on hist_fetches;
 create trigger hist_fetches_append_only
   before update or delete on hist_fetches
   for each row execute function forbid_ledger_mutation();
+
+-- Satır tetikleyicisi TRUNCATE'i görmez: çekme günlüğü tek komutla silinemesin (R110).
+drop trigger if exists hist_fetches_no_truncate on hist_fetches;
+create trigger hist_fetches_no_truncate
+  before truncate on hist_fetches
+  for each statement execute function forbid_ledger_mutation();

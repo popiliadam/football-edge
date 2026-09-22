@@ -82,6 +82,18 @@ def test_only_the_database_steps_get_a_secret_and_only_the_database_one() -> Non
     ]
 
 
+def test_the_sync_step_takes_the_all_input_from_the_dispatch() -> None:
+    """Kabuk testi ALL_PATHS'i doğrudan verir; girdiyle bağ yalnız burada sınanır."""
+    step = _steps(HISTORY)[_sync_index()]
+
+    assert step["env"]["ALL_PATHS"] == "${{ inputs.all }}"
+
+
+def test_history_is_bounded_by_a_job_timeout() -> None:
+    """`--all` ≈ 25 dk; sınırsız bir tur takılırsa alarm hiç açılmaz (`cancelled()` dalı)."""
+    assert _document()["jobs"]["history"]["timeout-minutes"] == 60
+
+
 RULES: tuple[Callable[[Path], None], ...] = (
     workflow_rules.test_red_run_opens_the_alarm_and_green_run_closes_it,
     workflow_rules.test_only_the_closing_step_may_fail_without_turning_the_run_red,
