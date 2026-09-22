@@ -18,8 +18,9 @@ MIGRATIONS = REPO / "db/migrations"
 COLLECT_DAILY = REPO / ".github/workflows/collect-daily.yml"
 COLLECT_NEWS = REPO / ".github/workflows/collect-news.yml"
 # Her toplayıcı workflow'u ve sırayla koşturduğu `football_edge.collect` alt komutları.
+# `fetch-footystats` YOK: GitHub runner'ları 403 alıyor, iş Mac'te koşuyor (RUNBOOK §3.9).
 COLLECTORS = {
-    COLLECT_DAILY: ("fetch-footystats", "fetch-tff", "fetch-venues"),
+    COLLECT_DAILY: ("fetch-tff", "fetch-venues"),
     COLLECT_NEWS: ("fetch-news",),
 }
 

@@ -9,7 +9,9 @@
                                            kredisi N'nin (varsayılan 60) altında, ölçülemez
                                            ya da ölçümü ücretliyse `🔴 bekçi kırmızı`yı açar
                                            ya da günceller, hepsi yolundaysa kapatır; iki
-                                           durumda da exit 0
+                                           durumda da exit 0. Kendi başlığı olan tetik
+                                           (Mac'in kalp atışı) bayatlığını o başlıkta açar,
+                                           kapatmayı o işin `ok` raporuna bırakır
 
 Her komut yalnız kendi başlığındaki alarma dokunur. GitHub API'nin kendisi düşerse exit 1.
 `GITHUB_TOKEN` ve `GITHUB_REPOSITORY` ortamdan okunur; bekçi `ODDS_API_KEY`i de okur ve onu
@@ -41,12 +43,18 @@ MIN_CREDITS = 60
 
 @dataclass(frozen=True)
 class Trigger:
-    """Bekçinin tazeliğini ölçtüğü tetik: `workflow`un en son turu `max_age`den eski olmamalı."""
+    """Bekçinin tazeliğini ölçtüğü tetik: `workflow`un en son turu `max_age`den eski olmamalı.
+
+    `alarm` bayatlığın yazıldığı başlık. Varsayılan bekçinin kendi alarmı; kendi başlığı olan
+    bir tetik (Mac'in kalp atışı) onu paylaşmaz: açık kalan bekçi alarmı, sonradan ölen başka
+    bir tetiği yalnız gövde düzenlemesiyle, yani bildirimsiz bırakırdı.
+    """
 
     workflow: str
     event: str | None  # None: tetik türü ne olursa olsun en son tur
     max_age: timedelta
     hint: str
+    alarm: str = WATCHDOG
 
 
 TRIGGERS = (
@@ -76,6 +84,16 @@ TRIGGERS = (
         event=None,
         max_age=timedelta(hours=4),
         hint="pg_cron collect-news-dispatch durmuş olabilir — RUNBOOK §3.3",
+    ),
+    # Mac'teki footystats işi her turdan sonra bu rapor workflow'unu tetikler (R74): kalp atışı.
+    # 72 sa: hafta sonu kapalı kalan bir Mac alarm üretmez, bir hafta kapalı kalan üretir.
+    Trigger(
+        workflow="footystats-local.yml",
+        event="workflow_dispatch",
+        max_age=timedelta(hours=72),
+        hint="Mac'teki footystats işi raporlamıyor: Mac kapalı, launchd işi durmuş ya da gh "
+        "oturumu düşmüş — RUNBOOK §3.9",
+        alarm="footystats-local",
     ),
 )
 
@@ -195,9 +213,15 @@ def _staleness(client: httpx.Client, trigger: Trigger, now: datetime) -> str | N
     )
 
 
-def watchdog(client: httpx.Client, now: datetime) -> list[str]:
-    """Bayat tetiklerin satırları; boş liste tüm tetiklerin canlı olduğu demektir."""
-    return [line for trigger in TRIGGERS if (line := _staleness(client, trigger, now)) is not None]
+def stale_by_alarm(client: httpx.Client, now: datetime) -> dict[str, list[str]]:
+    """Bayat tetiklerin satırları, yazılacakları alarm başlığına göre; boş sözlük tüm tetiklerin
+    canlı olduğu demektir."""
+    grouped: dict[str, list[str]] = {}
+    for trigger in TRIGGERS:
+        line = _staleness(client, trigger, now)
+        if line is not None:
+            grouped[trigger.alarm] = [*grouped.get(trigger.alarm, []), line]
+    return grouped
 
 
 def _redact(text: str, api_key: str) -> str:
@@ -257,15 +281,21 @@ def odds_credits(client: httpx.Client, api_key: str, min_credits: int) -> list[s
     return [line for line in lines if line is not None]
 
 
-def _watchdog_body(problems: list[str], run_url: str, now: datetime) -> str:
+def _watchdog_body(
+    problems: list[str], run_url: str, now: datetime, *, closer: str | None = None
+) -> str:
     diagnosis = "".join(f"- {line}\n" for line in problems)
+    closing = (
+        f"Bu issue'yu {closer} kapatır.\n"
+        if closer is not None
+        else "Bu issue'yu yalnız teşhisi boş bir bekçi turu kapatır: tetikler taze, kredi eşikte\n"
+        "ya da üstünde, ölçüm ücretli görünmüyor. Seal'in yeşil turu kapatmaz.\n"
+    )
     return (
         f"Teşhis:\n{diagnosis}\n"
         f"Bekçi turu: {run_url}\n"
         f"Zaman: {now:%Y-%m-%d %H:%M} UTC\n\n"
-        "Bu issue'yu yalnız teşhisi boş bir bekçi turu kapatır: tetikler taze, kredi eşikte\n"
-        "ya da üstünde, ölçüm ücretli görünmüyor. Seal'in yeşil turu kapatmaz.\n"
-        "Prosedür: docs/RUNBOOK.md §3.6.\n"
+        f"{closing}Prosedür: docs/RUNBOOK.md §3.6.\n"
     )
 
 
@@ -276,13 +306,23 @@ def report_watchdog(client: httpx.Client, run_url: str, now: datetime, credit: l
     Seal alarmına dokunmaz ve seal job'ını düşürmez: düşürseydi seal'in sonraki yeşil turu
     (≤15 dk) alarmı geri alırdı ve ölü bir snapshot her yedek turda yeniden unutulurdu.
     """
-    problems = [*watchdog(client, now), *credit]
+    stale = stale_by_alarm(client, now)
+    # Kendi başlığı olan tetik yalnız AÇILIR: kapatmak o işin yeşil raporunun işidir (açık alarm
+    # kırmızı bir toplayıcı raporundan da gelebilir; taze kalp atışı onu örtmemeli).
+    own = "".join(
+        raise_alarm(
+            client, name, _watchdog_body(lines, run_url, now, closer="işin bir sonraki `ok` raporu")
+        )
+        for name, lines in stale.items()
+        if name != WATCHDOG
+    )
+    problems = [*stale.get(WATCHDOG, []), *credit]
     if not problems:
-        healthy = "bekçi: tüm tetikler taze, Odds API kredisi yeterli\n"
-        return healthy + clear_alarm(client, WATCHDOG, run_url)
+        healthy = "bekçi: kendi tetikleri taze, Odds API kredisi yeterli\n"
+        return own + healthy + clear_alarm(client, WATCHDOG, run_url)
     # `::warning::` turun özet sayfasına düşer; adım bilerek yeşil kalır.
     warnings = "".join(f"::warning::{line}\n" for line in problems)
-    return warnings + raise_alarm(client, WATCHDOG, _watchdog_body(problems, run_url, now))
+    return own + warnings + raise_alarm(client, WATCHDOG, _watchdog_body(problems, run_url, now))
 
 
 def _parser() -> argparse.ArgumentParser:
