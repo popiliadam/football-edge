@@ -1,6 +1,6 @@
 # Faz 3 — Baz model, walk-forward doğrulama, canlı bağlam ve tek holdout açılışı · Tasarım
 
-**Tarih:** 2026-09-23 · **Durum:** **ONAYLANDI** (kullanıcı, 2026-09-23 — §14'ün on iki kararının hepsi önerildiği gibi; kararlar §14.1'de R122–R133). Sıradaki onay kapısı: TDD planı `../plans/2026-09-23-faz3-model-walkforward.md`; plan onaylanmadan ve İz A (`feat/leagues-n1-b1-aut`) `main`e birleşmeden Faz 3 kodu yazılmaz · **Spec:** `2026-09-19-football-edge-design.md` (§4, §6.2, §6.3, §9 Faz 3) · **Önceki faz:**
+**Tarih:** 2026-09-23 · **Durum:** **ONAYLANDI** (kullanıcı, 2026-09-23 — §14'ün on iki kararının hepsi önerildiği gibi; kararlar §14.1'de R128–R139). Sıradaki onay kapısı: TDD planı `../plans/2026-09-23-faz3-model-walkforward.md`; plan onaylanmadan ve İz A (`feat/leagues-n1-b1-aut`) `main`e birleşmeden Faz 3 kodu yazılmaz · **Spec:** `2026-09-19-football-edge-design.md` (§4, §6.2, §6.3, §9 Faz 3) · **Önceki faz:**
 `2026-09-22-faz2-tarihsel-taban-design.md` (D1–D20), `docs/phases/02-tarihsel-taban/HANDOFF.md` (§3 ölçülmeyenler,
 §4 R78–R121, §6 ön koşullar) · **Yol haritası:** `../plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` (Faz 3
 dalgaları) · **Ertelenenler:** `docs/DEFERRED.md` §12, §14
@@ -69,7 +69,7 @@ dalga 0'ı · P5 `final_eval` (seçilmiş satır, tek açılış).
 | Canlı fiyat | `odds_snapshots` (append-only, zincirli); günlük snapshot 06:22 UTC, mühür kapanışta | `db/migrations/0001_init.sql`, `.github/workflows/snapshot.yml` |
 | Canlı sonuç | `match_results` (The Odds API skorları, `fetch-results` KREDİ yakar, elle — R45/R67); içerik tekilleştirmesi yok (9.6f) | `db/migrations/0002_sources.sql`, `collectors/results.py` |
 | Canlı ↔ tarihsel eşleme | (lig, Londra tarihi, normalize ad) + `config/history_aliases.yaml` (6 ad) | `market/bridge.py:130-163` |
-| Canlı ligler | eng.1, esp.1, ita.1, ger.1, fra.1, tur.1 + İz A'nın N1, B1, AUT (GİRDİ, bu belge karar vermez) | `config/leagues.yaml`; HANDOFF §0 |
+| Canlı ligler | 8 aktif: eng.1, esp.1, ita.1, ger.1, fra.1, tur.1, ned.1, bel.1; `aut.1` var ama `active: false` (kredi) — İz A `main`e birleşti (`dd038f7`, `a398c31`) | `config/leagues.yaml` (`a398c31`) |
 | Holdout açılışı | 0 (`holdout_access_log`); izinli tek modül `backtest/final_eval.py` (henüz yok) | Faz 2 HANDOFF §2.3; `tests/test_holdout_access_rule.py` `GUARDED` |
 | Bağımlılık | yalnız numpy (D15); scipy Faz 3 dalga 0'ı | `pyproject.toml` |
 
@@ -473,20 +473,25 @@ Kullanıcı on iki kararın hepsinde önerilen seçeneği onayladı; K1 ve K3 ay
 
 | Ruling | Karar | Seçilen | Yanlışsa bedeli |
 |---|---|---|---|
-| **R122** | K1 holdout boşluğu | **H1**: canlı ve anahtarsız her yol DEV + POST; boşluk cezası DEV simülasyonu ve `final_eval` C6 ile ölçülür; holdout canlı duruma ancak Faz 5 açılışından SONRA serbest kalır | Faz 3–5 canlı gölgesi bir sezon bayat durumla koşar |
-| **R123** | K2 walk-forward şeması | **A**: hiperparametreler S'de (2012/13–2018/19) bir kez seçilip `config/model_faz3.yaml`da dondurulur; E'de (2019/20–2024/25) raporlanır; havuz ağırlığı genişleyen sezon katlarıyla | hiperparametre kayması yakalanmaz |
-| **R124** | K3 kapı ölçütü | **P**: süreç + akıl sağlığı (ön kayıt, tek açılış, eşitlik testi, W1); holdout sayıları kaydedilir, kenar şartı YOK | kötü bir baz çizgi de fazı geçer — Faz 4 onu kıyas tabanı olarak alır |
-| **R125** | K4 model ailesi | fit Elo + Dixon-Coles + log-doğrusal havuz; 1X2 birincil, Ü/A 2.5 ikincil | Ü/A kodu ve raporu ek iş |
-| **R126** | K5 canlı sonuç kaynağı | football-data POST + bayat durum koruması + cuma 09:50 UTC ek senkronu; kredi yok | gecikmeli sonuçlar tahmin kaybına döner |
-| **R127** | K6 canlı karar anı fiyatı | mevcut 06:22 UTC snapshot; ek snapshot İz A'nın kredi ölçümünden sonra ayrı onayla | canlı `pre` fiyatı tarihsel olandan saatler erken |
-| **R128** | K7 canlı kapsam | bütün aktif liglerde gölge tahmin (append-only `model_predictions`, yayın yok) | bir migration, bir iş akışı |
-| **R129** | K8 tek açılış | uygulama denetimi + `0010_holdout_phase.sql` (faz başına tekil) + 2024/25 üzerinde tam prova; çöküşte YALNIZ rapor üretilmediyse ve git SHA aynıysa tek, kayıtlı yeniden koşu | ikinci kayıt HANDOFF'ta adıyla sayılır |
-| **R130** | K9 DC grubu | ülke grubu (kademeler birlikte); süre dalga 0'da ölçülür, aşarsa lig başına ve ADIYLA | ince bağlantılı grupta güçler zayıf tanımlı |
-| **R131** | K10 ek ligler | tarihte yalnız model (LL, kalibrasyon, kapanışa uzaklık); harman ve CLV canlı gölgede | AUT'ta harman iddiası canlı veri birikene dek yok |
-| **R132** | K11 açılış öncesi ertelenenler | 14h, 14j, 14l zorunlu; 14k isteğe bağlı (plan dahil ediyor, aynı dosya) | küçük üç görev |
-| **R133** | K12 CLV eşiği | birincil `τ = 0.02`, duyarlılık {0, 0.05}, ön kayıtta sabit, E'de seçilmez | τ optimum olmayabilir; bu bilinçli |
+| **R128** | K1 holdout boşluğu | **H1**: canlı ve anahtarsız her yol DEV + POST; boşluk cezası DEV simülasyonu ve `final_eval` C6 ile ölçülür; holdout canlı duruma ancak Faz 5 açılışından SONRA serbest kalır | Faz 3–5 canlı gölgesi bir sezon bayat durumla koşar |
+| **R129** | K2 walk-forward şeması | **A**: hiperparametreler S'de (2012/13–2018/19) bir kez seçilip `config/model_faz3.yaml`da dondurulur; E'de (2019/20–2024/25) raporlanır; havuz ağırlığı genişleyen sezon katlarıyla | hiperparametre kayması yakalanmaz |
+| **R130** | K3 kapı ölçütü | **P**: süreç + akıl sağlığı (ön kayıt, tek açılış, eşitlik testi, W1); holdout sayıları kaydedilir, kenar şartı YOK | kötü bir baz çizgi de fazı geçer — Faz 4 onu kıyas tabanı olarak alır |
+| **R131** | K4 model ailesi | fit Elo + Dixon-Coles + log-doğrusal havuz; 1X2 birincil, Ü/A 2.5 ikincil | Ü/A kodu ve raporu ek iş |
+| **R132** | K5 canlı sonuç kaynağı | football-data POST + bayat durum koruması + cuma 09:50 UTC ek senkronu; kredi yok | gecikmeli sonuçlar tahmin kaybına döner |
+| **R133** | K6 canlı karar anı fiyatı | mevcut 06:22 UTC snapshot; ek snapshot İz A'nın kredi ölçümünden sonra ayrı onayla | canlı `pre` fiyatı tarihsel olandan saatler erken |
+| **R134** | K7 canlı kapsam | bütün aktif liglerde gölge tahmin (append-only `model_predictions`, yayın yok) | bir migration, bir iş akışı |
+| **R135** | K8 tek açılış | uygulama denetimi + `0010_holdout_phase.sql` (faz başına tekil) + 2024/25 üzerinde tam prova; çöküşte YALNIZ rapor üretilmediyse ve git SHA aynıysa tek, kayıtlı yeniden koşu | ikinci kayıt HANDOFF'ta adıyla sayılır |
+| **R136** | K9 DC grubu | ülke grubu (kademeler birlikte); süre dalga 0'da ölçülür, aşarsa lig başına ve ADIYLA | ince bağlantılı grupta güçler zayıf tanımlı |
+| **R137** | K10 ek ligler | tarihte yalnız model (LL, kalibrasyon, kapanışa uzaklık); harman ve CLV canlı gölgede | AUT'ta harman iddiası canlı veri birikene dek yok |
+| **R138** | K11 açılış öncesi ertelenenler | 14h, 14j, 14l zorunlu; 14k isteğe bağlı (plan dahil ediyor, aynı dosya) | küçük üç görev |
+| **R139** | K12 CLV eşiği | birincil `τ = 0.02`, duyarlılık {0, 0.05}, ön kayıtta sabit, E'de seçilmez | τ optimum olmayabilir; bu bilinçli |
 
 ### 14.2 Plan yazımında netleşenler (2026-09-23)
+
+**Ruling numaraları:** K1–K12 önce R122–R133 diye yazılmıştı; İz A'nın defteri R122–R127'yi kullandığı için
+R128–R139'a kaydırıldı (R122→R128 … R133→R139). **Taban:** plan İz A birleşmiş `main`e (`a398c31`) karşı
+yeniden doğrulandı; 8 aktif lig, `aut.1` kapalı — AUT canlıda (gölge, E3) görünmez, K10/R137'nin "canlıda gölge
+harman" kısmı AUT açılana (kredi onayı) dek ölçülmez.
 
 TDD planı (`../plans/2026-09-23-faz3-model-walkforward.md`) yazılırken kod bir kopyada koşuldu; tasarımdan sapan
 ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştirenler:
@@ -497,7 +502,7 @@ ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştir
 - **P8, P9** — §6.3, §9 G4: lig kendi eğitim satırı < 1.000 ise havuzlanmış ağırlık; W1 = ortalama ΔLL ≤ δ = 0.001.
 - **P11** — §6.1: Elo'nun 1X2 eşlemesi sıralı lojit değil `P(D) = δ·4E(1−E)` (tek parametre, kapalı biçim fit).
 - **P20** — §11: görev numaraları — gölge Task 11, modelin bilinen sonuçları Task 12.
-- **P25** — §10: haftalık gölge CLV raporu Faz 3'te yazılmaz (Faz 4'ün ilk görevi); R122'nin boşluk cezası bu fazda
+- **P25** — §10: haftalık gölge CLV raporu Faz 3'te yazılmaz (Faz 4'ün ilk görevi); R128'nin boşluk cezası bu fazda
   DEV simülasyonu (`walkforward --gap`) ve `final_eval` C6 ile ölçülür, canlı ayağı o rapora kadar ölçülmez.
 
 ## 15. Karar kaydı

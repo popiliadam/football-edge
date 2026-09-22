@@ -18,19 +18,19 @@ bir kez açılır; değerlendirme anahtarı değil seçilmiş satırları alır.
 **Tech Stack:** Python 3.11, uv, numpy, **scipy (Faz 3'ün tek yeni bağımlılığı)**, psycopg3, PyYAML,
 pytest, ruff, mypy (strict), Supabase Postgres (pg_cron → `workflow_dispatch`), GitHub Actions.
 
-**Durum:** **TASLAK — kullanıcı onayı bekliyor.** Uygulama İKİ koşul birlikte sağlanınca başlar: (1) bu plan
-kullanıcı tarafından onaylandı, (2) İz A (`feat/leagues-n1-b1-aut`, N1 · B1 · AUT) `main`e birleşti — canlı
-kapsamı (Task 8, Task 11, Task 13'ün canlı adımları) İz A'nın lig kümesi belirler. İkisinden biri eksikse hiçbir
-görev başlamaz.
-**Spec:** `docs/superpowers/specs/2026-09-23-faz3-model-walkforward-design.md` (onaylı 2026-09-23, R122–R133)
+**Durum:** **TASLAK — kullanıcı onayı bekliyor.** Uygulama yalnız bu plan kullanıcı tarafından onaylanınca
+başlar. İz A (N1 · B1 · AUT) `main`e birleşti (`dd038f7`, belgeler `a398c31`) — önceki "İz A önce birleşmeli"
+koşulu SAĞLANDI. Canlı kapsam bugün **8 aktif lig**: eng.1, esp.1, ita.1, ger.1, fra.1, tur.1, ned.1, bel.1;
+`aut.1` `config/leagues.yaml`da var ama `active: false` (kredi kararı): AUT'un snapshot'ı ve mührü yoktur, bu
+yüzden gölge ve E3 onu kapsamaz; AUT Faz 3'te yalnız tarihte, yalnız model olarak ölçülür (R137).
+**Spec:** `docs/superpowers/specs/2026-09-23-faz3-model-walkforward-design.md` (onaylı 2026-09-23, R128–R139)
 — ana spec `docs/superpowers/specs/2026-09-19-football-edge-design.md` (§4, §6.2 holdout politikası, §6.3).
 **Önceki faz:** `docs/phases/02-tarihsel-taban/HANDOFF.md` (§3 ölçülmeyenler, §4 R78–R121, §6 ön koşullar).
 **Süreç:** `docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` (§3 risk kademeleri, §4 paralellik).
 
 **Planın kodu nasıl doğrulandı (plan yazımında, 2026-09-23):** Her görevin kodu bu metinden AYNEN alınarak
-`main` `4e3d14f`'in `git archive` kopyasına dalga dalga kuruldu; her dalganın sonunda ve paralel dalgalarda her
-görev TEK BAŞINA `ruff check`, `ruff format --check`, `mypy --strict`, `pytest` yeşil verdi (son hâl: tam
-`verify.sh` 10 PASS + `zincir` ADIYLA SKIP). Her görevin "Mutasyon kanıtı" tablosundaki her satır o ağaçta
+`main` `a398c31`'in (İz A birleşmiş) `git archive` kopyasına dalga dalga kuruldu; her dalganın sonunda ve paralel
+dalgalarda her görev TEK BAŞINA tam `verify.sh`'tan geçti (10 PASS + `zincir` ADIYLA SKIP). Her görevin "Mutasyon kanıtı" tablosundaki her satır o ağaçta
 uygulanıp KIRMIZI görüldü ve geri alındı (`PYTHONDONTWRITEBYTECODE=1`). Ayrıntı: sondaki Self-review.
 
 ## Global Constraints
@@ -55,11 +55,11 @@ uygulanıp KIRMIZI görüldü ve geri alındı (`PYTHONDONTWRITEBYTECODE=1`). Ay
   `[2013-01-01, 2018-07-01)`; E ana `[2019-07-01, 2025-07-01)`, ek `[2018-07-01, 2025-07-01)`.
 - **Holdout Task 13'ün 8. adımına kadar AÇILMAZ.** `open_holdout` yalnız `backtest/final_eval.py`de; anahtar
   yalnız `load_matches(..., key=key)`e verilir (AST kuralı, Task 10). Faz 3 en çok bir açılış + (yalnız çöküşte,
-  rapor yokken, aynı git SHA'sıyla) bir kayıtlı yeniden koşu yapar (R129).
+  rapor yokken, aynı git SHA'sıyla) bir kayıtlı yeniden koşu yapar (R135).
 - Karar anı ve sonuç anı Faz 2'nin kuralıdır (`backtest/timeline.py`), değişmez: karar cuma/salı 12:00
   Europe/London; sonuç başlama + 3 sa, saat yoksa ertesi gün 03:00 Londra.
 - Vig yöntemi `power` (R118). CLV bahis kuralı: maç başına en çok bir bahis, en büyük `p · o − 1`, eşik
-  `τ = 0.02`; duyarlılık `{0, 0.05}` (R133). Kapanış referansı vig'i temizlenmiş `AvgC`.
+  `τ = 0.02`; duyarlılık `{0, 0.05}` (R139). Kapanış referansı vig'i temizlenmiş `AvgC`.
 - Append-only tablolar 0001'in `forbid_ledger_mutation()` tetikleyicisiyle, TRUNCATE tetikleyicisiyle ve
   politikasız RLS ile (0006/0007 deseni) korunur.
 - Commit: `<type>: <açıklama>` + `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; yalnız açık yollar
@@ -100,12 +100,12 @@ bir testle sabitlendi:
 | §7.1, §7.5, M9; 14g, 14k, 14l | Task 4 — ortak bağlam son adımı, `MatchKey`, Placebo tohumu | 1 | K1 |
 | §11, §13/R2 | Task 5 — dalga 1 birleştirmesi, süre ölçümü (controller) | 1 sonu | — |
 | §4, §5.1–5.3, §6.4–6.6, M2, M8 | Task 6 — Dixon-Coles stratejisi, walk-forward satırları ve değerlendirmesi | 2 | K1 |
-| §5.2, M3; R123 | Task 7 — S'de seçim, model yapılandırması, `select`/`walkforward` CLI | 3 | K1 |
-| §7.2–7.4, M10, M11; R126, R127 | Task 8 — canlı bağlam kurucusu + eşitlik testi E1–E2 | 3 | K1 |
+| §5.2, M3; R129 | Task 7 — S'de seçim, model yapılandırması, `select`/`walkforward` CLI | 3 | K1 |
+| §7.2–7.4, M10, M11; R132, R133 | Task 8 — canlı bağlam kurucusu + eşitlik testi E1–E2 | 3 | K1 |
 | §5.2 | Task 9 — seçim ve walk-forward raporu gerçek veride (controller) | 3 sonu | — |
-| §8, M12; R129, 12i, 14h, 14j | Task 10 — `final_eval`, ön kayıt, tek açılış, 0010, AST kuralı | 4 | K1 |
-| §10, M14; R126, R128 | Task 11 — canlı gölge, E3 eşitlik raporu, 0009/0011, `shadow.yml` | 4 | K1 |
-| §9 G4, M13; R124 | Task 12 — modelin bilinen sonuçları W1–W4 (`history.yml`) | 5 | K1 |
+| §8, M12; R135, 12i, 14h, 14j | Task 10 — `final_eval`, ön kayıt, tek açılış, 0010, AST kuralı | 4 | K1 |
+| §10, M14; R132, R134 | Task 11 — canlı gölge, E3 eşitlik raporu, 0009/0011, `shadow.yml` | 4 | K1 |
+| §9 G4, M13; R130 | Task 12 — modelin bilinen sonuçları W1–W4 (`history.yml`) | 5 | K1 |
 | §8.1–8.3, §10 (kırmızı takım), §12 | Task 13 — ön kayıt, prova, kırmızı takım, TEK açılış, HANDOFF (controller) | 6 | — |
 
 ## Dosya yapısı
@@ -125,7 +125,7 @@ bir testle sabitlendi:
 | `src/football_edge/backtest/wf_eval.py` | ağırlık katları, `frozen_weights`, bahis kuralı, `summarise` | 6 |
 | `src/football_edge/backtest/model_config.py` | `config/model_faz3.yaml` okuma/yazma | 7 |
 | `src/football_edge/backtest/selection.py` | koordinat inişi, S kayıpları, `select` | 7 |
-| `src/football_edge/backtest/wf_run.py` | DEV grupları, stratejiler, `run_rows`, boşluk cezası (R122), rapor | 7 |
+| `src/football_edge/backtest/wf_run.py` | DEV grupları, stratejiler, `run_rows`, boşluk cezası (R128), rapor | 7 |
 | `backtest/__main__.py` (değişir) | `select`, `walkforward` (T7) · `final-eval` (T10) · `model-selftest` (T12) | 7, 10, 12 |
 | `src/football_edge/live/context.py` · `live/store.py` | canlı kurucu, bayat durum koruması; defter okuma | 8 |
 | `src/football_edge/backtest/preregistration.py` · `final_eval.py` | ön kayıt, tek açılış, prova, holdout raporu | 10 |
@@ -252,10 +252,12 @@ W1_MARGIN = 0.001; model_rows(groups, kinds, rating_groups, config); model_check
 | 4 | 10 · 11 | `backtest/{preregistration,final_eval,__main__}.py`, `0010`, iki test yaması · `live/{shadow,__main__}.py`, `0009`, `0011`, `shadow.yml`, `scripts/ops_alert.py` | yok (`live/__main__.py` `backtest/__main__.py`yi yalnız OKUR; migration numaraları ayrık) |
 | 5 | 12 | `backtest/{model_selftest,__main__}.py`, `history.yml` | — (Task 10'un `__main__.py`sinin üstüne) |
 
-**İz A bağımlılığı (canlı kapsam):** Task 8 (canlı ad/lig eşlemesi `config/history_aliases.yaml` ve katalog
-`league_id`), Task 11 (gölge, aktif ligler) ve Task 13'ün canlı adımları (E3 raporu, ilk gölge turu) İz A'nın
+**İz A (birleşti, `a398c31`) ve canlı kapsam:** Task 8 (canlı ad/lig eşlemesi `config/history_aliases.yaml` ve
+katalog `league_id`), Task 11 (gölge, aktif ligler) ve Task 13'ün canlı adımları (E3 raporu, ilk gölge turu) İz A'nın
 birleşmiş lig kümesine karşı koşar. Kod lig sayısına bağlı değildir (`config/leagues.yaml` ve katalogdan okur);
-bağımlılık VERİdedir: yeni liglerin ilk canlı maçlarından sonra takma adlar İz A'nın 5. adımıyla girer.
+bağımlılık VERİdedir: yeni liglerin ilk canlı maçlarından sonra takma adlar İz A'nın 5. adımıyla girer. Bugün 8 aktif
+lig; `aut.1` kapalı olduğu için defterde AUT maçı yoktur — gölge ve E3 onu görmez; lig kredi onayıyla açılırsa
+kod değişmeden kapsar.
 
 ## Plan yazımında verilen kararlar (P1–P25)
 
@@ -307,22 +309,23 @@ Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen nokta
 20. **P20** Numaralar: gölge Task 11, model bilinen sonuçları Task 12 (tasarım §11 tablosundan farklı sıra) —
     *yok.*
 21. **P21** E3 (`live parity`) eşleşmeyen maçı sayar, kapı yapmaz; yalnız eşleşmiş maçta yapısal fark exit 15 —
-    *AUT'un `Date` takvimi yanlışsa maç eşleşmez ve yalnız sayı büyür; sayı raporda izlenir.*
-22. **P22** Prova (R129): E'nin son sezonu `[2024-07-01, 2025-07-01)` anahtarsız sahte holdout; ağırlıklar
+    *bir ligin `Date` takvimi yanlışsa maç eşleşmez ve yalnız sayı büyür; sayı raporda izlenir. AUT kapalı olduğu
+    sürece (`a398c31`) E3 AUT'u hiç görmez — §3/38 AUT için açık kalır.*
+22. **P22** Prova (R135): E'nin son sezonu `[2024-07-01, 2025-07-01)` anahtarsız sahte holdout; ağırlıklar
     ondan önceki E satırlarından — *prova sayıları E raporundakinden farklıdır (ağırlık kümesi daha kısa).*
 23. **P23** `live/__main__.py` `backtest/__main__.py`nin sabitlerini ve iki yardımcısını (`kinds_of`,
     `rating_groups`) içe alır — *iki CLI arasında bağ; ayrı bir modüle taşımak ek dosya.*
 24. **P24** Gölge her koşuda grubun durumunu DEV + POST'tan baştan kurar (grup başına bir Elo, bir DC fiti) —
     *koşu başına ~10 sn yükleme + fit; Task 13'te ölçülür.*
 25. **P25** Tasarım §10'un gölge CLV raporu (harman + bahis + mühürlü kapanış, haftalık) Faz 3'te YAZILMAZ: Faz 3
-    sicili biriktirir, rapor Faz 4'ün ilk görevidir (DEFERRED'a, Task 13 Step 10). R122'nin canlı ayağı (C6 −
+    sicili biriktirir, rapor Faz 4'ün ilk görevidir (DEFERRED'a, Task 13 Step 10). R128'nin canlı ayağı (C6 −
     gölge) da bu rapora kadar ölçülmez; boşluk cezası bu fazda DEV simülasyonu (`walkforward --gap`, Task 7/9)
     ve C6 ile ölçülür — *ilk haftaların gölge sayıları okunmaz; sicil yine append-only birikir.*
 
 ## Plan-zamanı ölçümler
 
 Bu plan yazılırken veritabanına bağlanılmadı; gerçek veride hiçbir şey ölçülmedi. Aşağıdakiler SENTETİK veride
-ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.718 passed / 2 skipped (taban 1.530); `leakage`
+ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.741 passed / 2 skipped (taban `a398c31`: 1.553); `leakage`
 işaretli 327 (taban 265); DC fiti 6 takım × 180 maçta ~0,6 ms (gerçek bir ülke grubunda
 takım ve maç sayısı onlarca kat büyük — süre Task 5'te ölçülür, tahmin edilmez). Gerçek veri ölçümleri (saatsiz satır,
 yineleme, DC ve Elo süresi/RSS, seçim ve walk-forward süresi) Task 0, 5 ve 9'da, ölçüm belgesi
@@ -413,7 +416,7 @@ Expected: `uv.lock`ta `scipy` (Python 3.11 için 1.17.x); `uv sync` hatasız.
 - [ ] **Step 3: Yeşil olduğunu gör**
 
 Run: `TMPDIR=$(mktemp -d) ./verify.sh > /tmp/verify-t0.log 2>&1; echo exit=$?; grep -E '^(PASS|FAIL|SKIP)|KAPI' /tmp/verify-t0.log`
-Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir`; pytest 1.530 passed / 2 skipped (değişmedi).
+Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir`; pytest 1.553 passed / 2 skipped (taban `a398c31`, değişmedi).
 
 - [ ] **Step 4: Mutasyon kanıtı** — `pyproject.toml`dan `"scipy>=1.14",` satırı çıkarılır, `uv sync` → `FAIL:
 paket-kurulu` (ve `mypy`); geri alınır, `uv sync`.
@@ -699,7 +702,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.model.di
 
 <!-- plan: yeni src/football_edge/model/dixon_coles.py -->
 ```python
-"""Zaman sönümlü Dixon-Coles (Faz 3 tasarımı §6.2, R125): saf fit ve skor matrisi.
+"""Zaman sönümlü Dixon-Coles (Faz 3 tasarımı §6.2, R131): saf fit ve skor matrisi.
 
 Gol süreci: ev golü `Poisson(exp(a_ev + d_dep + h))`, deplasman golü `Poisson(exp(a_dep + d_ev))`;
 düşük skorlarda `τ(ρ)` düzeltmesi. Maç ağırlığı `exp(−ξ · gün)`; güçlere sırt (L2) cezası hem
@@ -1208,12 +1211,12 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.model.el
 
 <!-- plan: yeni src/football_edge/model/elo_model.py -->
 ```python
-"""Fit edilebilir Elo (Faz 3 tasarımı §6.1, R125): iskele `EloPointInTime`ın yerine geçen strateji.
+"""Fit edilebilir Elo (Faz 3 tasarımı §6.1, R131): iskele `EloPointInTime`ın yerine geçen strateji.
 
 Yenilikler: marj biçimi seçilir (yok / doğrusal / log), sezon arası ortalamaya dönüş, görülmemiş
 takımın grup ortalamasının altından başlaması ve beraberliğin reyting farkına bağlanması
 (`P(D) = δ · 4E(1 − E)`; iskele sabit `draw_rate` kullanıyordu). Reyting (grup, takım)
-anahtarlıdır (R94). Değerler iskeledir; seçimi walk-forward'un S bölgesi yapar (R123).
+anahtarlıdır (R94). Değerler iskeledir; seçimi walk-forward'un S bölgesi yapar (R129).
 """
 
 from __future__ import annotations
@@ -1549,7 +1552,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.model.po
 
 <!-- plan: yeni src/football_edge/model/pool.py -->
 ```python
-"""Log-doğrusal görüş havuzu (Faz 3 tasarımı §6.3, R125).
+"""Log-doğrusal görüş havuzu (Faz 3 tasarımı §6.3, R131).
 
 `p ∝ exp(Σ wᵢ · log pᵢ)`, ağırlıklar ≥ 0. `w = (1, 0, …)` havuzun içindedir: doğru fit edilmiş bir
 harman, fit edildiği veride ilk bileşenden (piyasa) kötü olamaz — kapının akıl sağlığı sınaması
@@ -2282,7 +2285,7 @@ index 752882d..8219db4 100644
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_harness.py tests/test_strategies.py tests/test_selftest.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — test_harness 21 · test_strategies 26 · test_selftest 33 passed; tam paket 1.534 passed
+Expected: PASS — test_harness 21 · test_strategies 26 · test_selftest 33 passed; tam paket 1.557 passed
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
@@ -2375,7 +2378,7 @@ PY
 Karar kuralı (ölçümden SONRA, defterde Ruling olarak): İngiltere en büyük gruptur. Walk-forward'un DC maliyeti ≈
 Σ_grup (karar günü sayısı × fit süresi); karar günü S + E boyunca haftada ~2. Kestirilen toplam (S + E, bütün
 gruplar, H2H + Ü/A aynı memo) **45 dk'nın altındaysa** `cadence_days = 1`; üstündeyse `select --cadence-days 7`
-(P18) ve yeniden kestirim; hâlâ üstündeyse Task 6 başlamaz, eskalasyon (Decompose: lig başına DC, R130'un
+(P18) ve yeniden kestirim; hâlâ üstündeyse Task 6 başlamaz, eskalasyon (Decompose: lig başına DC, R136'un
 yedeği). Kapı gevşetilmez; ızgara (P10) küçültülmez — küçültmek seçimi değiştirir ve ayrı bir karardır.
 
 - [ ] **Step 4: Commit, taze klon kapısı, push**
@@ -2921,7 +2924,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.model.st
 ```python
 """Dixon-Coles'u harness'ın `Strategy` arayüzüne takar (Faz 3 tasarımı §6.2).
 
-Durum: grup (ülke, R94/R130) başına gözlenen goller, parça parça demetlerde (`CHUNK`): her
+Durum: grup (ülke, R94/R136) başına gözlenen goller, parça parça demetlerde (`CHUNK`): her
 `observe` yalnız son parçayı kopyalar — ~45 bin sonuçlu bir grupta tam demet kopyası O(n²) olurdu.
 Fit, karar gününün ISO günlük/haftalık tabanında (`cadence_days`) bir kez yapılır ve bir memo'da
 tutulur. Memo eşitliğe girmez; anahtarı (grup, fit günü) ve fit yalnız `fit günü`nden ÖNCEKİ
@@ -3045,13 +3048,13 @@ class DixonColesStrategy:
 
 <!-- plan: yeni src/football_edge/backtest/walkforward.py -->
 ```python
-"""Walk-forward satırları (Faz 3 tasarımı §5, R123): grup başına yeniden oynatma → bileşen tablosu.
+"""Walk-forward satırları (Faz 3 tasarımı §5, R129): grup başına yeniden oynatma → bileşen tablosu.
 
 Yalnız geliştirme dönemi: bölgeler `Window` ile kurulur ve `Window` holdout'a uzanamaz (R89).
 Isınma bölgesi durumu ısıtır, satır üretmez. Model bileşenleri (Elo, Dixon-Coles) harness'tan
 geçer; piyasa bileşeni maçın KENDİ kapanış öncesi fiyatıdır — `MarketPre`in bağlamdan okuduğunun
 aynısı (kapanış ve sonuç satıra yalnız değerlendirme alanı olarak girer, hiçbir bileşene girmez).
-Yeniden oynatma ülke grubu başına (R94, R130): gruplar arasında durum etkileşimi yoktur.
+Yeniden oynatma ülke grubu başına (R94, R136): gruplar arasında durum etkileşimi yoktur.
 """
 
 from __future__ import annotations
@@ -3230,7 +3233,7 @@ def group_rows(
 
 <!-- plan: yeni src/football_edge/backtest/wf_eval.py -->
 ```python
-"""Walk-forward değerlendirmesi (Faz 3 tasarımı §5.2–5.3, §6.3–6.5; R123, R131, R133).
+"""Walk-forward değerlendirmesi (Faz 3 tasarımı §5.2–5.3, §6.3–6.5; R129, R137, R139).
 
 Havuz ağırlığı lig başına genişleyen sezon katlarıyla: E'nin sezonu `s` için ağırlık YALNIZ E'nin
 `s`'den önceki sezonlarının satırlarıyla fit edilir; E'nin ilk sezonu S'nin satırlarını kullanır.
@@ -3579,7 +3582,7 @@ alt sınırı` → taze klon kapısı → push. Dalga 3 (Task 7, 8) bu commit'te
 
 **Kademe:** K1 · **Dalga:** 3 · **Worktree/dal:** `.worktrees/wt-select` · `feat/faz3-select`
 
-R123: hiperparametreler S'de BİR kez seçilir, `config/model_faz3.yaml`da dondurulur (katalog ve kilidin sha256'sıyla). Seçim tek turluk koordinat inişi (P10); Elo'nun δ'sı her adayda `fit_draw` ile. `walkforward` yapılandırmayı okur, katalog/kilit özeti değiştiyse exit 11 ve rapor YAZMAZ; yalnız DEV okunur (`development_groups`), rapor yalnız toplu sayı. Rapor yardımcıları (`score_table`, `format_interval`) Task 10'un holdout raporunca da kullanılır — adları sözleşmede. `gap_penalty` R122'nin DEV simülasyonudur: E'nin 2022/23 sezonu girdiden çıkarılır, 2023/24'ün AYNI maçları iki koşuda karşılaştırılır (`walkforward --gap`).
+R129: hiperparametreler S'de BİR kez seçilir, `config/model_faz3.yaml`da dondurulur (katalog ve kilidin sha256'sıyla). Seçim tek turluk koordinat inişi (P10); Elo'nun δ'sı her adayda `fit_draw` ile. `walkforward` yapılandırmayı okur, katalog/kilit özeti değiştiyse exit 11 ve rapor YAZMAZ; yalnız DEV okunur (`development_groups`), rapor yalnız toplu sayı. Rapor yardımcıları (`score_table`, `format_interval`) Task 10'un holdout raporunca da kullanılır — adları sözleşmede. `gap_penalty` R128'nin DEV simülasyonudur: E'nin 2022/23 sezonu girdiden çıkarılır, 2023/24'ün AYNI maçları iki koşuda karşılaştırılır (`walkforward --gap`).
 
 **Files:**
 - Create: `src/football_edge/backtest/model_config.py`
@@ -3882,7 +3885,7 @@ def test_the_report_renderer_names_unmeasured_sections(tmp_path: Path) -> None:
 def test_the_gap_penalty_rescores_the_same_matches_without_the_skipped_season(
     tmp_path: Path,
 ) -> None:
-    """R122: 2022/23 girdiden çıkınca 2023/24'ün AYNI maçları başka olasılık alır; fark ölçülür."""
+    """R128: 2022/23 girdiden çıkınca 2023/24'ün AYNI maçları başka olasılık alır; fark ölçülür."""
     _files(tmp_path)
     groups = development_groups({"E0": main_history(2019, 2023)}, GROUPS)
 
@@ -3902,7 +3905,7 @@ def test_the_gap_penalty_rescores_the_same_matches_without_the_skipped_season(
         config_sha256="0" * 64,
         gap=gap,
     )
-    assert "Boşluk cezası (R122" in text
+    assert "Boşluk cezası (R128" in text
 ```
 
 - [ ] **Step 2: Kırmızı olduğunu gör**
@@ -3916,7 +3919,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.backtest
 
 <!-- plan: yeni src/football_edge/backtest/model_config.py -->
 ```python
-"""Dondurulmuş hiperparametreler (Faz 3 tasarımı §5.2, R123): `config/model_faz3.yaml`.
+"""Dondurulmuş hiperparametreler (Faz 3 tasarımı §5.2, R129): `config/model_faz3.yaml`.
 
 Dosyayı `select` yazar, controller commit'ler; walk-forward, ön kayıt ve `final_eval` yalnız bu
 dosyayı okur. Katalog ve kilidin sha256'sı dosyadadır: ikisinden biri değişirse walk-forward
@@ -4031,7 +4034,7 @@ def load_model_config(path: Path) -> ModelConfig:
 
 <!-- plan: yeni src/football_edge/backtest/selection.py -->
 ```python
-"""Hiperparametre seçimi — yalnız S bölgesinde (Faz 3 tasarımı §5.2, §6.1–6.2; R123).
+"""Hiperparametre seçimi — yalnız S bölgesinde (Faz 3 tasarımı §5.2, §6.1–6.2; R129).
 
 Koordinat inişi: iskele değerlerden başlanır, parametreler SABİT sırayla tek tek ızgarada denenir,
 her birinde en düşük S log loss'u tutulur; tek tur. Elo'nun beraberlik payı `δ` her adayda S'nin
@@ -4310,7 +4313,7 @@ def run_rows(
     )
 
 
-# R122 boşluk cezası (DEV simülasyonu): E'nin bir sezonu girdiden çıkarılır, sonraki sezon iki
+# R128 boşluk cezası (DEV simülasyonu): E'nin bir sezonu girdiden çıkarılır, sonraki sezon iki
 # koşuda aynı maçlarda ölçülür. Canlı ve anahtarsız yollar holdout yılını böyle atlar.
 GAP_SKIPPED = Window(date(2022, 7, 1), date(2023, 7, 1))
 GAP_MEASURED = Window(date(2023, 7, 1), date(2024, 7, 1))
@@ -4422,7 +4425,7 @@ def render_walkforward(
     ]
     if gap is not None:
         lines += [
-            "### Boşluk cezası (R122, DEV simülasyonu)",
+            "### Boşluk cezası (R128, DEV simülasyonu)",
             "",
             f"{GAP_SKIPPED.start}–{GAP_SKIPPED.end} sezonu girdiden çıkarıldı; "
             f"{GAP_MEASURED.start}–{GAP_MEASURED.end} maçlarında LL(boşluklu) − LL(tam):",
@@ -4493,7 +4496,7 @@ def render_walkforward(
 +# 10 köprünün (`market bridge`) "eşleşme yok"u; 11: model yapılandırması okunamadı ya da
 +# katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
 +EXIT_CONFIG_MISMATCH = 11
-+DEFAULT_TAU = 0.02  # R133
++DEFAULT_TAU = 0.02  # R139
 +DEFAULT_SENSITIVITY = (0.0, 0.05)
  
  
@@ -4514,7 +4517,7 @@ def render_walkforward(
 +    walk.add_argument("--catalog", type=Path, default=CATALOG_PATH)
 +    walk.add_argument("--out", type=Path, required=True)
 +    walk.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
-+    walk.add_argument("--gap", action="store_true", help="R122 boşluk cezası (iki ek koşu)")
++    walk.add_argument("--gap", action="store_true", help="R128 boşluk cezası (iki ek koşu)")
      return parser
  
  
@@ -4669,9 +4672,9 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 
 **Kademe:** K1 · **Dalga:** 3 · **Worktree/dal:** `.worktrees/wt-live` · `feat/faz3-live`
 
-> **İz A'ya bağlı (canlı kapsam):** takma adlar (`config/history_aliases.yaml`) ve katalogdaki `league_id`ler İz A'nın liglerini kapsamalı; testler sentetiktir, gerçek eşleşme Task 13'ün E3 raporunda ölçülür.
+> **İz A'ya bağlı (canlı kapsam):** İz A birleşti (`a398c31`): 8 aktif lig (ned.1, bel.1 dahil; aut.1 kapalı). Katalogda ned.1 → N1, bel.1 → B1 eşlemesi hazır; yeni liglerin takma adları (`config/history_aliases.yaml`) ilk canlı kapanışlardan sonra İz A'nın 5. adımıyla girer. Testler SENTETİK lig kimliği (`t.1`) kullanır ve `config/leagues.yaml`a bağlı değildir; gerçek eşleşme dalga 4 sonundaki E3 raporunda ölçülür.
 
-Tasarım §7.2–7.4, R126, R127. Defterin maç ve snapshot satırları `MatchRecord`a çevrilir: lig `history_leagues.yaml`'ın `league_id`sinden, tarih Londra tarihi, adlar takma ad → normalize eşitliği, fiyat karar anında ya da önce gözlenen SON snapshot turunun tam kitap ortalaması. `observe` akışı harness'ın olay düzeniyle (bilinme anı, gruptaki sıra) aynı fonksiyondan; gerçek varış anı kullanılmaz. Bayat durum koruması: grubun son 10 günde bitmiş sayılan bir canlı maçı tabanda yoksa tahmin YOK. E1 bir sezonun BÜTÜN maçlarında (2026-10-25 yaz saati geçişi ve gece yarısı maçı dahil) bağlamın `match_index` dışındaki bütün alanlarını ve akışı birebir karşılaştırır; E2 aynı stratejinin iki kurucudan aynı tahmini verdiğini.
+Tasarım §7.2–7.4, R132, R133. Defterin maç ve snapshot satırları `MatchRecord`a çevrilir: lig `history_leagues.yaml`'ın `league_id`sinden, tarih Londra tarihi, adlar takma ad → normalize eşitliği, fiyat karar anında ya da önce gözlenen SON snapshot turunun tam kitap ortalaması. `observe` akışı harness'ın olay düzeniyle (bilinme anı, gruptaki sıra) aynı fonksiyondan; gerçek varış anı kullanılmaz. Bayat durum koruması: grubun son 10 günde bitmiş sayılan bir canlı maçı tabanda yoksa tahmin YOK. E1 bir sezonun BÜTÜN maçlarında (2026-10-25 yaz saati geçişi ve gece yarısı maçı dahil) bağlamın `match_index` dışındaki bütün alanlarını ve akışı birebir karşılaştırır; E2 aynı stratejinin iki kurucudan aynı tahmini verdiğini.
 
 **Files:**
 - Create: `src/football_edge/live/context.py`
@@ -4915,7 +4918,7 @@ def test_an_unmapped_match_gets_no_context() -> None:
 
 
 def test_a_group_result_missing_from_the_base_makes_the_state_stale() -> None:
-    """R126: tarihsel kural sonucu bilinir sayıyor, tabanda yok → tahmin yok, adıyla sayılır."""
+    """R132: tarihsel kural sonucu bilinir sayıyor, tabanda yok → tahmin yok, adıyla sayılır."""
     match = GROUP[_targets()[30]]
     decided = decision_at(match.date, match.kickoff)
     assert decided is not None
@@ -5026,10 +5029,10 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.live.con
 
 <!-- plan: yeni src/football_edge/live/context.py -->
 ```python
-"""Canlı bağlam kurucusu (Faz 3 tasarımı §7.2–7.3; R122, R126, R127).
+"""Canlı bağlam kurucusu (Faz 3 tasarımı §7.2–7.3; R128, R132, R133).
 
 Kaynak: defterdeki maç ve snapshot satırları (`live/store.py`) + tarihsel tabanın anahtarsız
-dönüşü (DEV + POST — R122: holdout yılı canlıda da yoktur). Son adım tarihsel kurucuyla ORTAKTIR
+dönüşü (DEV + POST — R128: holdout yılı canlıda da yoktur). Son adım tarihsel kurucuyla ORTAKTIR
 (`backtest/context.py`): canlı kurucu yalnız kaynağı `MatchRecord`a çevirir. Karar ve sonuç anları
 `timeline`ın kuralıyla hesaplanır; gerçek varış anı KULLANILMAZ. Tarihsel kuralın "bilinir" saydığı
 bir sonuç tabanda yoksa maç için bağlam kurulmaz (bayat durum): tahmin edilen her maçta canlı
@@ -5358,7 +5361,7 @@ ve S log loss'ları; maç satırı yok).
 - [ ] **Step 4: E bölgesi raporu**
 
 Run: `/usr/bin/time -l uv run --env-file .env python -m football_edge.backtest walkforward --gap --out docs/reports/<tarih>-faz3-walkforward.md; echo exit=$?`
-Expected: exit 0; raporun sonunda "Boşluk cezası (R122, DEV simülasyonu)" bölümü (Elo ve DC için LL farkı ve
+Expected: exit 0; raporun sonunda "Boşluk cezası (R128, DEV simülasyonu)" bölümü (Elo ve DC için LL farkı ve
 aralığı). `--gap` iki ek koşu demektir: süre üçe katlanır, ölçüm belgesine ayrı yazılır. Rapor yalnız toplu sayı
 taşır — kontrol:
 
@@ -5399,7 +5402,7 @@ açılır.
 
 **Kademe:** K1 · **Dalga:** 4 · **Worktree/dal:** `.worktrees/wt-final` · `feat/faz3-final-eval`
 
-Tasarım §8, R129. `preregistration.py`: `config/faz3_preregistration.yaml` commit'lenmiş, ağaç temiz, üç özet (model yapılandırması, kilit, katalog) tutuyor — değilse `PreflightError`, HİÇBİR ŞEY açılmaz. `final_eval.py`: önce kilit anahtarsız doğrulanır ve Faz 3 açılışları sayılır (P13), sonra TAZE bağlantıda `open_holdout`; anahtar yalnız `load_matches`e verilir ve bırakılır; holdout satır sayısı kilitle eşleşmezse `OpenedButFailed`. Değerlendirme tam durumla (DEV + HOLDOUT + POST) oynatır, ağırlıklar yalnız DEV'in E'sinden (`frozen_weights`); C1–C6 ve Placebo raporlanır. `--rehearse` aynı yolu anahtarsız, 2024/25'i sahte holdout yaparak koşar (P22). `0010`: faz başına tek açılış ve tek yeniden koşu (ifade indeksi). AST kuralı: `HoldoutKey` yalnız üç modülde; anahtarın `load_matches(key=…)` ve `del` dışındaki her kullanımı yasak (12i); `history/` dışından ayrıştırıcı/önbelleğin `_`-önekli adlarına erişim yasak (14h). 14j: `load_matches`in gerçek anahtarlı pozitif yolu.
+Tasarım §8, R135. `preregistration.py`: `config/faz3_preregistration.yaml` commit'lenmiş, ağaç temiz, üç özet (model yapılandırması, kilit, katalog) tutuyor — değilse `PreflightError`, HİÇBİR ŞEY açılmaz. `final_eval.py`: önce kilit anahtarsız doğrulanır ve Faz 3 açılışları sayılır (P13), sonra TAZE bağlantıda `open_holdout`; anahtar yalnız `load_matches`e verilir ve bırakılır; holdout satır sayısı kilitle eşleşmezse `OpenedButFailed`. Değerlendirme tam durumla (DEV + HOLDOUT + POST) oynatır, ağırlıklar yalnız DEV'in E'sinden (`frozen_weights`); C1–C6 ve Placebo raporlanır. `--rehearse` aynı yolu anahtarsız, 2024/25'i sahte holdout yaparak koşar (P22). `0010`: faz başına tek açılış ve tek yeniden koşu (ifade indeksi). AST kuralı: `HoldoutKey` yalnız üç modülde; anahtarın `load_matches(key=…)` ve `del` dışındaki her kullanımı yasak (12i); `history/` dışından ayrıştırıcı/önbelleğin `_`-önekli adlarına erişim yasak (14h). 14j: `load_matches`in gerçek anahtarlı pozitif yolu.
 
 **Files:**
 - Create: `src/football_edge/backtest/preregistration.py`
@@ -5423,7 +5426,7 @@ Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: 
 
 <!-- plan: yeni tests/test_final_eval.py -->
 ```python
-"""Faz 3'ün tek holdout açılışı (Faz 3 tasarımı §8; R124, R129): ön kayıt, sayım, sıra, satırlar.
+"""Faz 3'ün tek holdout açılışı (Faz 3 tasarımı §8; R130, R135): ön kayıt, sayım, sıra, satırlar.
 
 Veritabanı yok: `open_holdout` ve `load_matches` `final_eval` modülünde yamalanır ve ÇAĞRI SIRASI
 kaydedilir; değerlendirme SENTETİK sezonlarda gerçekten koşar.
@@ -6074,7 +6077,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.backtest
 
 <!-- plan: yeni src/football_edge/backtest/preregistration.py -->
 ```python
-"""Faz 3 holdout ön kaydı (tasarım §8.1; R124, R129, R133): `config/faz3_preregistration.yaml`.
+"""Faz 3 holdout ön kaydı (tasarım §8.1; R130, R135, R139): `config/faz3_preregistration.yaml`.
 
 Açılıştan ÖNCE commit'lenir; `final_eval` dosyanın commit'lenmiş hâliyle çalışma ağacındakinin aynı
 olduğunu, ağacın temiz olduğunu ve üç özetin (model yapılandırması, kilit, katalog) tuttuğunu
@@ -6195,7 +6198,7 @@ def preflight(
 
 <!-- plan: yeni src/football_edge/backtest/final_eval.py -->
 ```python
-"""Faz 3'ün TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R122, R124, R129).
+"""Faz 3'ün TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R128, R130, R135).
 
 `open_holdout`ın anılabildiği TEK modül (`tests/test_holdout_access_rule.py`). Anahtar yalnız
 `load_matches`e verilir ve hemen bırakılır: değerlendirme anahtarı değil SEÇİLMİŞ SATIRLARI alır
@@ -6309,7 +6312,7 @@ Zoning = Callable[[HistMatch, str], str | None]
 
 
 def rehearsal_zone(start: date, end: date) -> Zoning:
-    """Prova (R129): [start, end) sahte holdout — geliştirme döneminin içinde, anahtarsız."""
+    """Prova (R135): [start, end) sahte holdout — geliştirme döneminin içinde, anahtarsız."""
 
     def zone(match: HistMatch, kind: str) -> str | None:
         if start <= match.date < end:
@@ -6442,7 +6445,7 @@ def render_final(report: FinalReport, *, generated_at: datetime) -> str:
             f"# Faz 3 holdout raporu — {generated_at.date().isoformat()}",
             "",
             f"Açılış amacı `{report.purpose}` · holdout satırı {report.holdout_rows} · tahmin "
-            f"özeti sha256 `{report.predictions_sha256}`. Tek açılış (R129); ağırlıklar ve "
+            f"özeti sha256 `{report.predictions_sha256}`. Tek açılış (R135); ağırlıklar ve "
             "hiperparametreler yalnız geliştirme döneminden.",
             "",
             *score_table("C1–C4 · holdout, ana ligler, 1X2 (ortak satırlar)", report.holdout.main),
@@ -6487,7 +6490,7 @@ def run_rehearsal(
 
 <!-- plan: yeni db/migrations/0010_holdout_phase.sql -->
 ```sql
--- Faz 3: faz başına en çok bir holdout açılışı (Faz 3 tasarımı §8.3, R129).
+-- Faz 3: faz başına en çok bir holdout açılışı (Faz 3 tasarımı §8.3, R135).
 --
 -- `final_eval` açmadan önce `holdout_access_log`u sayar; bu indeks ikinci katmandır. Amaç
 -- `<faz>:<ön kayıt sha256>` ya da `<faz>-rerun:<neden>:<sha256>` biçimindedir; ilk parçası (faz ya
@@ -6511,7 +6514,7 @@ create unique index if not exists holdout_access_log_one_per_phase
  `selftest`: bilinen sonuçlar. `select`: S bölgesinde hiperparametre seçimi →
  `config/model_faz3.yaml` (controller commit'ler). `walkforward`: dondurulmuş yapılandırmayla E
 -bölgesi raporu.
-+bölgesi raporu. `final-eval`: Faz 3'ün TEK holdout açılışı (`backtest/final_eval.py`, R129).
++bölgesi raporu. `final-eval`: Faz 3'ün TEK holdout açılışı (`backtest/final_eval.py`, R135).
  
  Önce kilit: kilit dosyası bozuksa ya da önbellek kilitli dönemlerin özetinden farklıysa hiçbir
  ölçüm koşmaz (exit 9). Sonra her denetim adıyla loglanır; kapı denetimlerinden biri kırmızıysa
@@ -6561,19 +6564,19 @@ create unique index if not exists holdout_access_log_one_per_phase
  # katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
  EXIT_CONFIG_MISMATCH = 11
 +# final-eval: 12 ön kayıt denetimi tutmadı (AÇILMADI); 13 Faz 3 açılışı zaten var (AÇILMADI);
-+# 14 AÇILDI ama değerlendirme tamamlanmadı (rapor yok) — HANDOFF'a adıyla, R129 yeniden koşusu.
++# 14 AÇILDI ama değerlendirme tamamlanmadı (rapor yok) — HANDOFF'a adıyla, R135 yeniden koşusu.
 +EXIT_PREFLIGHT = 12
 +EXIT_ALREADY_OPENED = 13
 +EXIT_OPENED_FAILED = 14
- DEFAULT_TAU = 0.02  # R133
-+REHEARSAL_START = date(2024, 7, 1)  # prova: E'nin son sezonu (R129)
+ DEFAULT_TAU = 0.02  # R139
++REHEARSAL_START = date(2024, 7, 1)  # prova: E'nin son sezonu (R135)
  DEFAULT_SENSITIVITY = (0.0, 0.05)
  
  
 @@ -79,6 +99,18 @@
      walk.add_argument("--out", type=Path, required=True)
      walk.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
-     walk.add_argument("--gap", action="store_true", help="R122 boşluk cezası (iki ek koşu)")
+     walk.add_argument("--gap", action="store_true", help="R128 boşluk cezası (iki ek koşu)")
 +    final = commands.add_parser("final-eval", help="Faz 3'ün tek, kayıtlı holdout açılışı")
 +    final.add_argument("--prereg", type=Path, default=PREREGISTRATION_PATH)
 +    final.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
@@ -6695,13 +6698,13 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 (kabuklu `general-purpose`, K1'de `fable`), düzeltme, controller mutasyon kanıtı, `--no-ff` birleştirme.
 
 ---
-### Task 11: Canlı gölge tahmin, E3 eşitlik raporu, 0009/0011, `shadow.yml` (R126, R128)
+### Task 11: Canlı gölge tahmin, E3 eşitlik raporu, 0009/0011, `shadow.yml` (R132, R134)
 
 **Kademe:** K1 · **Dalga:** 4 · **Worktree/dal:** `.worktrees/wt-shadow` · `feat/faz3-shadow`
 
-> **İz A'ya bağlı (canlı kapsam):** gölge `config/leagues.yaml`ın aktif liglerinin (İz A sonrası dokuz) maçlarını işler; kod lig sayısına bağlı değildir.
+> **İz A'ya bağlı (canlı kapsam):** gölge defterdeki maçları işler; defter yalnız `config/leagues.yaml`ın AKTİF liglerinden dolar — bugün 8 (aut.1 kapalı, snapshot'ı yok). Testler sentetik lig kimliğiyle; kod lig sayısına bağlı değildir.
 
-Tasarım §10. `live shadow` salı ve cuma karar anından sonra (pg_cron `35 12 * * 2,5`, 0011) kararı verilmiş maçların bileşen olasılıklarını (piyasa, fit Elo, DC) ve karar anı fiyatını append-only `model_predictions`a (0009) yazar; yayın ve kredi YOK (P19). Aynı (grup, karar anı) için durum bir kez kurulur. `live parity` (E3) sonrası dönemde defter ↔ taban eşleşmelerinin yapısal alanlarını karşılaştırır; sezon ya da > 30 dk başlama farkı exit 15 (P12, P21). 0011 cuma 09:50 UTC'ye tarihsel senkron ekler (R126). Bekçi `shadow.yml`i 4 gün 12 sa eşiğiyle izler.
+Tasarım §10. `live shadow` salı ve cuma karar anından sonra (pg_cron `35 12 * * 2,5`, 0011) kararı verilmiş maçların bileşen olasılıklarını (piyasa, fit Elo, DC) ve karar anı fiyatını append-only `model_predictions`a (0009) yazar; yayın ve kredi YOK (P19). Aynı (grup, karar anı) için durum bir kez kurulur. `live parity` (E3) sonrası dönemde defter ↔ taban eşleşmelerinin yapısal alanlarını karşılaştırır; sezon ya da > 30 dk başlama farkı exit 15 (P12, P21). 0011 cuma 09:50 UTC'ye tarihsel senkron ekler (R132). Bekçi `shadow.yml`i 4 gün 12 sa eşiğiyle izler.
 
 **Files:**
 - Create: `db/migrations/0009_model_predictions.sql`
@@ -6728,7 +6731,7 @@ Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: 
 
 <!-- plan: yeni tests/test_shadow.py -->
 ```python
-"""Canlı gölge tahmin (Faz 3 tasarımı §10, R128) ve eşitlik raporu E3. Veritabanı yok; veri
+"""Canlı gölge tahmin (Faz 3 tasarımı §10, R134) ve eşitlik raporu E3. Veritabanı yok; veri
 SENTETİK (tests/model_builders.py) — canlı taraf aynı maçları defter biçiminde taşır."""
 
 from __future__ import annotations
@@ -7050,7 +7053,7 @@ index 1a3f535..4f1409b 100644
 <!-- plan: yama tests/test_history_dispatch.py -->
 ```diff
 diff --git a/tests/test_history_dispatch.py b/tests/test_history_dispatch.py
-index 7da8dcf..2f34278 100644
+index 7da8dcf..b7997fa 100644
 --- a/tests/test_history_dispatch.py
 +++ b/tests/test_history_dispatch.py
 @@ -33,3 +33,12 @@ def test_history_dispatch_runs_weekly_outside_time_critical_minutes() -> None:
@@ -7060,7 +7063,7 @@ index 7da8dcf..2f34278 100644
 +
 +
 +def test_history_is_also_synced_on_friday_before_the_friday_decision() -> None:
-+    """R126: cuma kararından önce taban bir kez daha tazelenir; aynı fonksiyon, ayrı iş."""
++    """R132: cuma kararından önce taban bir kez daha tazelenir; aynı fonksiyon, ayrı iş."""
 +    spec, command = _cron_jobs()["history-dispatch-friday"]
 +    minute, hour, day, month, weekday = spec.split()
 +
@@ -7079,7 +7082,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.live.sha
 
 <!-- plan: yeni db/migrations/0009_model_predictions.sql -->
 ```sql
--- Faz 3: canlı gölge tahminleri (Faz 3 tasarımı §10, R128). YAYIN YOK.
+-- Faz 3: canlı gölge tahminleri (Faz 3 tasarımı §10, R134). YAYIN YOK.
 --
 -- Salı ve cuma karar anından sonra `live shadow` aktif liglerin kararı verilmiş maçları için
 -- bileşen olasılıklarını (piyasa, fit Elo, Dixon-Coles) ve karar anındaki kapanış öncesi fiyatı
@@ -7125,7 +7128,7 @@ create trigger model_predictions_no_truncate
 
 <!-- plan: yeni db/migrations/0011_shadow_dispatch.sql -->
 ```sql
--- Faz 3: gölge tahmin işi (shadow.yml) ve tarihsel tabanın cuma senkronu pg_cron'dan (R126, R128).
+-- Faz 3: gölge tahmin işi (shadow.yml) ve tarihsel tabanın cuma senkronu pg_cron'dan (R132, R134).
 --
 -- NEDEN: gölge tahmin karar anından (salı/cuma 12:00 Londra) SONRA koşmalı; GitHub'ın `schedule`ı
 -- güvenilmez (0003). Canlı `observe` akışı football-data'nın sonrası dönemidir: cuma kararından önce
@@ -7196,7 +7199,7 @@ select cron.schedule('history-dispatch-friday', '50 9 * * 5', 'select ops.dispat
 
 <!-- plan: yeni src/football_edge/live/shadow.py -->
 ```python
-"""Canlı gölge tahmin (Faz 3 tasarımı §10, R128): kararı verilmiş maçların bileşen olasılıkları.
+"""Canlı gölge tahmin (Faz 3 tasarımı §10, R134): kararı verilmiş maçların bileşen olasılıkları.
 
 Yayın YOK. Aynı (grup, karar anı) için durum BİR kez kurulur: `observe` akışı o karardaki bütün
 maçlar için aynıdır. Harman ve bahis bu satırlardan, dondurulmuş ağırlıkla sonradan hesaplanır —
@@ -7595,7 +7598,7 @@ jobs:
           python-version: "3.11"
       - run: uv sync --frozen
       - name: Gölge tahmin
-        # Faz 3 (R128): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
+        # Faz 3 (R134): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
         # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım alır.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -7704,18 +7707,19 @@ select jobname, schedule, command, active from cron.job
 ```
   Expected: 0; indeks ifadesi `split_part(purpose, ':'::text, 1)`; iki tetikleyici (`…_append_only`,
   `…_no_truncate`); `true`; üç iş `active`.
-- [ ] **İlk gölge turu (İz A'ya bağlı):** `gh workflow run shadow.yml -R popiliadam/football-edge` → tur yeşil;
+- [ ] **İlk gölge turu (8 aktif lig):** `gh workflow run shadow.yml -R popiliadam/football-edge` → tur yeşil;
   logda `gölge: karar N · yazılan satır M · eşlenemeyen U · bayat durum B · fiyatsız Q`. Karar günü değilse
   N = 0 normaldir (yol yine uçtan uca koşar). `U > 0` ise o adlar `config/history_aliases.yaml`a İz A'nın 5.
   adımıyla (ad TAHMİN edilmez, canlı kapanıştan ölçülür) girer.
 - [ ] **E3 eşitlik raporu:** `uv run --env-file .env python -m football_edge.live parity` → exit 0; eşleşen,
   eşlenemeyen, sezon ve başlama farkı sayıları ölçüm belgesine. Exit 15 ise canlı bağlam tarihsel bağlamla aynı
-  değildir: Task 11'in sahibine bulgu (AUT'un `Date` takvimi burada ilk kez ölçülür, §3/38).
+  değildir: Task 11'in sahibine bulgu (ned.1 ve bel.1'in `Date` eşleşmesi burada ilk kez ölçülür; AUT kapalı olduğu için §3/38 AUT için
+  açık kalır).
 - [ ] Taze klon kapısı, push. Dalga 5 (Task 12) bu commit'ten açılır.
 
 ---
 
-### Task 12: Modelin bilinen sonuçları W1–W4 ve `history.yml` adımı (G4, R124)
+### Task 12: Modelin bilinen sonuçları W1–W4 ve `history.yml` adımı (G4, R130)
 
 **Kademe:** K1 · **Dalga:** 5 · **Worktree/dal:** `.worktrees/wt-model-selftest` · `feat/faz3-model-selftest`
 
@@ -7972,7 +7976,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.backtest
 
 <!-- plan: yeni src/football_edge/backtest/model_selftest.py -->
 ```python
-"""Modelin bilinen sonuçları (Faz 3 tasarımı §9 G4; R124): E bölgesinde, haftalık.
+"""Modelin bilinen sonuçları (Faz 3 tasarımı §9 G4; R130): E bölgesinde, haftalık.
 
 Kapı: W1 harman piyasadan `W1_MARGIN`dan fazla KÖTÜ değil (ortalama ΔLL ≤ δ) — `w = (1, 0, 0)`
 havuzun içinde olduğu için doğru bir fit örneklem içinde buna kesin uyar; örneklem dışında yalnız
@@ -8135,7 +8139,7 @@ def model_checks(rows: Sequence[Row], *, resamples: int) -> tuple[Check, ...]:
 @@ -99,6 +100,11 @@
      walk.add_argument("--out", type=Path, required=True)
      walk.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
-     walk.add_argument("--gap", action="store_true", help="R122 boşluk cezası (iki ek koşu)")
+     walk.add_argument("--gap", action="store_true", help="R128 boşluk cezası (iki ek koşu)")
 +    model = commands.add_parser("model-selftest", help="modelin bilinen sonuçları W1–W4")
 +    model.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
 +    model.add_argument("--lock", type=Path, default=LOCK_PATH)
@@ -8187,7 +8191,7 @@ def model_checks(rows: Sequence[Row], *, resamples: int) -> tuple[Check, ...]:
 <!-- plan: yama .github/workflows/history.yml -->
 ```diff
 diff --git a/.github/workflows/history.yml b/.github/workflows/history.yml
-index fff5eb1..d694890 100644
+index fff5eb1..334b4c2 100644
 --- a/.github/workflows/history.yml
 +++ b/.github/workflows/history.yml
 @@ -26,8 +26,9 @@ jobs:
@@ -8217,7 +8221,7 @@ index fff5eb1..d694890 100644
            esac
            exit "$code"
 +      - name: Model bilinen sonuçları
-+        # Faz 3 (G4, R124): W1–W3 kapı, W4 rapor. Örtük `success()`: kırmızı senkron ya da selftest
++        # Faz 3 (G4, R136): W1–W3 kapı, W4 rapor. Örtük `success()`: kırmızı senkron ya da selftest
 +        # sonrası koşmaz. Exit 11: `config/model_faz3.yaml` katalog/kilitle uyuşmuyor.
 +        env:
 +          DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -8285,7 +8289,7 @@ Bu görevin 8. adımı geri alınamaz: holdout'un Faz 3 açılışı. Önceki he
 
 ```bash
 cat > config/faz3_preregistration.yaml <<EOF
-# Faz 3 holdout ön kaydı (tasarım §8.1; R124, R129, R133). Açılıştan ÖNCE commit'lenir; değişirse
+# Faz 3 holdout ön kaydı (tasarım §8.1; R130, R135, R139). Açılıştan ÖNCE commit'lenir; değişirse
 # final-eval açmaz. Karşılaştırmalar: C1 harman–piyasa ΔLL · C2 DC, fit Elo, iskele Elo · C3 harman
 # bahis CLV + Placebo · C4 harman kalibrasyonu · C5 Ü/A 2.5 · C6 sonrası dönemi, tam durum.
 phase: faz3
@@ -8305,7 +8309,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 Kapı; push. **Bu commit'ten sonra `config/model_faz3.yaml`, kilit, katalog ve ön kayıt DEĞİŞMEZ** (değişirse
 `final-eval` exit 12 verir — doğru davranış).
 
-- [ ] **Step 3: Prova** (R129, P22) — aynı makinede, aynı kaynakla, AÇILIŞSIZ:
+- [ ] **Step 3: Prova** (R135, P22) — aynı makinede, aynı kaynakla, AÇILIŞSIZ:
 
 Run: `/usr/bin/time -l uv run --env-file .env python -m football_edge.backtest final-eval --rehearse --out docs/reports/<tarih>-faz3-prova.md; echo exit=$?`
 Expected: exit 0; `holdout AÇILMADI` logu; rapor C1–C4'ü sahte holdout (2024/25) için taşır, C6 boş; süre ve tepe
@@ -8336,7 +8340,7 @@ select count(*) from holdout_access_log;   -- 0
 ```
 
 - [ ] **Step 6: Çöküş planı yazılı** — açılış sonrası exit 14 ya da süreç çökmesi: rapor dosyası YOKSA ve
-  `git log -1` aynıysa TEK yeniden koşu `--rerun-reason "<neden>"` ile (R129); kod değiştiyse yeniden koşu YOK,
+  `git log -1` aynıysa TEK yeniden koşu `--rerun-reason "<neden>"` ile (R135); kod değiştiyse yeniden koşu YOK,
   holdout Faz 3 için harcanmış sayılır ve HANDOFF adıyla yazar.
 
 - [ ] **Step 7: Kullanıcı durağı (P14)** — kullanıcıya: ön kayıt dosyası, prova raporunun özeti, kırmızı takımın
@@ -8353,7 +8357,7 @@ select id, opened_at, recorded_at, git_sha, purpose from holdout_access_log orde
 ```
 
 - [ ] **Step 9: Holdout raporunu oku ve commit'le** — yalnız toplu sayı (Task 9'un takım adı kontrolü bu dosyada
-  da). R124: kenar şartı yoktur; sayılar kaydedilir, yorum HANDOFF'ta. Boşluk cezası (R122): Task 9 raporunun
+  da). R130: kenar şartı yoktur; sayılar kaydedilir, yorum HANDOFF'ta. Boşluk cezası (R128): Task 9 raporunun
   DEV simülasyonu ve C6'nın tam durum sayısı yan yana; canlı ayağı (C6 − gölge) P25 ile ertelendi.
 
 ```bash
@@ -8366,9 +8370,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 10: Faz 3 HANDOFF** — `docs/phases/03-baz-model/HANDOFF.md`: ne bitti; kapı ne ölçtü (adım adım, log
   dosyasından; `SKIP` adıyla); **kapının ölçmedikleri** (aşağıdaki liste + yürütmenin eklediği); verilen kararlar
-  (R122–R133, P1–P25, defterin `Ruling:` satırları); **holdout açılış sayısı** (`holdout_access_log`tan; 1 ya da
+  (R128–R139, P1–P25, defterin `Ruling:` satırları); **holdout açılış sayısı** (`holdout_access_log`tan; 1 ya da
   yeniden koşuyla 2, adıyla); ertelenenler (`docs/DEFERRED.md` yeni bölüm — gölge CLV raporu P25 dahil); Faz 4 ön koşulları (dil kalibrasyonu,
-  Jev istemcisi; gölge sicilin büyüklüğü; R122: holdout Faz 5 açılışından sonra durum verisi olur). `docs/HANDOFF.md`
+  Jev istemcisi; gölge sicilin büyüklüğü; R128: holdout Faz 5 açılışından sonra durum verisi olur). `docs/HANDOFF.md`
   §0 güncellenir. Taze klon kapısı, push, CI yeşil.
 
 ---
@@ -8387,7 +8391,7 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 18. **Dixon-Coles görülmemiş takımı tahmin etmez**: o maçlar ortak kümeden düşer (sayılır); E sayıları terfi eden
     takımların ilk maçlarını içermez.
 19. **Gölge harmanı, bahsi ve CLV'si bu fazda hesaplanmaz** (P19, P25): tablo bileşenleri ve karar anı fiyatını
-    tutar; rapor Faz 4'ün ilk görevi. R122'nin canlı ayağı o rapora kadar ölçülmez.
+    tutar; rapor Faz 4'ün ilk görevi. R128'nin canlı ayağı o rapora kadar ölçülmez.
 20. **Kitap kümesi farkı** (The Odds API ortalaması ↔ football-data `Avg`) E3'te ölçülmez; yalnız yapısal alanlar.
 21. **30 dk'nın altındaki başlama kaymaları görünmez** (P12).
 22. **Cross-platform kayan nokta** (macOS yerel ↔ Linux runner): tahmin özeti 1e-9'a yuvarlanır; iki platform
@@ -8406,17 +8410,18 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
   (0010, yeniden koşu) + Task 13 Step 3/6 · §9 G1 → Task 5/9/13 sabitleri · G2 → Task 6 · G3 → Task 6 · G4 →
   Task 12 · G5 → Task 10 · G6 → Task 10 · G7 → Task 6 · G8 → Task 0 · §10 → Task 11 (tablo, iş, E3); haftalık
   gölge CLV raporu → ERTELENDİ (P25) · §11 → dalgalar · §12 →
-  yukarıdaki liste · §13 riskleri → Task 5 ölçümü (R2), R3 P21/§22, R6 Task 13 Step 6 · §14 → R122–R133.
+  yukarıdaki liste · §13 riskleri → Task 5 ölçümü (R2), R3 P21/§22, R6 Task 13 Step 6 · §14 → R128–R139.
 - **Yer tutucu taraması:** "TBD/TODO/benzer şekilde/uygun hata" yok. `<tarih>`, `<Task 5 kararı>` ve ölçülen
   `leakage` sayıları çalışma zamanı değerleridir (aşağıda tanımlı).
 - **Tip tutarlılığı:** planın bütün kod blokları bu metinden bir ağaca kuruldu; her dalga sonunda ve paralel
   görevler tek başına `mypy --strict` + `ruff` + `pytest` yeşil. İsim sözleşmesi (yukarıdaki blok) kodla
   karşılaştırıldı.
-- **Kodun kendisi:** planın METNİNDEN (`<!-- plan: yeni|yama … -->` işaretli bloklar, sırayla) `4e3d14f`'e kurulan
+- **Kodun kendisi:** planın METNİNDEN (`<!-- plan: yeni|yama … -->` işaretli bloklar, sırayla) `a398c31`'e (İz A birleşmiş) kurulan
   ağaç, kodun yazıldığı ağaçla bayt bayt aynı (`uv.lock` dahil, `uv lock` ile üretilince); tam `verify.sh` 10 PASS
-  + `SKIP: zincir`; 1.718 passed / 2 skipped; `leakage` 327. Dalga sonu test sayıları: 1.530 · 1.577 · 1.611 ·
-  1.639 · 1.705 · 1.718; paralel görevler tek başına: T1 1.545 · T2 1.548 · T3 1.540 · T4 1.534 · T7 1.627 ·
-  T8 1.623 · T10 1.688 · T11 1.656. Görev tablolarındaki 35 mutasyonun her biri uygulandı, KIRMIZI görüldü,
+  + `SKIP: zincir`; 1.741 passed / 2 skipped; `leakage` 327. Her dalga sonunda ve paralel görev tek başına tam `verify.sh`
+  koşuldu (hepsi 10 PASS + `zincir` SKIP). Dalga sonu test sayıları: 1.553 · 1.600 · 1.634 · 1.662 · 1.728 ·
+  1.741; paralel görevler tek başına: T1 1.568 · T2 1.571 · T3 1.563 · T4 1.557 · T7 1.650 · T8 1.646 ·
+  T10 1.711 · T11 1.679. Görev tablolarındaki 35 mutasyonun her biri uygulandı, KIRMIZI görüldü,
   geri alındı.
 - **Bilinen boşluk:** hiçbir sayı gerçek veride ölçülmedi (bağlantı yok); Task 0/5/9'un ölçümleri kararları
   (P18 kadansı, P17 süresi) belirler ve kural önceden yazılıdır.
@@ -8434,9 +8439,9 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 - **Her dispatch'e:** "HİÇBİR ŞEY SİLME" (kendi scratch'i dahil); paralel ajanlara scratchpad'de AYRI alt dizin;
   rapor son mesajda (bazı implementer'lar dosya yazamıyor, controller kaydeder); holdout'u AÇMA.
 - **Model:** varsayılan opus; K1 incelemeleri, Task 13'ün kırmızı takımı ve bütün-dal incelemesi fable; haiku hiçbir yerde.
-- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R134'ten.
+- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R141'den (R140 controller'ın, R122–R127 İz A'nın).
 - **Çalışma zamanı değerleri:** `<tarih>` komutun koşulduğu gün (`YYYY-MM-DD`); `<Task 5 kararı>` Task 5 Step 3'ün
   kuralının çıktısı (1 ya da 7); `leakage` alt sınırları ölçülerek yazılır (plan yazımında 269 · 281 · 285 · 327).
-- **Onay kapıları:** (1) bu plan kullanıcı onayından ve İz A'nın birleşmesinden önce uygulanmaz; (2) Task 13
+- **Onay kapıları:** (1) bu plan kullanıcı onayından önce uygulanmaz (İz A'nın birleşmesi koşulu `a398c31` ile sağlandı); (2) Task 13
   Step 7 (holdout açılışı) ayrıca kullanıcı "evet"i ister; (3) kredi harcayan hiçbir adım yoktur — K6'nın ek
   snapshot'ı bu planın dışındadır ve ayrı onay ister.
