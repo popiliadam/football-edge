@@ -1,9 +1,10 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 (oturum 3) · **Durum:** **Faz 2 yürütülüyor** — tasarım ve TDD planı
-kullanıcı onaylı; dalga 0 `main`de (`e521ed5`), dalga 1'in dört görevi izole worktree'lerde · İz C canlı
-(mühür, snapshot, toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı
-**9 adım yeşil + `zincir` adıyla SKIP** (dalga 1 sonunda `sızıntı` adımıyla 10 olur)
+**Son güncelleme:** 2026-09-22 (oturum 3 sonu) · **Durum:** **Faz 2 yürütülüyor** — tasarım ve TDD planı
+kullanıcı onaylı; dalga 0 `main`de (`e521ed5`); dalga 1'in dört görevi kendi dallarında (üçü `complete`,
+Task 1 son inceleme turunda), **HİÇBİRİ merge edilmedi** — sıradaki Task 5 · İz C canlı (mühür, snapshot,
+toplayıcılar pg_cron'dan; footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı **9 adım yeşil +
+`zincir` adıyla SKIP** (Task 5'te `sızıntı` adımıyla 10 olur)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > Faz 1'in detaylı "ölçülmeyenler" listesi: `docs/phases/01-toplayicilar/HANDOFF.md` **§3**.
@@ -12,7 +13,7 @@ kullanıcı onaylı; dalga 0 `main`de (`e521ed5`), dalga 1'in dört görevi izol
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 3 sırasında yazıldı)
+## 0. Sonraki oturum — buradan başla (2026-09-22, oturum 3 sonunda yazıldı)
 
 **Faz 2 yürütülüyor — kaldığın yeri DEFTER söyler.**
 - Plan: `docs/superpowers/plans/2026-09-22-faz2-tarihsel-taban.md` (13 görev, onaylı, iki tur bağımsız
@@ -26,6 +27,44 @@ kullanıcı onaylı; dalga 0 `main`de (`e521ed5`), dalga 1'in dört görevi izol
 - Başlatmak için: "`docs/HANDOFF.md` §0'dan devam et" → defteri oku → açık worktree'leri (`git worktree list`)
   ve dalları defterle karşılaştır.
 
+**Dalga 1 — dört görev kendi dalında, `main`e merge EDİLMEDİ**
+
+| Görev | Dal · worktree | Commit'ler | Durum |
+|---|---|---|---|
+| Task 1 — tarihsel lig kataloğu + football-data ayrıştırıcısı | `feat/faz2-parser` · `.worktrees/wt-parser` | `e215b27` → tur 1 `4e19a3c` → tur 2 `be402bb` (R105) | iki tur bitti, controller mutantları kırmızı; **kapsamlı yeniden inceleme SIRADA** |
+| Task 2 — devig + metrikler | `feat/faz2-devig` · `.worktrees/wt-devig` | `25cbf8e..1107099` | complete |
+| Task 3 — kilit, holdout anahtarı, migration 0007 | `feat/faz2-lock` · `.worktrees/wt-lock` | `dcb639a..86ed2d8` | complete |
+| Task 4 — olay akışı harness'ı | `feat/faz2-harness` · `.worktrees/wt-harness` | `8c88969..75cd4ed` | complete |
+
+**Sıradaki adımlar**
+1. **Task 1'i kapat.** Kapsamlı yeniden inceleme `e215b27..be402bb` (iki turu birlikte; bulgular defterde: Important 1,
+   Minor 3, 5, 6 + R103–R105; `general-purpose` — kabuk gerekir; brif
+   `task-1-brief.md`, rapor `task-1-report.md`, paket `scripts/review-package`; rapor `task-1-rereview.md`).
+   Bulgu kalırsa tur 3 **yeni** bir implementer'la (ajan kimlikleri oturumla gider, "resume" edilemez).
+2. **Task 5 — planın metni birebir.** Merge sırası devig → lock → parser → harness; her biri `--no-ff` (merge
+   commit: gitleaks parmak izleri squash/rebase ile bozulur) ve her merge'den sonra tam `verify.sh`. 0007 canlı
+   Supabase'e **`86ed2d8`deki hâliyle** uygulanır (`recorded_at` dahil). `leakage` sayısı ölçülür, `sızıntı` adımı
+   eklenir (`EXPECTED_MIN_LEAKAGE`); belge sayıları (README "On bir adım", HANDOFF "10 adım"); taze klon kapısı;
+   `git fetch` + `git merge origin/main`, sonra push (force yok).
+3. **Task 6–12** planın dalgalarıyla. Task 8'in ilk gerçek senkronunda: **R104** — genişlik reddi ya da AvgC
+   doluluğu yüzünden dosya düşerse kapı GEVŞETİLMEZ; dosya/satır sayısı ve fazlalığın biçimi ölçülür, sonra ruling.
+   **R102** — Step 10b ile `Date` takvimi ölçülür. Task 12: lig önerisi kullanıcı onayı ister; tasarım metni
+   düzeltmeleri (R86, R98, DEFERRED 12j).
+
+**Oturum 3'ün kararları** (gerekçe ve bedel defterde): R101 — K1 incelemesinde sağ kalan mutantlar küçük tek turda
+kapanır, controller onları kendi kopyasında yeniden koşar · R102 — `Date` takvimi Task 8'de ölçülür · R103 — fiyat
+hücresi sayımı reddedilen ve yinelenen satırları içerir, genişliği tutmayan kaydınkini içermez · R104 — satır genişliği
+tam eşitlik (fail-closed) · R105 — 2019/20 sezon penceresi 31 Ağustos'ta kapanır (Serie A son haftası 1–2 Ağustos 2020).
+
+**Oturum düzeni (bu oturumda öğrenilenler)**
+- Bağlam ~%95'e yaklaşınca devir: koşan görev bitince defter + bu bölüm + commit/push, sonra yeni oturum —
+  otomatik sıkıştırmaya güvenme.
+- `Agent`'ın `isolation: "worktree"`ü bu makinede çalışmıyor (WorktreeCreate hook yol döndürmüyor) → worktree'yi
+  `git worktree add` ile elle aç.
+- Alt ajanlar izinsiz `rm -rf` yaptı (kendi scratch dizinleri) → her dispatch'e "hiçbir şey silme" yaz. Bazı
+  implementer'lar rapor dosyasını yazamıyor → raporu son mesajda iste, controller kaydeder.
+- Scratchpad'den `gh` çağrısı → `-R popiliadam/football-edge`.
+
 **Oturum 3'te bitenler** (hepsi `main`de, push'lu, CI yeşil)
 - 0a — R77 erişim kuralı testi (`c3aedaa`): yasak araçlar import edilemez, kilide ve kuruluma giremez;
   Scrapling'in fetcher tarafı bütünüyle yasak (R80), CAPTCHA/IP döndürme araçları (R81). Kalan boşluklar DEFERRED §11.
@@ -35,6 +74,8 @@ kullanıcı onaylı; dalga 0 `main`de (`e521ed5`), dalga 1'in dört görevi izol
 - 0c — Scrapling denemesi: uyarlanabilir seçiciler TFF'de BENİMSENMEZ (§4.1: 1.979 yeniden bulmanın 0'ı doğru).
 - Adım 1–2 — tasarım (`acdc6b5`, spec güncellemesi `5b3addd`) ve plan (`f1bf664`, DEFERRED §11–12).
 - Dalga 0 — `e521ed5`: `history/types.py`, numpy, `leakage` işareti; taze klon 743 passed / 2 skipped.
+- Devir commit'i: plana Task 8 Step 10b (R102, `Date` takvimi ölçümü); DEFERRED 12a'ya 0001 tetikleyici mesajı,
+  yeni 12e–12j (dalga 1 incelemelerinin ertelenen bulguları).
 
 **İzlenecekler (kendiliğinden olmalı; olmazsa RUNBOOK §3)**
 1. 2026-09-23 07:10 UTC ilk cron'lu `collect-daily` ve 10:40 yerel ilk zamanlanmış footystats turu:

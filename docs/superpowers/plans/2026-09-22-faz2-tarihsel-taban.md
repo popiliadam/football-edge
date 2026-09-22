@@ -9944,6 +9944,37 @@ Expected: `SyncReport` — `failed` boş; istenen yol sayısı `declared_paths` 
 satırlar dosya başına adıyla. Bir yol 404 verirse (o lig o sezon yok) katalogdaki `first_season`
 düzeltmesi Task 6'nın implementer'ına bulgu olarak döner; kapı gevşetilmez.
 
+- [ ] **Step 10b: `Date` takviminin ölçümü (R102)** — tasarım D5 `Time`in Europe/London olduğunu dağılımdan
+çıkardı; gece yarısından SONRAKİ Londra saatlerinde `Date`in Londra tarihi mi yerel tarih mi olduğu ölçülmedi.
+Yerel tarihse o satırların başlama anı 24 saat erken hesaplanır (sonuç, ait olduğu karardan önce "bilinir" —
+sızıntı). Önbellekten yerelde ölç (ağ yok, veritabanına yazma yok; yalnız toplu sayı basılır):
+
+```bash
+uv run --env-file .env python - <<'PY'
+from collections import Counter
+from pathlib import Path
+
+from football_edge.db import connect
+from football_edge.history.catalog import load_catalog
+from football_edge.history.sync import load_matches
+
+catalog = load_catalog(Path("config/history_leagues.yaml"))
+with connect() as conn:
+    matches = load_matches(conn, catalog)
+for code in ("USA", "BRA", "ARG", "MEX"):
+    late = [m for m in matches.get(code, ()) if m.kickoff is not None
+            and m.kickoff.astimezone(__import__("zoneinfo").ZoneInfo("Europe/London")).hour < 6]
+    days = Counter(m.date.strftime("%a") for m in late)
+    print(code, len(late), dict(sorted(days.items())))
+PY
+```
+Karar kuralı: USA'da (MLS maçları ağırlıkla cumartesi yerel akşamı) 00:00–05:59 satırları **pazar**a yığılıyorsa
+`Date` Londra tarihidir (D5 doğru); **cumartesi**ye yığılıyorsa yerel tarihtir. Sonuç ölçüm belgesine (§2.6)
+yazılır. Yerel tarih çıkarsa: katalog ek liglere saat dilimi alanı alır ve ayrıştırıcı düzeltmesi (K2 görevi)
+Faz 3'ten ÖNCE yapılır; o güne dek bu satırların başlama anı güvenilmez sayılır (Faz 2'de ek ligler yalnız
+kapanış ölçütlerinde kullanılır — zaman semantiğine dayanan K1/K4 ana liglerde). Ana liglerde 06:00 öncesi satır
+sayısı da aynı betikle basılır (beklenen 0).
+
 - [ ] **Step 11: robots doğrulaması** — `gh workflow run sources-audit.yml`; logda `football-data:
 sapma yok`. Sapma varsa anlık görüntü canlı dosyaya göre düzeltilir (içerik farkı değil yalnız biçim
 farkı olmalı; içerik farkıysa robots yeniden okunur).
