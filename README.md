@@ -169,7 +169,7 @@ Faz 1 ve 2'nin eklediği dört adım **ağa çıkmaz ve para harcamaz**:
 - **`veri-sözleşmesi`** — `contract` etiketli testleri koşar ve **sayılarını ölçer**
   (`EXPECTED_MIN_CONTRACT`, bugün 18). Bir marker sessizce kaybolursa kapı kırmızı verir.
 - **`sızıntı`** — `leakage` etiketli testleri koşar ve sayılarını ölçer
-  (`EXPECTED_MIN_LEAKAGE`, bugün 209): zaman semantiği, dönem ayrımı, kilit, bağlam/sonuç ayrımı.
+  (`EXPECTED_MIN_LEAKAGE`, bugün 221): zaman semantiği, dönem ayrımı, kilit, bağlam/sonuç ayrımı.
 - **`dil-kalibrasyonu`** — `config/languages.yaml`'da `production_enabled: true` olan her
   dilin geçerli bir kalibrasyon raporu taşıdığını sorar. **Bugün hiçbir dil açık değil.**
 
