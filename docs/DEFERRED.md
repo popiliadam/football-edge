@@ -583,3 +583,26 @@ için `0004_workflow_dispatch.sql`; `docs/RUNBOOK.md` §3). Açık kalanlar:
 | 10r | footystats GitHub runner'larında koşamıyor; iş Mac'te launchd ile koşuyor (R73–R75, RUNBOOK §3.9) | İlk canlı turda 6/6 lig 403 (Cloudflare veri merkezi IP'lerini geri çeviriyor; robots.txt runner'dan okunuyor), aynı kod ve kimlik Mac'ten 200. Kapatılanlar: sonuç `footystats-local.yml`e raporlanır ve alarmı github-actions açar (kullanıcının kendi token'ıyla açılan issue bildirim üretmezdi); raporlar bekçinin kalp atışıdır (72 sa); dört dilim + oturum açılışı gün içindeki kaçışı telafi eder; uyanışta ağ için 6 deneme. Kalanlar: Mac BÜTÜN GÜN kapalıysa o günün xG ara durumu kalıcı kaybolur; bir tur için katı süre sınırı yok (macOS'ta `timeout` yok, ağ adımları sınırlı); günlük dosyası döndürülmüyor; birden çok `DATABASE_URL` satırında ilki alınır (test edilmiyor) |
 | 10s | TFF: bütün görevli hücreleri boş bir sayfa "henüz açıklanmadı" sayılır (R72) | Hakemler her hafta maçlardan birkaç gün önce açıklanır; o günlerde sayfa 63/63 boş hücre taşır (ölçüldü 2026-09-22) ve tur 0 yazıp yeşil kalır. TFF görevlileri `Hakemler` div'inin DIŞINA taşır ve hücreyi boş bırakırsa bu durum sayfadan ayırt EDİLEMEZ. Ayıracak olan zaman boyutu: maç iki günden yakınken hâlâ 0 gözlem → alarm. Ayrıca sezon arasında sayfa hiç maç satırı taşımazsa tur her gün `hiç maç satırı tanınmadı` ile kırmızı olur (ölçülmedi, sonraki yaz arası) |
 | 10t | `main`in ucu her gün kişisel Mac'te, kullanıcının yetkisiyle ve insansız koşuyor (T2 incelemesi, güvenlik) | Runner'da kod geçici bir makinede, tur bitince geçersizleşen `issues: write` token'ıyla koşuyordu. Yerel işte GitHub hesabı ele geçirilip `main`e kötü bir commit itilirse (ya da `uv.lock` bozuk bir paket getirirse) kod bir gün içinde bu Mac'te, kullanıcının dosyalarına ve anahtar zincirine erişebilen bir süreç olarak çalışır. R74 GitHub token'ını işin süreçlerinden çıkardı; geliştirme sırasında aynı kod bu Mac'te zaten elle koşuyor. Kalıcı çözüm: işi yetkisiz ayrı bir macOS kullanıcısında koşmak (yönetici yetkisi, kullanıcı kararı) ya da yalnız imzalı commit'leri koşturmak. Şimdilik kabul edildi, kullanıcıya bildirildi |
+
+## 11. R77 erişim kuralı testinin bilinen boşlukları (`tests/test_access_method_rule.py`, 2026-09-22)
+
+Test kazara girişi durdurur; kasıtlı kaçışa karşı bir güvenlik sınırı değildir. İnceleme ve yeniden inceleme
+37 + 60'tan fazla mutasyonla sınadı; kalanlar (R87 — ikinci tura alınmadı):
+
+| # | Boşluk | Arkasındaki ağ |
+|---|---|---|
+| 11a | Ek taşıyan dizeler görünmez: `"camoufox==0.4"`, `"pip install camoufox"`, `os.system("uv pip install …")` | yok — çalışma zamanı kurulumu kilide girmez. İncelemecinin ölçtüğü iki denetim (yasak ad + sürüm işleci/`[`/`@`/`;`/`(`; kurulum fiili + ad) depodaki 1.098 dizede 0 yanlış pozitifle dört biçimi de yakalıyor — ucuz kapanır |
+| 11b | Elle yazılmış proxy döndürme (ör. httpx `proxy=` döngüsü) ölçülmüyor; yalnız adı bilinen iki döndürücü (`ProxyRotator`, `requests-ip-rotator`) aranıyor. Docstring'in "ölçülmeyenler" listesinden bu madde düştü | yok |
+| 11c | R80'in yol listesi `scrapling.spiders`, `core.ai`, `core.shell`, `cli`yi kapsamıyor (hepsi fetcher'lara ulaşır) | `scrapling/engines/static.py` import anında `curl_cffi` istiyor: kilit testi + çalışma zamanı `ImportError` |
+| 11d | `import_module(name="camoufox.sync_api")` (anahtar biçimli alt modül), ad dizesiyle erişim (`__import__(..., fromlist=[...])`, `attrgetter`), iki kabuk yazımı (zsh kaçışlı `scrapling\[fetchers\]`, `"scrapling"[fetchers]`) | kilit testi (paket kurulu değilse çalışmaz) |
+| 11e | Dize kuralının iki alt parçası (import köküyle `STRING_REASONS`, Scrapling modül yolu uzantısı) sabitsiz; neden aramasında Unicode büyük/küçük katlama `KeyError` (yine kırmızı) | — |
+| 11f | Form 4 (`.Fetcher` gibi öznitelik adları) genel adlarda ileride yanlış pozitif verebilir | kırmızı verir, sessiz değil |
+
+## 12. Faz 2 planından ertelenenler (2026-09-22)
+
+| # | Ne | Neden önemli |
+|---|---|---|
+| 12a | Eski append-only tablolarda (0001–0005: `odds_snapshots`, `source_observations`, `match_results`) TRUNCATE tetikleyicisi ve RLS yok | Satır tetikleyicisi UPDATE/DELETE'i durdurur, TRUNCATE'i durdurmaz; RLS'siz tablo, Supabase'in API rolleri yetkiliyse REST'ten okunabilir. 0006/0007 ikisini de açıyor (R90) — eski tablolar ayrı bir migration ister (Supabase advisors ile birlikte bakılmalı) |
+| 12b | `HistMatch.odds` sözlük + float nesneleri: plan incelemesinin deneyi maç başına ~4,4 KB → ~240 bin maçta ~1,1 GB | Runner'a sığıyor; `ODDS_COLUMNS` sırasına hizalı bir demet belleği birkaç kat düşürür. Task 8 gerçek tepeyi ölçer |
+| 12c | `hist_match` iki ayrı test yardımcısında (`tests/market_factory.py`, `tests/backtest_builders.py`) | Dalga 1'de paralel yazıldılar; birleştirme bir sonraki temizlikte |
+| 12d | Plan yeniden incelemesinin kalan gözlemleri (plan §"ölçmeyecekler" 24): `_measure` yakalama genişliği testsiz, `load_matches`in gerçek anahtarlı pozitif yolu testsiz, EKSİK kilit dosyası exit 1 | Uygulama incelemelerinde kapanır |

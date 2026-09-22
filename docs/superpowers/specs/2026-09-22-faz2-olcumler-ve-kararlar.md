@@ -1,7 +1,7 @@
 # Faz 2 — plan-zamanı ölçümleri ve verilen kararlar
 
 **Tarih:** 2026-09-22 · **Durum:** ölçümler tamam (§2.4 ve §4.1 oturum 3'te eklendi); tasarım belgesi
-`2026-09-22-faz2-tarihsel-taban-design.md` kullanıcı onayı bekliyor, TDD planı YAZILMADI · **Spec:** `2026-09-19-football-edge-design.md` · **Yol haritası:**
+`2026-09-22-faz2-tarihsel-taban-design.md` ONAYLANDI (2026-09-22); TDD planı yazıldı, onay bekliyor · **Spec:** `2026-09-19-football-edge-design.md` · **Yol haritası:**
 `../plans/2026-09-19-faz-1-7-yol-haritasi.md` (Faz 2), `../plans/2026-09-21-yol-haritasi-v2-paralel-izler.md`
 
 Bu belge tasarımın girdisidir, yerine geçmez. Her sayı aşağıda yazan komutla ölçüldü; ölçülmeyen
@@ -74,6 +74,22 @@ girmediler.
 | 2026/27 `HxG`/`AxG` | 22 ana ligin **18'inde %100 dolu** (EC, SC1, SC2, SC3'te sütun yok) — footystats'ın altı ligi (E0, SP1, I1, D1, F1, T1) dahil |
 | Ek lig dosya adları | ARG AUT BRA CHN **DNK** FIN IRL JPN MEX NOR POL **ROU** RUS SWE **SWZ** USA |
 | Eksik oranlı satırlar | T1 2022/23: kapanış ve öncesi %92 (maçların %8'i oransız) — yükleyici oransız satırı saymalı, düşürmemeli |
+
+### 2.5 The Odds API futbol anahtarları — `/v4/sports?all=true` (oturum 3, 0 kredi)
+`x-requests-last: 0` (uç kredi harcamaz); 67 futbol anahtarı. football-data kataloğuyla eşleşme:
+- **Ana ligler (18/22):** E0 `soccer_epl` · E1 `soccer_efl_champ` · E2 `soccer_england_league1` · E3
+  `soccer_england_league2` · SC0 `soccer_spl` · D1 `soccer_germany_bundesliga` · D2 `soccer_germany_bundesliga2` ·
+  I1 `soccer_italy_serie_a` · I2 `soccer_italy_serie_b` · SP1 `soccer_spain_la_liga` · SP2
+  `soccer_spain_segunda_division` · F1 `soccer_france_ligue_one` · F2 `soccer_france_ligue_two` · N1
+  `soccer_netherlands_eredivisie` · B1 `soccer_belgium_first_div` · P1 `soccer_portugal_primeira_liga` · T1
+  `soccer_turkey_super_league` · G1 `soccer_greece_super_league`. **Anahtarı YOK:** EC, SC1, SC2, SC3.
+- **Ek ligler (15/16):** ARG `soccer_argentina_primera_division` · AUT `soccer_austria_bundesliga` · BRA
+  `soccer_brazil_campeonato` · CHN `soccer_china_superleague` · DNK `soccer_denmark_superliga` · FIN
+  `soccer_finland_veikkausliiga` · IRL `soccer_league_of_ireland` · JPN `soccer_japan_j_league` · MEX
+  `soccer_mexico_ligamx` · NOR `soccer_norway_eliteserien` · POL `soccer_poland_ekstraklasa` · RUS
+  `soccer_russia_premier_league` · SWE `soccer_sweden_allsvenskan` · SWZ `soccer_switzerland_superleague` · USA
+  `soccer_usa_mls`. **Anahtarı YOK:** ROU. (CHN, JPN, POL, RUS ölçüm anında `active: false` — sezon arası ya da
+  bahisçi yok; anahtar var.)
 
 ### 2.3 Canlı defter ve kapasite (Supabase, 2026-09-22)
 Veritabanı 15 MB (ücretsiz sınır 500 MB). `odds_snapshots` 5.763 satır; **kapanışı mühürlenmiş maç 4**
