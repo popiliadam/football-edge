@@ -9,17 +9,19 @@ from types import MappingProxyType
 import pytest
 
 from football_edge.backtest import harness
+from football_edge.backtest.context import DuplicateMatch
 from football_edge.backtest.events import DECISION, RESULT, Event
 from football_edge.backtest.harness import (
     DecisionContext,
     LeakageError,
+    MatchKey,
     Outcome,
     Prediction,
     ResultRecord,
     replay,
 )
 from football_edge.backtest.timeline import result_known_at
-from football_edge.history.types import CLOSING, PRE_CLOSING, RESULTS, TOTALS_25, HistMatch
+from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, RESULTS, TOTALS_25, HistMatch
 from tests.backtest_builders import hist_match, quote
 
 FRIDAY_NOON_BST = datetime(2024, 8, 9, 11, tzinfo=UTC)
@@ -186,9 +188,13 @@ def test_a_decision_context_carries_only_pre_closing_prices() -> None:
     replay((match,), recorder)
 
     context = recorder.contexts[0]
+    # Faz 3 (R98 eşitliği): yalnız canlı defterin de üretebildiği `Avg` 1X2 kapanış öncesi fiyatı.
     assert dict(context.pre_prices) == {
-        key: price for key, price in FULL_ODDS.items() if key.phase == PRE_CLOSING
+        key: price
+        for key, price in FULL_ODDS.items()
+        if key.phase == PRE_CLOSING and key.book == "Avg" and key.market == H2H
     }
+    assert len(context.pre_prices) == 3
     assert isinstance(context.pre_prices, MappingProxyType)
     assert (context.league, context.season, context.date) == ("E0", "2425", date(2024, 8, 10))
     assert (context.home, context.away, context.decision_at) == ("Alfa", "Beta", FRIDAY_NOON_BST)
@@ -199,7 +205,15 @@ def test_outcomes_hold_only_closing_prices_and_only_for_predicted_matches() -> N
     kickoff = datetime(2024, 8, 10, 14, tzinfo=UTC)
     matches = (
         hist_match(day=date(2024, 8, 10), kickoff=kickoff, goals=(2, 1), odds=FULL_ODDS),
-        hist_match(day=date(2024, 8, 10), kickoff=kickoff, goals=(0, 0), odds=FULL_ODDS, line=2),
+        hist_match(
+            day=date(2024, 8, 10),
+            kickoff=kickoff,
+            home="Gama",
+            away="Delta",
+            goals=(0, 0),
+            odds=FULL_ODDS,
+            line=2,
+        ),
     )
 
     result = replay(matches, _recorder(predict_for=frozenset({0})))
@@ -401,6 +415,10 @@ _SLOTS: tuple[tuple[int, time | None], ...] = (
     (2, time(0, 30)),  # pazartesi 00:30
     (3, time(18, 45)),  # salı akşamı
     (4, time(23, 30)),  # çarşamba gece
+    # 14k: karar anına (11:00 UTC, BST) 1 sa 15 dk kala başlayan cuma ve salı maçları; sonucu
+    # 4 sa erken sızdıran bir harness'ı yalnız bu iki yuva yakalar.
+    (-1, time(12, 15)),  # cuma öğlen
+    (3, time(12, 15)),  # salı öğlen
 )
 _CANARY_LEAGUES = ("E0", "SP1", "BRA")
 
@@ -451,3 +469,40 @@ def test_an_oracle_that_uses_results_gets_no_prediction_from_the_honest_harness(
     # görmediği için susuyor.
     assert (result.no_decision, result.no_prediction) == (0, len(schedule))
     assert sum(prediction.probs[0] > 0 for prediction in earlier.predictions) > len(schedule) // 2
+
+
+@pytest.mark.leakage
+def test_replay_refuses_the_same_match_twice() -> None:
+    """14g/14r: aynı (lig, tarih, ev, deplasman) iki kez → iki karar ve çift durum güncellemesi."""
+    day = date(2024, 8, 10)
+    kickoff = datetime(2024, 8, 10, 14, tzinfo=UTC)
+    twice = (hist_match(day=day, kickoff=kickoff), hist_match(day=day, kickoff=kickoff, line=2))
+
+    with pytest.raises(DuplicateMatch, match="yinelenen maç"):
+        replay(twice, _recorder())
+
+
+def test_the_context_key_is_the_match_identity() -> None:
+    match = hist_match(day=date(2024, 8, 10), kickoff=datetime(2024, 8, 10, 14, tzinfo=UTC))
+
+    context = harness._context(4, match, FRIDAY_NOON_BST)
+
+    assert context.key == MatchKey("E0", date(2024, 8, 10), "Alfa", "Beta")
+
+
+@pytest.mark.leakage
+def test_the_context_carries_only_prices_the_live_ledger_can_rebuild() -> None:
+    """R98 eşitliği (Faz 3): canlı defter yalnız kitap ortalaması 1X2 kurar; başka kitap ya da
+    market bağlama girerse canlı bağlam onu taşıyamaz."""
+    odds = {
+        **quote("Avg", PRE_CLOSING, (2.6, 3.3, 2.8)),
+        **quote("Max", PRE_CLOSING, (2.8, 3.6, 3.1)),
+        **quote("Avg", PRE_CLOSING, (1.9, 1.95), market=TOTALS_25),
+    }
+    match = hist_match(
+        day=date(2024, 8, 10), kickoff=datetime(2024, 8, 10, 14, tzinfo=UTC), odds=odds
+    )
+
+    context = harness._context(0, match, FRIDAY_NOON_BST)
+
+    assert dict(context.pre_prices) == quote("Avg", PRE_CLOSING, (2.6, 3.3, 2.8))
