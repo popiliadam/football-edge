@@ -122,7 +122,10 @@ bütün-dal incelemesi (mutasyonlu) → düzeltme turu → DB bağlı 11/11 → 
    ve uyarlanabilir ayrıştırıcısı, projenin `guard_path` (robots), crawl-delay, dürüst kimlik (`football-edge/0.1`)
    ve yönlendirme denetimi ARKASINDA; `StealthyFetcher`/parmak izi gizleme/bot doğrulaması aşma KULLANILMAZ (R77,
    §3.2.1 — kullanıcıya açıkça söylendi; AST bekçisi `StealthyFetcher`/`stealth` importunu kırmızıya bağlar).
-   Yeni kaynaklar `sources.yaml`a `enabled: false` girer; açmak §0.7/4 kararına bağlı.
+   Yeni kaynaklar `sources.yaml`a `enabled: false` girer; açmak §0.7/4 kararına bağlı. **Scrapling varsayılanları
+   R77'ye aykırı** (`get`: `impersonate="chrome"`, `stealthy_headers=true`; `fetch`: üretilmiş tarayıcı kimliği,
+   `google_search=true`) — adaptör bunları açıkça kapatır, test kimliği/başlıkları sabitler (`docs/reports/2026-09-23-ek-kaynaklar.md`
+   §Scrapling). İlk hedef TFF PFDK kararları (windows-1254, uyarlanabilir seçiciler değer katar).
 3. **Küçük borçlar (K2):** DEFERRED 17n (bekçi test boşlukları), 17h'ye eklenen 17a bekçisi kaçışları (tablo adı
    sabitiyle f-string, büyük harf tablo adı, `GATES_READERS` kümesi — son inceleme M-4/M-5), 16k-b (`draw` alanı
    `ordered` biçimde isteğe bağlı; mühürlü `model_faz3.yaml` okunmaya devam eder).
@@ -150,12 +153,17 @@ hazır olur.
    ve **Netlify hesabı** (kullanıcı açar/giriş yapar; site, deploy, DNS'i asistan kurar — Netlify araçları bağlı).
 3. **Halka açık okuma katmanı:** siteye hangi tablolar/görünümler açılır (sicil, maç, kapanış…) — migration
    uygulanmadan önce onay.
-4. **EN haber kaynağı politikası:** izin listesi önerisi (kaynak koşulları raporu + Dalga A/1 ölçümü + oturum 9'da
-   gelen ek kaynak araştırması); **ajansspor 17l** (`ai-input=yes` yeterli mi, yayıncıya sorulsun mu).
+4. **Haber kaynağı politikası:** EN izin listesi (`docs/reports/2026-09-23-kaynak-kosullari.md` + Dalga A/1
+   ölçümü) ve ek kaynaklar (`docs/reports/2026-09-23-ek-kaynaklar.md`): önerilen kombinasyon EN = GDELT izin listesi
+   + SportMonks Starter (€29/ay, yapılandırılmış sakat/cezalı) + resmî hesaplar için X API (~$60/ay tahmini) +
+   Wikidata; TR = ajansspor + Fotomaç/A Spor RSS + TFF PFDK + Galatasaray RSS. Kararlar: hangileri, ücretli olanlar
+   (SportMonks 14 günlük deneme = hesap açma, kullanıcı), **ajansspor 17l** (`ai-input=yes` yeterli mi, sorulsun mu).
 5. **Dil kalibrasyonu etiket onayı** (200 haber; Dalga A/4 dosyası) — Plan 2 T3 bunu bekler.
 6. **Ücretli Jev harcamasını açan commit** (tek satırlık komut kullanıcıya verilir; auto-mode bu commit'i yapmaz)
    ve Plan 2 maliyet ölçümü onayı.
-7. **Hukuk (yayından önce, avukatla):** Türkiye'de bahisle ilgili içerik/yönlendirme riski, KVKK metinleri,
+7. **Hukuk (yayından önce, avukatla):** **sakatlık bilgisi = sağlık verisi (KVKK md. 6 / GDPR md. 9) — kaynaktan
+   bağımsız, bütün projeyi ilgilendirir; takım düzeyinde toplulaştırma yeterli mi?** · Türkiye'de bahisle ilgili
+   içerik/yönlendirme riski, KVKK metinleri,
    football-data'dan yazılı izin (spec §10/2), başlık telifi ve yayıncı ToS'larının aracı (GDELT/Google News)
    üzerinden bizi bağlayıp bağlamadığı (kaynak koşulları raporu §Açık sorular 2–3).
 8. **Holdout 2. açılışı için açık "evet"** (Plan 2 T11 — çok sonra, ön kayıt ve kırmızı takımdan sonra).
