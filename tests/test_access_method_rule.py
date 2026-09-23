@@ -17,16 +17,24 @@ akışları, action'lar, kabuk betikleri ve kökteki `requirements*.txt` onları
 `fetchers` dışındaki ekstraları (`ai`, `shell`, `all`) B ve C'de kırmızı kalır: R77b yalnız
 `fetchers`ı açtı; `ai`/`shell` MCP sunucusu ve kabuk getirir.
 
+Scrapling komut satırı aracı (`scrapling`, `fetchers` ekstrasıyla gelir) fetcher'ları geçidin
+dışında koşturur: C ekseni ve A'nın her dize sabiti `CLI_PATTERN`le taranır — `--solve-cloudflare`
+(b), `--proxy`/`--proxies` (a) ve `scrapling extract|shell|mcp` (`python -m scrapling.cli …`
+dahil) (d) kırmızı; A ayrıca `["scrapling", "extract", …]` argv listesini arar. `scrapling install`
+(tarayıcı kurulumu) serbest.
+
 A ekseninin R77b kuralları (AST, `src/` ve `scripts/`):
-(a) proxy: `ProxyRotator` import/ad/öznitelik/`getattr` kullanımı ve herhangi bir çağrıda
-    `PROXY_KEYWORDS` anahtar argümanı — her dosyada, adaptör dahil;
+(a) proxy: `ProxyRotator` import/ad/öznitelik/`getattr` kullanımı, herhangi bir çağrıda
+    `PROXY_KEYWORDS` anahtar argümanı ve bu adları TAM taşıyan dize (`opts["proxy"] = p`,
+    `**{"proxy": p}`) — her dosyada, adaptör dahil;
 (b) doğrulama çözme: `CHALLENGE_OPTIONS` (kurulu scrapling 0.4.15'in fetcher imzalarından
     ölçüldü: yalnız `solve_cloudflare`) anahtar argüman, parametre, ad, öznitelik ya da TAM dize
     olarak hiçbir değerle geçmez — `False` da;
 (c) adı verilmiş bot: `useragent=`/`user_agent=` argümanları, `"User-Agent"` başlık anahtarlı
-    sözlük ve atama (büyük/küçük harf duyarsız) ve `config/sources.yaml`daki `user_agent` alanı
-    `NAMED_BOTS` adlarından birini taşıyamaz. `config/robots/` anlık görüntüleri bot adı taşır:
-    kapsam dışı;
+    sözlük ve atama (büyük/küçük harf duyarsız), adı UA olan değişken/öznitelik ataması
+    (`USER_AGENT = …`, `self.useragent: str = …`, `DEFAULT_UA = …`) ve `config/sources.yaml`daki
+    `user_agent` alanı `NAMED_BOTS` adlarından birini taşıyamaz. `config/robots/` anlık
+    görüntüleri bot adı taşır: kapsam dışı;
 (d) tek geçit: Scrapling fetcher tarafı (`GATED_MODULES`, `GATED_NAMES`) yalnız `ADAPTER`de
     serbest; başka her dosyada kırmızı. "Yalnız `sources.yaml` kaynağı", robots, crawl-delay,
     `Retry-After` ve 403/429 kuralları adaptörün davranış testlerinde tek yerde zorlanır. Adaptör
@@ -35,15 +43,32 @@ A ekseninin R77b kuralları (AST, `src/` ve `scripts/`):
 `FORBIDDEN` tablosu spec'teki "ve benzerleri"nin TAMAMI DEĞİLDİR; otorite spec'tir — tabloda
 olmayan bir araç izinli değil, yalnız bu testin görmediği bir araçtır.
 
-Bilinen sınırlar: dize kuralı yalnız yasak adı TAM taşıyan sabiti yakalar — hesaplanmış dizeler
-(`"cloud" + "scraper"`), ek taşıyan dizeler (`"cloudscraper==1"`, `"pip install cloudscraper"`) ve
-`exec`/`eval` görünmez. Proxy ve doğrulama seçeneği `**{"proxy": ...}` sözlük açımıyla, User-Agent
-`[("User-Agent", ...)]` demet listesiyle, `setdefault`la ya da hesaplanmış bir değişkenle
-gelirse görünmez; bot adı yalnız UA bağlamındaki SABİT dizelerde aranır. httpx'in ortamdan proxy
-okuması (`trust_env`) ölçülmez. `FREED` araçlarının (ör. `curl_cffi`) adaptör dışında doğrudan
-kullanımı tek geçidi aşar; (d) yalnız Scrapling'i kapsar. Kuralın davranış tarafı (403/429'da
-kimlik ya da yol değiştirip yeniden denemek, `Retry-After`) burada değil adaptörün testlerinde
-ölçülür.
+Bilinen sınırlar:
+- Dize kuralı yalnız yasak adı TAM taşıyan sabiti yakalar: hesaplanmış dizeler
+  (`"cloud" + "scraper"`), ek taşıyan dizeler (`"cloudscraper==1"`, `"pip install cloudscraper"`) ve
+  `exec`/`eval` görünmez. Aynı sınıf: Python'da ekstra taşıyan kurulum dizesi
+  (`subprocess.run(["pip", "install", "scrapling[ai]"])`) — B ve C onu görür, A görmez
+  (DEFERRED 11a).
+- (c) bot adı yalnız UA bağlamındaki SABİT dizelerde aranır: UA adı taşımayan bir değişkenden,
+  `setdefault`la ya da `[("User-Agent", ...)]` demet listesiyle gelen UA görünmez. Bot listesi
+  kapalıdır: `AdsBot-Google`, `Storebot-Google`, `Mediapartners-Google` gibi listede olmayan
+  adlar yeşil kalır (spec "adı verilmiş bir bot" der; liste brief'in on iki adıdır).
+- (a) ortam değişkeniyle proxy (`os.environ["HTTPS_PROXY"] = ...`, httpx `trust_env`) ölçülmez.
+- (d) adaptörün bir fetcher'ı takma adla yeniden ihracı (`scrape.py`de
+  `from scrapling.fetchers import StealthyFetcher as Browser`, başka modülde
+  `from football_edge.scrape import Browser`) görünmez: ham fetcher geçidin dışında kullanılır.
+  Adaptörün testleri, açık adlarının hiçbirinin Scrapling fetcher sınıfı olmadığını ölçmeli.
+- (d) göreli dinamik import (`importlib.import_module(".fetchers", "scrapling")`) görünmez:
+  `package` argümanı modül yoluna eklenmiyor.
+- `config/sources.yaml`de yalnız `user_agent` alanı taranır: bir kaynağa eklenen `headers`
+  (`User-Agent: Googlebot`) ya da `fetch_options` (`solve_cloudflare`, `proxy`) görünmez.
+  `source_user_agents` kaynakları `id` ile sözlüğe koyar: yinelenen ya da eksik `id` önceki
+  satırı gizler. İkisini de çalışma zamanında `sources.py` reddeder (bilinmeyen alan, yinelenen
+  `id`); bu test o savunmaya dayanır.
+- `FREED` araçlarının (ör. `curl_cffi`) adaptör dışında doğrudan kullanımı tek geçidi aşar; (d)
+  yalnız Scrapling'i kapsar.
+- Kuralın davranış tarafı (403/429'da kimlik ya da yol değiştirip yeniden denemek,
+  `Retry-After`) burada değil adaptörün testlerinde ölçülür.
 """
 
 from __future__ import annotations
@@ -162,6 +187,18 @@ NAMED_BOTS = (
 )
 UA_KEYWORDS = frozenset({"useragent", "user_agent"})
 UA_HEADER = "user-agent"
+# Scrapling CLI'si (`fetchers` ekstrasıyla gelir): 0.4.15 `cli.py` `--proxy` ve
+# `--solve-cloudflare` bayraklarını, `extract`/`shell`/`mcp` alt komutlarını taşır; `install`
+# (tarayıcı kurulumu) serbest.
+CLI_REASON = f"Scrapling komut satırı aracı fetcher'ları {ADAPTER} dışında koşturur (tek geçit)"
+CLI_PATTERN = re.compile(
+    r"(?P<challenge>--solve[-_]cloudflare\b)"
+    r"|(?P<proxy>--prox(?:y|ies)\b)"
+    r"|(?P<cli>\bscrapling(?:-mcp|\.cli)?\s+(?:extract|shell|mcp)\b)",
+    re.IGNORECASE,
+)
+CLI_HEADS = frozenset({"scrapling", "scrapling-mcp", "scrapling.cli"})
+CLI_SUBCOMMANDS = frozenset({"extract", "shell", "mcp"})
 
 # Scrapling'in yalnız `fetchers` ekstrası serbest (R77b); `ai`/`shell`/`all` MCP sunucusu ve
 # etkileşimli kabuk getirir. Taban paket yalnız ayrıştırıcıdır (lxml, cssselect, orjson, …).
@@ -211,6 +248,8 @@ def _findings(tree: ast.AST, gate_open: bool) -> Iterator[Finding]:
             yield from _keyword_findings(node)
         elif isinstance(node, ast.Constant) and id(node) not in quiet:
             yield from _string_findings(node, gate_open)
+        elif isinstance(node, ast.List | ast.Tuple):
+            yield from _cli_argv_findings(node)
         else:
             yield from _identifier_findings(node, gate_open)
         yield from _user_agent_findings(node)
@@ -306,17 +345,40 @@ def _identifier_findings(node: ast.AST, gate_open: bool) -> Iterator[Finding]:
 
 
 def _string_findings(node: ast.Constant, gate_open: bool) -> Iterator[Finding]:
-    """Adı TAM taşıyan dize: `[..., "pip", "install", "cloudscraper"]`, `{"solve_cloudflare": 0}`.
-
-    Scrapling fetcher yolu dizesi (`"scrapling.fetchers"`) yalnız adaptör dışında."""
+    """Adı TAM taşıyan dize: `[..., "pip", "install", "cloudscraper"]`, `{"solve_cloudflare": 0}`,
+    `opts["proxy"]`; ve Scrapling CLI'sini çağıran dize (`"--solve-cloudflare"`, `"--proxy"`,
+    `os.system("scrapling extract …")`). Scrapling fetcher yolu dizesi (`"scrapling.fetchers"`)
+    yalnız adaptör dışında."""
     if not isinstance(node.value, str):
         return
     key = normalise(node.value)
     reason = STRING_REASONS.get(key) or (None if gate_open else GATED_STRINGS.get(key))
     if reason is None and node.value in CHALLENGE_OPTIONS:
         reason = CHALLENGE_REASON
+    if reason is None and node.value in PROXY_KEYWORDS:
+        reason = PROXY_REASON
+    if reason is None:
+        reason = cli_reason(node.value)
     if reason:
         yield node.lineno, f"{node.value!r} dizesi", reason
+
+
+def cli_reason(text: str) -> str | None:
+    """`text`teki ilk Scrapling CLI eşleşmesinin nedeni: bayrak kendi kuralıyla, alt komut (d)."""
+    match = CLI_PATTERN.search(text)
+    if match is None:
+        return None
+    if match["challenge"]:
+        return CHALLENGE_REASON
+    return PROXY_REASON if match["proxy"] else CLI_REASON
+
+
+def _cli_argv_findings(node: ast.List | ast.Tuple) -> Iterator[Finding]:
+    """`["scrapling", "extract", …]`, `[sys.executable, "-m", "scrapling.cli", "shell"]`."""
+    words = [element.value if isinstance(element, ast.Constant) else None for element in node.elts]
+    pairs = zip(words, words[1:], strict=False)
+    if any(head in CLI_HEADS and command in CLI_SUBCOMMANDS for head, command in pairs):
+        yield node.lineno, "Scrapling CLI argv listesi", CLI_REASON
 
 
 def named_bot(text: str) -> str | None:
@@ -341,9 +403,24 @@ def _user_agent_values(node: ast.AST) -> Iterator[ast.expr]:
     elif isinstance(node, ast.Dict):
         pairs = zip(node.keys, node.values, strict=True)
         yield from (value for key, value in pairs if _is_ua_header(key))
-    elif isinstance(node, ast.Assign):
-        targets = (target for target in node.targets if isinstance(target, ast.Subscript))
-        yield from (node.value for target in targets if _is_ua_header(target.slice))
+    elif isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if any(map(_is_ua_target, targets)):
+            yield node.value
+
+
+def _is_ua_target(target: ast.expr) -> bool:
+    """`h["User-Agent"] = …`, `USER_AGENT = …`, `self.useragent = …`, `DEFAULT_UA = …`."""
+    if isinstance(target, ast.Subscript):
+        return _is_ua_header(target.slice)
+    if isinstance(target, ast.Name):
+        name = target.id
+    elif isinstance(target, ast.Attribute):
+        name = target.attr
+    else:
+        return False
+    lowered = name.lower()
+    return any(word in lowered for word in UA_KEYWORDS) or "ua" in lowered.split("_")
 
 
 def _is_ua_header(node: ast.expr | None) -> bool:
@@ -448,7 +525,7 @@ def _blocked_extras(extras: str) -> set[str]:
     return named - ALLOWED_SCRAPLING_EXTRAS
 
 
-# ── C. Çalışma zamanında kurulum (iş akışları, betikler, requirements) ────────
+# ── C. Çalışma zamanında kurulum ve Scrapling CLI (iş akışları, betikler, requirements) ──
 
 
 def _name_pattern(name: str) -> str:
@@ -470,7 +547,7 @@ def install_violations(text: str, path: str) -> list[str]:
         if line.lstrip().startswith("#"):
             continue
         matches = _INSTALL_PATTERN.finditer(line)
-        reason = next(filter(None, map(_install_reason, matches)), None)
+        reason = next(filter(None, map(_install_reason, matches)), None) or cli_reason(line)
         if reason:
             violations.append(f"{path}:{number}: {line.strip()} — {reason} {RULE}")
     return violations
@@ -537,6 +614,9 @@ PROXY_PYTHON = [
     'page = session.fetch(url, proxy={"server": adres})',
     "page = session.get(url, proxy_auth=kimlik)",
     "page = session.get(url, proxy_rotator=rotator)",
+    # Sonradan kurulan seçenek sözlüğü: anahtar TAM dize olarak (inceleme Important-1, m9).
+    'opts["proxy"] = adres',
+    'page = session.fetch(url, **{"proxies": havuz})',
 ]
 # (b) doğrulama çözme — hangi değerle olursa olsun.
 CHALLENGE_PYTHON = [
@@ -557,6 +637,20 @@ BOT_PYTHON = [
     'basliklar["USER-AGENT"] = f"x {surum} PerplexityBot"',
     'client = httpx.Client(headers={"User-Agent": "Mozilla/5.0 (compatible; bingbot/2.0)"})',
     'izin = parser.can_fetch(url=u, user_agent="Google-Extended")',
+    # Adı UA olan sabit / öznitelik (inceleme Important-2, m6 ve m34).
+    'USER_AGENT = "Mozilla/5.0 (compatible; Googlebot/2.1)"',
+    'USER_AGENT: str = "Googlebot/2.1"',
+    'self.useragent = "DuckDuckBot/1.1"',
+    'DEFAULT_UA = "Baiduspider"',
+]
+# Scrapling CLI'si — her dosyada, adaptör dahil (inceleme Critical-1, m37).
+CLI_PYTHON = [
+    'subprocess.run(["scrapling", "extract", "get", url, "o.md"])',
+    'argv = ("scrapling", "mcp")',
+    'os.system("scrapling extract get https://ornek.invalid o.md")',
+    'komut = f"scrapling shell {url}"',
+    'secenek = "--solve-cloudflare"',
+    'argv = ["--proxy", adres]',
 ]
 # (d) tek geçit — adaptör DIŞINDA kırmızı, adaptörde yeşil.
 GATED_PYTHON = [
@@ -577,7 +671,9 @@ GATED_PYTHON = [
     "fetcher = scrapling.StealthyFetcher()",
     'getattr(scrapling, "DynamicFetcher")',
 ]
-EVERYWHERE_FORBIDDEN = FORBIDDEN_TOOL_PYTHON + PROXY_PYTHON + CHALLENGE_PYTHON + BOT_PYTHON
+EVERYWHERE_FORBIDDEN = (
+    FORBIDDEN_TOOL_PYTHON + PROXY_PYTHON + CHALLENGE_PYTHON + BOT_PYTHON + CLI_PYTHON
+)
 FORBIDDEN_PYTHON = EVERYWHERE_FORBIDDEN + GATED_PYTHON
 ALLOWED_PYTHON = [
     "import httpx",
@@ -610,6 +706,11 @@ ALLOWED_PYTHON = [
     "page = session.fetch(url, google_search=True, real_chrome=True)",
     "from . import cloudscraper",
     "from .cloudscraper import yardimci",
+    # `scrapling install` serbest (Task 3 tarayıcıyı kurar); UA adlı dürüst sabit serbest.
+    'subprocess.run(["scrapling", "install"])',
+    'log.info("proxy kullanılmaz")',
+    'USER_AGENT = "football-edge/0.1"',
+    'ua_surumu = "football-edge/0.1"',
 ]
 
 
@@ -785,6 +886,13 @@ FORBIDDEN_INSTALLS = [
     "pip install 2captcha-python",
     # Serbest ekstra yasak bir aracı aynı satırda gizleyemez.
     'uv pip install "scrapling[fetchers]" capsolver',
+    # Scrapling CLI'si (inceleme Critical-1, m36 ve m38).
+    'scrapling extract stealthy-fetch "$URL" o.md --solve-cloudflare --proxy "$P"',
+    "      - run: python -m scrapling.cli extract get $URL o.md --proxy $P",
+    "uv run scrapling extract get $URL o.md",
+    "scrapling shell",
+    "curl --proxy http://127.0.0.1:1 $URL",
+    "xvfb-run python kazi.py --solve_cloudflare",
 ]
 ALLOWED_INSTALLS = [
     "# cloudscraper yasak",
@@ -792,6 +900,8 @@ ALLOWED_INSTALLS = [
     "uv pip install scrapling playwright",
     'uv pip install "scrapling[fetchers]"',
     "pip install camoufox curl_cffi patchright",
+    "uv run scrapling install",
+    "scrapling install --force",
     # Kelime sınırı: yasak ad daha uzun bir adın parçasıysa o araç değildir.
     "uv pip install cloudscraperish",
     "uv pip install mycapsolver",
@@ -815,6 +925,9 @@ def test_install_scan_skips_comments_freed_tools_and_the_fetchers_extra(line: st
     [
         ("pip install Fake-UserAgent", FORBIDDEN_DISTRIBUTIONS["fake-useragent"]),
         ('uv pip install "scrapling [all]"', SCRAPLING_EXTRAS_REASON),
+        ("scrapling extract get $URL o.md", CLI_REASON),
+        ("curl --proxies http://p:1 $URL", PROXY_REASON),
+        ("kazi --solve-cloudflare", CHALLENGE_REASON),
     ],
 )
 def test_install_scan_gives_the_matched_tool_its_own_reason(line: str, reason: str) -> None:
