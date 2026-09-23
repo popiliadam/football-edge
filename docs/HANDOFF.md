@@ -65,6 +65,11 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
    ilk raporlarda `fikstür ≫ karar` penceredendir (17j). Exit 9/11 → RUNBOOK.
 3. `collect-news` her turda yeni "Haber deposunu güncelle" adımını koşar; kırmızıysa alarm (ops_alert).
 4. `history.yml` model W1–W4 16i sonrası da GEÇTİ (yerelde ölçüldü); runner'da ilk tur 2026-09-26/29.
+5. **2026-09-23 football-data robots sapması (#3, oturum 8'de kapatıldı):** site AI eğitim botlarını ve kazıyıcıları
+   adıyla kapattı (GPTBot, ClaudeBot, CCBot… 12 grup); `*` açık kaldı. RUNBOOK §3.7 uygulandı: bizim UA ile protego
+   500/500 yol izinli (ClaudeBot 0/500) → anlık görüntü (runner diff'inden birebir kuruldu, hunk sayıları doğrulandı)
+   ve `robots_verified_at` güncellendi; test yeni kural listesini birebir sabitler. **Sınır:** football-data verisi
+   Jev'e/AI'a verilmiyor — Plan 2'de verilecekse bu kaynak yeniden değerlendirilir (sitenin niyeti açık).
 
 ### 0.4 Plan 2'ye kadar ara iş seçenekleri (kullanıcıya sorulur; hiçbiri Plan 2'yi bloklamaz)
 1. **İz B** (Faz 6 iskeleti, Netlify + alan adı) — kullanıcının Netlify sitesi ve alan adı kararı gerekir.

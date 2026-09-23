@@ -182,14 +182,17 @@ sources:
     base_url: https://football-data.co.uk
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 3.0
-    robots_verified_at: 2026-09-22
+    robots_verified_at: 2026-09-23
     enabled: true
     access_basis: robots
     terms_url: ''
     note: >-
       Faz 2 tarihsel taban (tasarım D1, D7, D20). robots.txt `User-agent: *` + boş `Disallow:`
       (runner'dan ölçüldü 2026-09-22): her yol izinli, Crawl-delay yok; 3 sn kendi nezaket
-      aralığımız. Kanonik adres kök alan adı (`www` 302 veriyor). Türkiye'den TLS reset: çekme
+      aralığımız. 2026-09-23 sapması (sources-audit 35847854256): site AI eğitim botlarını ve
+      kazıyıcıları adıyla kapattı (GPTBot, ClaudeBot, CCBot…); `*` grubu değişmedi, bizim UA'mız
+      o adlardan hiçbirine uymuyor — protego ile 500/500 beyan edilen yol izinli (ClaudeBot 0/500).
+      Veri Jev'e/AI'a verilmez; verilirse bu kaynak yeniden değerlendirilir. Kanonik adres kök alan adı (`www` 302 veriyor). Türkiye'den TLS reset: çekme
       yalnız runner'da (`history.yml`). declared_paths ELLE DÜZENLENMEZ, `config/
       history_leagues.yaml`dan üretilir (komut: planın Task 6'sı) — tests/test_history_registry.py
       iki listenin eşitliğini zorlar; yeni sezonda önce katalog, sonra bu liste. Veri lisansı açık
