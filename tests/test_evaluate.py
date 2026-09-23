@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from functools import partial
 from types import MappingProxyType
@@ -29,6 +30,7 @@ AVG_CLOSE = quote("Avg", CLOSING, (2.0, 3.4, 4.2))
 FAVOURITE = (0.6, 0.25, 0.15)
 OUTSIDER = (0.2, 0.3, 0.5)
 OPEN = (0.45, 0.35, 0.2)
+UNIFORM = (1 / 3, 1 / 3, 1 / 3)
 ROWS: tuple[tuple[tuple[float, float, float], str], ...] = (
     (FAVOURITE, "H"),
     (FAVOURITE, "H"),
@@ -198,3 +200,12 @@ def test_the_clv_interval_honours_the_requested_resamples() -> None:
     values = clv_values(result, method=MULTIPLICATIVE)
     assert evaluation.clv == bootstrap_mean(values, resamples=500)
     assert evaluation.clv != bootstrap_mean(values, resamples=2000)
+
+
+def test_an_unmeasurable_calibration_is_none_not_a_crash() -> None:
+    """Yayılımsız tahmin (tekil fit) ölçülemez: değerlendirme None taşır, düşmez (DEFERRED 17i)."""
+    result = _replay()
+    # Tek-karşı-hepsi havuzunda da yayılımsız olmalı: satır içi de tek biçimli.
+    flat = replace(result, predictions=tuple(replace(p, probs=UNIFORM) for p in result.predictions))
+
+    assert evaluate(flat, method=MULTIPLICATIVE, resamples=50).calibration is None

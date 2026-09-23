@@ -25,7 +25,12 @@ from football_edge.backtest.walkforward import (
 from football_edge.backtest.wf_eval import Score, Summary
 from football_edge.history.holdout import DEV, Window, in_window, select_periods
 from football_edge.history.types import TOTALS_25, HistMatch
-from football_edge.market.metrics import Interval, bootstrap_mean, per_match_log_loss
+from football_edge.market.metrics import (
+    Interval,
+    bootstrap_mean,
+    interval_text,
+    per_match_log_loss,
+)
 from football_edge.model.elo_model import EloModel
 from football_edge.model.strategies import DixonColesStrategy
 
@@ -137,9 +142,7 @@ def rows_digest(rows: Sequence[Row]) -> str:
 
 
 def format_interval(interval: Interval | None) -> str:
-    if interval is None:
-        return "ölçülemedi"
-    return f"{interval.estimate:.4f} [{interval.low:.4f}, {interval.high:.4f}]"
+    return "ölçülemedi" if interval is None else interval_text(interval)
 
 
 def format_counts(counts: Mapping[str, int]) -> str:

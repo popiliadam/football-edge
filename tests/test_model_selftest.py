@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date
 from types import MappingProxyType
@@ -82,6 +83,19 @@ def _market_table(market_right: bool, count: int = 3000) -> tuple[Row, ...]:
                 )
             )
     return tuple(found)
+
+
+_FIVE_DECIMALS = re.compile(r"-?\d+\.\d{5} \[%95 -?\d+\.\d{5}, -?\d+\.\d{5}\]")
+
+
+def test_w1_and_w2_report_their_interval_with_five_decimals(rows: tuple[Row, ...]) -> None:
+    """Rapor metni `interval_text(digits=5, label="%95 ")` ile basılır (DEFERRED 16j birleştirmesi):
+    basamak ya da etiket kayarsa kapı değil ama operatörün okuduğu satır değişir."""
+    w1 = _checks(_market_table(market_right=True))["W1"].detail  # type: ignore[attr-defined]
+    w2 = _checks(rows)["W2"].detail  # type: ignore[attr-defined]
+
+    assert _FIVE_DECIMALS.search(w1), w1
+    assert _FIVE_DECIMALS.search(w2), w2
 
 
 def test_w1_passes_when_the_fitted_blend_keeps_the_market() -> None:

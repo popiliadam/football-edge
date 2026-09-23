@@ -17,7 +17,7 @@ from football_edge.market.metrics import (
     Interval,
     bootstrap_mean,
     brier,
-    calibration,
+    calibration_or_none,
     clv,
     per_match_log_loss,
     rps,
@@ -33,7 +33,7 @@ class Evaluation:
     log_loss: Interval
     brier: float
     rps: float
-    calibration: Calibration
+    calibration: Calibration | None
     clv: Interval | None
     bets: int
 
@@ -81,7 +81,7 @@ def evaluate(
         log_loss=bootstrap_mean(per_match_log_loss(probs, outcomes), resamples=resamples),
         brier=brier(probs, outcomes),
         rps=rps(probs, outcomes),
-        calibration=calibration(probs, outcomes),
+        calibration=calibration_or_none(probs, outcomes),
         clv=bootstrap_mean(values, resamples=resamples) if values else None,
         bets=len(values),
     )

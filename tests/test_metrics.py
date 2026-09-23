@@ -17,7 +17,9 @@ from football_edge.market.metrics import (
     bootstrap_mean,
     brier,
     calibration,
+    calibration_or_none,
     clv,
+    interval_text,
     log_loss,
     outcome_index,
     per_match_log_loss,
@@ -324,3 +326,27 @@ def test_outcome_index_for_totals_is_over_from_three_goals(
 def test_outcome_index_rejects_an_unknown_market() -> None:
     with pytest.raises(ValueError, match="bilinmeyen"):
         outcome_index(hist_match(), "ah")
+
+
+# ── Tek aralık biçimi ve ölçülemeyen kalibrasyon (DEFERRED 16j, 17i) ─────────────────────────
+
+
+def test_interval_text_keeps_every_callers_digits_and_label() -> None:
+    interval = Interval(estimate=0.123456, low=-0.000049, high=1.5)
+
+    assert interval_text(interval) == "0.1235 [-0.0000, 1.5000]"
+    assert interval_text(interval, label="%95 ") == "0.1235 [%95 -0.0000, 1.5000]"
+    assert interval_text(interval, digits=5, label="%95 ") == "0.12346 [%95 -0.00005, 1.50000]"
+
+
+def test_an_unmeasurable_calibration_is_none() -> None:
+    """Yayılımsız tahmin (tekil fit) "ölçülemedi"dir: None, koşu sürer."""
+    assert calibration_or_none(((0.5, 0.5),) * 4, (0, 1, 0, 1)) is None
+
+
+def test_a_shape_error_in_calibration_or_none_is_raised_not_swallowed() -> None:
+    """Bileşen hatası "ölçülemedi" basılırsa açılış kalibrasyonsuz harcanır (R135)."""
+    with pytest.raises(ValueError, match="sayısı farklı") as raised:
+        calibration_or_none(((0.6, 0.4), (0.3, 0.7)), (0,))
+
+    assert not isinstance(raised.value, CalibrationUnfit)

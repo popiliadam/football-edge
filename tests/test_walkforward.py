@@ -39,7 +39,11 @@ from football_edge.backtest.wf_eval import (
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.history.types import CLOSING, PRE_CLOSING, TOTALS_25, HistMatch
 from football_edge.market.devig import POWER
-from football_edge.market.metrics import CalibrationUnfit, per_match_log_loss
+from football_edge.market.metrics import (
+    CalibrationUnfit,
+    calibration_or_none,
+    per_match_log_loss,
+)
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModel
 from football_edge.model.pool import MIN_FIT_MATCHES, NotConverged
@@ -452,12 +456,12 @@ def test_extra_league_groups_stay_out_of_both_counts(
     )
 
 
-# ── `_calibration`: yalnız ölçülemeyen kalibrasyon None'dır (son inceleme I-4) ───────────────
+# ── `calibration_or_none`: yalnız ölçülemeyen kalibrasyon None'dır (son inceleme I-4) ─────────────
 
 
 def test_an_unmeasurable_calibration_is_none_in_the_report() -> None:
     """Yayılımsız tahmin (tekil fit) "ölçülemedi"dir: rapor satırı None taşır, koşu sürer."""
-    assert wf_eval._calibration(((0.5, 0.5),) * 4, (0, 1, 0, 1)) is None
+    assert calibration_or_none(((0.5, 0.5),) * 4, (0, 1, 0, 1)) is None
 
 
 @pytest.mark.parametrize(
@@ -473,6 +477,6 @@ def test_a_shape_or_value_error_in_calibration_is_raised_not_reported_as_unmeasu
 ) -> None:
     """Bileşen hatası "ölçülemedi" basılırsa açılış D6'sız harcanır (R135: yeniden koşu yok)."""
     with pytest.raises(ValueError, match=message) as raised:
-        wf_eval._calibration(probs, outcomes)
+        calibration_or_none(probs, outcomes)
 
     assert not isinstance(raised.value, CalibrationUnfit)

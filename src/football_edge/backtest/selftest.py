@@ -20,8 +20,8 @@ from football_edge.history.holdout import DEV, EXTRA_WINDOW, MAIN_WINDOW, in_win
 from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, REFERENCE_BOOK, HistMatch
 from football_edge.market.devig import METHODS, MULTIPLICATIVE, POWER, SHIN, devig, match_probs
 from football_edge.market.metrics import (
-    Interval,
     bootstrap_mean,
+    interval_text,
     log_loss,
     outcome_index,
     per_match_log_loss,
@@ -50,12 +50,8 @@ class Check:
     detail: str
 
 
-def _unmeasured(check_id: str, *, gate: bool, reason: str) -> Check:
+def unmeasured(check_id: str, *, gate: bool, reason: str) -> Check:
     return Check(id=check_id, gate=gate, passed=False, detail=f"{check_id} ölçülemedi: {reason}")
-
-
-def _interval(interval: Interval) -> str:
-    return f"{interval.estimate:.4f} [%95 {interval.low:.4f}, {interval.high:.4f}]"
 
 
 def _mean(values: Sequence[float]) -> float:
@@ -96,13 +92,14 @@ def _k1(main: Leagues, *, method: str, main_codes: frozenset[str], resamples: in
     gaps = {code: _gaps(main.get(code, ()), PRE_AVG, CLOSE_AVG, method) for code in main_codes}
     pooled = [gap for code in sorted(gaps) for gap in gaps[code]]
     if not pooled:
-        return _unmeasured(
+        return unmeasured(
             "K1", gate=True, reason="kapanış öncesi Avg ve kapanış AvgC 1X2'si birlikte tam maç yok"
         )
     interval = bootstrap_mean(pooled, resamples=resamples)
     positive = sum(1 for values in gaps.values() if values and _mean(values) > 0)
+    ci = interval_text(interval, label="%95 ")
     detail = (
-        f"ΔLL = LL(kapanış öncesi Avg) − LL(kapanış AvgC) {_interval(interval)} n={len(pooled)}; "
+        f"ΔLL = LL(kapanış öncesi Avg) − LL(kapanış AvgC) {ci} n={len(pooled)}; "
         f"ΔLL > 0 olan ana lig {positive}/{len(main_codes)} (eşik {K1_MIN_POSITIVE})"
     )
     passed = interval.low > 0 and positive >= K1_MIN_POSITIVE
@@ -126,7 +123,7 @@ def _k2(windowed: Leagues) -> Check:
         for method in METHODS:
             by_method[method].append(probs[method])
     if not outcomes:
-        return _unmeasured("K2", gate=False, reason="kapanış AvgC 1X2'si tam maç yok")
+        return unmeasured("K2", gate=False, reason="kapanış AvgC 1X2'si tam maç yok")
     scores = {method: log_loss(by_method[method], outcomes) for method in METHODS}
     listed = " · ".join(f"{method} {scores[method]:.5f}" for method in METHODS)
     passed = min(scores[SHIN], scores[POWER]) < scores[MULTIPLICATIVE]
@@ -157,12 +154,13 @@ def _k3(windowed: Leagues, *, method: str, resamples: int) -> Check:
     ]
     gaps = [gap for matches in kept for gap in _gaps(matches, CLOSE_AVG, CLOSE_SHARP, method)]
     if not gaps:
-        return _unmeasured(
+        return unmeasured(
             "K3", gate=True, reason="AvgC ve PSC 1X2'sinin birlikte %90 dolu olduğu lig-sezon yok"
         )
     interval = bootstrap_mean(gaps, resamples=resamples)
+    ci = interval_text(interval, label="%95 ")
     detail = (
-        f"ΔLL = LL(AvgC) − LL(PSC) {_interval(interval)} n={len(gaps)}; lig-sezon "
+        f"ΔLL = LL(AvgC) − LL(PSC) {ci} n={len(gaps)}; lig-sezon "
         f"{len(kept)}/{len(seasons)} (AvgC ve PSC birlikte ≥ %90 dolu)"
     )
     return Check(id="K3", gate=True, passed=interval.low > 0, detail=detail)
@@ -176,12 +174,13 @@ def _k4(main: Leagues, *, method: str, resamples: int) -> Check:
     bets = sum(1 for prediction in result.predictions if prediction.bet is not None)
     values = clv_values(result, method=method)
     if not values:
-        return _unmeasured(
+        return unmeasured(
             "K4", gate=True, reason=f"kapanışı tam bahis yok ({bets} bahis; {counts})"
         )
     interval = bootstrap_mean(values, resamples=resamples)
+    ci = interval_text(interval, label="%95 ")
     detail = (
-        f"Placebo CLV (AvgC kapanışına karşı) {_interval(interval)} bahis={len(values)}; "
+        f"Placebo CLV (AvgC kapanışına karşı) {ci} bahis={len(values)}; "
         f"kapanışı eksik {bets - len(values)}; {counts}; {K4_SCOPE}"
     )
     return Check(id="K4", gate=True, passed=interval.high < 0, detail=detail)
@@ -212,7 +211,7 @@ def _d1(main: Leagues, *, method: str) -> Check:
         means.append(_mean(values))
         parts.append(f"{label} {means[-1]:.4f} (n={len(values)})")
     if len(means) < 2:
-        return _unmeasured("D1", gate=False, reason="en az iki süre kovasında maç yok")
+        return unmeasured("D1", gate=False, reason="en az iki süre kovasında maç yok")
     rising = all(a <= b for a, b in pairwise(means))
     detail = (
         "karar→başlama süresine göre ortalama TV(kapanış öncesi Avg, kapanış AvgC): "

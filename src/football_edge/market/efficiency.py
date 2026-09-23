@@ -42,6 +42,7 @@ from football_edge.market.metrics import (
     bootstrap_mean,
     brier,
     calibration,
+    interval_text,
     log_loss,
     outcome_index,
     per_match_log_loss,
@@ -440,9 +441,7 @@ def _number(value: float | None) -> str:
 
 
 def _interval(interval: Interval | None) -> str:
-    if interval is None:
-        return "—"
-    return f"{interval.estimate:.4f} [{interval.low:.4f}, {interval.high:.4f}]"
+    return "—" if interval is None else interval_text(interval)
 
 
 def _window_text(window: Window) -> str:
