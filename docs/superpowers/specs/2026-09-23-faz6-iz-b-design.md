@@ -36,7 +36,7 @@ açık kararlar `AK1…`.
 | B9 | **Deploy hazır, bağlı değil:** `web/netlify.toml` + `.github/workflows/site.yml` yalnız `workflow_dispatch`, secret yoksa adıyla kırmızı; zamanlama/pg_cron tetiği YOK | HANDOFF §0.6/6 | — |
 | B10 | **Site kapısı `verify.sh`in adımıdır** (tek kapı); DB davranış testleri CI'da geçici `supabase/postgres` servis kabında koşar; `CI=true` iken test veritabanı yoksa adım **FAIL** | "Kapı = CI'ın koştuğu adımlar"; görünüm testleri gerçek Postgres ister; SKIP'in CI'da sessizce yeşil olması Vaka 1 desenidir | CI süresi uzar (ölçülecek) |
 | B11 | **Eski tabloların API açığı (DEFERRED 12a) Dalga A Task 6 `0013_api_roles_lockdown.sql` ile kapanır** (RLS, `anon`/`authenticated` yetkileri ve varsayılan yetkileri geri alma, append-only üçlüde TRUNCATE bekçisi, `forbid_ledger_mutation` `search_path`); canlıya bu oturumda controller uygular. Sitenin migration'ı **0014** (gerekirse 0015) | Tek açık tek migration'da kapanır; site onu varsayar, tekrar etmez | — |
-| B12 | **Dışa aktarım tek `REPEATABLE READ READ ONLY` işlemidir;** belirlenimcilik `content_sha256` (zaman damgası ve git SHA'sı hariç gövde) ile ölçülür, yayımlanan dosyanın tamamı ayrıca `snapshot.sha256` taşır | `matches.commence_time` her snapshot turunda UPDATE edilir (`db.upsert_matches`); defter kesimi `matches`i dondurmaz — tek işlem dondurur | Uzun işlem (saniyeler) — sorun değil |
+| B12 | **Dışa aktarım tek `REPEATABLE READ READ ONLY` işlemidir; zinciri GENESIS'ten ve bütün çıpalara karşı doğrular;** belirlenimcilik `content_sha256` (zaman damgası ve git SHA'sı hariç gövde, `ledger._canonical`) ile, ayrı alt süreçte farklı `PYTHONHASHSEED`le yapılan ikinci türetimle ölçülür; yayımlanan dosyanın tamamı ayrıca `snapshot.sha256` taşır | `matches.commence_time` her snapshot turunda UPDATE edilir (`db.upsert_matches`); defter kesimi `matches`i dondurmaz — tek işlem dondurur | Uzun işlem (saniyeler) — sorun değil |
 | B13 | **İki plan:** B-1 okuma katmanı + dışa aktarım + K1 testleri + onların CI adımı (İLK); B-2 web yüzeyi + Node kapı adımları + deploy hazırlığı (B-1'in sözleşme görevinden sonra paralel; `verify.sh`/`ci.yml`e B-1 birleştikten SONRA dokunur) (§15) | Tek plan K1 ile K3'ü aynı inceleme ağırlığına zorlar; K1 testleri B-2'yi beklememeli | — |
 
 ---
@@ -87,10 +87,10 @@ Her kural kodda bir bekçiye bağlanır; prose kural yazılmaz. "Kapının ölç
 
 | Kural | Zorlayan (hepsi kapıda) |
 |---|---|
-| **H1 — Holdout verisi sitede ASLA görünmez.** Holdout verisi = maç tarihi `[2025-07-01, 2026-07-01)` (Londra) olan her satır VE ondan türetilmiş her sayı (Faz 3 raporunun C1–C6 sayıları dahil). Sitede holdout sonucu en çok nitel bir cümleyle anılır | (a) **ilişki** bağımlılık kapanışı: `site`/`site_input`/`site_audit` görünümlerinin `pg_depend` kapanışındaki ilişkiler = {`leagues`, `matches`, `odds_snapshots`}; **fonksiyon** kapanışı ⊆ {`site.public_floor`} ∪ yerleşik `pg_catalog`; `site.public_floor()` gövdesinde tablo referansı yok (§4.4) · (b) davranış testi: holdout ve sınır tohumları (§4.4/2) · (c) `site.public_floor()` ↔ `HOLDOUT_END + 1 gün` eşitlik testi · (d) dışa aktarıcı her maç için `commence_time >= floor` iddia eder, aksi hâlde adıyla exit · (e) `verify-snapshot` (DB'siz, Python) anlık görüntüde tabandan eski tarih bulursa kırmızı · (f) **import bekçisi:** `football_edge.site` `history.lock`, `history.holdout.open_holdout`, `history.store`, `backtest.*` ve `hist_*` okuyucularını import edemez; `live.context.pre_prices` üzerinden gelen `history.types` importu adıyla yazılmış tek istisnadır · (g) testler `leakage` işaretini taşır, `EXPECTED_MIN_LEAKAGE` ölçülerek yükseltilir |
+| **H1 — Holdout verisi sitede ASLA görünmez.** Holdout verisi = maç tarihi `[2025-07-01, 2026-07-01)` (Londra) olan her satır VE ondan türetilmiş her sayı (Faz 3 raporunun C1–C6 sayıları dahil). Sitede holdout sonucu en çok nitel bir cümleyle anılır | (a) **ilişki** bağımlılık kapanışı: `site`/`site_input`/`site_audit` görünümlerinin `pg_depend` kapanışındaki **temel tablolar** (`relkind = 'r'`) = {`leagues`, `matches`, `odds_snapshots`} (ara `site.*` görünümleri kapanışta yer alır, eşitliğe girmez); **fonksiyon** kapanışı ⊆ {`site.public_floor`} — sabitlenmiş (pinned) `pg_catalog` nesneleri `pg_depend`e yazılmadığı için bu test fiilen sabitlenmemiş fonksiyonları sınar; `site.public_floor()` gövdesinde tablo referansı yok (§4.4) · (b) davranış testi: holdout ve sınır tohumları (§4.4/2) · (c) `site.public_floor()` ↔ `HOLDOUT_END + 1 gün` eşitlik testi · (d) dışa aktarıcı her maç için `commence_time >= floor` iddia eder, aksi hâlde adıyla exit · (e) `verify-snapshot` (DB'siz, Python) anlık görüntüde tabandan eski tarih bulursa kırmızı · (f) **import bekçisi, GEÇİŞLİ kapanış üzerinde:** `football_edge.site`in geçişli import kapanışı `history.{store,lock,holdout,football_data,sync,catalog}`, `backtest.*` ve `live.context` İÇEREMEZ; izinli tek `history` modülü `history.types`tir (yalnız sabitler/tipler; `market.devig` ve `market.consensus` üzerinden, adıyla). Bunun için konsensüs yaprak modüle taşınır (§4.3, `market/consensus.py`); `live.context.pre_prices` onu çağırır, `site` `live.context`i import etmez · (g) testler `leakage` işaretini taşır, `EXPECTED_MIN_LEAKAGE` ölçülerek yükseltilir |
 | **H2 — Ham kaynak metni ve oyuncu düzeyi bilgi yok** (spec §3.2/4) | (a) aynı ilişki allowlist'i · (b) anlık görüntü şeması `additionalProperties: false`; serbest metin alanı yalnız takım adı, lig adı, ülke — tip ve uzunluk sınırlı · (c) `verify-snapshot` `http`, `<`, `>` taşıyan veri dizesini reddeder |
 | **H3 — Value önerisi ve model olasılığı yok** (Faz 5'e kadar) | (a) şema `value_badge: const null`; model alanı şemada yok · (b) `model_predictions` ilişki allowlist'inde yok · (c) `site.record` gövdesinin `where false` kaldığını sınayan metin testi (B5) · (d) `site.record` kolon listesi = Python sabit tuple'ı (katalogdan) |
-| **H4 — Lisans iddiası yok** (spec §3.2/5) | Metin tarayıcısı `web/content/**` ve derlenmiş HTML'de büyük/küçük harf ve aksan katlanmış kalıpları kırmızı yapar: "lisanslı", "licensed", "resmi/resmî veri", "official data", "official partner", "resmi/resmî ortak", "authorized", "yetkili veri". Olumsuz cümle (ör. "lisans iddiasında bulunmuyoruz") yalnız `<!-- fe:allow-license-negation -->` işaretli paragrafta geçer; işaret sayısı test edilir |
+| **H4 — Lisans iddiası yok** (spec §3.2/5) | Metin tarayıcısı `web/content/**` ve derlenmiş HTML'de büyük/küçük harf ve aksan katlanmış kalıpları kırmızı yapar: "lisanslı", "licensed", "resmi/resmî veri", "official data", "official partner", "resmi/resmî ortak", "authorized", "yetkili veri". Olumsuz cümle (ör. "lisans iddiasında bulunmuyoruz") yalnız derlemeden sağ çıkan `data-fe-allow="license-negation"` öznitelikli öğede geçer (markdown içindeki HTML yorumu çizimde düşer, kullanılmaz); işaret sayısı kaynakta ve derlenmiş HTML'de ayrı ayrı sınanır ve eşittir |
 | **H5 — Tarayıcıya ve Netlify'a hiçbir anahtar gitmez; Node DB'ye bağlanmaz** | (a) `web/package.json` bağımlılık allowlist testi (DB sürücüsü, `@supabase/*` yok) · (b) `verify-snapshot` ve çıktı tarayıcısı `postgres://`, `postgresql://`, `service_role`, `eyJ` (JWT öneki), `SUPABASE_`, `NETLIFY_AUTH` kalıplarını kırmızı yapar · (c) `scripts/check_secrets.sh` regex'i `NETLIFY_AUTH_TOKEN`ı da kapsayacak biçimde genişler; testlerde bu adlar parçalardan kurulur (bellek notu `full-gate-every-commit`) · (d) `site.yml` testi **adım düzeyinde**: `SITE_DATABASE_URL` yalnız dışa aktarım adımının `env`inde, `NETLIFY_AUTH_TOKEN`/`NETLIFY_SITE_ID` yalnız deploy adımında; pnpm/next/tarayıcı adımları secret'sız; iş düzeyinde `env` secret taşımaz; `DATABASE_URL`, `ODDS_API_KEY`, `TYPESAFE_API_KEY` hiçbir adımda yok; checkout `persist-credentials: false` (`test_workflows.py` kuralı) |
 | **H6 — Sicil yalnız defterden türetilir, elle yazılmaz; TS sayı HESAPLAMAZ** | (a) §6.4 uyuşma kontrolleri · (b) anlık görüntü sayfanın gösterdiği HER türevi taşır (§5.2); TS yalnız yerel ayraç ve birim ekler (§5.4) · (c) çıktı tarayıcısı hem `data-fe-*` özniteliğinin anlık görüntüye birebir eşitliğini hem görünen METNİN `format(değer)`e eşitliğini sınar |
 | **H7 — Onaysız indeksleme yok** | `SITE_INDEXABLE` yoksa her sayfa `<meta name="robots" content="noindex">` + derlemenin ürettiği `out/_headers`te `X-Robots-Tag: noindex`; `robots.txt` bu dönemde `Disallow` TAŞIMAZ (taşırsa tarayıcı `noindex`i göremez); tarayıcı bayrak kapalıyken bir tane indekslenebilir sayfa görürse kırmızı; bayrak açık varyant da kapıda derlenir (§12.1) |
@@ -131,7 +131,7 @@ zamanı ve fonksiyonlar).
 ### 3.3 Öneri: A (B1)
 
 Gerekçe sırasıyla: (1) **şeffaflık iddiası ölçülebilir kalır** — site bir anlık görüntünün çizimidir, anlık görüntü
-defterle aynı işlemde karşılaştırılır ve hash'i yayımlanır; B'de "gösterilen = defter" iddiasını kanıtlayan bir an
+defterle aynı işlemde karşılaştırılır ve hash'i yayımlanır (dosya AK21'le açılana dek bu kamu için taahhüttür); B'de "gösterilen = defter" iddiasını kanıtlayan bir an
 yoktur. (2) **Sızıntı yüzeyi en küçük** — anahtar tarayıcıya gitmez. (3) **Maç öncesi ürün** (spec §1.3, in-play
 yok): dakikalık tazelik gerekmez. (4) En az bağımlılık, sunucu yok. Bedel: tazelik derleme sıklığıdır; mühür sonrası
 tetik (AK15) kapanışın sitede görünme gecikmesini ≤ 1 saat tutar. C'nin canlı parçası ihtiyaç ölçülürse statik
@@ -159,9 +159,12 @@ JSON'la A içinde çözülür; anon anahtarı gerekmez.
   `alter role site_reader set statement_timeout = '30s';`. İkisi de **kaza önleyicidir, güvenlik sınırı değildir**
   (kullanıcı oturumda kapatabilir). Sınır: `site_reader`in hiçbir tabloda yazma ya da okuma yetkisi yoktur.
 - `revoke all on schema site, site_input, site_audit from public`; `grant usage` ve `grant select on all tables in
-  schema …` yalnız `site_reader`'a. `grant execute on function site.public_floor() to site_reader` açıkça yazılır
-  (görünümdeki fonksiyon çağrısının EXECUTE yetkisi sorgulayana göre denetlenir); başka hiçbir fonksiyona yeni yetki
-  verilmez. `anon`, `authenticated`, `service_role` bu şemalara hiçbir yetki almaz.
+  schema …` yalnız `site_reader`'a. `grant execute on function site.public_floor() to site_reader` açıkça yazılır ve
+  **yük taşır:** görünümdeki fonksiyon çağrısının EXECUTE yetkisi sorgulayana göre denetlenir, ve 0013'ün genel
+  `alter default privileges for role postgres revoke execute on functions from public` satırı 0014'te yaratılan
+  fonksiyonun PUBLIC EXECUTE'unu baştan kaldırır — bu satır olmadan taban süzen her görünüm `site_reader` için
+  yetki hatası verir (§4.4/2'nin "`site_reader` olarak > 0 satır" testi eksikliği yakalar). Başka hiçbir fonksiyona
+  yeni yetki verilmez. `anon`, `authenticated`, `service_role` bu şemalara hiçbir yetki almaz.
 - Üç şema da Supabase'in API'ye açık şemalarına (`public`, `graphql_public`) EKLENMEZ; uygulama anında advisors okunur.
 - **Görünüm sahipliği ↔ 0013 RLS etkileşimi (açıkça):** 0013'ten sonra `leagues`, `matches`, `odds_snapshots`
   RLS'li ve politikasızdır (FORCE yok). Bir görünüm, sahibinin yetkisiyle ve sahibine uygulanan RLS ile okunur:
@@ -171,8 +174,11 @@ JSON'la A içinde çözülür; anon anahtarı gerekmez.
   - görünüm `security_invoker = true` taşırsa `site_reader`in kendisine RLS uygulanır ve yine 0 satır.
   Üç bekçi: (1) katalog testi: her `site`/`site_input`/`site_audit` görünümünün `relowner`ı = temel tabloların
   `relowner`ı, `reloptions` `security_invoker=true` TAŞIMAZ; (2) davranış testi: `site_reader` olarak tohumlanmış
-  maçlar > 0 satır döner — 0 satır da kırmızıdır; (3) dışa aktarıcı sessiz boşluk bekçisi: kesim içinde defter satırı
-  varken maç kümesi boşsa adıyla exit.
+  maçlar > 0 satır döner — 0 satır da kırmızıdır; (3) canlıda asıl bekçi DB DIŞI kanıttır: yanlış sahiplikte
+  `site.ledger_head` da RLS'li `odds_snapshots`i okur ve `rows = 0` döner, yani "defterde satır var ama maç yok"
+  koşulu DB içinden görülemez. Dışa aktarıcı bu yüzden depodaki çıpaya bakar: `anchor.rows > 0` iken
+  `site.ledger_head.rows = 0` ya da maç kümesi boşsa adıyla exit; aynı durumu zincir doğrulamasının çıpa kontrolü de
+  ("çıpanın işaret ettiği satır defterde yok") yakalar.
 - **Süzen görünümler `with (security_barrier)`** kurulur (taban süzgecinden önce satırı gören sızdıran fonksiyon
   saldırısına karşı — `PUBLIC`in varsayılan `TEMP` yetkisiyle `pg_temp` fonksiyonu yazılabilir); katalog testi
   `reloptions`ta `security_barrier=true` arar.
@@ -180,8 +186,12 @@ JSON'la A içinde çözülür; anon anahtarı gerekmez.
 ### 4.3 Görünümler
 
 `site` şemasındaki her kolon anlık görüntüye birebir girebilir (= yayımlanabilir); eklenen her kolon AK6 onayı ister.
-`site_input` ve `site_audit` kolonları yayımlanmaz; `verify-snapshot` bu iki şemanın kolon adlarının anlık
-görüntüde anahtar olarak geçmediğini sınar.
+`site_input` ve `site_audit` kolonları yayımlanmaz. `verify-snapshot` bunu **açık bir yasak anahtar kümesiyle**
+sınar: `(site_input ∪ site_audit kolonları) − (site kolonları ∪ şemanın bildirdiği anahtarlar)`; bugün
+`{bookmaker, book_key, ledger_id, point, price, bookmaker_last_update, prev_hash, row_hash, is_closing}`. Küme
+katalogdan türetilir, testte boş olmadığı da iddia edilir; anlık görüntünün herhangi bir derinliğinde bu adlardan biri
+anahtar olarak geçerse kırmızı. (`additionalProperties: false` bilinmeyen anahtarı zaten durdurur; izinli bir
+anahtarın altına kitap fiyatı konmasını ise ancak §4.4/3'ün elle hesaplanmış beklenen değerleri yakalar.)
 
 | Görünüm | Kolonlar | Kaynak ve süzgeç |
 |---|---|---|
@@ -191,20 +201,24 @@ görüntüde anahtar olarak geçmediğini sınar.
 | `site.ledger_head` | `rows`, `last_id`, `head` | `count(*)`, `max(id)`, son satırın `row_hash`i (bütün defter; süzgeç yok — tarih kolonu taşımaz) |
 | `site.record` (B5) | `publication_id bigint`, `match_id text`, `market text`, `outcome text`, `published_at timestamptz`, `published_price numeric`, `publication_ledger_id bigint`, `closing_fair_price numeric`, `clv double precision`, `publication_hash text` | Bugün `select … where false` (0 satır, tipli). Faz 5 `publications` tablosuna aynı kolonlarla bağlar |
 | `site_input.h2h_quotes` | `ledger_id`, `match_id`, `observed_at`, `is_closing`, `outcome`, `price`, `book_key` | `odds_snapshots` ⋈ `site.matches`, `market = 'h2h'`; `security_barrier`. `book_key` = tur içinde `dense_rank() over (partition by match_id, observed_at order by bookmaker)`: kitap adı taşımaz; kitap kümesi turlar arasında aynı kaldıkça aynı kitap aynı anahtarı alır (kısmen izlenebilir) — yayımlanmadığı için sorun değildir. `outcome` takım adı ya da `Draw`dır (`pre_prices` eşlemesi) |
-| `site_audit.ledger_rows` | `id` + `collect._LEDGER_COLUMNS`in kolonları (`match_id, observed_at, bookmaker, market, outcome, point, price, bookmaker_last_update, is_closing, prev_hash, row_hash`) | Bütün `odds_snapshots`; yalnız zincir doğrulaması için. `id` hash'i bozmaz (`ledger.payload_of` onu ayıklar). Metin testi kolon kümesini `{id} ∪ _LEDGER_COLUMNS`ten türetir (Python sabiti kaynak) |
+| `site_audit.ledger_rows` | `id` + `collect._LEDGER_COLUMNS`in kolonları (`match_id, observed_at, bookmaker, market, outcome, point, price, bookmaker_last_update, is_closing, prev_hash, row_hash`) | Bütün `odds_snapshots`; yalnız zincir doğrulaması için. `id` hash'i bozmaz (`ledger.payload_of` onu ayıklar). Metin testi kolon kümesini `{id} ∪ _LEDGER_COLUMNS`ten türetir; `_LEDGER_COLUMNS` bugün bir SQL METNİDİR (`SELECT … FROM odds_snapshots`), kolon tuple'ı değildir — tuple'a ayrılması §6.4/3a'nın parametreleme refactor'uyla AYNI görevde yapılır |
 
 **Konsensüs tanımı tek:** "turun üç sonucu tam kitaplarının ortalaması" (`live/context.pre_prices`). `pre_prices` tam
 kitap SAYISINI döndürmüyor ve turu "`decided` anında ya da öncesindeki son tur" diye seçiyor; site açılış/son/kapanış
-turlarını ve kitap sayısını istiyor. Plan bir K1 refactor'u yazar: tur-seçimsiz iç fonksiyon (ör. `_full_books(tur)`
-→ ortalamalar + sayı) ayrılır, `pre_prices` onu çağırır, dışa aktarıcı da onu (`Quote.bookmaker = book_key`).
-Davranış eşitliği mevcut testlerle korunur.
+turlarını ve kitap sayısını istiyor. Plan bir K1 refactor'u yazar: tur-seçimsiz fonksiyon (tur → üç sonuç
+ortalamaları + tam kitap sayısı; `Quote.bookmaker = book_key` ile de çalışır) **yaprak modül**
+`football_edge/market/consensus.py`ye taşınır; modül yalnız `history.types` sabitlerini import eder.
+`live.context.pre_prices` onu çağırır; `football_edge.site` de onu çağırır ve `live.context`i import ETMEZ (H1f
+geçişli bekçisi bunu zorlar: `live.context` `backtest.*` ve `history.catalog` import ettiği için dışa aktarıcının
+kapanışında olamaz). Davranış eşitliği mevcut `pre_prices` testleriyle korunur.
 
-### 4.4 Testler (üç katman)
+### 4.4 Testler
 
 1. **Metin (her kapıda, DB'siz):** `0014`te yasak tablo adları geçmez; **görünüm başına** beklenen süzgeç satır satır
    yazılır (`site.matches` ve `site_input.h2h_quotes` tabanla süzer; `site.leagues`, `site.ledger_head`,
    `site.record`, `site_audit.ledger_rows` süzmez — her biri adıyla); `site.record` gövdesi `where false`;
-   `grant` satırları yalnız `site_reader`; kelime sınırlı `\bLOGIN\b` ve `\bPASSWORD\b` yok (`NOLOGIN` hariç);
+   `grant` satırları yalnız `site_reader`; kelime sınırlı `\bLOGIN\b` ve `\bPASSWORD\b` yok (`NOLOGIN` hariç;
+   test SQL yorumlarını ayıklayıp koşar — migration yorumundaki "LOGIN" kelimesi eşleşmesin);
    `site_audit.ledger_rows` kolon kümesi Python sabitinden.
 2. **Katalog + davranış (yerel Postgres kabı, `supabase/postgres` 17.6 — tam etiket B-1 T0'da sabitlenir):**
    0001→0014 sırayla uygulanır (0003–0005'in `cron.schedule`i kapta gerçek cron işleri açar ve Vault'suz her 15
@@ -216,13 +230,29 @@ Davranış eşitliği mevcut testlerle korunur.
    site.record` ile kolon ADI/TİPİ değişikliği hata verir, sona kolon EKLEMEK hata vermez ama kolon listesi testi
    kırmızıdır (iki vaka). Holdout tohumları: `2026-01-15T12:00Z` → 0 satır, `2026-07-01T23:59:59.999999Z` → 0
    satır (sınırın komşusu), `2026-07-02T00:00Z` → 1 satır; `site_reader` olarak tohumlanmış maçlar > 0 satır.
-3. **Uçtan uca (kapta, sentetik):** `ledger.chain` ile geçerli zincirli sentetik defter + maçlar + çıpa dosyası
-   tohumlanır → `site export` (B-1) → `verify-snapshot`; B-2 birleştirmesinde aynı JSON'la `next build` +
-   `check-out`. Kurcalanmış varyant (bir satırın fiyatı değiştirilmiş) exit ≠ 0 vermeli.
-4. **Koruma:** davranış testleri append-only tablolara satır yazar — yalnız ATILABİLİR veritabanında. Fixture
+3. **Uçtan uca (kapta, sentetik, ELLE HESAPLANMIŞ BEKLENEN DEĞERLERLE):** `ledger.chain` ile geçerli zincirli
+   sentetik defter + maçlar + çıpa dosyası (kesimin ortasında bir `last_id`i işaret eder) tohumlanır → `site export`
+   (B-1) → `verify-snapshot`; B-2 birleştirmesinde aynı JSON'la `next build` + `check-out` (§12.1). Test, türetmeyi
+   yapan kodu ÇAĞIRMADAN elle yazılmış beklenenleri iddia eder: en az bir maç için açılış/son/kapanış `p` (görüntü
+   hassasiyetinde, §5.4), `move`, `rounds`, her turun `books`u, `sealed`; eşik altı kitaplı bir tur → `null`;
+   mühürsüz bir maç → `sealed: false`, `closing: null`; taban komşusu maç (`2026-07-01T23:59:59.999999Z`) anlık
+   görüntüde YOK. Kurcalama iki varyant, ikisi de exit ≠ 0 ve hiçbir dosya yazılmaz: (a) çıpa SONRASI bir satırın
+   fiyatı, (b) çıpa ÖNCESİ bir satırın fiyatı değiştirilmiş (N1: dışa aktarım GENESIS'ten hash'ler, §5.1). Kurcalanmış
+   hâl tohumda kurulur — satır INSERT'ten ÖNCE değiştirilir, saklanan hash'ler eski kalır; UPDATE ve tetikleyici
+   kapatma yoktur. **Sınır:** `site.record` Faz 5'e kadar `where false` olduğu için bu test sicilin defter tarafını
+   yalnız BOŞ hâliyle koşar (§12.4/12).
+4. **Yalıtım:** append-only tablolar DELETE/TRUNCATE kabul etmez (0001 satır tetikleyicisi, 0013 TRUNCATE bekçisi);
+   temizlik bu yüzden veritabanı düzeyindedir. **Her `sitedb` test modülü taze bir veritabanında koşar:** oturum başında
+   0001→0014 uygulanmış bir şablon veritabanı kurulur, her modül `CREATE DATABASE site_t_<rastgele> TEMPLATE <şablon>`
+   ile kopyasını alır, sonunda `DROP DATABASE`. Zincirsiz holdout tohumları (§4.4/2) ile zincirli defter (§4.4/3)
+   ASLA aynı veritabanında buluşmaz. **Testte tetikleyiciyi devre dışı bırakmak YASAKTIR:** `disable trigger`,
+   `session_replication_role`, `alter table … disable` test kodunda geçmediğini bir metin testi sınar (kapı
+   gevşetilerek yeşil alınmaz).
+5. **Koruma:** davranış testleri append-only tablolara satır yazar — yalnız ATILABİLİR veritabanında. Fixture
    `SITE_TEST_DATABASE_URL`'in ana makinesi `localhost`/`127.0.0.1`/CI servis adı değilse ya da `DATABASE_URL`e
    eşitse testleri adıyla REDDEDER (kırmızı). Değişken yoksa: yerelde `SKIP: site-db (SITE_TEST_DATABASE_URL yok)`,
-   **`CI=true` iken FAIL** (B10).
+   **`CI=true` iken FAIL** (B10). Rol `CREATE DATABASE` yetkisi taşır (kap süper kullanıcısı; üretimde bu fixture
+   hiç koşmaz).
 
 ### 4.5 Uygulama (onaydan sonra; bu tasarımın işi değil)
 0013 canlıda (controller) → AK6 onayı → `0014` ROLLBACK'li prova → `apply_migration` → katalog testleri gerçek DB'ye
@@ -237,34 +267,57 @@ düzeyi GUC'lerin (`statement_timeout`, `default_transaction_read_only`) pooler 
 ### 5.1 Modül ve komutlar
 `src/football_edge/site/` — `export.py`, `verify.py`, `slugs.py`, `__main__.py`. `__main__` `configure_logging`i
 çağırır (test); `SITE_DATABASE_URL` `_log_secrets`e eklenir (RUNBOOK §3.8, DEFERRED 10o), redaksiyon testi genişler.
-- `python -m football_edge.site export --out <dizin>` — `SITE_DATABASE_URL` ile bağlanır; **tek**
-  `BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY` işleminde (B12) sırayla: (1) zincir doğrulaması (§6.4/2a–b),
-  (2) `site.ledger_head`'den kesim `last_id`, (3) oran sorguları `ledger_id <= last_id`; maç kümesi = kesim içinde en
-  az bir oran satırı olan `site.matches` satırları, (4) anlık görüntü türetimi, (5) AYNI işlemde ikinci türetim ve
-  `content_sha256` eşitliği, (6) §6.4/2d–e kontrolleri. Hepsi geçerse `snapshot.json` + `snapshot.sha256` yazar;
-  biri kırmızıysa hiçbir dosya yazmadan adıyla exit. Log yalnız sayı ve hash basar.
-- `python -m football_edge.site verify-snapshot <dosya>` — **DB'siz**: şema, H1/H2/H3/H5 içerik kontrolleri,
-  `content_sha256` yeniden hesabı. CI'da fixture'lar, `site.yml`de gerçek anlık görüntü üzerinde koşar.
+- `python -m football_edge.site export --out <dizin>` — önce `SITE_DATABASE_URL`in varlığını kendisi denetler (yoksa
+  "SITE_DATABASE_URL yok — yayın yapılmadı" ile adıyla exit; `site.yml`de ayrı bir ön adım yoktur, çünkü secret
+  yalnız bu adıma verilir ve `if:` içinde okunamaz). Sonra **tek** `BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY`
+  işleminde (B12) sırayla:
+  1. **Zincirin TAMAMI:** depodaki HER çıpa sorulur (`_anchor_break`) ve kesim GENESIS'ten yeniden hash'lenir
+     (`verify-chain --full` semantiği, `site_audit.ledger_rows` üzerinden). Anlık görüntü açılış konsensüsünü, `move`u,
+     `rounds`u ve `move_distribution`ı tabandan beri BÜTÜN kesimden türettiği için yalnız çıpa kuyruğunu doğrulamak
+     yetmez. Maliyet: defter bugün birkaç bin satır, tek `SELECT` 30 sn'lik `statement_timeout`un çok altında; büyüme
+     AK22 ölçümüne bağlı. Çıpa eksikliği kontrolü git geçmişi ister: `site.yml` checkout'u `fetch-depth: 0`; git
+     geçmişi okunamazsa ("ÇIPA EKSİKLİĞİ KONTROLÜ ATLANDI") dışa aktarım bunu SKIP değil kırmızı sayar ve durur.
+  2. `site.ledger_head`'den kesim `last_id`; `snapshot.ledger.head` = son satırın yeniden hesaplanmış hash'i.
+  3. Oran sorguları `ledger_id <= last_id`; maç kümesi = kesim içinde en az bir oran satırı olan `site.matches`.
+     **Varsayım (adıyla):** bütün defter yazımları `db.insert_snapshots` → `lock_ledger` (`pg_advisory_xact_lock`)
+     ile serileşir; id'ler commit sırasıyla atanır ve anlık görüntüde görünen satırlar id'nin kesintisiz önekidir. Kilitsiz
+     bir defter yazarı eklenirse `max(id)` kesimi bozulur — plan bu varsayımı bir teste bağlar (defter INSERT'i yapan her
+     yol `lock_ledger`ı çağırır).
+  4. Anlık görüntü türetimi; işlemde okunan bütün girdiler (satırlar, çıpa, yapılandırma) kanonik bir girdi dökümüne
+     serileştirilir.
+  5. **İkinci türetim ayrı bir alt süreçte, farklı `PYTHONHASHSEED` ile**, yalnız o girdi dökümünden (DB'ye bağlanmadan)
+     yapılır; iki `content_sha256` eşit olmalı. Bu, küme/sözlük sırasına bağlı belirlenimsizliği yakalar (aynı süreçteki
+     ikinci çağrı yakalayamazdı). Mutasyon kanıtı planda: dizi kurulumunda sıralamayı kaldırmak bu adımı kırmızı yapmalı.
+  6. §6.4/3d–e kontrolleri.
+  Hepsi geçerse `snapshot.json` + `snapshot.sha256` (dosya baytlarının sha256'sı) yazar; biri kırmızıysa hiçbir dosya
+  yazmadan adıyla exit. Log yalnız sayı ve hash basar.
+- `python -m football_edge.site verify-snapshot <dosya>` — **DB'siz**: şema, dizilerin tanımlı anahtarla sıralı olması,
+  H1/H2/H3/H5 içerik kontrolleri, §4.3'ün yasak anahtar kümesi, `content_sha256` yeniden hesabı. CI'da fixture'lar ve
+  §4.4/3'ün JSON'u, `site.yml`de gerçek anlık görüntü üzerinde koşar.
 
 ### 5.2 Anlık görüntü v1 (`web/contract/snapshot.schema.json`, JSON Schema; her nesnede `additionalProperties: false`)
 
 ```
 schema_version: 1
 generated_at, git_sha                        # content_sha256'ya GİRMEZ
-content_sha256                               # yukarıdaki üçü hariç kanonik gövdenin sha256'sı
+content_sha256                               # generated_at, git_sha ve kendisi hariç gövdenin sha256'sı;
+                                             # kanonikleştirici `ledger._canonical` (sort_keys, (",", ":"),
+                                             # ensure_ascii=False) — defter hash'iyle aynı fonksiyon
 ledger:   { rows, last_id, head, anchor: { file, rows, last_id, head } }   # çıpa: depodaki en yeni ledger/head-*.txt
 floor:    "2026-07-02T00:00:00Z"
-leagues:  [ { id, slug, name, country, matches: int,
+leagues:  [ { id, slug, name, country, matches: int,        # sıra: id
               move_distribution: { p10, p50, p90 } | null } ]   # |açılış→kapanış hareketi| yüzde puanı, maç ≥ 5 ise
-teams:    [ { league_id, slug, name, matches: int } ]
-matches:  [ { id, league_id, path_id, slug, date,                # date = commence_time'ın UTC takvim günü
+teams:    [ { league_id, slug, name, matches: int,           # sıra: (league_id, slug)
+              indexable: bool } ]                              # §8.4, Python'da
+matches:  [ { id, league_id, path_id, slug, date,              # sıra: (commence_time, id); date = UTC takvim günü
               commence_time, home, away,
               sealed: bool,                                    # kesim içinde is_closing satırı var mı
               rounds: int,                                     # kesim içindeki h2h gözlem turu sayısı
               h2h: { opening|latest|closing: { observed_at, books: int,
                                                 p: { home, draw, away } } | null },
-              move: { home, draw, away } | null } ]            # açılış→kapanış (yoksa son), yüzde puanı
-record:   { published: int, entries: [ … site.record kolonları … ],
+              move: { home, draw, away } | null,               # açılış→kapanış (yoksa son), yüzde puanı
+              indexable: bool } ]                              # §8.4, Python'da
+record:   { published: int, entries: [ … site.record kolonları … ],   # sıra: publication_id
             summary: { mean_clv, ci_low, ci_high, n } | null } # n = 0 iken null
 value_badge: null          # const null — Faz 5 şema sürümünü artırır
 analysis:   null           # const null — Faz 7 şema sürümünü artırır
@@ -272,6 +325,7 @@ analysis:   null           # const null — Faz 7 şema sürümünü artırır
 - `p` = vig'i temizlenmiş konsensüs, `market.devig` ile, yöntem `config/model_faz3.yaml`'daki (`power`) — model kodu
   neyse o. `books < SITE_MIN_BOOKS` (öneri 3) ise o tur `null`. `summary` aralığı `market.metrics.bootstrap_mean`
   (sabit tohum), CLV `market.metrics.clv`.
+- Her dizi yukarıdaki anahtarla sıralıdır; `verify-snapshot` sıralılığı sınar (N3).
 - Python şemayı dışa aktarımda ve fixture'larda doğrular (doğrulayıcı seçimi — `jsonschema` bağımlılığı mı el yazımı
   mı — planda). TS `Snapshot` tipini elle taşır; fixture `satisfies Snapshot` ile `tsc`'de sınanır; bir pytest
   şemanın anahtar kümesini TS tip dosyasınınkiyle karşılaştırır.
@@ -285,15 +339,19 @@ importlar `.ts` uzantılı; uygulama koduyla paylaşılan modüller için `tscon
 JSON-LD dışındaki kontroller daraltılır; bağımlılık eklemek bilinçli commit).
 Girdi: anlık görüntü + `web/out/**`. Ölçer: (1) her maç/lig/takım için tam bir sayfa, her sayfa için tam bir kayıt;
 (2) H6c (öznitelik ve görünen metin); (3) sicil sayfasındaki `rows`, `last_id`, `head`, `published`, `summary` ve
-dosya hash'i anlık görüntüye eşit; (4) `hreflang` karşılıklı, kendine atıflı, `x-default` var; (5) site haritası =
-indekslenebilir sayfa kümesi; §8.4 eşikleri; (6) H4/H5/H7 kalıpları; (7) CSP: her satır içi betiğin sha256'sı
-`out/_headers` CSP'sinde (AK19); (8) basit erişilebilirlik: `<html lang>`, tek `<h1>`, `alt`, `<main>`, başlık sırası.
+`content_sha256` anlık görüntüye eşit (sayfa DOSYA hash'ini değil `content_sha256`i gösterir: dosya hash'i dosyanın
+içinde olamaz ve derleme girdisi değildir); (4) `hreflang` karşılıklı, kendine atıflı, `x-default` var; (5) site haritası =
+`indexable: true` kayıtların sayfa kümesi; `noindex` meta ↔ `indexable` birebir; (6) H4/H5/H7 kalıpları; (7) CSP: her satır içi YÜRÜTÜLEBİLİR betiğin sha256'sı
+`out/_headers` CSP'sinde (AK19); `type="application/ld+json"` veri blokları CSP'ye tabi değildir ve hash listesine
+girmez (girerse `_headers` gereksiz büyür); (8) basit erişilebilirlik: `<html lang>`, tek `<h1>`, `alt`, `<main>`, başlık sırası.
 
 ### 5.4 Biçimleme sözleşmesi
 Anlık görüntü sayıları **görüntülenecek hassasiyette** taşır: olasılık ve hareket yüzde puanı 1 ondalık
 (`45.7`), CLV yüzde 2 ondalık, fiyat 2 ondalık. TS yalnız dile göre ondalık ayracı (`45,7` / `45.7`) ve birim (`%`,
 `pp`) ekler; yuvarlama, çarpma, toplama yapmaz. `format` fonksiyonu tek yerdedir ve tarayıcı onu çağırarak H6c'yi
-sınar.
+sınar. **Hesap ham değerle, yuvarlama yalnız çıktıda:** `move`, `move_distribution`, `summary` ve `indexable` Python'da
+yuvarlanmamış değerlerden hesaplanır, sonra görüntü hassasiyetine yuvarlanır. Yuvarlanmış üç `p`nin toplamı 100,0
+olmayabilir; ne `verify-snapshot` ne tarayıcı toplamı sınar.
 
 ---
 
@@ -303,8 +361,9 @@ sınar.
 - **Yayınlanmış tahminler** (`record.entries`): an, maç, market, sonuç, yayın oranı, kapanış adil oranı, CLV; özet
   (`record.summary`): sayı, ortalama CLV, güven aralığı — hepsi Python'da hesaplanmış.
 - **Defter durumu:** zincir başı (`head`), satır sayısı, son id, dışa aktarım anı; depodaki en yeni çıpa dosyasının
-  adı, değeri ve GitHub'daki geçmiş bağlantısı; anlık görüntü dosyasının sha256'sı ve `/data/snapshot.json` indirmesi
-  (toplu indirmenin kendisi AK21'e bağlı; bağlanmadan yalnız hash gösterilir).
+  adı, değeri ve GitHub'daki geçmiş bağlantısı; anlık görüntünün `content_sha256`sı. `/data/snapshot.json` toplu
+  indirmesi AK21'e bağlıdır. Dosya yayımlanmadıkça gösterilen hash bir **doğrulama değil taahhüttür**: bugün kimse onu
+  yeniden hesaplayamaz; dosya sonradan açıklanırsa o gün doğrulanır. Sayfa bunu bu sözcüklerle yazar.
 - **Nasıl doğrulanır** bölümü (§6.3).
 
 ### 6.2 Sicil boşken (bugün) — dürüst metin
@@ -332,26 +391,31 @@ Gösterilen: DB'deki baş + depodaki çıpa. Aynı `last_id` ise "çıpa ile eş
 
 ### 6.4 Kapı: sayfa ↔ defter birebir
 Üç katman, çünkü CI'ın gerçek DB'si yok (bilinçli, `ci.yml` yorumu):
-1. **CI'da (her push, DB'siz):** sentetik fixture'lar → `verify-snapshot` → `next build` → çıktı tarayıcısı §5.3.
-   Fixture varyantları: boş sicil, dolu sicil (özetli), `books` eşik altı, mühürsüz maç, tek turlu maç.
-2. **CI'da (her push, geçici kapta):** §4.4/3 uçtan uca — gerçek görünüm SQL'i → dışa aktarıcı → `verify-snapshot`
-   (B-1), sonra → `next build` → tarayıcı (B-2 birleşince). Faz 6 kapısının asıl maddesi böylece sentetik veride
-   her push'ta uçtan uca koşar.
+1. **CI'da (her push, DB'siz):** sentetik fixture'lar → `verify-snapshot` → `next build` → çıktı tarayıcısı §5.3
+   (sayfa ↔ anlık görüntü). Fixture varyantları: boş sicil, dolu sicil (özetli), `books` eşik altı, mühürsüz maç,
+   tek turlu maç. Dolu sicil YALNIZ burada (JSON → sayfa) ve dışa aktarıcının sahte DB birim testlerinde sınanır.
+2. **CI'da (her push, geçici kapta):** §4.4/3 — gerçek görünüm SQL'i → dışa aktarıcı → `verify-snapshot` (B-1), sonra
+   → `next build` → tarayıcı (B-2 birleşince), elle hesaplanmış beklenen değerlerle. Uçtan uca koşan: **maç ve defter
+   durumu yolu** (defter → görünüm → türev sayılar → sayfa) ve iki kurcalama varyantı. **Sicil yolu Faz 5'e kadar
+   yalnız BOŞ hâliyle** uçtan uca koşar: `site.record` `where false` (§12.4/12).
 3. **`site.yml`'de (gerçek DB, yayından önce; biri kırmızıysa yayın yok):**
-   a. zincir: en yeni çıpadan kuyruk `site_audit.ledger_rows` üzerinden, mevcut `verify_chain` ve çıpa kontrolüyle
-      (`_anchor_break`) — ikinci bir zincir okuyucusu yazılmaz. Plan maddesi (K1): `collect._LEDGER_COLUMNS` /
-      `_LEDGER_ALL` / `_LEDGER_AFTER` / `_LEDGER_AT` bugün `FROM odds_snapshots` gömülü SQL metinleri ve `_anchor_break`
-      `SELECT count(*) FROM odds_snapshots` sabitini taşıyor; bunlar ilişki adını parametre alacak biçimde ayrılır
-      (varsayılan `odds_snapshots`, site `site_audit.ledger_rows`). `odds_snapshots` okuyucularının envanteri
-      (`collect.py`, `db.py`, `live/store.py`) planda çıkarılır; bugün onlar için bir okuyucu bekçisi yoktur;
+   a. zincir: HER çıpa + kesimin GENESIS'ten yeniden hash'lenmesi (§5.1/1), `site_audit.ledger_rows` üzerinden,
+      mevcut `verify_chain` ve `_anchor_break` ile — ikinci bir zincir okuyucusu yazılmaz. Plan maddesi (K1):
+      `collect._LEDGER_COLUMNS` / `_LEDGER_ALL` / `_LEDGER_AFTER` / `_LEDGER_AT` bugün `FROM odds_snapshots` gömülü SQL
+      metinleri ve `_anchor_break` `SELECT count(*) FROM odds_snapshots` sabitini taşıyor; bunlar kolon tuple'ı +
+      ilişki adı parametresi olarak ayrılır (varsayılan `odds_snapshots`, site `site_audit.ledger_rows`).
+      `odds_snapshots` okuyucularının envanteri (`collect.py`, `db.py`, `live/store.py`) planda çıkarılır; bugün
+      onlar için bir okuyucu bekçisi yoktur;
    b. `snapshot.ledger.head` = kesimdeki son satırın YENİDEN HESAPLANMIŞ hash'i (hücre değil — `_anchor_break` ilkesi);
-   c. belirlenimcilik: aynı işlemde ikinci türetim aynı `content_sha256`yı üretir (B12). İşlem kapandıktan sonra
-      yeniden türetme bu eşitliği vaat etmez (`matches` değişebilir) ve vaat edilmez;
+   c. belirlenimcilik (§5.1/5): ayrı alt süreçte, farklı `PYTHONHASHSEED` ile, işlemin girdi dökümünden ikinci türetim
+      aynı `content_sha256`yı üretir. İşlem kapandıktan sonra DB'den yeniden türetme bu eşitliği vaat etmez
+      (`matches` değişebilir) ve vaat edilmez;
    d. `record.published` = `site.record` satır sayısı; her girdinin CLV'si defter satırlarından `market.metrics.clv`
       ile yeniden hesaplanır;
    e. `verify-snapshot` + §5.3 tarayıcısı gerçek anlık görüntüyle;
-   f. yayından sonra: canlı `/data/snapshot.sha256` indirilir ve derlenmiş olanla karşılaştırılır; `curl -I` ile
-      örnek sayfalarda `X-Robots-Tag` ve CSP başlıkları okunur (yayımlanan = doğrulanan).
+   f. yayından sonra: canlı `/data/snapshot.sha256` indirilir ve derlenmiş olanla karşılaştırılır (AK21 kapalıyken
+      dosyanın kendisi yayımlanmaz ama hash dosyası yayımlanır); `curl -I` ile örnek sayfalarda `X-Robots-Tag` ve
+      CSP başlıkları okunur (yayımlanan = doğrulanan).
 
 ### 6.5 Faz 5'e devredilen şartlar (İz B bunları KURMAZ, sözleşmeye yazar)
 - `publications` tablosu append-only + TRUNCATE tetikleyicisi + kendi hash zinciri; `site.record` ona B5 ile bağlanır.
@@ -390,9 +454,13 @@ oranı, bağlantı yok** (B7). Value rozeti bileşeni vardır ve `value_badge ==
 
 Kurallar: lig slug'ı `track-record`/`legal` olamaz; takım slug'ı `match` olamaz; `path_id` çakışması derlemeyi
 kırmızı yapar (test). `generateStaticParams` + `dynamicParams = false`: anlık görüntüde olmayan yol 404'tür. Her
-maç için `out/_redirects`e `/{lang}/{league}/match/{path_id}/*` → güncel yol (301) yazılır: takım adı değişse de
-eski maç URL'si çözülür. Erteleme URL'yi değiştirmez (tarih yolda değil; görünen metinde, UTC).
-Lig pasifleşirse (`active = false`) lig ve maçları anlık görüntüden düşer ve 404 olur; kalıcı kaldırma kararı AK22.
+maç için `out/_redirects`e `/{lang}/{league}/match/{path_id}/*` → güncel yol **zorlamasız** `301` (`301!` DEĞİL)
+yazılır: güncel yol dosya olarak var olduğu için kural onu gölgelemez ve kendine yönlenmez; takım adı değişse de eski
+maç URL'si çözülür. Erteleme URL'yi değiştirmez (tarih yolda değil; görünen metinde, UTC). `path_id` The Odds API olay
+kimliğini kamuya açar → AK17'nin okuma kapsamına girer; olay kimliğinin ertelemede korunduğu ölçülmedi (§17).
+Lig pasifleşirse (`active = false`) lig, takımları ve maçları anlık görüntüden düşer. AK20(b)'nin kaybolan-slug
+kontrolü bunu `config/site_redirects.yaml`daki tek bir `gone: <lig>` girdisiyle kabul eder (lig altındaki bütün
+slug'lar muaf; sunulan durum 404 ya da 410 — Netlify davranışı planda ölçülür); girdi yoksa kırmızı. Saklama AK22.
 
 ### 8.2 Slug'lar
 Kendi testli fonksiyonu `site/slugs.py` (`naming.normalise_team`a DAYANMAZ — o eşleşme için load-bearing'dir,
@@ -406,10 +474,11 @@ Sözlükler `web/src/i18n/{lang}.json`, tipli erişimci; kütüphane yok. Dil li
 EN birincil; TR yasal inceleme zaten gerekiyor). Makine çevirisi yayımlanmaz.
 
 ### 8.4 İndeksleme politikası (B8'in üstünde, `SITE_INDEXABLE` açıkken)
-Maç sayfası `rounds ≥ 2` ve en az bir turda `books ≥ SITE_MIN_BOOKS` olana dek `noindex`; takım sayfası
-`teams[].matches ≥ SITE_MIN_TEAM_MATCHES` (öneri 3) olana dek `noindex`; `noindex` sayfa site haritasına girmez.
-Kanonik URL alan adıdır (AK4); `*.netlify.app` alt alanı her zaman `noindex` (`_headers` alan adına göre değil,
-kanonik etiket + Netlify alt alan kuralıyla — plan ölçer).
+`indexable` Python'da hesaplanır ve anlık görüntüye yazılır (anlık görüntü yalnız açılış/son/kapanış turlarının
+`books`unu taşıdığı için eşik oradan türetilemez). Maç: `rounds ≥ 2` VE kesimdeki turlardan en az birinde
+`books ≥ SITE_MIN_BOOKS`. Takım: `matches ≥ SITE_MIN_TEAM_MATCHES` (öneri 3). `indexable: false` sayfa `noindex` alır
+ve site haritasına girmez; tarayıcı ikisini `indexable`a karşı sınar. Kanonik URL alan adıdır (AK4); `*.netlify.app`
+alt alanı her zaman `noindex` (yöntem planda ölçülür, §18).
 
 ### 8.5 İnce/kopya içerik riski
 Faz 7 yokken maç sayfası yalnız sayısal türev taşır; binlerce benzer sayfa "ince içerik" sayılabilir. Panzehirler:
@@ -475,9 +544,11 @@ sayfa üstünde kalıcı 18+ şeridi (CSS/`<noscript>`). **Bu bir yaş doğrulam
   CSP, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, bayrak kapalıyken `X-Robots-Tag: noindex`.
   `_redirects` de `out/` içinde üretilir (§8.1).
 - **`.github/workflows/site.yml`:** yalnız `workflow_dispatch`; `permissions: contents: read`; `concurrency`
-  `site-deploy`; checkout `persist-credentials: false` (`fetch-depth` — çıpa geçmişi bağlantısı ve olası çıpa
-  kontrolü için — planda); adımlar: `uv sync --frozen` → secret yoksa adıyla exit ("SITE_DATABASE_URL yok — yayın
-  yapılmadı") → `site export` (**yalnız bu adım** `SITE_DATABASE_URL` alır) → `verify-snapshot` → pnpm kurulum →
+  `site-deploy`; checkout `persist-credentials: false`, **`fetch-depth: 0`** (çıpa eksikliği kontrolü git geçmişi
+  ister; sığ checkout'ta "ATLANDI" satırı dışa aktarımı durdurur, §5.1/1); adımlar: `uv sync --frozen` →
+  `site export` (**yalnız bu adım** `SITE_DATABASE_URL` alır; secret'ın varlığını komut kendisi denetler, ayrı ön adım
+  yok) → `verify-snapshot` → kaybolan-slug kontrolü (önceki yayının `/data/slugs.json`ı ↔ yeni derleme, AK20 b;
+  önceki yayın yoksa yalnız açık `--first-publish` girdisiyle geçer, site erişilemezse kırmızı) → pnpm kurulum →
   `next build` → çıktı tarayıcısı → `netlify deploy --prod --dir out` (**yalnız bu adım** `NETLIFY_AUTH_TOKEN`,
   `NETLIFY_SITE_ID` alır; `netlify-cli` sürümü sabit) → yayın sonrası kontrol (§6.4/3f). `schedule` YOK; pg_cron
   dispatch YOK (AK15). Test: adım başına ortam anahtar kümesi (H5d), tetik kümesi = `{workflow_dispatch}`.
@@ -493,13 +564,13 @@ sayfa üstünde kalıcı 18+ şeridi (CSS/`<noscript>`). **Bu bir yaş doğrulam
 |---|---|---|---|
 | `pytest` (mevcut) | B-1 | `tests/test_site_*.py` | Migration metin testleri, dışa aktarıcı (sahte DB), `verify-snapshot` fixture'larda, import bekçisi, şema ↔ TS anahtar eşitliği, `site.yml` adım ortamı, log redaksiyonu, slug vektörleri |
 | `sızıntı` (mevcut) | B-1 | `leakage` işaretli site testleri | H1; `EXPECTED_MIN_LEAKAGE` B-1 birleştirmesinde ölçülerek yükseltilir |
-| `site-db` (yeni) | B-1 | `pytest -m sitedb` | §4.4/2–3 katalog, davranış, uçtan uca (dışa aktarıma kadar); `CI=true` ve değişken yok → FAIL |
+| `site-db` (yeni) | B-1 | `pytest -m sitedb` | §4.4/2–4 katalog, davranış, uçtan uca (dışa aktarıma kadar, beklenen değerlerle); `CI=true` ve değişken yok → FAIL. Uçtan uca vakanın ürettiği anlık görüntüyü sabit yola yazar: `${TMPDIR}/site-e2e/snapshot.json` (Node adımlarından ÖNCE koşar) |
 | `site-kurulum` | B-2 | `pnpm -C web install --frozen-lockfile` | Kilit dosyası ↔ `package.json`; bağımlılık yaşam döngüsü betikleri kapalı (pnpm varsayılanı; izin listesi boş) |
 | `site-tip` | B-2 | `pnpm -C web exec tsc --noEmit` | Tipler, fixture `satisfies Snapshot` |
 | `site-lint` | B-2 | `pnpm -C web exec biome ci` | Lint + biçim (tek bağımlılık) |
 | `site-test` | B-2 | `pnpm -C web exec vitest run` | `format`, `hreflang`, JSON-LD, 18+ bileşeni |
-| `site-derleme` | B-2 | `next build` fixture ile, iki varyant: bayraksız ve `SITE_INDEXABLE=1` (yayımlanmaz) | Statik üretim; bayrak açık yolun kendisi |
-| `site-uyum` | B-2 | `node web/scripts/check-out.ts` (her iki varyant + §4.4/3'ün JSON'u) | §5.3 — sayfa ↔ anlık görüntü, H4–H7, `hreflang`, site haritası ↔ `noindex`, §8.4 eşikleri, CSP hash'leri, basit erişilebilirlik |
+| `site-derleme` | B-2 | `next build` üç kez: fixture bayraksız, fixture `SITE_INDEXABLE=1` (yayımlanmaz), `${TMPDIR}/site-e2e/snapshot.json` | Statik üretim; bayrak açık yol; uçtan uca JSON'un sayfaya dönüşmesi. Uçtan uca JSON yoksa: yerelde adıyla SKIP, **`CI=true` iken FAIL** |
+| `site-uyum` | B-2 | `node web/scripts/check-out.ts` (üç derlemenin her biri) | §5.3 — sayfa ↔ anlık görüntü, H4–H7, `hreflang`, site haritası ↔ `noindex`, §8.4 eşikleri, CSP hash'leri, basit erişilebilirlik |
 
 pnpm ya da Node yoksa B-2 adımları **FAIL** (SKIP değil): site kapının parçasıdır.
 
@@ -533,6 +604,13 @@ aynı dosyaya aynı anda yazmaz; sıralama kuralı korur (yol haritası §4).
 9. Netlify'ın başlıkları her sayfada sunduğu (yayın sonrası kontrol örnek sayfalarda).
 10. Çeviri kalitesi; takım/lig slug'larının sağlayıcı ad değişikliklerine dayanıklılığı (AK20'nin seçimine bağlı).
 11. The Odds API koşullarına ve TR mevzuatına uyum (AK13, AK17).
+12. **Dolu sicilin defter tarafı** (görünüm → dışa aktarıcı → CLV yeniden hesabı) Faz 5 `publications` gelene kadar
+    yalnız sahte DB ile sınanır; kapta uçtan uca yalnız boş sicil koşar (§6.4/2).
+13. Belirlenimcilik kontrolü (§5.1/5) hash tohumuna bağlı sıra ve `now()`/rastgelelik kullanımını yakalar; işlemler
+    arası (DB değiştikten sonra) yeniden üretilebilirliği ölçmez ve vaat etmez.
+14. Kesim tutarlılığı defter yazarlarının `lock_ledger` ile serileştiği varsayımına dayanır (§5.1/3); varsayımı bir
+    test sınar ama kilitsiz bir yazarın canlı DB'ye başka yoldan (elle SQL) yazmasını durdurmaz.
+15. Tam zincir taraması defter büyüdükçe uzar; süre ölçülmez, AK22'ye bağlıdır.
 
 ---
 
@@ -548,6 +626,7 @@ web/
   src/app/[lang]/…                       # §8.1 yolları; sitemap.ts, robots.ts
   src/lib/{snapshot,hreflang,jsonld,format}.ts · src/i18n/{lang}.json · src/components/…
 src/football_edge/site/{__init__,__main__,export,verify,slugs}.py
+src/football_edge/market/consensus.py    # yaprak modül: tur → ortalamalar + tam kitap sayısı
 db/migrations/0014_site_read.sql
 .github/workflows/site.yml
 tests/test_site_*.py
@@ -578,9 +657,10 @@ tests/test_site_*.py
 - **Plan B-1 — okuma katmanı, dışa aktarım ve K1 testleri (İLK):**
   T0 CI servis kabında 0001–0013'ün koştuğunu ölç, imaj etiketini sabitle (ölçmeden B10 yok);
   T1 `snapshot.schema.json` + sentetik fixture'lar + biçimleme sözleşmesi (sözleşme görevi — B-2'nin başlangıç kapısı
-  bu commit); T2 `0014` + metin/katalog/davranış testleri; T3 `pre_prices` refactor'u + zincir okuyucusunun
-  parametrelenmesi; T4 dışa aktarıcı (tek işlem) + slug fonksiyonu; T5 `verify-snapshot` + import bekçisi + uçtan uca
-  kap testi; T6 `site.yml` (bağlanmamış) + adım ortamı testi + redaksiyon + `check_secrets.sh` genişlemesi;
+  bu commit); T2 `0014` + metin/katalog/davranış testleri; T3 `market/consensus.py` yaprak modülü + `pre_prices`in ona
+  bağlanması + zincir okuyucusunun (kolon tuple'ı + ilişki parametresi) ayrılması + `lock_ledger` varsayım testi;
+  T4 dışa aktarıcı (tek işlem, tam zincir, alt süreçte ikinci türetim) + slug fonksiyonu; T5 `verify-snapshot` +
+  geçişli import bekçisi + şablon veritabanlı test yalıtımı + beklenen değerli uçtan uca kap testi (iki kurcalama); T6 `site.yml` (bağlanmamış) + adım ortamı testi + redaksiyon + `check_secrets.sh` genişlemesi;
   **dalga sonu birleştirme:** `ci.yml` servis kabı + `verify.sh` `site-db` + `EXPECTED_MIN_LEAKAGE`.
 - **Plan B-2 — web yüzeyi (K2/K3, tarayıcı K1 süreciyle; B-1 T1 birleşince paralel):** iskelet + sözlükler;
   maç/lig/takım/sicil/yasal sayfaları; slug yolları + `hreflang` + site haritası + `_redirects`; JSON-LD; 18+;
@@ -611,31 +691,38 @@ tests/test_site_*.py
 | AK14 | İndekslemeye açma (`SITE_INDEXABLE`) | ilk yayından · onaylardan sonra | **AK3, AK4, AK13'ten sonra** | Arama trafiği |
 | AK15 | Yeniden derleme tetiği (bağlanınca) | elle · günlük snapshot sonrası · + saatte en çok bir mühür sonrası (pg_cron → `ops.dispatch_workflow('site.yml')`) | **Günlük + saatlik mühür sonrası** | `site.yml`in otomatiği. **Yeni migration gerekir** (pg_cron izinli listesi); `test_workflows.py` izinli listedeki her workflow'da alarm adımları + `issues: write` ister → `permissions: contents: read` ile uzlaştırılmalı |
 | AK16 | Netlify yayın yöntemi | Actions'tan hazır dizin (CLI) · Netlify Git derlemesi | **CLI** | `site.yml` |
-| AK17 | The Odds API koşullarının türetilmiş olasılık yayımı açısından okunması | asistan salt okuma araştırması → karar kullanıcıda | **Plan B-2'den önce oku** | AK8'in kesinleşmesi, AK9 (b)/(c), AK21 |
+| AK17 | The Odds API koşullarının türetilmiş olasılık yayımı açısından okunması | asistan salt okuma araştırması → karar kullanıcıda | **Plan B-2'den önce oku** (kapsam: türetilmiş olasılık, toplu döküm, olay kimliğinin `path_id` olarak kamuya açılması) | AK8'in kesinleşmesi, AK9 (b)/(c), AK20 (b), AK21 |
 | AK18 | `site_reader` parolası + GitHub secret'ları (`SITE_DATABASE_URL`, `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`) | kullanıcı ekler (parola istemci tarafı SCRAM ile, §4.2) | Netlify kişisel erişim tokenı site başına kısıtlanamaz, hesabın bütün sitelerine yetkilidir → **yalnız bu siteyi barındıran ayrı Netlify hesabı/ekibi** | İlk gerçek dışa aktarım ve deploy |
 | AK19 | **CSP ↔ Next.js satır içi betikleri** (App Router statik çıktısı her sayfaya satır içi RSC betiği basar; sunucu olmadığı için nonce yok; `script-src 'self'` hidrasyonu, 18+ kapısını ve yerel saati kırar) | (a) derleme sonrası satır içi betiklerin sha256'larını toplayıp `out/_headers` CSP'sine yazan adım · (b) `script-src 'self' 'unsafe-inline'` · (c) istemci betiklerini kaldırıp 18+'yı CSS/`<noscript>` ile çözmek (satır içi RSC betikleri yine kalır → (a) ya da (b) yine gerekir) | **(a)**; tarayıcı CSP'nin izin vermediği satır içi betik bulursa kırmızı. (a) ölçümde kırılgan çıkarsa (sayfa başına farklı hash listesi `_headers` boyutunu şişirirse) (b)'ye düşmek AYRI bir kullanıcı kararıdır | `_headers` üretimi, 18+ kapısı, B-2 |
-| AK20 | **Slug kalıcılığı** (`site.yml` `contents: read` — dışa aktarımda dosyaya eklemek commit'lenemez; commit yolu seal botuyla yarışır; `commence_time` değişir) | (a) DB'de append-only `site_slugs` tablosu (yazarı boru hattı, okuyucusu `site` görünümü) · (b) maç yolu değişmez kimlikten (`path_id`) + kimlik altında joker yönlendirme; takım/lig slug'ları için önceki yayının `/data/slugs.json`ı depo sayılır: yeni derlemede kaybolan eski slug, depoda elle commit'lenmiş `config/site_redirects.yaml`da yönlendirmesi yoksa `site.yml` kırmızı · (c) elle commit'lenen slug dosyası + dışa aktarımda bilinmeyen slug → kırmızı | **(b)**: yeni tablo ve yazar gerektirmez; erteleme ve ad değişikliği maç URL'sini kırmaz; takım adı değişikliği nadir ve yayından önce kırmızıyla görünür. (c) her yükselen takımda yayını durdurur | §8.1 URL şeması, `site.yml` |
-| AK21 | `/data/snapshot.json` toplu indirmesi | yayımla · yalnız hash yayımla | **Yalnız hash, AK17'ye kadar** (dosya bütün maçların türetilmiş oranlarının toplu dökümüdür) | Sicil "indir" bağlantısı |
-| AK22 | Veri saklama ve büyüme | tabandan beri her maç sonsuza dek · son N sezon · lig pasifleşince kaldır (404) | **Tabandan beri hepsi; anlık görüntü boyutu ve derleme süresi ölçülür, eşik aşılınca yeniden karar** | Derleme süresi, Actions dakikası, pasif lig URL'leri |
+| AK20 | **Slug kalıcılığı** (`site.yml` `contents: read` — dışa aktarımda dosyaya eklemek commit'lenemez; commit yolu seal botuyla yarışır; `commence_time` değişir) | (a) DB'de append-only `site_slugs` tablosu (yazarı boru hattı, okuyucusu `site` görünümü) · (b) maç yolu değişmez kimlikten (`path_id`) + kimlik altında joker yönlendirme; takım/lig slug'ları için önceki yayının `/data/slugs.json`ı depo sayılır: yeni derlemede kaybolan eski slug, depoda elle commit'lenmiş `config/site_redirects.yaml`da yönlendirmesi ya da `gone: <lig>` girdisi (pasifleşen lig, AK22) yoksa `site.yml` kırmızı; önceki yayın yoksa (ilk yayın) yalnız açık `--first-publish` ile geçer, site erişilemezse kırmızı · (c) elle commit'lenen slug dosyası + dışa aktarımda bilinmeyen slug → kırmızı | **(b)**: yeni tablo ve yazar gerektirmez; erteleme ve ad değişikliği maç URL'sini kırmaz; takım adı değişikliği nadir ve yayından önce kırmızıyla görünür. (c) her yükselen takımda yayını durdurur | §8.1 URL şeması, `site.yml` |
+| AK21 | `/data/snapshot.json` toplu indirmesi | yayımla · yalnız hash yayımla | **Yalnız hash, AK17'ye kadar** (dosya bütün maçların türetilmiş oranlarının toplu dökümüdür). Bedeli adıyla: yayımlanmayan dosyanın hash'i doğrulama değil **taahhüttür**; bu süre boyunca §3.3'ün "anlık görüntü doğrulanabilir" iddiası kamu için değil yalnız bizim kapımız için geçerlidir ve sayfa bunu söyler (§6.1) | Sicil "indir" bağlantısı, kamu doğrulaması |
+| AK22 | Veri saklama ve büyüme | tabandan beri her maç sonsuza dek · son N sezon | **Tabandan beri hepsi; anlık görüntü boyutu, derleme süresi ve tam zincir taraması süresi ölçülür, eşik aşılınca yeniden karar.** Pasifleşen lig her durumda düşer ve `config/site_redirects.yaml`da `gone: <lig>` girdisiyle kabul edilir (AK20 b ile tutarlı) | Derleme süresi, Actions dakikası, pasif lig URL'leri |
 
 ---
 
-## 17. Öz-inceleme (2026-09-23, düzeltme turu 1 sonrası)
+## 17. Öz-inceleme (2026-09-24, düzeltme turu 2 sonrası)
 
 - **Yer tutucu dışında TBD yok:** açık kalanlar §16'da satır ya da plana bırakılan uygulama ayrıntısı (JSON Schema
-  doğrulayıcı seçimi, imaj etiketi, CI süresi, `fetch-depth`, HTML ayrıştırma sağlamlığı) olarak adıyla işaretli.
+  doğrulayıcı seçimi, imaj etiketi, CI süresi, HTML ayrıştırma sağlamlığı) olarak adıyla işaretli.
 - **İç çelişki taraması:** B3 (şema = yayımlanabilirlik) ↔ B7 (kitap fiyatı yayımlanmaz) artık tutarlı:
   kitap bazında fiyat `site_input`te. H3 ↔ §7 ↔ B6 ↔ B5 tutarlı. H5 ↔ B2 ↔ §13 tutarlı. H6 ↔ §5.2 (türevler şemada)
   ↔ §5.4 (TS yalnız ayraç) tutarlı. Belirlenimcilik yalnız tek işlem içinde vaat edilir (B12, §6.4/3c); `sealed_at` ve
   `commence_time` değişkenliği yazılı. Holdout tabanı üç yerde aynı (B4, §4.3, H1) ve tek kaynaklı. Maç URL'si tarih
-  taşımadığı için erteleme URL'yi kırmaz (§8.1, AK20).
+  taşımadığı için erteleme URL'yi kırmaz (§8.1, AK20). Pasif lig AK20(b) ↔ AK22 ↔ §8.1'de aynı `gone: <lig>` kuralıyla.
+  "Uçtan uca" iddiası sicil için daraltıldı (§6.4/2, §12.4/12). Import bekçisi geçişli ve konsensüs yaprak modülde —
+  `live.context` dışa aktarıcının kapanışında değil (H1f ↔ §4.3). Yasak anahtar kümesi açık ve `site` anahtarlarını
+  dışlıyor (§4.3). Test yalıtımı tetikleyici kapatmadan, veritabanı düzeyinde (§4.4/4).
 - **Kapsam:** tek plana sığmıyor → §15'te iki plan; ilk B-1; K1 testleri B-1'in kendi CI adımında koşar.
 - **Bilinen varsayımlar (ölçülmedi):** CI servis kabında 0003–0005'in koşması; Netlify fiyat/limitleri; takım adı
-  değişim sıklığı; pooler üzerinden rol GUC'leri; `path_id` önek uzunluğunun çakışmasızlığı (test onu yakalar).
+  değişim sıklığı; pooler üzerinden rol GUC'leri; `path_id` önek uzunluğunun çakışmasızlığı (test onu yakalar); The
+  Odds API olay kimliğinin ertelemede korunduğu; defter yazarlarının hepsinin `lock_ledger`dan geçtiği (plan testle
+  bağlar); tam zincir taramasının defter büyüdükçe süresi.
 
 ---
 
-## 18. Düzeltme turu 1 — bulgu eşlemesi ve açık küçük noktalar
+## 18. Düzeltme turları — bulgu eşlemesi ve açık küçük noktalar
+
+### 18.1 Tur 1 (`izb-spec-review.md`)
 
 **Kapatılanlar:** C1 (§4.3 `site_audit.ledger_rows` `id` taşır; §6.4/3a parametreleme) · C2 (B12, §5.1, §6.4/3c) ·
 I1 (B11, §4.1, §4.2 sahiplik etkileşimi, AK7) · I2 (B3, `site_input`, `book_key` cümlesi) · I3 (H1a iki küme, görünüm
@@ -651,12 +738,27 @@ cron gürültüsü §4.4/2), M10 (H5c), M11 (§11 CLI dizini, `_redirects`/`_hea
 (§5.3), M13 (AK15), M14 (başlık notu), M15 (§6.2), M16 (H7, §8.4), M17 (§4.2), M18 (§4.5, §5.1), M19 (§9), M20
 (AK19–AK22; (e) tarih dilimi UTC olarak §5.2'de karara bağlandı), M21 (§4.2).
 
-**Açık küçük noktalar (plana bırakılan ölçümler):**
+### 18.2 Tur 2 (`izb-spec-rereview.md`)
+**Kapatılanlar:** N1 (§5.1/1 her çıpa + GENESIS'ten, `fetch-depth: 0`, §4.4/3 çıpa öncesi/sonrası iki kurcalama,
+B12) · N2 (§4.4/3 elle hesaplanmış beklenen değerler, §6.4/2 daraltıldı, §12.4/12) · N3 (§5.1/4–5 girdi dökümü + ayrı
+alt süreç + farklı `PYTHONHASHSEED`, §5.2 sıralı diziler ve `ledger._canonical`, §12.4/13) · N4 (`market/consensus.py`
+yaprak modül, H1f geçişli bekçi, §4.3) · N5 (§4.3 açık yasak anahtar kümesi) · N6 (§4.4/4 şablondan taze veritabanı,
+tetikleyici kapatma yasağı ve metin testi) · 0013 notu (§4.2 `grant execute` yük taşır, gerekçesiyle).
+Minor'lar: m1 (§4.2 bekçi 3 DB dışı çıpaya bağlandı) · m2 (§12.1 uçtan uca JSON'un sabit yolu, `CI=true` FAIL) · m3
+(H4 `data-fe-allow` özniteliği, iki katmanda sayım) · m4 (§8.1 zorlamasız 301, `gone: <lig>`, `--first-publish`,
+`path_id` → AK17; AK20/AK22 tutarlı) · m5 (§6.1 taahhüt dili, sayfa `content_sha256` gösterir, AK21, §3.3) · m6
+(§5.1 secret varlık kontrolü komutta, `fetch-depth: 0`, ATLANDI = kırmızı) · m7 (§5.4 ham hesap/çıktıda yuvarlama,
+toplam sınanmaz; `indexable` Python'da, §8.4) · m8 (H1a temel tablolar, sabitlenmiş nesneler notu) · m9 (§5.3/7
+JSON-LD hash listesi dışında). C2 analizinin `lock_ledger` önek varsayımı §5.1/3 ve §12.4/14'e; `\bLOGIN\b` yorum
+notu §4.4/1'e; `_LEDGER_COLUMNS` tuple'ı §4.3'e yazıldı.
+
+### 18.3 Açık küçük noktalar (plana bırakılan ölçümler)
 1. `supabase/postgres` tam imaj etiketi ve kapta 0003–0005'in koştuğu — B-1 T0 (M9).
 2. Bağımlılıksız HTML ayrıştırmanın sağlamlığı; kırılgansa tarayıcı kapsamı daraltılır ya da bağımlılık bilinçli
    eklenir (M12).
 3. Supavisor kullanıcı biçimi ve rol GUC'lerinin pooler üzerinden uygulanması — 0014 uygulama adımında (M18).
 4. `*.netlify.app` alt alanının `noindex`ini `_headers` ile mi kanonik etiketle mi sağlamanın en sağlam olduğu —
    Netlify davranışı ölçülür (M16).
-5. `site.yml` checkout `fetch-depth` değeri (çıpa geçmişi bağlantısı için gereken derinlik) (I6).
-6. `path_id` önek uzunluğu (çakışma testiyle seçilir) (AK20).
+5. `path_id` önek uzunluğu (çakışma testiyle seçilir) (AK20).
+6. Netlify'da `gone: <lig>` girdisinin 404 mü 410 mu sunduğu (§8.1).
+7. JSON Schema doğrulayıcısı (`jsonschema` bağımlılığı ya da el yazımı) (§5.2).
