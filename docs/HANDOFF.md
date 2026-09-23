@@ -1,10 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-23 (oturum 6, Faz 3 kapanışı) · **Durum:** **Faz 3 TAMAMLANDI — `main`de** (devir
-belgesi `docs/phases/03-baz-model/HANDOFF.md`) · holdout Faz 3 için **TEK kez açıldı** (`holdout_access_log` id 13,
-git `485134b`) · gölge sicili canlı (`shadow-dispatch` salı/cuma 12:35 UTC, 0009/0011) · tarihsel taban haftalık
-(salı + cuma 09:50 UTC, `history.yml`'de model W1–W4) · **Dal:** `main` = `origin/main` · kapı **10 adım yeşil +
-`zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11)
+**Son güncelleme:** 2026-09-23 (oturum 7, Faz 4 Plan 1 bitti) · **Durum:** **Faz 4 tasarımı + Plan 1 (dalga 0–1,
+11 görev) `main`de** (`4a629c2`) · Plan 2 ön koşulları bekleniyor (§0.2) · holdout Faz 3 için bir kez açıldı, Faz 4'te
+henüz açılmadı · `0012` canlı, `news_items` dolu, `collect-news` her turda senkronlar · **Dal:** `main` = `origin/main` ·
+kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11) · `EXPECTED_MIN_LEAKAGE` 418
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -14,7 +13,58 @@ git `485134b`) · gölge sicili canlı (`shadow-dispatch` salı/cuma 12:35 UTC, 
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-23, Faz 3 kapanışında güncellendi)
+## 0. Sonraki oturum — buradan başla (2026-09-23, Faz 4 Plan 1 sonunda)
+
+**Faz 4 Plan 1 bitti.** Tasarım `docs/superpowers/specs/2026-09-23-faz4-jev-sinyal-design.md` (R157–R172), plan
+`docs/superpowers/plans/2026-09-23-faz4-plan1-dalga0-1.md`, T0c raporu `docs/reports/2026-09-23-faz4-arsiv-spike.md`,
+ölçümler `docs/superpowers/specs/2026-09-23-faz4-olcumler.md`, ertelenenler **DEFERRED §17**. SDD defteri (gitignored,
+bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/progress.md`.
+
+### 0.1 Ne yapıldı (hepsi görev incelemesi + bütün-dal incelemesinden geçti)
+- **Dalga 0:** T1 `live freeze-weights` + `config/blend_weights_faz3.yaml` (19 lig; çoğunda model ağırlığı 0 — Faz 3
+  bulgusuyla tutarlı) · T2 haftalık gölge CLV raporu (`shadow.yml` salı adımı, yalnız baz stratejileri — mühür testli;
+  sonuç football-data'dan `match_key` ile, çünkü `match_results` boş) · T3–T5 açılış öncesi düzeltmeler 16a–16d, 16i,
+  16l, 16p (`final-eval --phase` zorunlu) · T6 spike · T7 Jev batarya + $25/ay tavan (`jev_spend`) · T8 `0012`.
+- **Dalga 1:** T9 `news_items` + `sync-news` (R172: `available_at = greatest(now(), iddia)`) · T10 karar anı filtresi,
+  logit kaydırma, import kuralı · T11 34 soruluk `config/jev_questions.yaml`, kademe 1 koşucusu (`features tier1`, sahte
+  istemciyle; gerçek Jev çağrısı YOK).
+- **Son inceleme düzeltmeleri:** bütçesiz Jev yolları kapandı (`map-entities`, `calibrate` artık `BudgetedJev`), havuz
+  fiti yakınsamazsa `freeze-weights` exit 18, kademe 1 haber başına 3 deneme tavanı (`t1_failed:<n>` işaretleri),
+  `CalibrationUnfit`.
+- **Gerçek veritabanı işlemleri:** `0012` uygulandı ve okuma sorgularıyla doğrulandı · `sync-news --since 2026-09-04`
+  geri doldurması 1.259 haber (önce ROLLBACK'li kuru koşu) · 16i ölçümü: 1X2/pre red 0, W1–W4 GEÇTİ.
+
+### 0.2 Plan 2'nin ön koşulları (Plan 2 bunlar olmadan yazılmaz)
+1. **Arşiv kapsamı runner'da (DEFERRED 17k)** — asistan yapar: geçici dal + `workflow_dispatch`, T0c betiği. ≥ %30 ise
+   arşiv ayağı yeniden açılır; değilse spec §7.3 yalnız-canlı yolu (seçim dilimi ≥ 900 haberli maç, kapı dilimi ≥ 1.800,
+   2027-06-30). **Şu anki karar: KAPALI** (koşul ölçülmediği için).
+2. **`TYPESAFE_API_KEY`** `.env`e ve GitHub secret'ına (kullanıcı). Ücretli harcamayı açan commit'i asistan yapamaz —
+   tek satırlık komutu kullanıcıya verir.
+3. **`lag_b_p99`**: `sync-news` en az 2 hafta koşmuş olmalı (en erken **2026-10-07**) — yayıncı iddiası ↔ `first_seen_at`.
+4. **Gölge raporunun ilk turları** (ilk salı 2026-09-29): canlı ΔLL SD'si → güç yeniden hesabı (spec §7.3).
+5. EN kaynağı: GDELT DOC API, runner'dan; ToS'u AI kullanımını yasaklayan alan adları dışlanır. ajansspor gövdesi için
+   ToS okunmalı (17l).
+
+**Plan 2'ye taşınacaklar (brief'lere):** 17a okuyucu mühürü (T5 ilk adım), 17b kesinti hafifletmesi (T4), 17c–17e
+açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 kuru koşusunda `min(boolean)` yok — `bool_and`.
+
+### 0.3 İzlenecekler
+1. **2026-09-26 cuma 12:35 UTC** ilk karar günlü gölge turu (Faz 3 §0.6 aynen).
+2. **2026-09-29 salı** ilk haftalık gölge CLV raporu (`shadow.yml` iş özeti): `sonuçsuz N` ve lig kapsamı tablosu —
+   ilk raporlarda `fikstür ≫ karar` penceredendir (17j). Exit 9/11 → RUNBOOK.
+3. `collect-news` her turda yeni "Haber deposunu güncelle" adımını koşar; kırmızıysa alarm (ops_alert).
+4. `history.yml` model W1–W4 16i sonrası da GEÇTİ (yerelde ölçüldü); runner'da ilk tur 2026-09-26/29.
+
+### 0.4 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
+- SDD betikleri ANA depo kökünden, BASE/HEAD açık SHA ile (`review-package`); worktree'ler `.worktrees/wt-faz4-*`.
+- Plan yazımı: sözleşmeli paralel yazar ajanlar + tek-ağaç bağımsız plan incelemesi (iki tur) — dört görevler arası
+  kırılmayı yürütmeden önce yakaladı.
+- Gerçek DB'ye ilk yazım öncesi aynı SQL ROLLBACK içinde koşulur; K1 inceleyicileri yerel Postgres kabında (supabase
+  17.6 imajı) migration ve INSERT'i gerçekten koşabilir.
+- Temizlik YALNIZ kullanıcı onayıyla: `.worktrees/wt-faz4-{a,b,c,d,e,f,fix}` ve dalları `feat/faz4-{a..f}`,
+  `fix/faz4-plan1-final` (hepsi birleşti).
+
+## 0.eski Önceki oturum (2026-09-23, Faz 3 kapanışında yazıldı — tarihçe)
 
 **Faz 3 bitti.** 14 görevin hepsi `main`de; ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, R149–R156 ve Faz 4 ön
 koşulları: **`docs/phases/03-baz-model/HANDOFF.md`**. Kısaca:

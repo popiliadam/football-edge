@@ -733,3 +733,24 @@ Kaynak: bütün dal incelemesi, kırmızı takım (`docs/reports/2026-09-23-faz3
 | 16n | Izgara ucu (Elo k = 10, DC ξ = 0,003, sırt = 0,003) | Genişletmek yeni seçimdir; kullanıcı açılışı ızgarayı genişletmeden onayladı | Faz 4'te model yeniden seçilirse ızgara genişletilir |
 | 16o | Gölge CLV raporu (harman + bahis + mühürlü kapanış, haftalık; P25/R145) ve R128'in canlı ayağı (C6 − gölge) | Faz 3 sicil biriktirir | Faz 4'ün ilk görevi |
 | 16p | 111 holdout maçı satır üretmedi (12.092 − 11.981), nedeni sınıflanmadı; anahtarsız vekil: DEV E'de `no_decision` payı | Holdout satırları gitti | Faz 4'te anahtarsız ölçüm |
+
+## 17. Faz 4 Plan 1'den (dalga 0–1) ertelenenler (2026-09-23)
+
+Kaynak: görev incelemeleri, bütün-dal son incelemesi ve triyajı, SDD defteri
+(`.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/`, gitignored). 16a–16f, 16i, 16l, 16o, 16p Plan 1'de kapandı.
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 17a | **`jev_item_answers` okuyucu mühürü:** tablodaki `t1_failed:<n>` işaret satırlarını her SELECT süzmeli ya da `gates_from`a vermeli (son inceleme I-3) | Bugün tek okuyucu `tier1.py` ve süzüyor | **Plan 2 T5'in ilk adımı**, tabloya yeni okuyucu yazılmadan önce test |
+| 17b | Kesinti koşusu: bütün haberler `jev_error` ile düşerse işaret yazılmamalı (3 ardışık kesinti = o `prompt_version` için kalıcı kapsam kaybı) | `tier1` zamanlanmadı | Plan 2 T4, zamanlamadan önce |
+| 17c | Faz parametresi yalnız `faz3` ile test edildi (M4/M5); `prereg_sha256` argümanı doğrulanmıyor (M9); C5 piyasa sütunu süzgeçsiz satır kümesinden | Açılış yok | **Bir sonraki açılıştan ÖNCE** (Plan 2 T10) |
+| 17d | Havuz fiti yakınsamazsa `frozen_weights` sessizce MARKET_ONLY (renderer yarısı; `freeze-weights` artık exit 18); `run_final` hedeflerinde ek lig anahtarları (16k) "geri düşülen ağırlık N"yi fazla sayar | Açılış yok | Plan 2 T10 ön kayıt ↔ renderer birebirliği |
+| 17e | `faz4` `PHASES`e yalnız ön kayıt ↔ renderer testi varken eklenir — bugün faz4 açılışını reddeden tek şey `PHASES`te olmaması | Plan 2 | Plan 2 T10 |
+| 17f | `match_results` boş: `fetch-results` hiçbir workflow'da zamanlanmamış; gölge raporu ve D1 sonucu football-data tabanından `match_key` ile alır | Kaynak yeterli, kredi harcamaz | Canlı pencere D1 aynı kaynağı kullanır; football-data gecikmesi "sonuçsuz N" olarak görünür |
+| 17g | Gölgede reddedilen karar fiyatı (Σ1/o<1) sayılmaz (`live/shadow.py`); raporda `incomplete`e karışır | Ölçülen 1X2/pre red 0 | Gölge dosyasının ilk değişikliği |
+| 17h | AST bekçilerinin bilinen kaçışları: import kuralında yerel adla yeniden bağlama / `getattr`; bütçe bekçisinde `TypeSafeJev as X` takma adı ve sarmadan önce çıplak kullanım | Kazara girişi durdurur, bilinçli kaçışı değil (Faz 3 §3.1/12) | Kırmızı takım (Plan 2 T10) |
+| 17i | `_budgeted` iki kopya (`collect.py`, `features/__main__.py`); `LockViolation→9` bloğunun üçüncü kopyası; `_calibration` dışında `backtest/evaluate.py:85` çıplak `calibration()` | Bekçi modül başına sarmalayıcı tanır | 16j ile birlikte |
+| 17j | 16e: rapor penceresi 2026-09-01'den → ilk raporlarda `fikstür ≫ karar` (pencere, bayatlık değil); eşlenemeyen ad takma ad hijyeniyle çözülür | Ölçüm | 2026-09-29 ilk salı raporu okunurken |
+| 17k | Arşiv kapsamı ölçülemedi (T0c): GDELT DOC API bu ağdan 429; betik hazır (8 lig × 7 sezon × 50 maç, tohum 20260923) | Yerel ağ hız sınırı | **Plan 2 yazılmadan önce runner'da bir kez** — ≥ %30 ise arşiv ayağı yeniden açılır |
+| 17l | ajansspor gövdesi robots'a göre okunabilir ama ToS okunmadı | Sinyal şimdilik başlık | Plan 2'de gövde toplamadan önce |
+| 17m | Küçükler (hepsi "kalır"): ağırlık dosyasında `_vector` bool, `version: true`; rapor metninde sabit yol; `test_live_report.py` 552 / `test_feature_tier1.py` 632 satır; `forbid_ledger_mutation()` mesajı `odds_snapshots` adını taşır; `shift` olasılık uzunluğu doğrulanmaz; `_words` karesel; yakın eşdoğrusal soru çiftleri (T9 budaması); `QUESTIONS_PATH` CWD-göreli | Düşük değer | Dosyaya dokunulduğunda |
