@@ -177,6 +177,10 @@ yok, TFF fixture'ından programla türetilen 17 sayfa biçimi. Sonuç:
   düşürüyor (kapatılamıyor), Google referer'ı; `StealthyFetcher` bunların üstüne patchright ve tespit
   önleyici bayraklar. **Hiçbirinin varsayılan yolu dürüst kimlik taşımıyor** — R79 doğrulandı, R80 bütün
   fetcher tarafını yasakladı. JS çizimli sayfa gerekirse dürüst yol düz Playwright'tır.
+  **R77b ile değişti (2026-09-23):** kullanıcı kararıyla Scrapling tam kullanılır (spec §3.2.1 R77b);
+  R80 kapısı (`tests/test_access_method_rule.py`) fetcher'ları serbest bırakacak biçimde yeniden yazıldı —
+  proxy, doğrulama çözme (`solve_cloudflare`), adı verilmiş bot User-Agent'ı ve tek geçit
+  (`src/football_edge/scrape.py`) kırmızı kalır. Yukarıdaki ölçümler 0c'nin kaydı olarak durur.
 - Spec §5.3 "kendini onaran ayrıştırıcı" yapıyla değil ANLAMLA (takım adı biçimi, `(H)` etiketi,
   ev ≠ deplasman) doğrulanan adaylar ister — Faz 4'ün Jev işi; Scrapling aday listesi döndüren bir API
   sunmuyor.

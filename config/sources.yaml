@@ -74,6 +74,34 @@ sources:
       korur (her fetch edilen yol beyanlı). PFDK (spec §3.1 satır 81, plan Task 6 başlığı) HİÇ
       uygulanmadı → HANDOFF §3 madde 30 / DEFERRED §9.
 
+  - id: tff-pfdk
+    base_url: https://www.tff.org
+    user_agent: football-edge/0.1
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-09-23
+    declared_paths:
+      - /default.aspx?pageID=238
+      - /default.aspx?pageID=246&ftxtID=51404
+    enabled: false
+    access_basis: robots
+    terms_url: https://www.tff.org/Default.aspx?pageID=179
+    note: >-
+      PFDK kararları (oturum 9 Task 3) — yalnız Scrapling adaptörü (`football_edge.scrape`) ile,
+      yalnız ayrıştırma + fixture; veritabanına yazan ya da zamanlanan iş YOK (Plan 2). `tff`e yol
+      eklenmedi: `tff` enabled ve `declared_paths`i günlük toplayıcının GERÇEKTEN istediği tek yol
+      (R7; `pageID=246` bu yüzden oradan kaldırılmıştı, #M28). Aynı host, aynı robots (2026-09-23
+      adaptör üzerinden canlı ölçüldü: /robots.txt 404 → politika yok). `enabled: false` = zamanlanmış
+      toplayıcı yok; bu yüzden kapının `kaynak-politikası` adımı bu kaydı denetlemez —
+      tests/test_pfdk.py yolları anlık görüntüye karşı ayrıca sorar. `pageID=238` karar listesi,
+      `pageID=246&ftxtID=<n>` tek bir karar metni; ftxtID her kararda değişir ve declared_paths
+      yalnız fixture'ı kaydedilen kararı taşır (R7 — gelecek kararları ifade edemez, Plan 2'de
+      çözülecek; openmeteo sorgu dizesi boşluğuyla aynı sınıf, DEFERRED §9.1d). Kullanım Şartları
+      (pageID=179, 2026-09-23 okundu): otomatik erişim ya da yapay zekâ hakkında hüküm YOK; ama
+      "bu bilgiler ticari amaçlarla kullanılamaz", "kişisel ve ticari olmayan kullanım amaçlarıyla
+      ... yararlanılabilir" ve içerik "izin alınmadan ve kaynak gösterilmeden" kopyalanamaz/yeniden
+      yayımlanamaz — googlenews Ruling B ile aynı sınıf ticari kısıt; ticari karar operatörde,
+      task-3-report.md.
+
   - id: ajansspor
     base_url: https://ajansspor.com
     user_agent: football-edge/0.1
