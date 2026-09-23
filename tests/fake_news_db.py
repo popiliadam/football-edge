@@ -100,6 +100,8 @@ class _Cursor:
             self._select_news(params)
         elif text.startswith("SELECT DISTINCT item_id FROM jev_item_answers"):
             self._select_asked(params)
+        elif text.startswith("SELECT item_id, count(*) FROM jev_item_answers"):
+            self._select_attempts(params)
         elif text.startswith("INSERT INTO jev_item_answers"):
             self._insert_answers(params)
         elif text.startswith("SELECT id, league_id, commence_time, home_team, away_team"):
@@ -145,13 +147,27 @@ class _Cursor:
         ]
 
     def _select_asked(self, params: Any) -> None:
-        prompt_version, item_ids = params
+        prompt_version, item_ids, failed_prefix = params
         found = {
             row["item_id"]
             for row in self._db.answers
-            if row["prompt_version"] == prompt_version and row["item_id"] in item_ids
+            if row["prompt_version"] == prompt_version
+            and row["item_id"] in item_ids
+            and not row["question_id"].startswith(failed_prefix)
         }
         self._result = [(item_id,) for item_id in sorted(found)]
+
+    def _select_attempts(self, params: Any) -> None:
+        prompt_version, item_ids, failed_prefix = params
+        counts: dict[int, int] = {}
+        for row in self._db.answers:
+            if (
+                row["prompt_version"] == prompt_version
+                and row["item_id"] in item_ids
+                and row["question_id"].startswith(failed_prefix)
+            ):
+                counts[row["item_id"]] = counts.get(row["item_id"], 0) + 1
+        self._result = sorted(counts.items())
 
     def _insert_answers(self, params: Any) -> None:
         keys = {(r["item_id"], r["prompt_version"], r["question_id"]) for r in self._db.answers}

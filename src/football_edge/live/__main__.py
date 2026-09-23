@@ -4,7 +4,8 @@
 `parity`: sonrası dönemde hem defterde hem tabanda olan maçların yapısal alanları (lig, tarih,
 adlar, sezon, başlama) birebir mi — fark varsa exit 15. Fiyat farkı rapordur, kapı değil.
 `freeze-weights`: geliştirme E satırlarıyla harman ağırlığı → `config/blend_weights_faz3.yaml`
-(controller koşar ve commit'ler). `report`: baz serisinin haftalık gölge CLV raporu (Faz 4 T0a).
+(controller koşar ve commit'ler); havuz fit edilemezse exit 18, dosya yazılmaz.
+`report`: baz serisinin haftalık gölge CLV raporu (Faz 4 T0a).
 """
 
 from __future__ import annotations
@@ -58,7 +59,9 @@ from football_edge.live.store import (
 from football_edge.live.weights import (
     BLEND_WEIGHTS_PATH,
     BlendWeightsError,
+    PooledFitFailed,
     dump_blend_weights,
+    fallback_reasons,
     freeze,
     load_blend_weights,
 )
@@ -69,6 +72,8 @@ ALIASES_PATH = Path("config/history_aliases.yaml")
 HORIZON = timedelta(days=8)
 LOOKBACK = timedelta(days=10)
 EXIT_PARITY = 15
+# `freeze-weights`: havuz ağırlığı fit edilemedi (son inceleme I-2); 16/17 Jev bütçesi/anahtarı.
+EXIT_POOLED_UNFIT = 18
 # Saat dilimi ya da yaz saati hatası ≥ 60 dk kaydırır; yayıncı kaynaklı küçük saat farkları değil.
 KICKOFF_TOLERANCE = timedelta(minutes=30)
 # Faz 3 gölge serisi bu tarihten sonra başladı; seri `model_config_sha256` ile ayrılır (R161).
@@ -266,14 +271,20 @@ def _freeze_weights(args: argparse.Namespace) -> int:
         return EXIT_LOCK_VIOLATION
     groups = rating_groups(catalog)
     rows = run_rows(development_groups(history, groups), kinds_of(catalog), groups, config)
-    weights = freeze(
-        rows,
-        [league.code for league in catalog.leagues if league.kind == MAIN],
-        model_config_sha256=file_sha256(args.config),
-        lock_sha256=config.lock_sha256,
-        catalog_sha256=config.catalog_sha256,
-    )
+    try:
+        weights = freeze(
+            rows,
+            [league.code for league in catalog.leagues if league.kind == MAIN],
+            model_config_sha256=file_sha256(args.config),
+            lock_sha256=config.lock_sha256,
+            catalog_sha256=config.catalog_sha256,
+        )
+    except PooledFitFailed as error:
+        LOGGER.error("harman ağırlığı dondurulmadı, dosya yazılmadı: %s", error)
+        return EXIT_POOLED_UNFIT
     args.out.write_text(dump_blend_weights(weights), encoding="utf-8")
+    for league, reason in fallback_reasons(rows, weights).items():
+        LOGGER.info("havuza düşen lig %s: %s", league, reason)
     LOGGER.info(
         "harman ağırlığı yazıldı: %s (kendi ağırlığı %d lig · havuza düşen %d)",
         args.out,
