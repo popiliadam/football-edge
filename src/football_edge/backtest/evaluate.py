@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from football_edge.backtest.harness import Outcome, ReplayResult
-from football_edge.history.types import CLOSING, H2H, RESULTS, OddsKey
+from football_edge.history.types import CLOSING, H2H, REFERENCE_BOOK, RESULTS, OddsKey
 from football_edge.market.devig import InvalidPrices, devig
 from football_edge.market.metrics import (
     Calibration,
@@ -23,7 +23,6 @@ from football_edge.market.metrics import (
     rps,
 )
 
-REFERENCE_BOOK = "Avg"
 DEFAULT_RESAMPLES = 2000
 
 

@@ -29,13 +29,12 @@ from typing import Any
 import yaml
 
 from football_edge.history.holdout import DEV, DEV_END, HOLDOUT, HOLDOUT_END, period_of
-from football_edge.history.types import CLOSING, H2H, HistMatch
+from football_edge.history.types import CLOSING, H2H, REFERENCE_BOOK, HistMatch
 
 CANONICAL_VERSION = 1
 # Kilitlenen dönemler, dosyadaki sırasıyla.
 _LOCKED_PERIODS = (DEV, HOLDOUT)
 # Kapsam bilgisi referans kapanıştan (D3): lig önerisi holdout doluluğunu açmadan buradan okur.
-_REFERENCE_BOOK = "Avg"
 _SEPARATORS = ("\t", "\n", "\r")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _ROOT_KEYS = frozenset({"canonical_version", "locked_at", "dev_end", "holdout_end", "leagues"})
@@ -105,9 +104,7 @@ def canonical_line(match: HistMatch) -> str:
 def digest(matches: Sequence[HistMatch]) -> Digest:
     """Sıradan bağımsız özet: kanonik satırlar SIRALANIP `\\n` ile birleştirilir."""
     lines = sorted(canonical_line(match) for match in matches)
-    complete = sum(
-        1 for match in matches if match.prices(_REFERENCE_BOOK, H2H, CLOSING) is not None
-    )
+    complete = sum(1 for match in matches if match.prices(REFERENCE_BOOK, H2H, CLOSING) is not None)
     return Digest(
         rows=len(lines),
         sha256=hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest(),

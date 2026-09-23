@@ -33,9 +33,14 @@ from football_edge.backtest.wf_eval import blended, complete, fold_weights
 from football_edge.backtest.wf_run import model_strategies
 from football_edge.history.catalog import MAIN
 from football_edge.history.types import HistMatch
-from football_edge.market.metrics import Interval, bootstrap_mean, calibration, per_match_log_loss
+from football_edge.market.metrics import (
+    LOG_FLOOR,
+    Interval,
+    bootstrap_mean,
+    calibration,
+    per_match_log_loss,
+)
 
-_LOG_FLOOR = 1e-15
 # ~5 bin maçlık bir katta üç ağırlığın örneklem dışı gürültüsü ~3e-4; δ bunun üç katı.
 W1_MARGIN = 0.001
 
@@ -138,8 +143,8 @@ def _w3(rows: Sequence[Row]) -> Check:
         return _unmeasured("W3", True)
     counts = [sum(1 for row in base_rows if row.outcome == index) for index in range(3)]
     base = [count / len(base_rows) for count in counts]
-    dc = math.fsum(-math.log(max(row.components[DC][row.outcome], _LOG_FLOOR)) for row in usable)
-    rate = math.fsum(-math.log(max(base[row.outcome], _LOG_FLOOR)) for row in usable)
+    dc = math.fsum(-math.log(max(row.components[DC][row.outcome], LOG_FLOOR)) for row in usable)
+    rate = math.fsum(-math.log(max(base[row.outcome], LOG_FLOOR)) for row in usable)
     dc, rate = dc / len(usable), rate / len(usable)
     return Check(
         "W3", True, dc < rate, f"LL Dixon-Coles {dc:.5f} < S oranları {rate:.5f} n={len(usable)}"

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from football_edge.backtest.records import DecisionContext, MatchKey, ResultRecord
-from football_edge.history.types import H2H, PRE_CLOSING, HistMatch, OddsKey
+from football_edge.history.types import H2H, PRE_CLOSING, REFERENCE_BOOK, HistMatch, OddsKey
 
 
 class DuplicateMatch(ValueError):
@@ -33,7 +33,6 @@ class MatchRecord:
 # Bağlam yalnız İKİ kaynağın da üretebildiği fiyatları taşır: canlı defter 1X2'yi kitap kitap
 # toplar (snapshot `markets=h2h`); football-data karşılığı kitap ortalaması `Avg`'dir. Başka kitap
 # ya da market bağlama girerse canlı bağlam onu taşıyamaz ve eşitlik (R98) sözde kalır.
-CONTEXT_BOOK = "Avg"
 CONTEXT_MARKETS = frozenset({H2H})
 
 
@@ -44,7 +43,7 @@ def pre_only(prices: Mapping[OddsKey, float]) -> Mapping[OddsKey, float]:
             key: price
             for key, price in prices.items()
             if key.phase == PRE_CLOSING
-            and key.book == CONTEXT_BOOK
+            and key.book == REFERENCE_BOOK
             and key.market in CONTEXT_MARKETS
         }
     )

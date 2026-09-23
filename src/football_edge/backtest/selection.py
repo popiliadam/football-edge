@@ -27,6 +27,7 @@ from football_edge.backtest.walkforward import (
 )
 from football_edge.history.catalog import MAIN
 from football_edge.history.types import HistMatch
+from football_edge.market.metrics import LOG_FLOOR
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import (
     LINEAR_MARGIN,
@@ -56,7 +57,6 @@ ELO_GRID: Mapping[str, tuple[Any, ...]] = MappingProxyType(
 DC_GRID: Mapping[str, tuple[Any, ...]] = MappingProxyType(
     {"xi": (0.0010, 0.0019, 0.0030), "ridge": (0.003, 0.01, 0.03)}
 )
-_LOG_FLOOR = 1e-15
 Groups = Mapping[str, Sequence[HistMatch]]
 T = TypeVar("T")
 
@@ -144,7 +144,7 @@ def elo_loss(
     outcomes = [row.outcome for row in rows]
     fitted = fit_outcome_params(config, expectations, outcomes)
     loss = -math.fsum(
-        math.log(max(elo_outcome_probs(e, fitted)[o], _LOG_FLOOR))
+        math.log(max(elo_outcome_probs(e, fitted)[o], LOG_FLOOR))
         for e, o in zip(expectations, outcomes, strict=True)
     ) / len(rows)
     return loss, fitted
@@ -171,7 +171,7 @@ def dc_loss(
 
     rows = [row for row in _selection_rows(groups, kinds, build, method) if DC in row.components]
     return -math.fsum(
-        math.log(max(row.components[DC][row.outcome], _LOG_FLOOR)) for row in rows
+        math.log(max(row.components[DC][row.outcome], LOG_FLOOR)) for row in rows
     ) / len(rows)
 
 

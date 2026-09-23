@@ -20,7 +20,7 @@ import yaml
 
 from football_edge.backtest.timeline import LONDON
 from football_edge.history.holdout import POST, select_periods
-from football_edge.history.types import CLOSING, H2H, HistMatch
+from football_edge.history.types import CLOSING, H2H, REFERENCE_BOOK, HistMatch
 from football_edge.market.devig import InvalidPrices, devig, match_probs
 from football_edge.market.metrics import Interval, bootstrap_mean
 from football_edge.naming import normalise_team
@@ -31,7 +31,6 @@ LOGGER = logging.getLogger("football_edge.market.bridge")
 # (`rounds.run_seal` → `odds_api.fetch_odds(markets="h2h")`) satırları bu adlarla yazar.
 LIVE_MARKET = "h2h"
 LIVE_DRAW = "Draw"
-REFERENCE_BOOK = "Avg"  # (Avg, CLOSING) = football-data'nın AvgC'si — referans kapanış (D3)
 
 _CLOSINGS = """
     SELECT m.id, m.league_id, m.commence_time, m.home_team, m.away_team,

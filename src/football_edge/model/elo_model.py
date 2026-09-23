@@ -21,6 +21,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from football_edge.backtest.harness import DecisionContext, Prediction, ResultRecord
 from football_edge.elo import EloConfig, expected_home
+from football_edge.market.metrics import LOG_FLOOR
 
 NO_MARGIN = "none"
 LINEAR_MARGIN = "linear"
@@ -33,7 +34,6 @@ DRAW_FORMS = frozenset({QUADRATIC, ORDERED})
 _SCALE_BOUNDS = (0.05, 5.0)
 _CUT_BOUNDS = (1e-3, 3.0)
 _LOGIT_CLIP = 1e-9
-_LOG_FLOOR = 1e-15
 
 Key = tuple[str, str]
 
@@ -116,7 +116,7 @@ def fit_draw(expectations: Sequence[float], outcomes: Sequence[int]) -> float:
 
     def loss(draw: float) -> float:
         return -math.fsum(
-            math.log(max(elo_probs(e, draw)[o], _LOG_FLOOR))
+            math.log(max(elo_probs(e, draw)[o], LOG_FLOOR))
             for e, o in zip(expectations, outcomes, strict=True)
         ) / len(outcomes)
 
@@ -132,7 +132,7 @@ def fit_ordered(expectations: Sequence[float], outcomes: Sequence[int]) -> tuple
     def loss(params: Any) -> float:
         scale, cut = float(params[0]), float(params[1])
         return -math.fsum(
-            math.log(max(ordered_probs(e, scale, cut)[o], _LOG_FLOOR))
+            math.log(max(ordered_probs(e, scale, cut)[o], LOG_FLOOR))
             for e, o in zip(expectations, outcomes, strict=True)
         ) / len(outcomes)
 

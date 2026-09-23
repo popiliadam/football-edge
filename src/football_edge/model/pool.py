@@ -14,9 +14,10 @@ import numpy as np
 import numpy.typing as npt
 from scipy.optimize import minimize
 
+from football_edge.market.metrics import LOG_FLOOR
+
 Floats = npt.NDArray[np.float64]
 
-LOG_FLOOR = 1e-15
 MAX_WEIGHT = 5.0
 MIN_FIT_MATCHES = 300
 

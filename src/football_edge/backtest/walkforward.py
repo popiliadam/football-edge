@@ -21,7 +21,14 @@ from football_edge.backtest.records import MatchKey
 from football_edge.backtest.timeline import decision_at
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.history.holdout import DEV_END, MAIN_WINDOW, Window, in_window
-from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, TOTALS_25, HistMatch
+from football_edge.history.types import (
+    CLOSING,
+    H2H,
+    PRE_CLOSING,
+    REFERENCE_BOOK,
+    TOTALS_25,
+    HistMatch,
+)
 from football_edge.market.devig import match_probs
 from football_edge.market.metrics import outcome_index
 
@@ -39,8 +46,7 @@ ZONES: Mapping[str, Mapping[str, Window]] = MappingProxyType(
     }
 )
 # S'de kapanış öncesi ortalama Betbrain'in (`BbAv`), E'de football-data'nın `Avg`'si (ölçüm §2.4).
-PRE_BOOK: Mapping[str, str] = MappingProxyType({SELECTION: "BbAv", EVALUATION: "Avg"})
-REFERENCE_BOOK = "Avg"
+PRE_BOOK: Mapping[str, str] = MappingProxyType({SELECTION: "BbAv", EVALUATION: REFERENCE_BOOK})
 MARKET = "market"
 ELO = "elo_fit"
 DC = "dixon_coles"

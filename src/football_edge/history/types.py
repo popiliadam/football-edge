@@ -14,6 +14,9 @@ from types import MappingProxyType
 
 PRE_CLOSING = "pre"
 CLOSING = "close"
+# football-data'nın piyasa ortalaması: (REFERENCE_BOOK, CLOSING) = AvgC, referans kapanış (D3);
+# (REFERENCE_BOOK, PRE_CLOSING) = Avg. Tarihsel tabanın her okuyucusu kitabı buradan alır.
+REFERENCE_BOOK = "Avg"
 H2H = "1x2"
 TOTALS_25 = "ou25"
 MARKET_OUTCOMES: Mapping[str, tuple[str, ...]] = MappingProxyType(

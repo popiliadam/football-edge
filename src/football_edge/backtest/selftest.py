@@ -17,7 +17,7 @@ from football_edge.backtest.harness import replay
 from football_edge.backtest.strategies import Placebo
 from football_edge.backtest.timeline import decision_at
 from football_edge.history.holdout import DEV, EXTRA_WINDOW, MAIN_WINDOW, in_window, select_periods
-from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, HistMatch
+from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, REFERENCE_BOOK, HistMatch
 from football_edge.market.devig import METHODS, MULTIPLICATIVE, POWER, SHIN, devig, match_probs
 from football_edge.market.metrics import (
     Interval,
@@ -33,7 +33,6 @@ K3_MIN_COVERAGE = 0.9
 # geçer (T11 S8). Harness kanaryası `tests/test_harness.py`deki Oracle testidir.
 K4_SCOPE = "fiyat sütunu negatif kontrolü; harness sızıntısını ölçmez"
 DRIFT_BUCKETS: tuple[tuple[float, float], ...] = ((0, 12), (12, 36), (36, 60), (60, 96))
-REFERENCE_BOOK = "Avg"
 SHARP_BOOK = "PS"
 
 Quote = tuple[str, str]  # (kitap, evre)

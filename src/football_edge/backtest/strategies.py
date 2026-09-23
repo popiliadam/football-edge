@@ -15,7 +15,7 @@ from types import MappingProxyType
 from football_edge.backtest.harness import Bet, DecisionContext, Prediction, ResultRecord
 from football_edge.backtest.records import MatchKey
 from football_edge.elo import EloConfig, expected_home, updated
-from football_edge.history.types import H2H, PRE_CLOSING, RESULTS, OddsKey
+from football_edge.history.types import H2H, PRE_CLOSING, REFERENCE_BOOK, RESULTS, OddsKey
 
 Devig = Callable[[Sequence[float]], tuple[float, ...]]
 
@@ -71,7 +71,7 @@ class MarketPre:
     """Piyasa taban çizgisi: `book`un kapanış öncesi fiyatının vig'i temizlenmiş olasılığı."""
 
     devig: Devig
-    book: str = "Avg"
+    book: str = REFERENCE_BOOK
 
     @property
     def name(self) -> str:
@@ -148,7 +148,7 @@ class Placebo:
 
     devig: Devig
     seed: int = 20260922
-    book: str = "Avg"
+    book: str = REFERENCE_BOOK
 
     @property
     def name(self) -> str:
