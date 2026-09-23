@@ -275,8 +275,17 @@ def run_final(
         ) from error
 
 
+def _coverage(label: str, summary: Summary) -> str:
+    """Ortak kümenin dışında kalan satır ve geri düşülen ağırlık — sessiz kalmasın (16c)."""
+    fallback = ", ".join(summary.fallback) or "yok"
+    return (
+        f"{label}: satır {summary.rows} · bileşeni eksik (ortak kümeye girmedi) "
+        f"{summary.incomplete} · geri düşülen ağırlık {len(summary.fallback)} ({fallback})"
+    )
+
+
 def render_final(report: FinalReport, *, generated_at: datetime) -> str:
-    """Yalnız toplu sayı; ham satır yok. C1–C6 ön kayıttaki adlarıyla."""
+    """Yalnız toplu sayı; ham satır yok. C1–C6 ön kayıttaki adlarıyla; C2 ve C5 eşleştirilmiş."""
     return "\n".join(
         [
             f"# Faz 3 holdout raporu — {generated_at.date().isoformat()}",
@@ -285,12 +294,21 @@ def render_final(report: FinalReport, *, generated_at: datetime) -> str:
             f"özeti sha256 `{report.predictions_sha256}`. Tek açılış (R135); ağırlıklar ve "
             "hiperparametreler yalnız geliştirme döneminden.",
             "",
+            _coverage("Holdout", report.holdout),
+            _coverage("Sonrası", report.post),
+            "",
             *score_table("C1–C4 · holdout, ana ligler, 1X2 (ortak satırlar)", report.holdout.main),
             f"C1 ΔLL harman − piyasa: {format_interval(report.holdout.blend_gap)}",
+            *(
+                f"C2 ΔLL {name} − piyasa: {format_interval(gap)}"
+                for name, gap in report.holdout.component_gaps.items()
+            ),
             f"C3 Placebo CLV (negatif kontrol): {format_interval(report.placebo_holdout)}",
             "",
             *score_table("Holdout, ek ligler (yalnız model)", report.holdout.extra),
             *score_table("C5 · holdout, Ü/A 2.5", report.holdout.totals),
+            f"C5 ΔLL dixon_coles − piyasa (Ü/A 2.5): {format_interval(report.holdout.totals_gap)}",
+            "",
             *score_table("C6 · sonrası dönemi, tam durum", report.post.main),
             f"C6 ΔLL harman − piyasa: {format_interval(report.post.blend_gap)}",
             f"C6 Placebo CLV: {format_interval(report.placebo_post)}",

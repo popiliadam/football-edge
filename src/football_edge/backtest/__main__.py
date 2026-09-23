@@ -41,6 +41,7 @@ from football_edge.backtest.preregistration import (
     CanonicalPaths,
     PreflightError,
     preflight,
+    probe_out_dir,
     real_git,
 )
 from football_edge.backtest.selection import select
@@ -307,6 +308,7 @@ def _final_eval(args: argparse.Namespace) -> int:
             phase=args.phase,
             canonical=None if args.rehearse else canonical,
         )
+        probe_out_dir(args.out)
         config = load_model_config(model_path)
         if args.rehearse:
             report = run_rehearsal(

@@ -8,6 +8,7 @@ gerçek açılış yalnız kanonik yollarla yapılır (16b), prova serbesttir.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -108,6 +109,20 @@ def load_preregistration(path: Path, *, phase: str) -> Preregistration:
         sensitivity=tuple(float(value) for value in raw["sensitivity"]),
         resamples=int(raw["resamples"]),
     )
+
+
+def probe_out_dir(path: Path) -> None:
+    """Rapor yolu yazılabilir mi — açılıştan ÖNCE (16a). Açılıştan sonra yazılamayan rapor exit
+    14'tür: açılış harcanır, sonuç yoktur. Deneme dosyası yazılmaz; izin sorulur."""
+    folder = path.parent
+    if path.is_dir():
+        raise PreflightError(f"{path}: rapor yolu bir dizin")
+    if not folder.is_dir():
+        raise PreflightError(f"{folder}: rapor dizini yok")
+    if not os.access(folder, os.W_OK | os.X_OK):
+        raise PreflightError(f"{folder}: rapor dizini yazılamaz")
+    if path.exists() and not os.access(path, os.W_OK):
+        raise PreflightError(f"{path}: rapor dosyası yazılamaz")
 
 
 def _check_canonical(

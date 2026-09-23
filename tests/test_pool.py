@@ -8,7 +8,13 @@ import numpy as np
 import pytest
 
 from football_edge.model import pool as pooling
-from football_edge.model.pool import MIN_FIT_MATCHES, TooFewMatches, fit_weights, pool
+from football_edge.model.pool import (
+    MIN_FIT_MATCHES,
+    NotConverged,
+    TooFewMatches,
+    fit_weights,
+    pool,
+)
 
 MARKET = (0.5, 0.3, 0.2)
 MODEL = (0.2, 0.3, 0.5)
@@ -111,3 +117,23 @@ def test_weights_stay_within_bounds() -> None:
     components, outcomes = _sample(1000, truth=1, seed=3)
 
     assert all(0.0 <= weight <= pooling.MAX_WEIGHT for weight in fit_weights(components, outcomes))
+
+
+def test_a_fit_that_does_not_converge_is_named_not_a_bare_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """16a: yakınsamama `NotConverged`dır; uzunluk uyuşmazlığı düz `ValueError` kalır."""
+    components, outcomes = _sample(MIN_FIT_MATCHES, truth=0)
+
+    class _Failed:
+        success = False
+        message = "ABNORMAL_TERMINATION_IN_LNSRCH"
+        x = np.array([1.0, 0.0])
+
+    monkeypatch.setattr(pooling, "minimize", lambda *args, **kwargs: _Failed())
+
+    with pytest.raises(NotConverged, match="yakınsamadı"):
+        fit_weights(components, outcomes)
+    with pytest.raises(ValueError, match="sonuç") as mismatch:
+        fit_weights(components, outcomes[:-1])
+    assert not isinstance(mismatch.value, NotConverged)

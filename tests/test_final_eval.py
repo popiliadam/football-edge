@@ -6,6 +6,7 @@ kaydedilir; değerlendirme SENTETİK sezonlarda gerçekten koşar.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ from football_edge.backtest.preregistration import (
     Preregistration,
     load_preregistration,
     preflight,
+    probe_out_dir,
 )
 from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
 from football_edge.history.holdout import HOLDOUT, HoldoutKey, period_of
@@ -681,3 +683,123 @@ def test_a_canonical_path_spelled_another_way_is_the_same_file(
     )
 
     assert _preflight(paths, _git(), canonical).phase == "faz3"
+
+
+# ── 16a: rapor yolu açılıştan ÖNCE · 16c: rapor ortak kümeyi ve eşleştirilmiş ΔLL'yi basar ──
+
+
+def test_a_writable_report_path_passes_the_probe_without_writing(tmp_path: Path) -> None:
+    probe_out_dir(tmp_path / "rapor.md")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("where", "message"),
+    [("missing", "dizini yok"), ("directory", "bir dizin"), ("read-only", "yazılamaz")],
+)
+def test_an_unusable_report_path_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, where: str, message: str
+) -> None:
+    path = {
+        "missing": tmp_path / "yok" / "rapor.md",
+        "directory": tmp_path,
+        "read-only": tmp_path / "rapor.md",
+    }[where]
+    if where == "read-only":
+        monkeypatch.setattr(os, "access", lambda path, mode: False)
+
+    with pytest.raises(PreflightError, match=message):
+        probe_out_dir(path)
+
+
+@pytest.mark.leakage
+def test_the_cli_probes_the_report_path_before_the_opening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """16a: yazılamayan `--out` açılıştan SONRA exit 14'tü; şimdi açılıştan ÖNCE exit 12."""
+    from football_edge.backtest import __main__ as cli
+
+    paths = _prereg_files(tmp_path)
+    monkeypatch.setattr(cli, "real_git", lambda: _git())
+    monkeypatch.setattr(cli, "canonical_paths", lambda phase: _canonical(paths))
+    monkeypatch.setattr(cli, "load_model_config", lambda path: CONFIG)
+
+    def run_final(*args: object, **kwargs: object) -> object:
+        raise AssertionError("açılış denendi")
+
+    monkeypatch.setattr(cli, "run_final", run_final)
+
+    returned = cli.main(
+        [
+            "final-eval",
+            "--phase",
+            "faz3",
+            "--prereg",
+            str(paths["prereg"]),
+            "--config",
+            str(paths["model"]),
+            "--lock",
+            str(paths["lock"]),
+            "--catalog",
+            str(paths["catalog"]),
+            "--out",
+            str(tmp_path / "yok" / "rapor.md"),
+        ]
+    )
+
+    assert returned == 12
+
+
+def test_the_report_prints_paired_gaps_incomplete_rows_and_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db = _Db()
+    _patch(monkeypatch, db)
+    report = _run(db, tmp_path)
+
+    text = render_final(report, generated_at=NOW)
+
+    for name in report.holdout.component_gaps:
+        assert f"C2 ΔLL {name} − piyasa: " in text
+    assert set(report.holdout.component_gaps) == {"dixon_coles", "elo_fit", "elo_scaffold"}
+    assert "C5 ΔLL dixon_coles − piyasa (Ü/A 2.5): " in text
+    assert f"bileşeni eksik (ortak kümeye girmedi) {report.holdout.incomplete}" in text
+    fallback = ", ".join(report.holdout.fallback)
+    assert report.holdout.fallback and f"({fallback})" in text
+
+
+def test_a_bare_or_already_written_report_path_passes_the_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Review Focus (16a): `--out rapor.md` (üst dizin `.`) ve var olan rapor (yeniden koşunun
+    `report_exists` denetimi onu görmeli) yoklamada reddedilmez."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "eski.md").write_text("önceki rapor\n", encoding="utf-8")
+
+    probe_out_dir(Path("rapor.md"))
+    probe_out_dir(tmp_path / "eski.md")
+
+
+def test_the_report_renders_when_a_zone_has_no_common_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review Focus (16c): provada sonrası dönemi boştur; yeni satırlar (C2, C5, kapsam) orada da
+    basılmalı — gerçek açılışta render çökerse holdout harcanır ve rapor yoktur (exit 14)."""
+    db = _Db()
+    _patch(monkeypatch, db)
+    report = run_rehearsal(
+        db,  # type: ignore[arg-type]
+        catalog=CATALOG,
+        lock=LOCK,
+        config=CONFIG,
+        prereg=PREREG,
+        start=date(2024, 7, 1),
+        end=date(2025, 7, 1),
+    )
+
+    text = render_final(report, generated_at=NOW)
+
+    assert not report.post.main and report.post.component_gaps == {}
+    assert "C6 ΔLL harman − piyasa: ölçülemedi" in text
+    assert "Sonrası: satır 0 · bileşeni eksik (ortak kümeye girmedi) 0" in text

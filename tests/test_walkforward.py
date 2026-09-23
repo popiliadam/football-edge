@@ -33,9 +33,10 @@ from football_edge.backtest.wf_eval import (
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.history.types import TOTALS_25
 from football_edge.market.devig import POWER
+from football_edge.market.metrics import per_match_log_loss
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModel
-from football_edge.model.pool import MIN_FIT_MATCHES
+from football_edge.model.pool import MIN_FIT_MATCHES, NotConverged
 from football_edge.model.strategies import DixonColesStrategy
 from tests.backtest_builders import hist_match
 from tests.model_builders import main_history
@@ -262,3 +263,54 @@ def test_frozen_weights_never_see_holdout_or_post_rows() -> None:
     mixed, _ = wf_eval.frozen_weights([*development, *holdout], [("E0", "2526")])
 
     assert mixed == alone
+
+
+def _never_converges(*args: object, **kwargs: object) -> tuple[float, ...]:
+    raise NotConverged("ağırlık fiti yakınsamadı: test")
+
+
+def test_a_fit_that_does_not_converge_falls_back_to_the_market_and_is_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """16a: yakınsamama açılıştan sonra exit 14 değil, adıyla sayılan bir geri düşüştür."""
+    monkeypatch.setattr(wf_eval, "fit_weights", _never_converges)
+    table = _table({"1819": 0, "1920": 0}, count=wf_eval.LEAGUE_MIN_MATCHES)
+
+    folded, folded_fallback = fold_weights(table)
+    frozen, frozen_fallback = wf_eval.frozen_weights(table, [("E0", "2526")])
+
+    assert folded[("E0", "1920")] == frozen[("E0", "2526")] == MARKET_ONLY
+    assert folded_fallback == ("E0/1920",) and frozen_fallback == ("E0/2526",)
+
+
+def _mean_gap(
+    first: list[tuple[float, ...]], second: list[tuple[float, ...]], outcomes: list[int]
+) -> float:
+    a, b = per_match_log_loss(first, outcomes), per_match_log_loss(second, outcomes)
+    return sum(x - y for x, y in zip(a, b, strict=True)) / len(outcomes)
+
+
+def test_each_component_and_the_totals_are_paired_against_the_market(
+    rows: tuple[Row, ...],
+) -> None:
+    """16c: C2 ve C5 strateji başına LL değil, piyasaya karşı AYNI satırlarda ΔLL'dir."""
+    summary = summarise(rows, tau=0.02, sensitivity=(), resamples=50)
+    common = [row for row in rows if row.zone == EVALUATION and wf_eval.complete(row)]
+    outcomes = [row.outcome for row in common]
+    market = [row.components[MARKET] for row in common]
+    totals = [
+        row for row in rows if row.zone == EVALUATION and MARKET in row.totals and DC in row.totals
+    ]
+
+    assert set(summary.component_gaps) == {ELO, DC}
+    for name, gap in summary.component_gaps.items():
+        own = [row.components[name] for row in common]
+        assert gap.estimate == pytest.approx(_mean_gap(own, market, outcomes))
+    assert summary.totals_gap is not None
+    assert summary.totals_gap.estimate == pytest.approx(
+        _mean_gap(
+            [row.totals[DC] for row in totals],
+            [row.totals[MARKET] for row in totals],
+            [row.totals_outcome for row in totals],
+        )
+    )

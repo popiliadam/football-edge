@@ -34,7 +34,7 @@ from football_edge.market.metrics import (
     per_match_log_loss,
     rps,
 )
-from football_edge.model.pool import TooFewMatches, fit_weights, pool
+from football_edge.model.pool import NotConverged, TooFewMatches, fit_weights, pool
 
 BLEND = "blend"
 CLOSING_NAME = "closing"
@@ -59,9 +59,11 @@ class Score:
 class Summary:
     main: Mapping[str, Score]  # E, ana ligler, ortak satırlar: market, elo_fit, dixon_coles, blend
     blend_gap: Interval | None  # LL(blend) − LL(market), eşleştirilmiş
+    component_gaps: Mapping[str, Interval]  # her bileşen: LL(bileşen) − LL(market), ortak satırlar
     league_gaps: Mapping[str, Interval]
     extra: Mapping[str, Score]  # E, ek ligler: elo_fit, dixon_coles, closing (kıyas)
     totals: Mapping[str, Score]  # E, ana ligler, Ü/A 2.5: market, dixon_coles
+    totals_gap: Interval | None  # Ü/A 2.5: LL(dixon_coles) − LL(market), eşleştirilmiş
     clv_sensitivity: Mapping[float, Interval | None]  # τ → harman CLV'si
     rows: int
     incomplete: int  # bileşeni eksik E satırı (ortak kümeye girmedi)
@@ -73,12 +75,15 @@ def complete(row: Row, names: Sequence[str] = BLEND_COMPONENTS) -> bool:
 
 
 def _fit_or_none(rows: Sequence[Row]) -> tuple[float, ...] | None:
+    """Fit edilemeyen ağırlık (az maç ya da yakınsamama) None'dır: çağıran geri düşer ve sayar.
+
+    Yakınsamama açılıştan SONRA çıplak `ValueError`la exit 14 olurdu (16a)."""
     try:
         return fit_weights(
             [[row.components[name] for name in BLEND_COMPONENTS] for row in rows],
             [row.outcome for row in rows],
         )
-    except TooFewMatches:
+    except (TooFewMatches, NotConverged):
         return None
 
 
@@ -197,6 +202,34 @@ def _gap(
     return bootstrap_mean([x - y for x, y in zip(a, b, strict=True)], resamples=resamples)
 
 
+def _component_gaps(
+    pairs: Sequence[tuple[Row, tuple[float, ...]]], resamples: int
+) -> dict[str, Interval]:
+    """Ortak satırlarda bulunan her bileşenin piyasaya karşı eşleştirilmiş ΔLL'si (C2; 16c)."""
+    if not pairs:
+        return {}
+    outcomes = [row.outcome for row, _ in pairs]
+    market = [row.components[MARKET] for row, _ in pairs]
+    names = sorted(set.intersection(*(set(row.components) for row, _ in pairs)) - {MARKET})
+    return {
+        name: _gap([row.components[name] for row, _ in pairs], market, outcomes, resamples)
+        for name in names
+    }
+
+
+def _totals_gap(rows: Sequence[Row], resamples: int) -> Interval | None:
+    """Ü/A 2.5: DC − piyasa, ikisi de olan satırlarda eşleştirilmiş (C5; 16c)."""
+    usable = [row for row in rows if MARKET in row.totals and DC in row.totals]
+    if not usable:
+        return None
+    return _gap(
+        [row.totals[DC] for row in usable],
+        [row.totals[MARKET] for row in usable],
+        [row.totals_outcome for row in usable],
+        resamples,
+    )
+
+
 def _main_scores(
     pairs: Sequence[tuple[Row, tuple[float, ...]]], tau: float, resamples: int
 ) -> dict[str, Score]:
@@ -271,6 +304,7 @@ def summarise(
     return Summary(
         main=MappingProxyType(_main_scores(pairs, tau, resamples) if pairs else {}),
         blend_gap=_gap([p for _, p in pairs], market, outcomes, resamples) if pairs else None,
+        component_gaps=MappingProxyType(_component_gaps(pairs, resamples)),
         league_gaps=MappingProxyType(
             {
                 league: _gap(
@@ -286,6 +320,7 @@ def summarise(
             _extra_scores([row for row in evaluation if row.kind == EXTRA], resamples)
         ),
         totals=MappingProxyType(_totals_scores(main, tau, resamples)),
+        totals_gap=_totals_gap(main, resamples),
         clv_sensitivity=MappingProxyType(
             {
                 value: (
