@@ -137,3 +137,17 @@ def test_a_fit_that_does_not_converge_is_named_not_a_bare_value_error(
     with pytest.raises(ValueError, match="sonuç") as mismatch:
         fit_weights(components, outcomes[:-1])
     assert not isinstance(mismatch.value, NotConverged)
+
+
+def test_the_weight_bound_binds_when_the_outcomes_want_a_sharper_component() -> None:
+    """16l: sonuçlar ikinci bileşenin ~8. kuvvetinden gelir (5/6, 1/12, 1/12 ⇔ (4/3)^w = 10):
+    sınırsız fit w ≈ 8,004 bulur; `MAX_WEIGHT` onu 5'te tutar. `bounds=None` mutantı burada
+    kırmızıdır (mevcut `test_weights_stay_within_bounds` sınırı hiç zorlamaz)."""
+    flat, sharp = (1 / 3, 1 / 3, 1 / 3), (0.4, 0.3, 0.3)
+    count = MIN_FIT_MATCHES
+    outcomes = [0] * (count * 10 // 12) + [1] * (count // 12) + [2] * (count // 12)
+
+    weights = fit_weights([[flat, sharp]] * len(outcomes), outcomes)
+
+    assert len(outcomes) == count
+    assert weights[1] == pytest.approx(pooling.MAX_WEIGHT)

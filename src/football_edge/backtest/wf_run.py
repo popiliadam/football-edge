@@ -142,6 +142,10 @@ def format_interval(interval: Interval | None) -> str:
     return f"{interval.estimate:.4f} [{interval.low:.4f}, {interval.high:.4f}]"
 
 
+def format_counts(counts: Mapping[str, int]) -> str:
+    return " · ".join(f"{name} {count}" for name, count in counts.items()) or "yok"
+
+
 def _score_line(score: Score) -> str:
     calibration = (
         "ölçülemedi"
@@ -177,6 +181,8 @@ def render_walkforward(
     config_sha256: str,
     gap: Mapping[str, Interval] | None = None,
     digest: str | None = None,
+    missing: Mapping[str, int] | None = None,
+    rejected: Mapping[str, int] | None = None,
 ) -> str:
     lines = [
         f"# Faz 3 walk-forward raporu — {generated_at.date().isoformat()}",
@@ -188,6 +194,16 @@ def render_walkforward(
         "",
         f"E satırı {summary.rows} · bileşeni eksik (ortak kümeye girmedi) {summary.incomplete} · "
         f"geri düşülen ağırlık katı {len(summary.fallback)}",
+        *(
+            [f"Ortak kümeye girmeyen ana lig maçı (nedene göre): {format_counts(missing)}"]
+            if missing is not None
+            else []
+        ),
+        *(
+            [f"Vig'i temizlenemeyen fiyat kümesi (Σ 1/o < 1 dahil): {format_counts(rejected)}"]
+            if rejected is not None
+            else []
+        ),
         "",
         *score_table("Ana ligler, 1X2 (ortak satırlar)", summary.main),
         f"ΔLL harman − piyasa: {format_interval(summary.blend_gap)}",

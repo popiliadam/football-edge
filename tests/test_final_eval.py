@@ -37,8 +37,10 @@ from football_edge.backtest.preregistration import (
     preflight,
     probe_out_dir,
 )
+from football_edge.backtest.walkforward import MISSING_REASONS
+from football_edge.backtest.wf_run import format_counts
 from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
-from football_edge.history.holdout import HOLDOUT, HoldoutKey, period_of
+from football_edge.history.holdout import HOLDOUT, POST, HoldoutKey, period_of
 from football_edge.history.lock import LockViolation, build_lock
 from football_edge.market.devig import POWER
 from football_edge.model.dixon_coles import DCConfig
@@ -480,6 +482,7 @@ class _DroppingDb(_Db):
             raise psycopg.OperationalError("bağlantı koptu")
 
 
+@pytest.mark.leakage
 def test_a_connection_dropping_after_the_opening_is_reported_as_opened(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -803,3 +806,20 @@ def test_the_report_renders_when_a_zone_has_no_common_rows(
     assert not report.post.main and report.post.component_gaps == {}
     assert "C6 ΔLL harman − piyasa: ölçülemedi" in text
     assert "Sonrası: satır 0 · bileşeni eksik (ortak kümeye girmedi) 0" in text
+
+
+def test_the_report_names_why_matches_left_the_common_rows_and_counts_refused_prices(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """16p ve 16i: holdout'un satırsız/eksik maçları ve reddedilen fiyatları raporda adıyla."""
+    db = _Db()
+    _patch(monkeypatch, db)
+    report = _run(db, tmp_path)
+
+    text = render_final(report, generated_at=NOW)
+
+    for zone, label in ((HOLDOUT, "Holdout"), (POST, "Sonrası")):
+        assert tuple(report.missing[zone]) == MISSING_REASONS
+        assert f"{label}, ortak kümeye girmeyen ana lig maçı: " in text
+        assert format_counts(report.missing[zone]) in text
+        assert format_counts(report.rejected[zone]) in text

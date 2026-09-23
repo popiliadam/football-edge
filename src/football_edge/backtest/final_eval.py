@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from functools import partial
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import psycopg
@@ -30,10 +31,17 @@ from football_edge.backtest.walkforward import (
     Row,
     group_matches,
     group_rows,
+    missing_reasons,
+    rejected_prices,
     zone_of,
 )
 from football_edge.backtest.wf_eval import Summary, frozen_weights, summarise
-from football_edge.backtest.wf_run import format_interval, model_strategies, score_table
+from football_edge.backtest.wf_run import (
+    format_counts,
+    format_interval,
+    model_strategies,
+    score_table,
+)
 from football_edge.history.catalog import Catalog
 from football_edge.history.holdout import HOLDOUT, POST, open_holdout, period_of
 from football_edge.history.lock import HistoryLock
@@ -71,6 +79,8 @@ class FinalReport:
     placebo_post: Interval | None
     holdout_rows: int
     predictions_sha256: str
+    missing: Mapping[str, Mapping[str, int]]  # bölge → ortak kümeye girmeme nedeni (16p)
+    rejected: Mapping[str, Mapping[str, int]]  # bölge → vig'i temizlenemeyen fiyat kümesi (16i)
 
 
 def rerun_of(phase: str) -> str:
@@ -202,6 +212,18 @@ def evaluate_selected(
         placebo_post=placebo_post,
         holdout_rows=sum(1 for row in rows if row.zone == HOLDOUT),
         predictions_sha256=digest,
+        missing=MappingProxyType(
+            {
+                zone: missing_reasons(groups, rows, kinds, zone=zone, zoning=zoning)
+                for zone in (HOLDOUT, POST)
+            }
+        ),
+        rejected=MappingProxyType(
+            {
+                zone: rejected_prices(groups, kinds, method=config.method, zone=zone, zoning=zoning)
+                for zone in (HOLDOUT, POST)
+            }
+        ),
     )
 
 
@@ -275,13 +297,16 @@ def run_final(
         ) from error
 
 
-def _coverage(label: str, summary: Summary) -> str:
-    """Ortak kümenin dışında kalan satır ve geri düşülen ağırlık — sessiz kalmasın (16c)."""
+def _coverage(label: str, summary: Summary, report: FinalReport, zone: str) -> list[str]:
+    """Ortak kümenin dışında kalan satır, nedeni, reddedilen fiyat ve geri düşülen ağırlık —
+    sessiz kalmasın (16c, 16i, 16p)."""
     fallback = ", ".join(summary.fallback) or "yok"
-    return (
+    return [
         f"{label}: satır {summary.rows} · bileşeni eksik (ortak kümeye girmedi) "
-        f"{summary.incomplete} · geri düşülen ağırlık {len(summary.fallback)} ({fallback})"
-    )
+        f"{summary.incomplete} · geri düşülen ağırlık {len(summary.fallback)} ({fallback})",
+        f"{label}, ortak kümeye girmeyen ana lig maçı: {format_counts(report.missing[zone])}",
+        f"{label}, vig'i temizlenemeyen fiyat kümesi: {format_counts(report.rejected[zone])}",
+    ]
 
 
 def render_final(report: FinalReport, *, generated_at: datetime) -> str:
@@ -294,8 +319,8 @@ def render_final(report: FinalReport, *, generated_at: datetime) -> str:
             f"özeti sha256 `{report.predictions_sha256}`. Tek açılış (R135); ağırlıklar ve "
             "hiperparametreler yalnız geliştirme döneminden.",
             "",
-            _coverage("Holdout", report.holdout),
-            _coverage("Sonrası", report.post),
+            *_coverage("Holdout", report.holdout, report, HOLDOUT),
+            *_coverage("Sonrası", report.post, report, POST),
             "",
             *score_table("C1–C4 · holdout, ana ligler, 1X2 (ortak satırlar)", report.holdout.main),
             f"C1 ΔLL harman − piyasa: {format_interval(report.holdout.blend_gap)}",

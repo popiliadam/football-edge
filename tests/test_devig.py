@@ -84,27 +84,27 @@ def test_multiplicative_divides_by_the_book_sum() -> None:
     assert devig((1.9, 3.8, 3.8), MULTIPLICATIVE) == pytest.approx((0.5, 0.25, 0.25), abs=1e-12)
 
 
-@pytest.mark.parametrize("prices", (LOPSIDED, BALANCED, TWO_WAY, UNDER_ROUND))
+@pytest.mark.parametrize("prices", (LOPSIDED, BALANCED, TWO_WAY))
 def test_power_probabilities_are_one_common_power_of_the_implied(prices: tuple[float, ...]) -> None:
     implied = tuple(1.0 / price for price in prices)
     probs = devig(prices, POWER)
     exponents = [math.log(p) / math.log(q) for p, q in zip(probs, implied, strict=True)]
     assert max(exponents) - min(exponents) < 1e-9
-    # B > 1 ise k > 1 (marj uzak sonuçlardan daha çok alınır), B < 1 ise k < 1
-    assert (exponents[0] > 1.0) == (math.fsum(implied) > 1.0)
+    # B > 1 (B < 1 reddedilir, 16i): k > 1 — marj uzak sonuçlardan daha çok alınır
+    assert exponents[0] > 1.0
 
 
 @pytest.mark.parametrize(
     ("prices", "exponent"),
-    (((1.06, 10_000.0), 0.407417157324016), ((1.25, 1.25), math.log(0.5) / math.log(0.8))),
-    ids=("alt-uc", "ust-uc"),
+    (((1.25, 1.25), math.log(0.5) / math.log(0.8)),),
+    ids=("ust-uc",),
 )
 def test_power_widens_its_start_bracket_when_the_root_lies_outside_it(
     prices: tuple[float, ...], exponent: float
 ) -> None:
-    # Başlangıç aralığı B < 1 iken [0.5, 1], B > 1 iken [1, 2]. (1.06, 10000): B = 0.9435, kök
-    # k = 0.4074 (50 basamaklı Decimal ikiye bölmesiyle) · (1.25, 1.25): B = 1.6, k = ln ½ / ln 0.8
-    # ≈ 3.106. Aralık genişlemeseydi ikiye bölme uca yapışır, Σ p 1'den uzak kalırdı.
+    # Başlangıç aralığı [1, 2]. (1.25, 1.25): B = 1.6, k = ln ½ / ln 0.8 ≈ 3.106. Aralık
+    # genişlemeseydi ikiye bölme uca yapışır, Σ p 1'den uzak kalırdı. (B < 1'in alt ucu artık
+    # yok: 16i o kitabı reddeder.)
     probs = devig(prices, POWER)
     assert math.fsum(probs) == pytest.approx(1.0, abs=1e-9)
     implied = tuple(1.0 / price for price in prices)
@@ -147,11 +147,18 @@ def test_invalid_prices_are_rejected(method: str, prices: tuple[float, ...]) -> 
         overround(prices)
 
 
-def test_shin_rejects_a_book_under_one_hundred_percent() -> None:
-    with pytest.raises(InvalidPrices, match="Shin"):
-        devig(UNDER_ROUND, SHIN)
-    assert math.fsum(devig(UNDER_ROUND, POWER)) == pytest.approx(1.0, abs=1e-9)
-    assert devig(UNDER_ROUND, MULTIPLICATIVE) == pytest.approx((0.5, 0.25, 0.25), abs=1e-12)
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize(
+    "prices", (UNDER_ROUND, (1.06, 10_000.0), (2.05, 2.05)), ids=("uc-yol", "uzak-uc", "iki-yol")
+)
+def test_every_method_rejects_a_book_under_one_hundred_percent(
+    method: str, prices: tuple[float, ...]
+) -> None:
+    """16i: multiplicative ve power Σ 1/o < 1'i kabul edip olasılığı şişiriyordu (E'nin Ü/A
+    "piyasa 1 bahis" satırı). Marj ölçülür (`overround` < 0) ama vig temizlenmez."""
+    with pytest.raises(InvalidPrices, match="< 1"):
+        devig(prices, method)
+    assert overround(prices) < 0.0
 
 
 def test_shin_rejects_a_margin_it_cannot_explain_below_z_one_half() -> None:
@@ -199,9 +206,12 @@ def test_match_probs_is_none_when_a_price_is_missing() -> None:
 
 
 def test_match_probs_is_none_when_the_method_cannot_solve_the_prices() -> None:
-    match = hist_match(prices={("Avg", H2H, CLOSING): UNDER_ROUND})
-    assert match_probs(match, book="Avg", market=H2H, phase=CLOSING, method=SHIN) is None
-    assert match_probs(match, book="Avg", market=H2H, phase=CLOSING, method=POWER) is not None
+    under = hist_match(prices={("Avg", H2H, CLOSING): UNDER_ROUND})
+    wide = hist_match(prices={("Avg", H2H, CLOSING): (1.25, 1.25, 30.0)})
+    for method in METHODS:
+        assert match_probs(under, book="Avg", market=H2H, phase=CLOSING, method=method) is None
+    assert match_probs(wide, book="Avg", market=H2H, phase=CLOSING, method=SHIN) is None
+    assert match_probs(wide, book="Avg", market=H2H, phase=CLOSING, method=POWER) is not None
 
 
 def test_match_probs_does_not_hide_an_unknown_method() -> None:
@@ -218,3 +228,15 @@ def test_match_probs_names_an_unknown_market_like_outcome_index() -> None:
     with pytest.raises(ValueError) as from_metrics:
         outcome_index(bare, "ah")
     assert str(from_devig.value) == str(from_metrics.value)
+
+
+@pytest.mark.parametrize("method", METHODS)
+@pytest.mark.parametrize("prices", ((1.04, 26.0), (1.08, 13.5)))
+def test_an_exactly_fair_book_one_ulp_short_is_still_a_fair_book(
+    method: str, prices: tuple[float, ...]
+) -> None:
+    """Review Focus (16i): 1/1.04 + 1/26 = 1 tam, ama float toplamı 0.9999999999999999. Katı
+    `< 1` koruması adil kitabı reddederdi (Shin eskiden de reddediyordu)."""
+    assert math.fsum(1.0 / price for price in prices) < 1.0
+
+    assert devig(prices, method) == tuple(1.0 / price for price in prices)

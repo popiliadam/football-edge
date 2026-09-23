@@ -9,6 +9,7 @@ Yeniden oynatma ülke grubu başına (R94, R136): gruplar arasında durum etkile
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -47,6 +48,13 @@ DC_TOTALS = "dixon_coles_ou25"
 ELO_SCAFFOLD = "elo_scaffold"  # Faz 2 iskelesi (`EloPointInTime`): kıyas, harmana girmez
 BLEND_COMPONENTS: tuple[str, ...] = (MARKET, ELO, DC)
 _NO_KICKOFF = datetime.min.replace(tzinfo=UTC)
+# 16p: ortak kümeye (bütün harman bileşenleri) girmeyen ana lig maçının nedeni. Satırsız maçın tek
+# nedeni başlamanın karar anından önce olmasıdır (`group_rows`); görülmemiş takım satırı değil DC
+# bileşenini düşürür. Reddedilen piyasa fiyatı `other`a düşer ve `rejected_prices`ta ayrıca sayılır.
+KICKOFF_BEFORE_DECISION = "kickoff_before_decision"
+UNSEEN_TEAM = "unseen_team"
+OTHER = "other"
+MISSING_REASONS: tuple[str, ...] = (KICKOFF_BEFORE_DECISION, UNSEEN_TEAM, OTHER)
 
 
 @dataclass(frozen=True)
@@ -177,3 +185,101 @@ def group_rows(
             continue
         rows.append(_row(index, match, kind, zone, probs, method))
     return tuple(rows)
+
+
+def _first_days(matches: Sequence[HistMatch]) -> Mapping[str, date]:
+    """Takım → gruptaki ilk maçının günü."""
+    first: dict[str, date] = {}
+    for match in matches:
+        for team in (match.home, match.away):
+            first[team] = min(first.get(team, match.date), match.date)
+    return first
+
+
+def _reason(match: HistMatch, row: Row | None, first: Mapping[str, date]) -> str | None:
+    if row is None:
+        return KICKOFF_BEFORE_DECISION if decision_at(match.date, match.kickoff) is None else OTHER
+    if all(name in row.components for name in BLEND_COMPONENTS):
+        return None
+    model_missing = any(name not in row.components for name in (ELO, DC))
+    if model_missing and match.date in (first[match.home], first[match.away]):
+        return UNSEEN_TEAM
+    return OTHER
+
+
+def _group_reasons(
+    matches: Sequence[HistMatch],
+    rows: Mapping[MatchKey, Row],
+    zone: str,
+    zoning: Callable[[HistMatch, str], str | None],
+) -> list[str]:
+    first = _first_days(matches)
+    found = (
+        _reason(match, rows.get(record_of(match).key), first)
+        for match in matches
+        if zoning(match, MAIN) == zone
+    )
+    return [reason for reason in found if reason is not None]
+
+
+def missing_reasons(
+    groups: Mapping[str, Sequence[HistMatch]],
+    rows: Sequence[Row],
+    kinds: Mapping[str, str],
+    *,
+    zone: str = EVALUATION,
+    zoning: Callable[[HistMatch, str], str | None] = zone_of,
+) -> Mapping[str, int]:
+    """`zone`un ana lig maçlarından ortak kümeye girmeyenler, nedene göre (16p). Anahtarsız:
+    `walkforward` DEV'de, `final_eval` seçilmiş holdout satırlarında çağırır."""
+    by_key = {row.key: row for row in rows if row.zone == zone}
+    counts = Counter(
+        reason
+        for matches in groups.values()
+        if group_kind(matches, kinds) == MAIN
+        for reason in _group_reasons(matches, by_key, zone, zoning)
+    )
+    return MappingProxyType({name: counts[name] for name in MISSING_REASONS})
+
+
+def _lookups(zone: str) -> Mapping[str, tuple[str, str, str]]:
+    """`_row`un vig'ini temizlediği dört fiyat kümesi: ad → (kitap, market, evre)."""
+    return {
+        f"{H2H}/{PRE_CLOSING}": (PRE_BOOK.get(zone, REFERENCE_BOOK), H2H, PRE_CLOSING),
+        f"{H2H}/{CLOSING}": (REFERENCE_BOOK, H2H, CLOSING),
+        f"{TOTALS_25}/{PRE_CLOSING}": (REFERENCE_BOOK, TOTALS_25, PRE_CLOSING),
+        f"{TOTALS_25}/{CLOSING}": (REFERENCE_BOOK, TOTALS_25, CLOSING),
+    }
+
+
+def _rejected(match: HistMatch, book: str, market: str, phase: str, method: str) -> bool:
+    """Fiyat VAR ama vig'i temizlenemedi: `match_probs`un None'ı eksik fiyatla reddi birleştirir."""
+    return (
+        match.prices(book, market, phase) is not None
+        and match_probs(match, book=book, market=market, phase=phase, method=method) is None
+    )
+
+
+def rejected_prices(
+    groups: Mapping[str, Sequence[HistMatch]],
+    kinds: Mapping[str, str],
+    *,
+    method: str,
+    zone: str = EVALUATION,
+    zoning: Callable[[HistMatch, str], str | None] = zone_of,
+) -> Mapping[str, int]:
+    """`zone`un satır üreten ana lig maçlarında vig'i temizlenemeyen fiyat kümeleri (16i): sessiz
+    değil, sayılı. Reddedilen piyasa bileşeni satırı ortak kümeden, kapanışı bahsi CLV'den atar."""
+    decided = [
+        match
+        for matches in groups.values()
+        if group_kind(matches, kinds) == MAIN
+        for match in matches
+        if zoning(match, MAIN) == zone and decision_at(match.date, match.kickoff) is not None
+    ]
+    return MappingProxyType(
+        {
+            name: sum(1 for match in decided if _rejected(match, book, market, phase, method))
+            for name, (book, market, phase) in _lookups(zone).items()
+        }
+    )

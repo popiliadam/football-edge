@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
 from types import MappingProxyType
 
 import pytest
@@ -15,12 +15,18 @@ from football_edge.backtest.walkforward import (
     DC_TOTALS,
     ELO,
     EVALUATION,
+    KICKOFF_BEFORE_DECISION,
     MARKET,
+    MISSING_REASONS,
+    OTHER,
     SELECTION,
+    UNSEEN_TEAM,
     Row,
     group_kind,
     group_matches,
     group_rows,
+    missing_reasons,
+    rejected_prices,
     zone_of,
 )
 from football_edge.backtest.wf_eval import (
@@ -31,14 +37,14 @@ from football_edge.backtest.wf_eval import (
     summarise,
 )
 from football_edge.history.catalog import EXTRA, MAIN
-from football_edge.history.types import TOTALS_25
+from football_edge.history.types import CLOSING, PRE_CLOSING, TOTALS_25, HistMatch
 from football_edge.market.devig import POWER
 from football_edge.market.metrics import per_match_log_loss
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModel
 from football_edge.model.pool import MIN_FIT_MATCHES, NotConverged
 from football_edge.model.strategies import DixonColesStrategy
-from tests.backtest_builders import hist_match
+from tests.backtest_builders import hist_match, quote
 from tests.model_builders import main_history
 
 KINDS = MappingProxyType({"E0": MAIN, "E1": MAIN, "BRA": EXTRA})
@@ -328,4 +334,111 @@ def test_each_component_and_the_totals_are_paired_against_the_market(
             [row.totals[MARKET] for row in totals],
             [row.totals_outcome for row in totals],
         )
+    )
+
+
+def _odds(prices: tuple[float, float, float]) -> dict[object, float]:
+    return {**quote("Avg", PRE_CLOSING, prices), **quote("Avg", CLOSING, prices)}
+
+
+def _wednesday(day: date, home: str, away: str, prices: tuple[float, float, float]) -> HistMatch:
+    return hist_match(
+        day=day,
+        kickoff=datetime.combine(day, datetime.min.time(), tzinfo=UTC).replace(hour=19),
+        season="1920",
+        home=home,
+        away=away,
+        odds=_odds(prices),  # type: ignore[arg-type]
+        line=900 + day.day,
+    )
+
+
+# E bölgesinde üç kusurlu maç: cuma 11:00 UTC başlama (karar 12:00 Londra = 12:00 UTC, kasımda
+# GMT), grupta ilk kez görülen takım, Σ 1/o = 0.909 olan piyasa fiyatı.
+EARLY = hist_match(
+    day=date(2019, 11, 1),
+    kickoff=datetime(2019, 11, 1, 11, tzinfo=UTC),
+    season="1920",
+    odds=_odds((2.0, 3.4, 3.8)),  # type: ignore[arg-type]
+    line=900,
+)
+NEWCOMER = _wednesday(date(2019, 11, 6), "Yeni", "Alfa", (2.0, 3.4, 3.8))
+UNDER_ROUND = _wednesday(date(2019, 11, 13), "Gama", "Delta", (2.2, 4.4, 4.4))
+
+
+@pytest.fixture(scope="module")
+def flawed() -> tuple[dict[str, tuple[HistMatch, ...]], tuple[Row, ...]]:
+    groups = dict(
+        group_matches(
+            {"E0": (*main_history(2017, 2020), EARLY, NEWCOMER, UNDER_ROUND)}, {"E0": "Ülke"}
+        )
+    )
+    found = tuple(
+        row
+        for matches in groups.values()
+        for row in group_rows(matches, KINDS, _strategies(), method=POWER)  # type: ignore[arg-type]
+    )
+    return groups, found
+
+
+def test_each_match_left_out_of_the_common_rows_is_named_by_its_reason(
+    flawed: tuple[dict[str, tuple[HistMatch, ...]], tuple[Row, ...]],
+) -> None:
+    """16p: satırsız maç (başlama ≤ karar), görülmemiş takım ve geri kalan — anahtarsız sayım."""
+    groups, found = flawed
+
+    reasons = missing_reasons(groups, found, KINDS)
+
+    assert tuple(reasons) == MISSING_REASONS
+    assert reasons[KICKOFF_BEFORE_DECISION] == 1
+    assert reasons[UNSEEN_TEAM] == 1
+    assert reasons[OTHER] == 1  # reddedilen piyasa fiyatı: `rejected_prices` ayrıca sayar
+    rowless = sum(
+        1
+        for matches in groups.values()
+        for match in matches
+        if zone_of(match, MAIN) == EVALUATION
+        and all(row.key.date != match.date or row.key.home != match.home for row in found)
+    )
+    summary = summarise(found, tau=0.02, sensitivity=(), resamples=20)
+    assert sum(reasons.values()) == summary.incomplete + rowless
+
+
+def test_a_price_set_under_one_hundred_percent_is_counted_not_silently_dropped(
+    flawed: tuple[dict[str, tuple[HistMatch, ...]], tuple[Row, ...]],
+) -> None:
+    """16i: `match_probs`un None'ı eksik fiyatla reddi birleştirir; sayım yalnız reddi sayar."""
+    groups, found = flawed
+
+    rejected = rejected_prices(groups, KINDS, method=POWER)
+
+    assert rejected == {"1x2/pre": 1, "1x2/close": 1, "ou25/pre": 0, "ou25/close": 0}
+    (row,) = [r for r in found if r.key.home == "Gama" and r.key.date == date(2019, 11, 13)]
+    assert MARKET not in row.components and row.closing is None
+
+
+def test_extra_league_groups_stay_out_of_both_counts(
+    flawed: tuple[dict[str, tuple[HistMatch, ...]], tuple[Row, ...]],
+) -> None:
+    """Review Focus (16p/16i): ek lig grubu (harman yok, satırı `final_eval` dışında yok) ne
+    `other` ne reddedilen fiyat olarak sayılır; `group_kind` ana/ek karışımını zaten reddeder."""
+    groups, found = flawed
+    extra = tuple(
+        hist_match(
+            day=date(2019, 11, 13),
+            kickoff=datetime(2019, 11, 13, 19, tzinfo=UTC),
+            league="BRA",
+            season="2019",
+            home=f"Ek {index}",
+            away=f"Konuk {index}",
+            odds=_odds((2.2, 4.4, 4.4)),  # type: ignore[arg-type]
+            line=950 + index,
+        )
+        for index in range(3)
+    )
+    with_extra = {**groups, "Brezilya": extra}
+
+    assert missing_reasons(with_extra, found, KINDS) == missing_reasons(groups, found, KINDS)
+    assert rejected_prices(with_extra, KINDS, method=POWER) == rejected_prices(
+        groups, KINDS, method=POWER
     )

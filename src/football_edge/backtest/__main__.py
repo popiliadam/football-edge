@@ -46,6 +46,7 @@ from football_edge.backtest.preregistration import (
 )
 from football_edge.backtest.selection import select
 from football_edge.backtest.selftest import Check, run_selftest
+from football_edge.backtest.walkforward import missing_reasons, rejected_prices
 from football_edge.backtest.wf_eval import summarise
 from football_edge.backtest.wf_run import (
     development_groups,
@@ -265,6 +266,8 @@ def _walkforward(args: argparse.Namespace) -> int:
             config_sha256=file_sha256(args.config),
             gap=gap,
             digest=rows_digest(rows),
+            missing=missing_reasons(development, rows, kinds_of(catalog)),
+            rejected=rejected_prices(development, kinds_of(catalog), method=config.method),
         ),
         encoding="utf-8",
     )

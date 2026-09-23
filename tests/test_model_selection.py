@@ -267,6 +267,8 @@ def test_walkforward_writes_an_aggregate_report(
     report = (tmp_path / "r.md").read_text(encoding="utf-8")
     assert code == 0
     assert "ΔLL harman − piyasa" in report and "holdout ve sonrası dönemi okunmadı" in report
+    assert "Ortak kümeye girmeyen ana lig maçı (nedene göre): kickoff_before_decision" in report
+    assert "Vig'i temizlenemeyen fiyat kümesi (Σ 1/o < 1 dahil): 1x2/pre 0" in report
     assert re.search(r"satır özeti sha256 `[0-9a-f]{64}`", report), "rapor tahmin özetini taşımıyor"
     assert not any(team in report for team in TEAMS)
 
