@@ -223,16 +223,28 @@ def run_final(
             report_exists=report_path.exists(),
             rerun_reason=rerun_reason,
         )
-    with connect() as conn:
-        try:
-            key = open_holdout(conn, purpose=purpose, git_sha=git_sha, now=now)
-        except psycopg.errors.UniqueViolation as error:
-            raise AlreadyOpened(f"0010 ikinci açılışı reddetti: {error}") from error
-        try:
-            leagues = load_matches(conn, catalog, lock=lock, key=key)
-        except Exception as error:
-            raise OpenedButFailed(f"açılıştan sonra yükleme düştü: {error}") from error
-        del key
+    opened = False
+    try:
+        with connect() as conn:
+            try:
+                key = open_holdout(conn, purpose=purpose, git_sha=git_sha, now=now)
+            except psycopg.errors.UniqueViolation as error:
+                raise AlreadyOpened(f"0010 ikinci açılışı reddetti: {error}") from error
+            opened = True
+            try:
+                leagues = load_matches(conn, catalog, lock=lock, key=key)
+            except Exception as error:
+                raise OpenedButFailed(f"açılıştan sonra yükleme düştü: {error}") from error
+            del key
+    except OpenedButFailed:
+        raise
+    except Exception as error:
+        # Bağlantının kapanışı (`__exit__` → commit) açılıştan SONRA düşerse de exit 14 (P15).
+        if not opened:
+            raise
+        raise OpenedButFailed(
+            f"açılıştan sonra bağlantı düştü: {type(error).__name__}: {error}"
+        ) from error
     try:
         check_holdout_count(lock, leagues)
         return evaluate_selected(

@@ -419,3 +419,85 @@ def test_the_phase_index_rejecting_the_insert_is_not_an_opening(
     with pytest.raises(AlreadyOpened, match="0010"):
         _run(db, tmp_path)
     assert "load keyed" not in db.calls
+
+
+@pytest.mark.leakage
+def test_a_logged_rerun_reaches_open_holdout_with_its_purpose(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """R135: yeniden koşunun amacı (`faz3-rerun:<neden>:<sha>`) açılışa aynen ulaşır."""
+    db = _Db(previous=[("faz3:" + "p" * 64, SHA)])
+    _patch(monkeypatch, db)
+
+    _run(db, tmp_path, rerun_reason="OOM")
+
+    assert "open faz3-rerun:OOM:" + "p" * 64 in db.calls
+
+
+class _DroppingDb(_Db):
+    """Açılıştan sonra bağlantının kapanışı (`__exit__` → commit) düşer."""
+
+    def __exit__(self, *exc: object) -> None:
+        import psycopg
+
+        if any(call.startswith("open") for call in self.calls):
+            raise psycopg.OperationalError("bağlantı koptu")
+
+
+def test_a_connection_dropping_after_the_opening_is_reported_as_opened(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P15: açılış kayda düştükten sonra bağlantı kapanışında düşmek de exit 14 sınıfıdır."""
+    db = _DroppingDb()
+    _patch(monkeypatch, db)
+
+    with pytest.raises(OpenedButFailed, match="OperationalError"):
+        _run(db, tmp_path)
+    assert any(call.startswith("open") for call in db.calls)
+
+
+@pytest.mark.leakage
+def test_the_cli_rehearsal_writes_its_report_without_trying_the_opening(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """P22: `--rehearse` yalnız `run_rehearsal`ı çağırır; `run_final`e hiç girmez."""
+    from football_edge.backtest import __main__ as cli
+
+    paths = _prereg_files(tmp_path)
+    monkeypatch.setattr(cli, "real_git", lambda: _git())
+    monkeypatch.setattr(cli, "load_model_config", lambda path: CONFIG)
+    monkeypatch.setattr(cli, "load_catalog", lambda path: CATALOG)
+    monkeypatch.setattr(cli, "load_lock", lambda path: LOCK)
+    rehearsed: list[str] = []
+
+    def run_rehearsal(*args: object, **kwargs: object) -> object:
+        rehearsed.append("prova")
+        return object()
+
+    def run_final(*args: object, **kwargs: object) -> object:
+        raise AssertionError("açılış denendi")
+
+    monkeypatch.setattr(cli, "run_rehearsal", run_rehearsal)
+    monkeypatch.setattr(cli, "run_final", run_final)
+    monkeypatch.setattr(cli, "render_final", lambda report, *, generated_at: "prova raporu\n")
+    out = tmp_path / "prova.md"
+
+    returned = cli.main(
+        [
+            "final-eval",
+            "--rehearse",
+            "--prereg",
+            str(paths["prereg"]),
+            "--config",
+            str(paths["model"]),
+            "--lock",
+            str(paths["lock"]),
+            "--catalog",
+            str(paths["catalog"]),
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert returned == 0 and rehearsed == ["prova"]
+    assert out.read_text(encoding="utf-8") == "prova raporu\n"
