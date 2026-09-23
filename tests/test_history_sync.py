@@ -12,10 +12,25 @@ from protego import Protego
 
 from football_edge.collector import ContractViolation
 from football_edge.history.catalog import Catalog, declared_paths, load_catalog
-from football_edge.history.holdout import DEV, HOLDOUT, POST, HoldoutKey, HoldoutLocked, period_of
+from football_edge.history.holdout import (
+    DEV,
+    HOLDOUT,
+    POST,
+    HoldoutKey,
+    HoldoutLocked,
+    open_holdout,
+    period_of,
+)
 from football_edge.history.lock import LockViolation, build_lock
 from football_edge.history.store import save_file
-from football_edge.history.sync import SyncReport, _load_all, load_matches, mutable_paths, sync
+from football_edge.history.sync import (
+    DuplicateMatches,
+    SyncReport,
+    _load_all,
+    load_matches,
+    mutable_paths,
+    sync,
+)
 from football_edge.history.types import HistMatch
 from tests.fake_hist_db import FakeHistDb, at
 from tests.fake_sources import fake_source
@@ -318,6 +333,45 @@ def test_a_hand_built_key_does_not_open_the_holdout() -> None:
         load_matches(_cached_periods(), CATALOG, key=forged)
 
 
+class _AccessLog:
+    """`open_holdout`ın yazdığı tek INSERT'i ve commit'i sayan en küçük bağlantı."""
+
+    def __init__(self) -> None:
+        self.inserts: list[tuple[object, ...]] = []
+        self.commits = 0
+
+    def cursor(self) -> _AccessLog:
+        return self
+
+    def __enter__(self) -> _AccessLog:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.inserts.append(params)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        raise AssertionError("rollback beklenmiyordu")
+
+
+@pytest.mark.leakage
+def test_a_key_from_open_holdout_returns_the_holdout_rows_once_logged() -> None:
+    """14j: `load_matches`in gerçek anahtarlı pozitif yolu — açılış kayda düşer, sonra holdout
+    satırları DEV ve sonrası dönemiyle birlikte döner."""
+    log = _AccessLog()
+    key = open_holdout(log, purpose="faz3:deneme", git_sha="a" * 40, now=at(0))  # type: ignore[arg-type]
+
+    loaded = load_matches(_cached_periods(), CATALOG, key=key)
+
+    assert (len(log.inserts), log.commits) == (1, 1)
+    assert _periods(loaded) == {"E0": [HOLDOUT, POST], "BRA": [DEV, HOLDOUT, POST]}
+
+
 @pytest.mark.leakage
 def test_the_lock_is_checked_over_every_period_before_the_holdout_is_filtered_out() -> None:
     """Süzgeçten SONRA doğrulansaydı kilitteki holdout özeti eksik satırlarla tutmazdı."""
@@ -350,3 +404,23 @@ def test_load_matches_rechecks_the_contract_of_every_cached_file() -> None:
 
     with pytest.raises(ContractViolation, match="zorunlu sütun"):
         load_matches(db, CATALOG)
+
+
+@pytest.mark.leakage
+def test_a_duplicate_inside_the_holdout_is_refused_before_any_key_exists() -> None:
+    """C1: 2025/26 ve 2026/27 dosyalarının pencereleri haziranda çakışır; aynı maç holdout'ta iki
+    kez geçerse anahtarsız yükleme reddeder — açılış hiç denenmez. Mesaj holdout satırı taşımaz."""
+    twin = main_row(7, {"Date": "30/06/2026"})
+    files = {
+        **PERIODS_FILES,
+        OLD: csv_bytes(MAIN_2526, [*(main_row(n) for n in range(3)), twin]),
+        CURRENT: csv_bytes(
+            MAIN_2627, [main_row(n, {"Date": "22/08/2026"}) for n in range(2)] + [twin]
+        ),
+    }
+    db = FakeHistDb()
+    run(db, Site(files))
+
+    with pytest.raises(DuplicateMatches, match=r"E0 ×1") as raised:
+        load_matches(db, CATALOG)
+    assert "Ev 7" not in str(raised.value) and "2026-06-30" not in str(raised.value)

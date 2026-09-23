@@ -16,6 +16,7 @@ kuralı (`tests/test_holdout_access_rule.py`) başka her anmayı kırmızıya ç
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -240,6 +241,26 @@ def _load_all(
     )
 
 
+class DuplicateMatches(ContractViolation):
+    """Aynı (lig, tarih, ev, deplasman) BÜTÜN dönemlerde (holdout dahil) iki kez geçti.
+
+    Faz 3 plan incelemesi C1: yineleme yalnız oynatmada yakalansaydı holdout'taki bir yineleme
+    açılıştan SONRA patlar ve tek açılışı harcardı. Denetim anahtar yokken, burada koşar; mesaj
+    holdout satırını (tarih, ad) dışarı vermez — yalnız lig ve sayı.
+    """
+
+
+def _refuse_duplicates(everything: Mapping[str, Sequence[HistMatch]]) -> None:
+    found = {
+        code: sum(n - 1 for n in Counter((m.date, m.home, m.away) for m in matches).values())
+        for code, matches in everything.items()
+    }
+    repeated = {code: count for code, count in sorted(found.items()) if count}
+    if repeated:
+        detail = ", ".join(f"{code} ×{count}" for code, count in repeated.items())
+        raise DuplicateMatches(f"{SOURCE_ID}: yinelenen maç (bütün dönemler, 14g): {detail}")
+
+
 def load_matches(
     conn: psycopg.Connection[Any],
     catalog: Catalog,
@@ -254,6 +275,7 @@ def load_matches(
     `select_periods`te `HoldoutLocked` verir.
     """
     everything = _load_all(conn, catalog)
+    _refuse_duplicates(everything)
     if lock is not None:
         verify_lock(lock, everything)
     periods = _OPEN_PERIODS if key is None else _OPEN_PERIODS | {HOLDOUT}
