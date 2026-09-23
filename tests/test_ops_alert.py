@@ -308,6 +308,7 @@ FRESH = {
     "collect-news.yml": [_workflow_run("workflow_dispatch", timedelta(hours=3, minutes=59))],
     "footystats-local.yml": [_workflow_run("workflow_dispatch", timedelta(hours=71))],
     "history.yml": [_workflow_run("workflow_dispatch", timedelta(days=7, hours=23))],
+    "shadow.yml": [_workflow_run("workflow_dispatch", timedelta(days=4, hours=11))],
 }
 STALE_SNAPSHOT = [_workflow_run("workflow_dispatch", timedelta(hours=31))]
 
@@ -776,4 +777,17 @@ def test_a_stale_history_trigger_is_named_in_the_watchdog_alarm() -> None:
     (alarm,) = fake.issues
     assert alarm["title"] == WATCHDOG_ALARM
     for needle in ("history.yml: ", "history-dispatch"):
+        assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"
+
+
+def test_a_stale_shadow_trigger_is_named_in_the_watchdog_alarm() -> None:
+    """Gölge tahminin tek tetiği pg_cron (0011): cuma → salı 4 gün, eşik 4 gün 12 sa."""
+    stale = [_workflow_run("workflow_dispatch", timedelta(days=4, hours=13))]
+    fake = FakeGitHub(runs={**FRESH, "shadow.yml": stale})
+
+    assert _watchdog(fake) == 0
+
+    (alarm,) = fake.issues
+    assert alarm["title"] == WATCHDOG_ALARM
+    for needle in ("shadow.yml: ", "shadow-dispatch"):
         assert needle in alarm["body"], f"gövdede teşhis eksik: {needle!r}"

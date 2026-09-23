@@ -1,0 +1,64 @@
+name: shadow
+
+on:
+  # Tek tetik pg_cron (0011): salı ve cuma 12:35 UTC, karar anından (12:00 Londra) sonra. GitHub
+  # `schedule`ı KASITLI olarak yok: seyrek ve gecikmeli koşar (0003).
+  workflow_dispatch:
+
+concurrency:
+  # Kendi grubu: iki tur aynı maça aynı yapılandırmayla yazmaz (tekil kısıt yine de korur).
+  group: shadow
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    # Tabanı yükle (~10 sn, ~760 MB) + grup başına bir Elo ve bir Dixon-Coles durumu.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Secret taraması
+        run: ./scripts/check_secrets.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Gölge tahmin
+        # Faz 3 (R134): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
+        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım alır.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.live shadow
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            9) echo "::error::live shadow: kilit ihlali (exit 9) — tahmin yazılmadı" ;;
+            11) echo "::error::live shadow: model yapılandırması katalog/kilitle uyuşmuyor (exit 11)" ;;
+            *) echo "::error::live shadow beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
+      - name: Alarm aç
+        if: ${{ failure() || cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow shadow --run-url "$RUN_URL"
+      - name: Alarm kapat
+        if: success()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow shadow --run-url "$RUN_URL"

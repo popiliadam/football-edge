@@ -1,0 +1,215 @@
+"""`python -m football_edge.live {shadow,parity}` — canlı gölge tahmin ve eşitlik raporu (E3).
+
+`shadow`: kararı verilmiş, başlamamış maçlar → `model_predictions` (yayın yok, kredi yok).
+`parity`: sonrası dönemde hem defterde hem tabanda olan maçların yapısal alanları (lig, tarih,
+adlar, sezon, başlama) birebir mi — fark varsa exit 15. Fiyat farkı rapordur, kapı değil.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import MappingProxyType
+
+from football_edge.backtest.__main__ import (
+    CATALOG_PATH,
+    EXIT_CONFIG_MISMATCH,
+    EXIT_LOCK_VIOLATION,
+    LOCK_PATH,
+    kinds_of,
+    rating_groups,
+)
+from football_edge.backtest.context import record_of
+from football_edge.backtest.model_config import (
+    MODEL_CONFIG_PATH,
+    ModelConfigError,
+    file_sha256,
+    load_model_config,
+)
+from football_edge.backtest.records import MatchKey
+from football_edge.backtest.walkforward import group_matches
+from football_edge.collect import configure_logging
+from football_edge.db import connect
+from football_edge.history.catalog import Catalog, load_catalog
+from football_edge.history.holdout import HOLDOUT_END
+from football_edge.history.lock import LockViolation, load_lock
+from football_edge.history.sync import load_matches
+from football_edge.history.types import HistMatch
+from football_edge.live.context import LiveMatch, build_batch, live_key, naming_from, season_of
+from football_edge.live.shadow import shadow_rows, write_shadow
+from football_edge.live.store import load_live_matches, load_quotes
+from football_edge.market.bridge import load_aliases
+
+LOGGER = logging.getLogger("football_edge.live")
+ALIASES_PATH = Path("config/history_aliases.yaml")
+HORIZON = timedelta(days=8)
+LOOKBACK = timedelta(days=10)
+EXIT_PARITY = 15
+# Saat dilimi ya da yaz saati hatası ≥ 60 dk kaydırır; yayıncı kaynaklı küçük saat farkları değil.
+KICKOFF_TOLERANCE = timedelta(minutes=30)
+
+
+def head_sha() -> str:
+    return subprocess.run(
+        ("git", "rev-parse", "HEAD"), capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="python -m football_edge.live")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("shadow", "parity"):
+        command = commands.add_parser(name)
+        command.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
+        command.add_argument("--lock", type=Path, default=LOCK_PATH)
+        command.add_argument("--catalog", type=Path, default=CATALOG_PATH)
+        command.add_argument("--aliases", type=Path, default=ALIASES_PATH)
+    commands.choices["parity"].add_argument(
+        "--since",
+        type=lambda text: datetime.fromisoformat(text).replace(tzinfo=UTC),
+        default=datetime.combine(HOLDOUT_END, datetime.min.time(), tzinfo=UTC),
+    )
+    return parser
+
+
+def _codes(catalog: Catalog) -> Mapping[str, str]:
+    return MappingProxyType({league.league_id: league.code for league in catalog.leagues})
+
+
+def _shadow(args: argparse.Namespace) -> int:
+    try:
+        config = load_model_config(args.config)
+    except ModelConfigError as error:
+        LOGGER.error("model yapılandırması: %s", error)
+        return EXIT_CONFIG_MISMATCH
+    if (file_sha256(args.catalog), file_sha256(args.lock)) != (
+        config.catalog_sha256,
+        config.lock_sha256,
+    ):
+        LOGGER.error("katalog ya da kilit model yapılandırmasındaki özetle uyuşmuyor")
+        return EXIT_CONFIG_MISMATCH
+    catalog = load_catalog(args.catalog)
+    now = datetime.now(UTC)
+    try:
+        with connect() as conn:
+            history = load_matches(conn, catalog, lock=load_lock(args.lock))
+            live = load_live_matches(conn, since=now - LOOKBACK, until=now + HORIZON)
+            quotes = load_quotes(
+                conn, tuple(m.match_id for m in live if m.kickoff > now), until=now
+            )
+            groups = rating_groups(catalog)
+            batch = build_batch(
+                live,
+                quotes,
+                group_matches(history, groups),
+                now=now,
+                naming=naming_from(history, _codes(catalog), load_aliases(args.aliases)),
+                kinds=kinds_of(catalog),
+                rating_groups=groups,
+            )
+            rows = shadow_rows(
+                batch,
+                config=config,
+                rating_groups=groups,
+                config_sha256=file_sha256(args.config),
+                git_sha=head_sha(),
+            )
+            written = write_shadow(conn, rows)
+    except LockViolation as error:
+        LOGGER.error("kilit ihlali — gölge tahmin koşulmadı: %s", "; ".join(error.differences))
+        return EXIT_LOCK_VIOLATION
+    LOGGER.info(
+        "gölge: karar %d · yazılan satır %d · eşlenemeyen %d · bayat durum %d · fiyatsız %d",
+        len(batch.decisions),
+        written,
+        len(batch.unmapped),
+        len(batch.stale),
+        len(batch.no_quote),
+    )
+    return 0
+
+
+@dataclass(frozen=True)
+class ParityReport:
+    paired: int
+    unmatched: int
+    season_mismatch: int
+    kickoff_mismatch: int
+
+
+def parity(
+    live: Sequence[LiveMatch],
+    history: Mapping[str, Sequence[HistMatch]],
+    *,
+    codes: Mapping[str, str],
+    aliases: Mapping[str, str],
+    kinds: Mapping[str, str],
+) -> ParityReport:
+    """E3: defterdeki maç ↔ taban satırı yapısal alanları (fiyat hariç)."""
+    naming = naming_from(history, codes, aliases)
+    index: dict[MatchKey, HistMatch] = {
+        record_of(match).key: match for matches in history.values() for match in matches
+    }
+    paired = unmatched = seasons = kickoffs = 0
+    for match in live:
+        key = live_key(match, naming)
+        found = None if key is None else index.get(key)
+        if key is None or found is None:
+            unmatched += 1
+            continue
+        paired += 1
+        league = [m for m in history.get(key.league, ()) if m is not found]
+        if season_of(league, key.date, kinds.get(key.league, "")) not in (None, found.season):
+            seasons += 1
+        if found.kickoff is not None and abs(found.kickoff - match.kickoff) > KICKOFF_TOLERANCE:
+            kickoffs += 1
+    return ParityReport(paired, unmatched, seasons, kickoffs)
+
+
+def _parity(args: argparse.Namespace) -> int:
+    catalog = load_catalog(args.catalog)
+    try:
+        with connect() as conn:
+            history = load_matches(conn, catalog, lock=load_lock(args.lock))
+            live = load_live_matches(conn, since=args.since, until=datetime.now(UTC))
+    except LockViolation as error:
+        LOGGER.error("kilit ihlali — eşitlik raporu koşulmadı: %s", "; ".join(error.differences))
+        return EXIT_LOCK_VIOLATION
+    report = parity(
+        live,
+        history,
+        codes=_codes(catalog),
+        aliases=load_aliases(args.aliases),
+        kinds=kinds_of(catalog),
+    )
+    LOGGER.info(
+        "eşitlik (E3): eşleşen %d · eşlenemeyen %d · sezon farkı %d · başlama farkı %d",
+        report.paired,
+        report.unmatched,
+        report.season_mismatch,
+        report.kickoff_mismatch,
+    )
+    if report.season_mismatch or report.kickoff_mismatch:
+        LOGGER.error("yapısal alan farkı: canlı bağlam tarihsel bağlamla aynı değil")
+        return EXIT_PARITY
+    return 0
+
+
+COMMANDS: Mapping[str, Callable[[argparse.Namespace], int]] = MappingProxyType(
+    {"shadow": _shadow, "parity": _parity}
+)
+
+
+def main(argv: list[str] | None = None) -> int:
+    configure_logging()
+    args = _parser().parse_args(argv)
+    return COMMANDS[args.command](args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

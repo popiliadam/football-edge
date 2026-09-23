@@ -33,3 +33,12 @@ def test_history_dispatch_runs_weekly_outside_time_critical_minutes() -> None:
     assert re.fullmatch(r"\d+", minute) and int(minute) not in taken, (minute, sorted(taken))
     assert re.fullmatch(r"\d+", hour), hour
     assert (day, month, weekday) == ("*", "*", "2"), "haftada bir, salı değil"
+
+
+def test_history_is_also_synced_on_friday_before_the_friday_decision() -> None:
+    """R132: cuma kararından önce taban bir kez daha tazelenir; aynı fonksiyon, ayrı iş."""
+    spec, command = _cron_jobs()["history-dispatch-friday"]
+    minute, hour, day, month, weekday = spec.split()
+
+    assert command == "select ops.dispatch_history()"
+    assert (minute, hour, day, month, weekday) == ("50", "9", "*", "*", "5")
