@@ -46,7 +46,10 @@ senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 
   geri doldurması 1.259 haber (önce ROLLBACK'li kuru koşu) · 16i ölçümü: 1X2/pre red 0, W1–W4 GEÇTİ.
 
 ### 0.2 Plan 2'nin başlangıç kontrol listesi (acil değil — en erken 2026-10-07; Plan 2 bunlar olmadan yazılmaz)
-1. **Arşiv kapsamı runner'da (DEFERRED 17k)** — asistan yapar: geçici dal + `workflow_dispatch`, T0c betiği. ≥ %30 ise
+1. **Arşiv kapsamı runner'da (DEFERRED 17k)** — asistan yapar: geçici dal + `workflow_dispatch`, T0c betiği
+   (`step3_coverage.py 50 50`, ~2.800 sorgu, ~4,7 saat). **Betikler ve girdileri** (oturum 8'de `/private/tmp`ten
+   kurtarıldı — yeniden başlatmada silinirdi): `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/t0c/` (gitignored;
+   `Matches.csv` holdout sonuçları taşır, betik sonuç sütunlarını OKUMAZ). ≥ %30 ise
    arşiv ayağı yeniden açılır; değilse spec §7.3 yalnız-canlı yolu (seçim dilimi ≥ 900 haberli maç, kapı dilimi ≥ 1.800,
    2027-06-30). **Şu anki karar: KAPALI** (koşul ölçülmediği için).
 2. ~~`TYPESAFE_API_KEY`~~ — **2026-09-23 eklendi** (secret + `.env`). Ücretli harcamayı açan commit'i asistan yapamaz —
@@ -58,6 +61,14 @@ senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 
 
 **Plan 2'ye taşınacaklar (brief'lere):** 17a okuyucu mühürü (T5 ilk adım), 17b kesinti hafifletmesi (T4), 17c–17e
 açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 kuru koşusunda `min(boolean)` yok — `bool_and`.
+
+### 0.2b Oturum 8'de (2026-09-23) biten
+- football-data robots sapması (#3) kapandı (§0.3/5).
+- §0.4/2 küçük borç temizliği `main`de (`3205f32`) + son incelemenin ertelenen küçükleri (`50b677f`: altı kilit
+  ihlali mesajı birebir testle sabit, `model_selftest` W4 biçim hatasını yutmaz). DEFERRED 16j/17i kapalı; açık:
+  16g (ayrı tasarım), 16k-a/b, 17m kalanları — hepsi gerekçesiyle DEFERRED'da. Worktree/dallar silindi.
+- **Kalan ara iş:** İz B (Netlify sitesi + alan adı = kullanıcı kararı) · takma ad hijyeni (09-26 gölge turunun
+  `eşlenemeyen U` satırından sonra). Tarihe bağlı olmayan başka iş yok.
 
 ### 0.3 İzlenecekler
 1. **2026-09-26 cuma 12:35 UTC** ilk karar günlü gölge turu (Faz 3 §0.6 aynen).
