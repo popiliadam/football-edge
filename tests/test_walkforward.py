@@ -283,6 +283,21 @@ def test_a_fit_that_does_not_converge_falls_back_to_the_market_and_is_counted(
     assert folded_fallback == ("E0/1920",) and frozen_fallback == ("E0/2526",)
 
 
+def test_a_programming_error_in_the_fit_is_not_a_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """16a: yalnız az maç ve yakınsamama geri düşüştür; düz `ValueError` (programlama hatası)
+    yükselir — sessizce MARKET_ONLY'e sayılmaz."""
+
+    def broken(*args: object, **kwargs: object) -> tuple[float, ...]:
+        raise ValueError("3 bileşen, 2 sonuç")
+
+    monkeypatch.setattr(wf_eval, "fit_weights", broken)
+    table = _table({"1819": 0, "1920": 0}, count=wf_eval.LEAGUE_MIN_MATCHES)
+    with pytest.raises(ValueError, match="sonuç"):
+        fold_weights(table)
+    with pytest.raises(ValueError, match="sonuç"):
+        wf_eval.frozen_weights(table, [("E0", "2526")])
+
+
 def _mean_gap(
     first: list[tuple[float, ...]], second: list[tuple[float, ...]], outcomes: list[int]
 ) -> float:
