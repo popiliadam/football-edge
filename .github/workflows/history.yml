@@ -26,8 +26,9 @@ jobs:
   # bu yüzden ikinci bir job değil, `Senkron` ile alarm adımları arasında bir ADIMDIR.
   history:
     runs-on: ubuntu-latest
-    # `--all`: 500 dosya × 3 sn nezaket aralığı ≈ 25 dk + indirme; haftalık tur ~40 dosya.
-    timeout-minutes: 60
+    # `--all`: 500 dosya × 3 sn nezaket aralığı ≈ 25 dk + indirme; haftalık tur ~40 dosya. Faz 3
+    # model denetimi (W1–W4) E bölgesini yeniden oynatır — süresi Task 9'da ölçüldü.
+    timeout-minutes: 120
     permissions:
       # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
       contents: read
@@ -48,7 +49,8 @@ jobs:
           python-version: "3.11"
       - run: uv sync --frozen
       - name: Senkron
-        # Veritabanı secret'ını yalnız veritabanını kullanan adımlar alır (bu ve selftest) — liste
+        # Veritabanı secret'ını yalnız veritabanını kullanan adımlar alır (bu, selftest ve model
+        # denetimi) — liste
         # tests/test_history_workflow.py::DATABASE_STEPS. Girdi `env` ile gelir, betiğe `${{ }}`
         # ile gömülmez.
         env:
@@ -84,6 +86,24 @@ jobs:
             1) echo "::error::selftest: bilinen sonuç kapısı kırmızı ya da beklenmedik arıza (exit 1) — hangi K olduğu yukarıdaki satırlarda" ;;
             9) echo "::error::selftest: kilit ihlali (exit 9) — önbellek kilitli dönemlerden farklı, K1–K4 koşulmadı" ;;
             *) echo "::error::selftest beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
+      - name: Model bilinen sonuçları
+        # Faz 3 (G4, R136): W1–W3 kapı, W4 rapor. Örtük `success()`: kırmızı senkron ya da selftest
+        # sonrası koşmaz. Exit 11: `config/model_faz3.yaml` katalog/kilitle uyuşmuyor.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.backtest model-selftest
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            1) echo "::error::model-selftest: W kapısı kırmızı ya da beklenmedik arıza (exit 1) — hangi W olduğu yukarıdaki satırlarda" ;;
+            9) echo "::error::model-selftest: kilit ihlali (exit 9) — W1–W4 koşulmadı" ;;
+            11) echo "::error::model-selftest: model yapılandırması katalog/kilitle uyuşmuyor (exit 11)" ;;
+            *) echo "::error::model-selftest beklenmedik kodla düştü (exit $code)" ;;
           esac
           exit "$code"
       - name: Alarm aç

@@ -24,9 +24,9 @@ from tests.workflow_helpers import REPO, _index_of, _steps, _triggers
 
 HISTORY = REPO / ".github/workflows/history.yml"
 SYNC = "football_edge.history sync"
-# DATABASE_URL'i alan adımlar, adlarıyla: senkron ve bilinen sonuçlar. Başka hiçbir adım
-# (checkout, secret taraması, üçüncü taraf setup-uv, `uv sync`, alarm) secret görmez.
-DATABASE_STEPS: tuple[str, ...] = ("Senkron", "Bilinen sonuçlar")
+# DATABASE_URL'i alan adımlar, adlarıyla: senkron, bilinen sonuçlar ve modelinkiler. Başka hiçbir
+# adım (checkout, secret taraması, üçüncü taraf setup-uv, `uv sync`, alarm) secret görmez.
+DATABASE_STEPS: tuple[str, ...] = ("Senkron", "Bilinen sonuçlar", "Model bilinen sonuçları")
 
 
 def _document() -> dict[str, Any]:
@@ -91,8 +91,8 @@ def test_the_sync_step_takes_the_all_input_from_the_dispatch() -> None:
 
 
 def test_history_is_bounded_by_a_job_timeout() -> None:
-    """`--all` ≈ 25 dk; sınırsız bir tur takılırsa alarm hiç açılmaz (`cancelled()` dalı)."""
-    assert _document()["jobs"]["history"]["timeout-minutes"] == 60
+    """`--all` ≈ 25 dk + model denetimi (Faz 3); sınırsız bir tur takılırsa alarm hiç açılmaz."""
+    assert _document()["jobs"]["history"]["timeout-minutes"] == 120
 
 
 RULES: tuple[Callable[[Path], None], ...] = (
@@ -233,6 +233,66 @@ def test_selftest_names_every_exit_code_and_keeps_the_run_red(
     errors = [line for line in out.splitlines() if line.startswith("::error::")]
     assert calls == [f"run python -m {SELFTEST}"]
     assert returned == code, "selftest'in kodu yutuldu: alarm adımı kırmızıyı görmez"
+    if code == 0:
+        assert errors == []
+    else:
+        assert len(errors) == 1 and named in errors[0] and f"exit {code}" in errors[0], errors
+
+
+# ── Model bilinen sonuçları (Faz 3, G4) ──────────────────────────────────────────────────────
+
+MODEL_SELFTEST = "football_edge.backtest model-selftest"
+
+
+def _model_index() -> int:
+    index = _index_of(_steps(HISTORY), MODEL_SELFTEST)
+    assert index is not None, "history.yml modelin bilinen sonuçlarını hiç koşmuyor"
+    return index
+
+
+def test_the_model_checks_run_after_the_known_results_and_before_the_alarms() -> None:
+    steps = _steps(HISTORY)
+    opens = _index_of(steps, "scripts/ops_alert.py fail --workflow history ")
+
+    assert opens is not None
+    assert _selftest_index() < _model_index() < opens
+    step = steps[_model_index()]
+    assert step.get("env") == {"DATABASE_URL": "${{ secrets.DATABASE_URL }}"}
+    assert "if" not in step and not step.get("continue-on-error")
+
+
+@pytest.mark.parametrize(
+    ("code", "named"),
+    [
+        (0, ""),
+        (backtest_cli.EXIT_GATE_FAILED, "W kapısı"),
+        (backtest_cli.EXIT_LOCK_VIOLATION, "kilit"),
+        (backtest_cli.EXIT_CONFIG_MISMATCH, "yapılandırması"),
+        (3, "beklenmedik"),
+    ],
+    ids=["yesil", "kapi", "kilit", "yapilandirma", "beklenmedik"],
+)
+def test_the_model_step_names_every_exit_code_and_keeps_the_run_red(
+    tmp_path: Path, code: int, named: str
+) -> None:
+    fake = tmp_path / "uv"
+    fake.write_text(FAKE_UV, encoding="utf-8")
+    fake.chmod(0o755)
+    calls = tmp_path / "calls"
+    calls.touch()
+    env = {
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "FAIL_CODE": str(code),
+    }
+    body = str(_steps(HISTORY)[_model_index()]["run"])
+    result = subprocess.run(
+        ["bash", "-e", "-c", body], env=env, capture_output=True, text=True, timeout=30, check=False
+    )
+
+    errors = [line for line in result.stdout.splitlines() if line.startswith("::error::")]
+    assert calls.read_text(encoding="utf-8").splitlines() == [f"run python -m {MODEL_SELFTEST}"]
+    assert result.returncode == code
     if code == 0:
         assert errors == []
     else:

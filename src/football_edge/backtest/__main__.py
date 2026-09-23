@@ -34,6 +34,7 @@ from football_edge.backtest.model_config import (
     file_sha256,
     load_model_config,
 )
+from football_edge.backtest.model_selftest import model_checks, model_rows
 from football_edge.backtest.preregistration import (
     PREREGISTRATION_PATH,
     PreflightError,
@@ -101,6 +102,11 @@ def _parser() -> argparse.ArgumentParser:
     walk.add_argument("--out", type=Path, required=True)
     walk.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
     walk.add_argument("--gap", action="store_true", help="R128 boşluk cezası (iki ek koşu)")
+    model = commands.add_parser("model-selftest", help="modelin bilinen sonuçları W1–W4")
+    model.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
+    model.add_argument("--lock", type=Path, default=LOCK_PATH)
+    model.add_argument("--catalog", type=Path, default=CATALOG_PATH)
+    model.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
     final = commands.add_parser("final-eval", help="Faz 3'ün tek, kayıtlı holdout açılışı")
     final.add_argument("--prereg", type=Path, default=PREREGISTRATION_PATH)
     final.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
@@ -251,6 +257,27 @@ def _walkforward(args: argparse.Namespace) -> int:
     return 0
 
 
+def _model_selftest(args: argparse.Namespace) -> int:
+    config = _checked_config(args)
+    if config is None:
+        return EXIT_CONFIG_MISMATCH
+    loaded = _locked_matches(args.catalog, args.lock)
+    if loaded is None:
+        return EXIT_LOCK_VIOLATION
+    catalog, matches = loaded
+    groups = rating_groups(catalog)
+    rows = model_rows(development_groups(matches, groups), kinds_of(catalog), groups, config)
+    checks = model_checks(rows, resamples=args.resamples)
+    for check in checks:
+        _log(check)
+    failed = [check.id for check in checks if check.gate and not check.passed]
+    if failed:
+        LOGGER.error("kırmızı model denetimi: %s", ", ".join(failed))
+        return EXIT_GATE_FAILED
+    LOGGER.info("model bilinen sonuçları: kapı denetimlerinin hepsi geçti")
+    return 0
+
+
 def _final_eval(args: argparse.Namespace) -> int:
     git = real_git()
     try:
@@ -312,6 +339,7 @@ COMMANDS: Mapping[str, Callable[[argparse.Namespace], int]] = MappingProxyType(
         "selftest": _selftest,
         "select": _select,
         "walkforward": _walkforward,
+        "model-selftest": _model_selftest,
         "final-eval": _final_eval,
     }
 )
