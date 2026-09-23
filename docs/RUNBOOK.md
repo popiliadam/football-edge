@@ -500,8 +500,8 @@ tur `🔴 snapshot kırmızı` alarmını açar (§3.6):
 | 19 | **boş tur:** hiçbir lig satır yazmadı, hiçbir lig düşmedi, kredi bitmedi — ama ufukta fikstür var | aşağıdaki yordam |
 
 **Neden var.** 2026-09-23'te FIFA arasında 8 ligin hepsi `yazılacak satır yok` dedi, kredi
-değişmedi, tur yeşildi. Ara için doğru; ama sessiz bir arıza (sport key yeniden adlandırıldı,
-API boş dönüyor, bölge değişti) bayt bayt aynı görünür ve canlı gölge günlerce karar almaz.
+değişmedi, tur yeşildi. Ara için doğru; ama sessiz bir arıza (API boş 200 dönüyor, bölge/pazar
+değişti) bayt bayt aynı görünür ve canlı gölge günlerce karar almaz.
 Bekçi yalnız HER lig boşken, oran çağrısıyla AYNI `commenceTimeTo` ufkuyla ücretsiz
 `/v4/sports/{sport}/events` ucunu sorar (`x-requests-last: 0`, ölçüldü). Ufukta fikstür yoksa
 ara, tur 0; varsa log `oran boş ama ufukta fikstür var: <lig id'leri>` der ve exit 19.
@@ -525,5 +525,7 @@ kördür; elle yukarıdaki 1–2. adımlar koşulur.
 
 **Bilinen sınır (kasıtlı):** yalnız TÜM ligler boşken sorulur. Bir lig satır yazdıysa diğer bir
 ligin boş dönmesi işaretlenmez: bazı liglerin eu-bölge oranı fikstürden günler sonra açılır ve
-kısmi boşluk her gün yanlış alarm verirdi. Tek bir ligin sessizce kaybolması (ör. yalnız onun
-sport key'i değişti) bu bekçiye görünmez. Mühür turu (`seal`) bekçiyi hiç koşmaz.
+kısmi boşluk her gün yanlış alarm verirdi. Tek bir ligin sessizce boş dönmesi bu bekçiye görünmez
+(bilinmeyen sport key büyük olasılıkla 404 verir, o zaten exit 3'tür — ölçülmedi). **Aranın sonunda
+olası tek yanlış 19:** oranı geç açılan bir ligin fikstürü ufka girdiğinde öteki ligler hâlâ
+boşsa bekçi bir kez kırmızı verebilir; sonraki yeşil tur alarmı kapatır (son inceleme M-2). Mühür turu (`seal`) bekçiyi hiç koşmaz.

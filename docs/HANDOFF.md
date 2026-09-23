@@ -1,9 +1,10 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-23 (oturum 8: robots #3 kapandı, küçük borç temizliği) · **Durum:** **Faz 4 tasarımı + Plan 1 (dalga 0–1,
-11 görev) `main`de** (`4a629c2`) · Plan 2 ön koşulları bekleniyor (§0.2) · holdout Faz 3 için bir kez açıldı, Faz 4'te
-henüz açılmadı · `0012` canlı, `news_items` dolu, `collect-news` her turda senkronlar · **Dal:** `main` = `origin/main` ·
-kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11) · `EXPECTED_MIN_LEAKAGE` 418
+**Son güncelleme:** 2026-09-23 (oturum 8 kapanışı) · **Durum:** Faz 4 tasarımı + Plan 1 `main`de; oturum 8'de borç
+temizliği, 17a/17b/17g, takma ad hijyeni, boş tur bekçisi (exit 19), kaynak koşulları raporu (`f640fa1` ve belgeler) ·
+**FIFA milli arası: kulüp maçı 2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken 2026-10-07 · holdout Faz 4'te
+açılmadı · **Dal:** `main` = `origin/main`, açık worktree yok · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DB
+bağlıyken 11/11) · `EXPECTED_MIN_LEAKAGE` 418
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -23,13 +24,13 @@ bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/
 ### 0.0 Taze oturum — başlatma
 
 **Başlatma istemi (yeni oturuma yapıştır):**
-> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.3 izlenecekleri kontrol et (gölge turu, salı raporu, collect-news
-> senkronu). Tarih 2026-10-07'den önceyse Plan 2'ye başlama: §0.2'deki kontrol listesi bekler; bana §0.4'teki ara iş
-> seçeneklerini sor. 2026-10-07 veya sonrasıysa §0.2'yi sırayla yürüt, sonra Plan 2'yi `superpowers:writing-plans`
-> ile yaz."
+> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.3 izlenecekleri kontrol et. Tarih 2026-10-07'den önceyse Plan 2'ye
+> başlama; bana §0.4'teki (kısa) seçenekleri sor. 2026-10-07 veya sonrasıysa §0.2'yi sırayla yürüt, sonra Plan 2'yi
+> `superpowers:writing-plans` ile yaz."
 
 **Kullanıcı kararı (2026-09-23):** §0.2'deki ön koşullar acil değil — Plan 2'nin başlangıç kontrol listesidir. Haber
 senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 2 yazılırken (en erken 2026-10-07) yapılır.
+Kullanıcı ayrıca "en iyi senaryo, asistanın önerisi" diye yetki verdi (bellek: `user-delegates-to-recommendation`).
 
 ### 0.1 Ne yapıldı (hepsi görev incelemesi + bütün-dal incelemesinden geçti)
 - **Dalga 0:** T1 `live freeze-weights` + `config/blend_weights_faz3.yaml` (19 lig; çoğunda model ağırlığı 0 — Faz 3
@@ -55,28 +56,47 @@ senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 
 2. ~~`TYPESAFE_API_KEY`~~ — **2026-09-23 eklendi** (secret + `.env`). Ücretli harcamayı açan commit'i asistan yapamaz —
    tek satırlık komutu kullanıcıya verir.
 3. **`lag_b_p99`**: `sync-news` en az 2 hafta koşmuş olmalı (en erken **2026-10-07**) — yayıncı iddiası ↔ `first_seen_at`.
-4. **Gölge raporunun ilk turları** (ilk salı 2026-09-29): canlı ΔLL SD'si → güç yeniden hesabı (spec §7.3).
-5. EN kaynağı: GDELT DOC API, runner'dan; ToS'u AI kullanımını yasaklayan alan adları dışlanır. ajansspor gövdesi için
-   ToS okunmalı (17l).
+4. **Gölge raporunun ilk DOLU turları:** milli ara yüzünden 09-26 ve 09-29 boş geçer; ilk karar günü **2026-10-09
+   cuma 12:35 UTC**, ilk dolu salı raporu en erken **2026-10-13** (sonuç football-data haftalık senkronuna bağlı;
+   gerçekçi 10-20). Canlı ΔLL SD'si → güç yeniden hesabı (spec §7.3) ancak ondan sonra.
+5. **EN kaynağı — KULLANICI KARARI GEREKİYOR:** `docs/reports/2026-09-23-kaynak-kosullari.md`. GDELT kendi verisi için
+   kısıtsız (atıf şartı, ≤ 1 istek/5 sn). Kontrol edilen 25 EN yayıncıdan 19'u yapay zekâ kullanımını/TDM'yi açıkça
+   yasaklıyor, 3'ü sessiz (independent, standard, sportsmole) → "yasaklayanı dışla" büyük İngiliz yayıncılarının
+   hepsini düşürür; öneri **izin listesi** (okunmuş-sessiz alan adları, bilinmeyen dışarıda). Önce runner'da gerçek
+   alan adı sıralaması ölçülmeli (`step6_gdelt_en.py` → `doms.most_common(40)`, T0c betik dizininde). **17l
+   ajansspor:** sözleşme robots'ta kapalı; robots `Content-Signal: ai-input=yes, ai-train=no` — kapatmak ya da
+   yayıncıya sormak (dış iletişim, kullanıcı onayı) kullanıcıda.
 
-**Plan 2'ye taşınacaklar (brief'lere):** 17a okuyucu mühürü (T5 ilk adım), 17b kesinti hafifletmesi (T4), 17c–17e
-açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 kuru koşusunda `min(boolean)` yok — `bool_and`.
+**Plan 2'ye taşınacaklar (brief'lere):** 17c–17e açılış öncesi (T10), 17h kırmızı takım (oturum 8'de 17a bekçisinin
+kaçışları eklendi), 17n bekçi test boşlukları. **`tier1` zamanlanırken:** workflow adımı exit 7'yi "Jev kesintisi"
+diye adlandırır (17b). 17a/17b oturum 8'de kapandı. Plan metnindeki Task 9 Step 8 kuru koşusunda `min(boolean)` yok —
+`bool_and`.
 
-### 0.2b Oturum 8'de (2026-09-23) biten
-- football-data robots sapması (#3) kapandı (§0.3/5).
-- §0.4/2 küçük borç temizliği `main`de (`3205f32`) + son incelemenin ertelenen küçükleri (`50b677f`: altı kilit
-  ihlali mesajı birebir testle sabit, `model_selftest` W4 biçim hatasını yutmaz). DEFERRED 16j/17i kapalı; açık:
-  16g (ayrı tasarım), 16k-a/b, 17m kalanları — hepsi gerekçesiyle DEFERRED'da. Worktree/dallar silindi.
-- **Kalan ara iş:** İz B (Netlify sitesi + alan adı = kullanıcı kararı) · takma ad hijyeni (09-26 gölge turunun
-  `eşlenemeyen U` satırından sonra). Tarihe bağlı olmayan başka iş yok.
+### 0.2b Oturum 8'de (2026-09-23) biten — hepsi bağımsız bütün-dal incelemesinden geçti, `main`de
+- football-data robots sapması (#3) kapandı (§0.3/6).
+- Küçük borç temizliği (`3205f32`) + küçükleri (`50b677f`): DEFERRED 16j/17i kapalı; 16k-c ve 17m'nin iki doğrulama
+  açığı kapalı. Plan `docs/superpowers/plans/2026-09-23-kucuk-borc-temizligi.md`.
+- **Takma ad hijyeni (16e, `6ca8547`):** 51 canlı maçta tek eşlenmeyen `Erzurum BB` → `Erzurumspor`; `live parity`
+  eşleşen 51 · eşlenemeyen 0 · sezon farkı 0 · başlama farkı 0.
+- **17a** okuyucu mühürü (süzgeç yönü dahil) · **17b** kesinti = art arda 3 Jev hatası, koşu durur (≤ 3 çağrı) ·
+  **17g** reddedilen karar fiyatı gölgede ve raporda adıyla · **boş tur bekçisi:** her lig boşken ücretsiz `/events`
+  ufukta fikstür görürse `collect snapshot` exit 19 (RUNBOOK §3.11) — `f640fa1`. İnceleme: 50 mutasyon; I-1 (süzgeç
+  yönü), I-2 (kesinti tavanı delmesi), M-1 düzeltildi, kalanlar 17h/17n.
+- **Kaynak koşulları raporu** (§0.2/5). **T0c betikleri** `/private/tmp`ten kalıcı dizine kurtarıldı (§0.2/1).
+- **Kalan ara iş:** yalnız İz B (Netlify sitesi + alan adı = kullanıcı kararı). Tarihe bağlı olmayan başka iş yok.
 
 ### 0.3 İzlenecekler
-1. **2026-09-26 cuma 12:35 UTC** ilk karar günlü gölge turu (Faz 3 §0.6 aynen).
-2. **2026-09-29 salı** ilk haftalık gölge CLV raporu (`shadow.yml` iş özeti): `sonuçsuz N` ve lig kapsamı tablosu —
-   ilk raporlarda `fikstür ≫ karar` penceredendir (17j). Exit 9/11 → RUNBOOK.
-3. `collect-news` her turda yeni "Haber deposunu güncelle" adımını koşar; kırmızıysa alarm (ops_alert).
-4. `history.yml` model W1–W4 16i sonrası da GEÇTİ (yerelde ölçüldü); runner'da ilk tur 2026-09-26/29.
-5. **2026-09-23 football-data robots sapması (#3, oturum 8'de kapatıldı):** site AI eğitim botlarını ve kazıyıcıları
+**Milli ara (ölçüldü 2026-09-23, The Odds API ücretsiz `/events`, 0 kredi):** sonraki kulüp maçları EPL 2026-10-10,
+La Liga ve Süper Lig 2026-10-09. `odds_snapshots`ta 09-20'den beri satır yok — arıza DEĞİL, fikstür yok.
+1. **2026-09-26 cuma 12:35 UTC** gölge turu: `karar 0` beklenir (arıza değil). İlk dolu karar günü **2026-10-09**.
+2. **2026-09-29 salı** haftalık rapor: yeni karar yok; yalnız 09-19/20 maçları. İlk dolu rapor en erken 10-13.
+3. **~2026-10-02/03 06:22 UTC snapshot:** fikstürler 7 günlük ufka girer, satır yazılmaya başlamalı. **Olası tek
+   yanlış exit 19** (oranı geç açılan bir lig ve öteki ligler hâlâ boşsa; RUNBOOK §3.11) — sonraki yeşil tur alarmı
+   kapatır. 10-04'ten sonra hâlâ 19 ya da 0 satır → gerçek arıza, RUNBOOK §3.11.
+4. **10-10/11 hafta sonundan sonra:** `live parity --since 2026-10-01` (salt okuma) — ned.1/bel.1'in ilk canlı
+   maçları ve yeni takma adlar (aynı gün/lig/konum kuralı; teşhis betiği tarifi 16e satırında).
+5. `collect-news` her turda "Haber deposunu güncelle"; `history.yml` model W1–W4 runner'da ilk tur 09-26/29.
+6. **2026-09-23 football-data robots sapması (#3, oturum 8'de kapatıldı):** site AI eğitim botlarını ve kazıyıcıları
    adıyla kapattı (GPTBot, ClaudeBot, CCBot… 12 grup); `*` açık kaldı. RUNBOOK §3.7 uygulandı: bizim UA ile protego
    500/500 yol izinli (ClaudeBot 0/500) → anlık görüntü (runner diff'inden birebir kuruldu, hunk sayıları doğrulandı)
    ve `robots_verified_at` güncellendi; test yeni kural listesini birebir sabitler. **Sınır:** football-data verisi
@@ -84,18 +104,9 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
 
 ### 0.4 Plan 2'ye kadar ara iş seçenekleri (kullanıcıya sorulur; hiçbiri Plan 2'yi bloklamaz)
 1. **İz B** (Faz 6 iskeleti, Netlify + alan adı) — kullanıcının Netlify sitesi ve alan adı kararı gerekir.
-2. ~~**Küçük borç temizliği**~~ — **yapıldı 2026-09-23** (oturum 8, plan
-   `docs/superpowers/plans/2026-09-23-kucuk-borc-temizligi.md`, 7 görev, satır içi yürütme + bütün-dal incelemesi):
-   16j ve 17i kapandı, 16k-c ve 17m'nin iki doğrulama açığı kapandı; 16g, 16k-a/b ve 17m kalanları gerekçesiyle
-   DEFERRED'da. Bütün-dal incelemesi (24 mutasyon, `git archive` kopyasında): dört aralık çağıranından yalnız
-   `selftest` etiketi sabitti — dördü de artık birebir metinle sabit (`model_selftest` 5 basamak, `selftest` 4
-   basamak + `%95`, `wf_run.format_interval`, `efficiency._interval`); bütçe bekçisi yalnız `jev_budget`tan takma
-   adsız import edilen ve yerelde yeniden tanımlanmayan sarmalayıcı adına güvenir. **Kapının ölçmediği:** kilit
-   ihlali satırlarının çağrı yeri başına `what` metni (CLI testleri yalnız çıkış kodunu sınar; bayt eşliği incelemede
-   git-grep ile doğrulandı).
-3. **Takma ad hijyeni** (Faz 3 §3.3/8, DEFERRED 16e): 09-26 gölge turunun `eşlenemeyen U` satırından sonra
-   `config/history_aliases.yaml` (aynı gün/lig/konum kuralı, tahmin yok).
-4. Hiçbiri — 2026-10-07'ye kadar yalnız izleme.
+2. **§0.2/5 EN kaynağı kararı** (izin listesi mi, kara liste mi; ajansspor 17l) — rapor hazır, karar kullanıcıda.
+3. Hiçbiri — 2026-10-07'ye kadar yalnız izleme (§0.3).
+Oturum 8'de yapılanlar (borç temizliği, takma ad hijyeni) §0.2b'de.
 
 ### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
 - SDD betikleri ANA depo kökünden, BASE/HEAD açık SHA ile (`review-package`); worktree'ler `.worktrees/wt-faz4-*`.
