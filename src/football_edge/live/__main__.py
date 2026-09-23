@@ -24,8 +24,6 @@ from football_edge.backtest.__main__ import (
     EXIT_CONFIG_MISMATCH,
     EXIT_LOCK_VIOLATION,
     LOCK_PATH,
-    kinds_of,
-    rating_groups,
 )
 from football_edge.backtest.context import record_of
 from football_edge.backtest.evaluate import DEFAULT_RESAMPLES
@@ -41,7 +39,7 @@ from football_edge.backtest.walkforward import group_matches
 from football_edge.backtest.wf_run import development_groups, run_rows
 from football_edge.collect import configure_logging
 from football_edge.db import connect
-from football_edge.history.catalog import MAIN, Catalog, load_catalog
+from football_edge.history.catalog import MAIN, Catalog, kinds_of, load_catalog, rating_groups
 from football_edge.history.holdout import HOLDOUT_END
 from football_edge.history.lock import LockViolation, load_lock
 from football_edge.history.sync import load_matches

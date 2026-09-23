@@ -8,8 +8,10 @@ buradan türetilir ve bir test ikisinin eşit olduğunu zorlar (tasarım D20). C
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -111,6 +113,17 @@ def load_catalog(path: Path) -> Catalog:
     leagues = tuple(_league(entry, current) for entry in raw["leagues"])
     _check_unique(leagues)
     return Catalog(current_season=current, leagues=leagues)
+
+
+def kinds_of(catalog: Catalog) -> Mapping[str, str]:
+    """Lig kodu → tür (ana/alt lig): walk-forward satırları ve ağırlık fiti buradan okur."""
+    return MappingProxyType({league.code: league.kind for league in catalog.leagues})
+
+
+def rating_groups(catalog: Catalog) -> Mapping[str, str]:
+    """Elo'nun reyting grubu (R94): lig kodu → ülke. Elo'yu kuran her yol grupları buradan alır;
+    selftest Elo kurmaz (K1–K4 fiyat ve Placebo ile ölçülür)."""
+    return MappingProxyType({league.code: league.country for league in catalog.leagues})
 
 
 def file_paths(league: HistoryLeague, *, current_season: str) -> tuple[str, ...]:

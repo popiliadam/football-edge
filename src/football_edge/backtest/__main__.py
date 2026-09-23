@@ -58,7 +58,7 @@ from football_edge.backtest.wf_run import (
 from football_edge.collect import configure_logging
 from football_edge.collector import ContractViolation
 from football_edge.db import connect
-from football_edge.history.catalog import MAIN, Catalog, load_catalog
+from football_edge.history.catalog import MAIN, Catalog, kinds_of, load_catalog, rating_groups
 from football_edge.history.holdout import DEV_END
 from football_edge.history.lock import LockViolation, load_lock
 from football_edge.history.sync import load_matches
@@ -138,12 +138,6 @@ def canonical_paths(phase: str) -> CanonicalPaths:
     )
 
 
-def rating_groups(catalog: Catalog) -> Mapping[str, str]:
-    """Elo'nun reyting grubu (R94): lig kodu → ülke. Elo'yu kuran her yol grupları buradan alır;
-    selftest Elo kurmaz (K1–K4 fiyat ve Placebo ile ölçülür)."""
-    return MappingProxyType({league.code: league.country for league in catalog.leagues})
-
-
 def _log(check: Check) -> None:
     kind = "kapı" if check.gate else "rapor"
     verdict = "GEÇTİ" if check.passed else "KALDI"
@@ -173,10 +167,6 @@ def _selftest(args: argparse.Namespace) -> int:
         return EXIT_GATE_FAILED
     LOGGER.info("bilinen sonuçlar: kapı denetimlerinin hepsi geçti")
     return 0
-
-
-def kinds_of(catalog: Catalog) -> Mapping[str, str]:
-    return MappingProxyType({league.code: league.kind for league in catalog.leagues})
 
 
 def _locked_matches(
