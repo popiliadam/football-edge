@@ -6,10 +6,12 @@ import re
 from dataclasses import replace
 from datetime import date
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 import pytest
 
+from football_edge.backtest import model_selftest
 from football_edge.backtest.model_config import ModelConfig
 from football_edge.backtest.model_selftest import model_checks, model_rows, w1_passes
 from football_edge.backtest.records import MatchKey
@@ -17,7 +19,7 @@ from football_edge.backtest.walkforward import DC, ELO, ELO_SCAFFOLD, MARKET, Ro
 from football_edge.backtest.wf_run import development_groups
 from football_edge.history.catalog import MAIN
 from football_edge.market.devig import POWER
-from football_edge.market.metrics import Interval, bootstrap_mean
+from football_edge.market.metrics import CalibrationUnfit, Interval, bootstrap_mean
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModelConfig
 from tests.model_builders import main_history
@@ -194,3 +196,31 @@ def test_w1_uses_the_phase_two_bootstrap_settings() -> None:
         0.95,
     )
     assert bootstrap_mean.__kwdefaults__ == {"resamples": 2000, "seed": 20260922, "level": 0.95}
+
+
+def _raising(error: Exception) -> Any:
+    def fit(*_a: object, **_k: object) -> Any:
+        raise error
+
+    return fit
+
+
+def test_w4_reports_only_an_unfit_calibration_as_unmeasured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tekil fit "ölçülemedi"dir, koşu sürer (R135 deseni; son inceleme M-7)."""
+    monkeypatch.setattr(model_selftest, "calibration", _raising(CalibrationUnfit("fit tekil")))
+
+    w4 = _checks(_market_table(market_right=True))["W4"]
+
+    assert (w4.passed, w4.detail) == (False, "W4 ölçülemedi: fit tekil")  # type: ignore[attr-defined]
+
+
+def test_w4_raises_a_shape_error_instead_of_reporting_it_as_unmeasured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bileşen hatası "ölçülemedi" basılırsa hata raporda kaybolur (son inceleme M-7)."""
+    monkeypatch.setattr(model_selftest, "calibration", _raising(ValueError("sayısı farklı")))
+
+    with pytest.raises(ValueError, match="sayısı farklı"):
+        _checks(_market_table(market_right=True))

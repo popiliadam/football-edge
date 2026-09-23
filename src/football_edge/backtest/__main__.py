@@ -180,7 +180,7 @@ def _locked_matches(
         with connect() as conn:
             return catalog, load_matches(conn, catalog, lock=lock)
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — koşulmadı: %s", "; ".join(error.differences))
+        refuse_on_violation(LOGGER, error, "koşulmadı")  # çıkış kodunu çağıran verir
         return None
 
 

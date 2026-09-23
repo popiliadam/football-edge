@@ -291,7 +291,8 @@ def test_an_unknown_draw_form_or_non_positive_ordered_parameters_are_refused() -
     ],
 )
 def test_an_invalid_elo_config_is_refused_by_name(field: str, value: object, message: str) -> None:
-    """NaN K ya da sıfır başlangıç sessizce NaN reyting üretirdi (DEFERRED 16k)."""
+    """NaN K ya da NaN başlangıç her reytingi sessizce NaN yapardı; negatif K öğrenmeyi tersine
+    çevirir (DEFERRED 16k). Sıfır başlangıç NaN üretmez — anlamsız olduğu için reddedilir."""
     with pytest.raises(ValueError, match=message):
         EloModelConfig(**{field: value})  # type: ignore[arg-type]
 

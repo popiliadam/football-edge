@@ -35,6 +35,7 @@ from football_edge.history.catalog import MAIN
 from football_edge.history.types import HistMatch
 from football_edge.market.metrics import (
     LOG_FLOOR,
+    CalibrationUnfit,
     Interval,
     calibration,
     interval_text,
@@ -86,7 +87,8 @@ def _w1(rows: Sequence[Row], resamples: int) -> tuple[Check, Check]:
         w4 = Check(
             "W4", False, True, f"harman kalibrasyonu b={fitted.slope:.3f} ECE={fitted.ece:.4f}"
         )
-    except ValueError as error:
+    except CalibrationUnfit as error:
+        # Yalnız ölçülemeyen fit; biçim/değer hatası yükselir (R135 deseni, `calibration_or_none`).
         w4 = Check("W4", False, False, f"W4 ölçülemedi: {error}")
     ci = interval_text(gap, digits=5, label="%95 ")
     return (
