@@ -110,12 +110,25 @@ def fold_weights(rows: Sequence[Row]) -> tuple[Weights, tuple[str, ...]]:
     return MappingProxyType(weights), tuple(fallback)
 
 
+def frozen_rows(rows: Sequence[Row]) -> list[Row]:
+    """`frozen_weights`in fit örneklemi: ana lig, bütün bileşenleri olan, yalnız E satırları."""
+    return [row for row in rows if row.kind == MAIN and complete(row) and row.zone == EVALUATION]
+
+
+def pooled_weights(rows: Sequence[Row]) -> tuple[float, ...] | None:
+    """`frozen_weights`in havuz ağırlığı; fit edilemezse None (orada `MARKET_ONLY`ye düşülür).
+
+    Havuzun kendisinin fit edilemediği `frozen_weights`in dönüşünden okunamaz: `fallback` yalnız
+    lig anahtarlarını adlandırır. Donmuş ağırlık dosyası bunu buradan sorar (son inceleme I-2)."""
+    return _fit_or_none(frozen_rows(rows))
+
+
 def frozen_weights(
     rows: Sequence[Row], targets: Sequence[tuple[str, str]]
 ) -> tuple[Weights, tuple[str, ...]]:
     """Geliştirme satırlarının BÜTÜN E'siyle fit edilmiş ağırlık, verilen (lig, sezon) için —
     holdout ve sonrası dönemi ağırlığı hiç görmez (`final_eval`)."""
-    usable = [row for row in rows if row.kind == MAIN and complete(row) and row.zone == EVALUATION]
+    usable = frozen_rows(rows)
     weights: dict[tuple[str, str], tuple[float, ...]] = {}
     fallback: list[str] = []
     pooled = _fit_or_none(usable) or MARKET_ONLY

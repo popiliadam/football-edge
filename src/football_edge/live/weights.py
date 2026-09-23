@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,12 +21,20 @@ from typing import Any
 import yaml
 
 from football_edge.backtest.walkforward import BLEND_COMPONENTS, Row
-from football_edge.backtest.wf_eval import frozen_weights
+from football_edge.backtest.wf_eval import (
+    LEAGUE_MIN_MATCHES,
+    frozen_rows,
+    frozen_weights,
+    pooled_weights,
+)
+from football_edge.model.pool import MIN_FIT_MATCHES
 
 VERSION = 1
 BLEND_WEIGHTS_PATH = Path("config/blend_weights_faz3.yaml")
 LIVE_SEASON = "live"
-# Hiçbir lig kodu değil: `frozen_weights` onu havuza düşürür — havuz ağırlığı da aynı fonksiyondan.
+# Hiçbir lig kodu değil: `frozen_weights` onu HER ZAMAN havuza düşürür (satırı yok) — havuz ağırlığı
+# da aynı fonksiyondan. `fallback`ten atılması bu yüzden bilgi kaybı değildir: havuzun kendisi fit
+# edilemezse `freeze` dosyayı hiç kurmaz (`PooledFitFailed`).
 _POOLED = "*"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DIGESTS = ("model_config_sha256", "lock_sha256", "catalog_sha256")
@@ -34,6 +43,13 @@ _TOP = frozenset({"version", *_DIGESTS, "components", "pooled", "leagues", "fall
 
 class BlendWeightsError(ValueError):
     """Harman ağırlığı dosyası okunamadı ya da eksik/fazla/geçersiz alan taşıyor."""
+
+
+class PooledFitFailed(ValueError):
+    """Havuz ağırlığı fit edilemedi: `MARKET_ONLY` dondurulmaz (son inceleme I-2).
+
+    Yazılsaydı havuza düşen her lig adsız biçimde yalnız piyasayı alırdı ve rapor onu
+    "havuz ağırlığı" diye okurdu."""
 
 
 @dataclass(frozen=True)
@@ -55,7 +71,17 @@ def freeze(
     lock_sha256: str,
     catalog_sha256: str,
 ) -> BlendWeights:
-    """Ana liglerin canlı ağırlığı; yalnız `zone == E` satırları fit'e girer (`frozen_weights`)."""
+    """Ana liglerin canlı ağırlığı; yalnız `zone == E` satırları fit'e girer (`frozen_weights`).
+
+    Havuz fit edilemezse (az E satırı ya da yakınsamama) `PooledFitFailed`: dosya kurulmaz."""
+    if pooled_weights(rows) is None:
+        count = len(frozen_rows(rows))
+        cause = (
+            f"{count} E satırı < {MIN_FIT_MATCHES}"
+            if count < MIN_FIT_MATCHES
+            else f"{count} E satırıyla yakınsamama"
+        )
+        raise PooledFitFailed(f"havuz ağırlığı fit edilemedi: {cause} — MARKET_ONLY dondurulmaz")
     found, fell = frozen_weights(rows, [(league, LIVE_SEASON) for league in (*leagues, _POOLED)])
     fallback = frozenset(entry.removesuffix(f"/{LIVE_SEASON}") for entry in fell)
     return BlendWeights(
@@ -72,6 +98,24 @@ def freeze(
             }
         ),
         fallback=tuple(sorted(fallback - {_POOLED})),
+    )
+
+
+def fallback_reasons(rows: Sequence[Row], weights: BlendWeights) -> Mapping[str, str]:
+    """Havuza düşen her ligin sebebi: az E satırı ya da kendi fitinin yakınsamaması.
+
+    `LEAGUE_MIN_MATCHES` ≥ `MIN_FIT_MATCHES` olduğundan eşiği geçen ligin fiti yalnız
+    yakınsamadığı için düşer. Dosya biçimi değişmez; sebep `freeze-weights` logundadır."""
+    counts = Counter(row.key.league for row in frozen_rows(rows))
+    return MappingProxyType(
+        {
+            league: (
+                f"{counts[league]} E satırı < {LEAGUE_MIN_MATCHES}"
+                if counts[league] < LEAGUE_MIN_MATCHES
+                else f"kendi fiti yakınsamadı ({counts[league]} E satırı)"
+            )
+            for league in weights.fallback
+        }
     )
 
 

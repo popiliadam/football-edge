@@ -31,7 +31,7 @@ from football_edge.live.store import (
     load_closing,
     load_predictions,
 )
-from football_edge.live.weights import BlendWeights, dump_blend_weights, freeze
+from football_edge.live.weights import BlendWeights, dump_blend_weights
 from football_edge.market.devig import POWER, devig
 from football_edge.market.metrics import per_match_log_loss
 from football_edge.model.pool import pool
@@ -405,7 +405,18 @@ def _real_weights(tmp_path: Path, **change: str) -> Path:
         **change,
     }
     path = tmp_path / "weights.yaml"
-    path.write_text(dump_blend_weights(freeze((), ["E0"], **digests)), encoding="utf-8")
+    # Dosya doğrudan kurulur: boş tabanla `freeze` artık havuzu dondurmayı reddeder (I-2); bu
+    # testler yalnız dosyanın özetlerini ve biçimini sınar, eskiden `freeze(())`in verdiğini.
+    weights = BlendWeights(
+        model_config_sha256=digests["model_config_sha256"],
+        lock_sha256=digests["lock_sha256"],
+        catalog_sha256=digests["catalog_sha256"],
+        components=BLEND_COMPONENTS,
+        pooled=MARKET_ONLY,
+        leagues=MappingProxyType({}),
+        fallback=("E0",),
+    )
+    path.write_text(dump_blend_weights(weights), encoding="utf-8")
     return path
 
 

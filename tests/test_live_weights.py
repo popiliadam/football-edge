@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import Any
 import pytest
 import yaml
 
+from football_edge.backtest import wf_eval
 from football_edge.backtest.model_config import MODEL_CONFIG_PATH, file_sha256, load_model_config
 from football_edge.backtest.records import MatchKey
 from football_edge.backtest.walkforward import (
@@ -28,12 +31,14 @@ from football_edge.live import __main__ as live_cli
 from football_edge.live.weights import (
     BlendWeights,
     BlendWeightsError,
+    PooledFitFailed,
     dump_blend_weights,
+    fallback_reasons,
     freeze,
     load_blend_weights,
     weights_for,
 )
-from football_edge.model.pool import MIN_FIT_MATCHES
+from football_edge.model.pool import MIN_FIT_MATCHES, NotConverged
 
 DIGESTS = {"model_config_sha256": "a" * 64, "lock_sha256": "b" * 64, "catalog_sha256": "c" * 64}
 
@@ -78,12 +83,59 @@ def test_a_league_with_enough_rows_keeps_its_own_weights_and_the_rest_pool() -> 
     assert elo > market
 
 
-def test_without_evaluation_rows_every_league_takes_the_market_alone() -> None:
-    weights = freeze(_rows("E0", 50, zone=SELECTION), ["E0", "E1"], **DIGESTS)
+def test_without_evaluation_rows_the_pooled_weights_are_refused_by_name() -> None:
+    """Son inceleme I-2: havuz fit edilemezse `MARKET_ONLY` dosyaya ağırlık diye yazılmaz —
+    havuza düşen her lig adsız biçimde yalnız piyasayı alırdı."""
+    with pytest.raises(PooledFitFailed, match="havuz"):
+        freeze(_rows("E0", 50, zone=SELECTION), ["E0", "E1"], **DIGESTS)
 
-    assert weights.pooled == MARKET_ONLY
-    assert dict(weights.leagues) == {}
-    assert weights.fallback == ("E0", "E1")
+
+def test_a_pooled_fit_that_does_not_converge_is_refused_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [*_rows("E0", LEAGUE_MIN_MATCHES, outcome=2), *_rows("E1", MIN_FIT_MATCHES)]
+
+    def fit_weights(forecasts: Sequence[Any], outcomes: Sequence[int]) -> tuple[float, ...]:
+        raise NotConverged("yakınsamadı")
+
+    monkeypatch.setattr(wf_eval, "fit_weights", fit_weights)
+
+    with pytest.raises(PooledFitFailed, match="yakınsamama"):
+        freeze(rows, ["E0", "E1"], **DIGESTS)
+
+
+def test_frozen_weights_keeps_its_market_fallback_for_the_final_evaluation() -> None:
+    """`final_eval`in yolu değişmez: havuz fit edilemezse yine `MARKET_ONLY` (raporu Plan 2)."""
+    found, fell = frozen_weights(_rows("E0", 50, zone=SELECTION), [("E0", "x")])
+
+    assert found[("E0", "x")] == MARKET_ONLY
+    assert fell == ("E0/x",)
+
+
+def test_every_fallback_league_is_named_with_its_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Havuza düşmenin iki sebebi ayrı adlandırılır: az satır ya da kendi fitinin yakınsamaması."""
+    rows = [
+        *_rows("E0", LEAGUE_MIN_MATCHES, outcome=2),
+        *_rows("E1", MIN_FIT_MATCHES),
+        *_rows("E2", LEAGUE_MIN_MATCHES + 1),
+    ]
+    real = wf_eval.fit_weights
+
+    def fit_weights(forecasts: Sequence[Any], outcomes: Sequence[int]) -> tuple[float, ...]:
+        if len(outcomes) == LEAGUE_MIN_MATCHES + 1:
+            raise NotConverged("E2 yakınsamadı")
+        return real(forecasts, outcomes)
+
+    monkeypatch.setattr(wf_eval, "fit_weights", fit_weights)
+
+    weights = freeze(rows, ["E0", "E1", "E2", "E3"], **DIGESTS)
+
+    assert weights.fallback == ("E1", "E2", "E3")
+    assert fallback_reasons(rows, weights) == {
+        "E1": f"{MIN_FIT_MATCHES} E satırı < {LEAGUE_MIN_MATCHES}",
+        "E2": f"kendi fiti yakınsamadı ({LEAGUE_MIN_MATCHES + 1} E satırı)",
+        "E3": f"0 E satırı < {LEAGUE_MIN_MATCHES}",
+    }
 
 
 @pytest.mark.leakage
@@ -184,7 +236,7 @@ class _Conn:
 
 
 def test_freeze_weights_writes_the_digests_of_the_files_it_was_given(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """CLI: anahtarsız `load_matches` (holdout döndürmez) → walk-forward DEV satırları → dosya."""
     seen: dict[str, Any] = {}
@@ -193,11 +245,14 @@ def test_freeze_weights_writes_the_digests_of_the_files_it_was_given(
         seen.update(kwargs)
         return {}
 
+    rows = [*_rows("E0", LEAGUE_MIN_MATCHES, outcome=2), *_rows("E1", MIN_FIT_MATCHES)]
     monkeypatch.setattr(live_cli, "connect", _Conn)
     monkeypatch.setattr(live_cli, "load_matches", load_matches)
+    monkeypatch.setattr(live_cli, "run_rows", lambda *_a: rows)
     out = tmp_path / "w.yaml"
 
-    assert live_cli.main(["freeze-weights", "--out", str(out)]) == 0
+    with caplog.at_level(logging.INFO):
+        assert live_cli.main(["freeze-weights", "--out", str(out)]) == 0
 
     weights = load_blend_weights(out)
     config = load_model_config(MODEL_CONFIG_PATH)
@@ -207,8 +262,24 @@ def test_freeze_weights_writes_the_digests_of_the_files_it_was_given(
         config.lock_sha256,
         config.catalog_sha256,
     )
-    assert weights.pooled == MARKET_ONLY and dict(weights.leagues) == {}
-    assert weights.fallback  # boş tabanda her ana lig havuza düşer
+    assert weights.pooled != MARKET_ONLY and set(weights.leagues) == {"E0"}
+    assert "E1" in weights.fallback
+    assert f"havuza düşen lig E1: {MIN_FIT_MATCHES} E satırı < {LEAGUE_MIN_MATCHES}" in caplog.text
+
+
+def test_freeze_weights_refuses_an_unfit_pool_by_name_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Son inceleme I-2: boş tabanda havuz fit edilemez — `MARKET_ONLY` ağırlık dosyası yazılmaz."""
+    monkeypatch.setattr(live_cli, "connect", _Conn)
+    monkeypatch.setattr(live_cli, "load_matches", lambda *_a, **_k: {})
+    out = tmp_path / "w.yaml"
+
+    code = live_cli.main(["freeze-weights", "--out", str(out)])
+
+    assert code == live_cli.EXIT_POOLED_UNFIT == 18
+    assert not out.exists()
+    assert "havuz" in caplog.text
 
 
 def test_freeze_weights_refuses_a_config_whose_digests_do_not_match(
@@ -235,7 +306,11 @@ def test_a_digit_only_digest_survives_the_round_trip_and_an_unquoted_one_is_refu
     `str()` onu sessizce kabul ederdi; yazıcı tırnaklar, okuyucu tipi de denetler."""
     digits = "1234567890" * 6 + "1234"
     weights = freeze(
-        (), ["E0"], model_config_sha256=digits, lock_sha256="b" * 64, catalog_sha256="c" * 64
+        _rows("E1", MIN_FIT_MATCHES),
+        ["E0"],
+        model_config_sha256=digits,
+        lock_sha256="b" * 64,
+        catalog_sha256="c" * 64,
     )
     path = tmp_path / "w.yaml"
     path.write_text(dump_blend_weights(weights), encoding="utf-8")
