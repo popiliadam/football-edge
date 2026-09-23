@@ -24,9 +24,10 @@ bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/
 ### 0.0 Taze oturum — başlatma
 
 **Başlatma istemi (yeni oturuma yapıştır):**
-> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.3 izlenecekleri kontrol et. Tarih 2026-10-07'den önceyse Plan 2'ye
-> başlama; bana §0.4'teki (kısa) seçenekleri sor. 2026-10-07 veya sonrasıysa §0.2'yi sırayla yürüt, sonra Plan 2'yi
-> `superpowers:writing-plans` ile yaz."
+> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.3 izlenecekleri kontrol et. Sonra §0.6'daki iş listesini (kullanıcı
+> girdisi GEREKMEYEN işler) dalga dalga yürüt — ayrık dosya kümeli işler paralel ajanlarla, her dalga bağımsız
+> inceleme ve tam kapıdan geçer. §0.7'deki kullanıcı taleplerini SORMA; kullanıcı onları toplu olarak verecek.
+> 2026-10-07 veya sonrasıysa §0.2 kontrol listesini de yürüt."
 
 **Kullanıcı kararı (2026-09-23):** §0.2'deki ön koşullar acil değil — Plan 2'nin başlangıç kontrol listesidir. Haber
 senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 2 yazılırken (en erken 2026-10-07) yapılır.
@@ -83,7 +84,7 @@ diye adlandırır (17b). 17a/17b oturum 8'de kapandı. Plan metnindeki Task 9 St
   ufukta fikstür görürse `collect snapshot` exit 19 (RUNBOOK §3.11) — `f640fa1`. İnceleme: 50 mutasyon; I-1 (süzgeç
   yönü), I-2 (kesinti tavanı delmesi), M-1 düzeltildi, kalanlar 17h/17n.
 - **Kaynak koşulları raporu** (§0.2/5). **T0c betikleri** `/private/tmp`ten kalıcı dizine kurtarıldı (§0.2/1).
-- **Kalan ara iş:** yalnız İz B (Netlify sitesi + alan adı = kullanıcı kararı). Tarihe bağlı olmayan başka iş yok.
+- **Kalan iş:** §0.6 (kullanıcısız iş listesi) ve §0.7 (toplu kullanıcı talepleri).
 
 ### 0.3 İzlenecekler
 **Milli ara (ölçüldü 2026-09-23, The Odds API ücretsiz `/events`, 0 kredi):** sonraki kulüp maçları EPL 2026-10-10,
@@ -102,13 +103,68 @@ La Liga ve Süper Lig 2026-10-09. `odds_snapshots`ta 09-20'den beri satır yok �
    ve `robots_verified_at` güncellendi; test yeni kural listesini birebir sabitler. **Sınır:** football-data verisi
    Jev'e/AI'a verilmiyor — Plan 2'de verilecekse bu kaynak yeniden değerlendirilir (sitenin niyeti açık).
 
-### 0.4 Plan 2'ye kadar ara iş seçenekleri (kullanıcıya sorulur; hiçbiri Plan 2'yi bloklamaz)
-1. **İz B** (Faz 6 iskeleti, Netlify + alan adı) — kullanıcının Netlify sitesi ve alan adı kararı gerekir.
-2. **§0.2/5 EN kaynağı kararı** (izin listesi mi, kara liste mi; ajansspor 17l) — rapor hazır, karar kullanıcıda.
-3. Hiçbiri — 2026-10-07'ye kadar yalnız izleme (§0.3).
-Oturum 8'de yapılanlar (borç temizliği, takma ad hijyeni) §0.2b'de.
+### 0.4 Plan 2'ye kadar ara iş
+Yerini §0.6 (kullanıcı girdisi gerekmeyen iş listesi) ve §0.7 (toplu kullanıcı talepleri) aldı. Oturum 8'de
+yapılanlar §0.2b'de.
+
+### 0.6 Taze oturum iş listesi — kullanıcı girdisi GEREKMEYEN işler (oturum 9 için)
+Kullanıcı kararı (2026-09-23): Netlify'a kadar yapılabilecek her şey taze oturumda bitirilir; kullanıcıdan
+istenenler (§0.7) sonra toplu verilir. Alt ajanlar Opus 5.5 high (`~/.claude/settings.json`, bellek
+`subagents-opus-high`). Her dalga: ayrık dosya kümesi → worktree başına bir ajan → entegrasyon dalı → bağımsız
+bütün-dal incelemesi (mutasyonlu) → düzeltme turu → DB bağlı 11/11 → `main` → CI.
+
+**Dalga A (paralel, dosya kümeleri ayrık):**
+1. **EN alan adı sıralaması (ops, ~dakikalar):** tek kullanımlık dal + `workflow_dispatch` ile runner'da T0c
+   `step6_gdelt_en.py`'yi `doms.most_common(40)` basacak biçimde koş (betik `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/t0c/`;
+   GDELT ücretsiz, ≥ 6 sn aralık, 429'da dur). Çıktı kaynak koşulları raporuna (§0.2/5) eklenir: izin listesiyle
+   kaç başlık kaybedilir. Kullanıcının EN kararı (§0.7/4) bu veriyle verilir. Dal sonra silinir (uzak dal: onay).
+2. **Scrapling toplayıcı adaptörü (K2, kullanıcı isteği 2026-09-23):** Scrapling'in `Fetcher`/`DynamicFetcher`ı
+   ve uyarlanabilir ayrıştırıcısı, projenin `guard_path` (robots), crawl-delay, dürüst kimlik (`football-edge/0.1`)
+   ve yönlendirme denetimi ARKASINDA; `StealthyFetcher`/parmak izi gizleme/bot doğrulaması aşma KULLANILMAZ (R77,
+   §3.2.1 — kullanıcıya açıkça söylendi; AST bekçisi `StealthyFetcher`/`stealth` importunu kırmızıya bağlar).
+   Yeni kaynaklar `sources.yaml`a `enabled: false` girer; açmak §0.7/4 kararına bağlı.
+3. **Küçük borçlar (K2):** DEFERRED 17n (bekçi test boşlukları), 17h'ye eklenen 17a bekçisi kaçışları (tablo adı
+   sabitiyle f-string, büyük harf tablo adı, `GATES_READERS` kümesi — son inceleme M-4/M-5), 16k-b (`draw` alanı
+   `ordered` biçimde isteğe bağlı; mühürlü `model_faz3.yaml` okunmaya devam eder).
+4. **Dil kalibrasyonu ön-etiketleri (Plan 2 T3 hazırlığı, ücretsiz):** `news_items`tan tohumlu 100 TR + 100 EN
+   haber; Opus ön-etiketler (spec §5.4: insan yalnız onaylar); kullanıcının onaylayacağı tek dosya (§0.7/5). Jev
+   ÇAĞRILMAZ; ham metin depoya girmez (gitignored dizin).
+
+**Dalga B (A'dan sonra; İz B — Netlify/alan adı/marka OLMADAN yapılabilen kısım):**
+5. **İz B tasarımı:** `superpowers:brainstorming` → `docs/superpowers/specs/<tarih>-faz6-iz-b-design.md`. Marka,
+   alan adı, diller, halka açık tablolar YER TUTUCU; her açık karar §0.7'ye satır olarak eklenir. Sonra
+   `writing-plans` + bağımsız plan incelemesi.
+6. **İz B yapımı (yerelde, deploy YOK):** T1 Next.js iskeleti + okuma katmanı (salt okuma görünümleri/rol ve RLS
+   migration'ı YAZILIR ama canlıya UYGULANMAZ — §0.7/3 onayı bekler; yerel Postgres kabında test), T3 sicil sayfası
+   (defterden türetilir, kapı defterle birebir uyuşmayı ölçer), T4 pSEO yapısı + `hreflang`, T5 schema.org, T6
+   18+/sorumlu bahis/KVKK/çerez metin TASLAKLARI (hukuk incelemesi §0.7/7), T7 `netlify.toml` + Actions deploy
+   adımı hazır ama bağlanmamış. T2 "value" rozeti Faz 5'e kadar yer tutucu; sitede value önerisi YOK (Faz 3 sonucu).
+
+**İsteğe bağlı (vakit kalırsa):** 7. DEFERRED 16g DC memo anahtarı tasarımı (`at`ten önceki gözlem sayısı, ucuz
+hesap). 8. Arşiv kapsamı runner ölçümü (17k, `step3_coverage.py 50 50`, ~4,7 saat, arka planda) — sonuç Plan 2'ye
+hazır olur.
+
+### 0.7 Kullanıcıdan TOPLU istenecekler (oturumda sorulmaz; kullanıcı hazır olunca birlikte)
+1. **Marka adı** (alan adı ondan türer; `football-edge` çalışma adı).
+2. **Alan adı satın alma** (ödeme kullanıcıda; kayıt yeri seçenekleri Cloudflare Registrar / Namecheap / Netlify)
+   ve **Netlify hesabı** (kullanıcı açar/giriş yapar; site, deploy, DNS'i asistan kurar — Netlify araçları bağlı).
+3. **Halka açık okuma katmanı:** siteye hangi tablolar/görünümler açılır (sicil, maç, kapanış…) — migration
+   uygulanmadan önce onay.
+4. **EN haber kaynağı politikası:** izin listesi önerisi (kaynak koşulları raporu + Dalga A/1 ölçümü + oturum 9'da
+   gelen ek kaynak araştırması); **ajansspor 17l** (`ai-input=yes` yeterli mi, yayıncıya sorulsun mu).
+5. **Dil kalibrasyonu etiket onayı** (200 haber; Dalga A/4 dosyası) — Plan 2 T3 bunu bekler.
+6. **Ücretli Jev harcamasını açan commit** (tek satırlık komut kullanıcıya verilir; auto-mode bu commit'i yapmaz)
+   ve Plan 2 maliyet ölçümü onayı.
+7. **Hukuk (yayından önce, avukatla):** Türkiye'de bahisle ilgili içerik/yönlendirme riski, KVKK metinleri,
+   football-data'dan yazılı izin (spec §10/2), başlık telifi ve yayıncı ToS'larının aracı (GDELT/Google News)
+   üzerinden bizi bağlayıp bağlamadığı (kaynak koşulları raporu §Açık sorular 2–3).
+8. **Holdout 2. açılışı için açık "evet"** (Plan 2 T11 — çok sonra, ön kayıt ve kırmızı takımdan sonra).
+9. İsteğe bağlı: Odds API planı (kredi; maçlar 10-09'da başlayınca tüketim ölçülür).
 
 ### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
+- **Model (2026-09-23, kullanıcı):** bütün alt ajanlar Opus 5.5 high — `~/.claude/settings.json`
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=claude-opus-5-5` + `effortLevel: high`. Aşağıdaki ve eski bölümlerdeki "K1 incelemeleri /
+  kırmızı takım `fable`" notları bununla geçersiz. Ajana `model` parametresi verilmez.
 - SDD betikleri ANA depo kökünden, BASE/HEAD açık SHA ile (`review-package`); worktree'ler `.worktrees/wt-faz4-*`.
 - Plan yazımı: sözleşmeli paralel yazar ajanlar + tek-ağaç bağımsız plan incelemesi (iki tur) — dört görevler arası
   kırılmayı yürütmeden önce yakaladı.
