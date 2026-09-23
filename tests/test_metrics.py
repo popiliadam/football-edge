@@ -12,6 +12,7 @@ import pytest
 from football_edge.history.types import H2H, TOTALS_25
 from football_edge.market.metrics import (
     LOG_FLOOR,
+    CalibrationUnfit,
     Interval,
     bootstrap_mean,
     brier,
@@ -223,14 +224,19 @@ def test_an_over_confident_forecast_has_slope_below_one() -> None:
 
 
 def test_calibration_refuses_forecasts_without_spread() -> None:
-    with pytest.raises(ValueError, match="tekil"):
+    with pytest.raises(CalibrationUnfit, match="tekil"):
         calibration(((0.5, 0.5),) * 4, (0, 1, 0, 1))
 
 
 def test_calibration_refuses_a_perfectly_separated_sample() -> None:
     # En olası sonuç HER maçta gerçekleşti: ML eğimi sonsuza gider, fit yakınsayamaz.
-    with pytest.raises(ValueError, match="kalibrasyon fiti"):
+    with pytest.raises(CalibrationUnfit, match="kalibrasyon fiti"):
         calibration(((0.7, 0.3), (0.3, 0.7)), (0, 1))
+
+
+def test_an_unmeasurable_calibration_is_still_a_value_error() -> None:
+    """`NotConverged` deseni: eski `except ValueError` çağıranları kırılmaz."""
+    assert issubclass(CalibrationUnfit, ValueError)
 
 
 def test_clv_is_price_times_fair_probability_minus_one() -> None:

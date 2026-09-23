@@ -38,6 +38,13 @@ class Interval:
     high: float
 
 
+class CalibrationUnfit(ValueError):
+    """Kalibrasyon fiti bu örnekte kurulamıyor (tekil, ıraksak ya da yakınsamayan): ölçülemez.
+
+    `pool.NotConverged` deseni: veri meşru biçimde dejenereyse budur; biçim/değer hatası
+    (`_checked`) çıplak `ValueError` kalır — çağıran yalnız bunu "ölçülemedi"ye çevirir."""
+
+
 @dataclass(frozen=True)
 class Calibration:
     slope: float
@@ -108,7 +115,7 @@ def rps(probs: Sequence[Sequence[float]], outcomes: Sequence[int]) -> float:
 def _logistic_fit(x: Floats, y: Floats) -> tuple[float, float]:
     """y ~ a + b·x lojistik fiti (Newton/IRLS); (a, b) döner."""
     if float(np.ptp(x)) == 0.0:
-        raise ValueError("kalibrasyon fiti tekil: bütün logit(p) değerleri aynı")
+        raise CalibrationUnfit("kalibrasyon fiti tekil: bütün logit(p) değerleri aynı")
     design = np.column_stack((np.ones_like(x), x))
     beta = np.array([0.0, 1.0])  # mükemmel kalibrasyondan başlar
     for _ in range(_IRLS_STEPS):
@@ -118,13 +125,13 @@ def _logistic_fit(x: Floats, y: Floats) -> tuple[float, float]:
         try:
             step = np.linalg.solve(hessian, design.T @ (y - mu))
         except np.linalg.LinAlgError as error:
-            raise ValueError("kalibrasyon fiti tekil (Hessian tersinmez)") from error
+            raise CalibrationUnfit("kalibrasyon fiti tekil (Hessian tersinmez)") from error
         beta = beta + step
         if not np.all(np.isfinite(beta)):
-            raise ValueError("kalibrasyon fiti ıraksadı")
+            raise CalibrationUnfit("kalibrasyon fiti ıraksadı")
         if float(np.max(np.abs(step))) < _IRLS_TOLERANCE:
             return float(beta[0]), float(beta[1])
-    raise ValueError("kalibrasyon fiti yakınsamadı (ayrışan örnek olabilir)")
+    raise CalibrationUnfit("kalibrasyon fiti yakınsamadı (ayrışan örnek olabilir)")
 
 
 def _ece(p: Floats, y: Floats, bins: int) -> float:

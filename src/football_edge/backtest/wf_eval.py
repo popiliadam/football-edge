@@ -26,6 +26,7 @@ from football_edge.backtest.walkforward import (
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.market.metrics import (
     Calibration,
+    CalibrationUnfit,
     Interval,
     bootstrap_mean,
     brier,
@@ -173,9 +174,12 @@ def bet_clv(
 
 
 def _calibration(probs: Sequence[Sequence[float]], outcomes: Sequence[int]) -> Calibration | None:
+    """Yalnız ölçülemeyen fit (`CalibrationUnfit`) None'dır; biçim/değer hatası yükselir.
+
+    Bileşen hatası "ölçülemedi" diye basılsaydı açılış kalibrasyonsuz harcanırdı (R135)."""
     try:
         return calibration(probs, outcomes)
-    except ValueError:
+    except CalibrationUnfit:
         return None
 
 
