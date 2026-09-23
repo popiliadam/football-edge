@@ -240,7 +240,8 @@ varsayılan yetki ayarı sayesinde zaten kapalıdır. 0002 fonksiyonu yeniden ta
 koşulup yeni bir `source_observations`/`match_results` kurarsa onlarda da RLS ve TRUNCATE bekçisi
 yoktur — yine 0013. Doğrulama: yeni tabloda dört indeks (`odds_snapshots_pkey`,
 `odds_snapshots_row_hash_key`, `odds_match_idx`, `odds_closing_idx`) ve `DATABASE_URL` tanımlıyken
-`uv run pytest tests/test_api_roles_lockdown_db.py -k catalog`. Prosedür yerel kapta, geri alınan tek
+`uv run pytest tests/test_api_roles_lockdown_db.py -k catalog --tb=short` (`--tb=short` bağlantı hatasında
+parolanın terminale basılmasını önler; DEFERRED 18g). Prosedür yerel kapta, geri alınan tek
 işlemde sınandı (oturum 9 Task 6 düzeltme turu 1): dört indeks ve dizi özgün adlarıyla yeniden kuruldu.
 
 Sonra çıpalar §1.4'teki prosedürle `ledger/archive/` altına **taşınır** (silinmez) ve
