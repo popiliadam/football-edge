@@ -70,12 +70,6 @@ _CLOSING = """
     WHERE o.match_id = ANY(%s) AND o.market = %s AND o.is_closing
     ORDER BY o.match_id, o.observed_at, o.bookmaker, o.outcome
 """
-_OUTCOMES = """
-    SELECT match_id, observed_at, home_score, away_score
-    FROM match_results
-    WHERE match_id = ANY(%s) AND completed
-    ORDER BY match_id, observed_at
-"""
 
 
 @dataclass(frozen=True)
@@ -156,24 +150,3 @@ def load_closing(
                 [prices[OddsKey(REFERENCE_BOOK, H2H, outcome, PRE_CLOSING)] for outcome in RESULTS]
             )
     return MappingProxyType(found)
-
-
-def load_outcomes(conn: psycopg.Connection[Any], match_ids: tuple[str, ...]) -> Mapping[str, int]:
-    """Maç → sonucun RESULTS sırası (0 ev, 1 beraberlik, 2 deplasman); skor düzeltmesi sonradan
-    gözlenir, en YENİ tamamlanmış gözlem geçerlidir."""
-    if not match_ids:
-        return MappingProxyType({})
-    with conn.cursor() as cur:
-        cur.execute(_OUTCOMES, (list(match_ids),))
-        rows = cur.fetchall()
-    latest: dict[str, tuple[datetime, int, int]] = {}
-    for row in rows:
-        match_id = str(row[0])
-        if match_id not in latest or row[1] >= latest[match_id][0]:
-            latest[match_id] = (row[1], int(row[2]), int(row[3]))
-    return MappingProxyType(
-        {
-            match_id: 0 if home > away else (1 if home == away else 2)
-            for match_id, (_, home, away) in latest.items()
-        }
-    )

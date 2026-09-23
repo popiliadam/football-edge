@@ -46,13 +46,12 @@ from football_edge.history.lock import LockViolation, load_lock
 from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
 from football_edge.live.context import LiveMatch, build_batch, live_key, naming_from, season_of
-from football_edge.live.report import build_report, render_report
+from football_edge.live.report import build_report, outcomes_of, render_report
 from football_edge.live.shadow import shadow_rows, write_shadow
 from football_edge.live.store import (
     BASE_STRATEGIES,
     load_closing,
     load_live_matches,
-    load_outcomes,
     load_predictions,
     load_quotes,
 )
@@ -301,20 +300,28 @@ def _report(args: argparse.Namespace) -> int:
     ):
         LOGGER.error("harman ağırlığı başka bir model yapılandırmasıyla dondurulmuş")
         return EXIT_CONFIG_MISMATCH
-    codes = _codes(load_catalog(args.catalog))
+    catalog = load_catalog(args.catalog)
     now = datetime.now(UTC)
-    with connect() as conn:
-        predictions = load_predictions(
-            conn, since=args.since, strategies=BASE_STRATEGIES, model_config_sha256=config_sha256
-        )
-        ids = tuple(sorted({row.match_id for row in predictions}))
-        closing = load_closing(conn, ids)
-        outcomes = load_outcomes(conn, ids)
-        fixtures = load_live_matches(conn, since=args.since, until=now)
+    try:
+        with connect() as conn:
+            # Sonuç gölge modelin kendi kaynağından: anahtarsız taban (DEV + POST, holdout yok).
+            history = load_matches(conn, catalog, lock=load_lock(args.lock))
+            predictions = load_predictions(
+                conn,
+                since=args.since,
+                strategies=BASE_STRATEGIES,
+                model_config_sha256=config_sha256,
+            )
+            closing = load_closing(conn, tuple(sorted({row.match_id for row in predictions})))
+            fixtures = load_live_matches(conn, since=args.since, until=now)
+    except LockViolation as error:
+        LOGGER.error("kilit ihlali — gölge raporu koşulmadı: %s", "; ".join(error.differences))
+        return EXIT_LOCK_VIOLATION
+    codes = _codes(catalog)
     report = build_report(
         predictions,
         closing,
-        outcomes,
+        outcomes_of(history),
         weights,
         tau=config.tau,
         method=config.method,

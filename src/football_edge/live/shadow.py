@@ -19,7 +19,7 @@ from football_edge.backtest.harness import Strategy
 from football_edge.backtest.model_config import ModelConfig
 from football_edge.backtest.walkforward import DC, ELO, MARKET
 from football_edge.history.types import H2H, PRE_CLOSING, RESULTS, OddsKey
-from football_edge.live.context import REFERENCE_BOOK, LiveBatch, LiveDecision
+from football_edge.live.context import REFERENCE_BOOK, LiveBatch, LiveDecision, match_key_text
 from football_edge.market.devig import InvalidPrices, devig
 from football_edge.model.elo_model import EloModel
 from football_edge.model.strategies import DixonColesStrategy
@@ -101,7 +101,7 @@ def shadow_rows(
         rows.extend(
             ShadowRow(
                 match_id=decision.match_id,
-                match_key=f"{key.league}|{key.date.isoformat()}|{key.home}|{key.away}",
+                match_key=match_key_text(key),
                 strategy=name,
                 probs=(probs[0], probs[1], probs[2]),
                 pre=pre,

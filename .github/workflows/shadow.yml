@@ -51,7 +51,8 @@ jobs:
           exit "$code"
       - name: Haftalık gölge raporu
         # Faz 4 T0a (16o): yalnız salı turunda, baz serisinin CLV raporu iş özetine (spec §5/5:
-        # Jev'li strateji okunmaz). Exit 11: harman ağırlığı ya da model yapılandırması uyuşmuyor.
+        # Jev'li strateji okunmaz). Sonuç football-data tabanından: exit 9 kilit ihlali, 11 harman
+        # ağırlığı ya da model yapılandırması uyuşmuyor.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -65,6 +66,7 @@ jobs:
           set -e
           case "$code" in
             0) ;;
+            9) echo "::error::live report: kilit ihlali (exit 9) — rapor yazılmadı" ;;
             11) echo "::error::live report: harman ağırlığı ya da yapılandırma uyuşmuyor (exit 11)" ;;
             *) echo "::error::live report beklenmedik kodla düştü (exit $code)" ;;
           esac

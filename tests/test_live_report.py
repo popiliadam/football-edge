@@ -6,25 +6,29 @@ from __future__ import annotations
 import ast
 import inspect
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 
+from football_edge.backtest.context import record_of
 from football_edge.backtest.model_config import MODEL_CONFIG_PATH, file_sha256, load_model_config
 from football_edge.backtest.walkforward import BLEND_COMPONENTS, DC, ELO, MARKET
 from football_edge.backtest.wf_eval import MARKET_ONLY, bet_clv
+from football_edge.history.lock import LockViolation
+from football_edge.history.types import HistMatch
 from football_edge.live import __main__ as live_cli
 from football_edge.live import report as report_module
 from football_edge.live import store as store_module
-from football_edge.live.report import build_report, render_report
+from football_edge.live.context import match_key_text
+from football_edge.live.report import build_report, outcomes_of, render_report
 from football_edge.live.store import (
     BASE_STRATEGIES,
     PredictionRow,
     load_closing,
-    load_outcomes,
     load_predictions,
 )
 from football_edge.live.weights import BlendWeights, dump_blend_weights, freeze
@@ -230,32 +234,52 @@ def test_the_closing_is_the_full_book_average_of_the_latest_round() -> None:
     assert found["m1"] == pytest.approx((2.1, 3.1, 4.2))
 
 
-def test_the_newest_completed_result_wins() -> None:
-    first, correction = DECIDED + timedelta(days=1), DECIDED + timedelta(days=2)
-    conn = _Conn(
-        [
-            # Sorgunun sırası (`ORDER BY match_id, observed_at`, eski → yeni): ilk gözlemi tutan
-            # okuyucu 2-0'ı, en yeniyi tutan düzeltmeyi (1-1) döndürür.
-            ("m1", first, 2, 0),
-            ("m1", correction, 1, 1),
-            ("m2", first, 0, 3),
-            ("m3", first, 2, 1),
-        ]
-    )
-
-    found = load_outcomes(conn, ("m1", "m2", "m3"))  # type: ignore[arg-type]
-
-    ((sql, params),) = conn.log
-    assert "AND completed" in sql and params == (["m1", "m2", "m3"],)
-    assert dict(found) == {"m1": 1, "m2": 2, "m3": 0}
-
-
-def test_no_match_ids_means_no_query() -> None:
+def test_no_match_ids_means_no_closing_query() -> None:
     conn = _Conn()
 
     assert dict(load_closing(conn, ())) == {}  # type: ignore[arg-type]
-    assert dict(load_outcomes(conn, ())) == {}  # type: ignore[arg-type]
     assert conn.log == []
+
+
+def _played(home: str, result: str, league: str = "E0") -> HistMatch:
+    goals = {"H": (2, 0), "D": (1, 1), "A": (0, 3)}[result]
+    return HistMatch(
+        league=league,
+        season="2627",
+        date=date(2026, 10, 3),
+        kickoff=None,
+        home=home,
+        away="B",
+        home_goals=goals[0],
+        away_goals=goals[1],
+        result=result,
+        odds=MappingProxyType({}),
+        stats=MappingProxyType({}),
+        source_line=1,
+    )
+
+
+def test_outcomes_come_from_the_historical_base_keyed_by_the_shadow_match_key() -> None:
+    """Sonuç kaynağı football-data tarihsel tabanıdır (gölge modelin kendi kaynağı; defterin
+    `match_results`i boş). Anahtar gölge satırının `match_key`i — maç kimliği DEĞİL — ve biçim
+    `shadow_rows`un yazdığı yardımcıdan (`match_key_text`) gelir."""
+    history = {"E0": (_played("M1", "H"), _played("M2", "D")), "SP1": (_played("M3", "A", "SP1"),)}
+
+    found = outcomes_of(history)
+
+    assert dict(found) == {
+        "E0|2026-10-03|M1|B": 0,
+        "E0|2026-10-03|M2|B": 1,
+        "SP1|2026-10-03|M3|B": 2,
+    }
+    assert set(found) == {
+        match_key_text(record_of(match).key) for matches in history.values() for match in matches
+    }
+
+
+def _key(match_id: str, league: str) -> str:
+    """Gölge satırının `match_key`i: maç başına ayrı; maç kimliği (`m1`) metinde geçmez."""
+    return f"{league}|2026-10-03|{match_id.upper()}|B"
 
 
 def _predictions(
@@ -267,7 +291,7 @@ def _predictions(
     probs = {MARKET: (0.5, 0.3, 0.2), ELO: (0.7, 0.2, 0.1), DC: (0.6, 0.25, 0.15)}
     return [
         PredictionRow(
-            match_id, f"{league}|2026-10-03|A|B", league, name, probs[name], pre, DECIDED, SHA
+            match_id, _key(match_id, league), league, name, probs[name], pre, DECIDED, SHA
         )
         for name in names
     ]
@@ -281,7 +305,7 @@ def test_the_report_blends_with_the_frozen_weights_and_counts_every_loss() -> No
         *_predictions("m4", "E0", (2.0, 3.4, 4.2)),  # kapanışı çözülemez (fiyat 1.0)
     ]
     closing = {"m1": (2.0, 3.5, 4.0), "m4": (1.0, 3.5, 4.0)}
-    outcomes = {"m1": 0, "m2": 2, "m3": 0}
+    outcomes = {_key("m1", "E0"): 0, _key("m2", "E1"): 2, _key("m3", "E0"): 0}
     fixtures = {"m1": "E0", "m2": "E1", "m3": "E0", "x9": "SP1"}
 
     report = build_report(
@@ -302,6 +326,7 @@ def test_the_report_blends_with_the_frozen_weights_and_counts_every_loss() -> No
     expected_clv = bet_clv(m1, (2.4, 3.4, 3.6), devig((2.0, 3.5, 4.0), POWER), 0.02)
     assert expected_clv is not None
     assert (report.decided, report.incomplete, report.settled, report.closed) == (4, 1, 2, 1)
+    assert report.unsettled == 1  # m4: tam ama tarihsel tabanda sonucu yok
     assert report.bad_closing == 1
     assert report.blend_log_loss is not None and report.blend_gap is not None
     assert report.blend_log_loss.estimate == pytest.approx(sum(blend_ll) / 2)
@@ -316,6 +341,27 @@ def test_the_report_blends_with_the_frozen_weights_and_counts_every_loss() -> No
         "E1": (1, 1, 1, 1, 0),
         "SP1": (1, 0, 0, 0, 0),
     }
+
+
+def test_a_result_keyed_by_match_id_is_not_a_result_and_the_gap_is_visible() -> None:
+    """`outcomes`in anahtarı `match_key`tir: maç kimliğiyle ya da başka maçın anahtarıyla gelen
+    sonuç eşleşmez; maç sonuçsuz sayılır ve raporda adıyla görünür (sessizce düşmez)."""
+    report = build_report(
+        _predictions("m1", "E0", (2.4, 3.4, 3.6)),
+        {},
+        {"m1": 0, _key("m9", "E0"): 1},
+        WEIGHTS,
+        tau=0.02,
+        method=POWER,
+        resamples=20,
+        fixtures={"m1": "E0"},
+    )
+
+    text = render_report(report, generated_at=DECIDED)
+
+    assert (report.settled, report.unsettled, report.blend_log_loss) == (0, 1, None)
+    assert report.leagues["E0"].settled == 0
+    assert "sonuçsuz 1" in text
 
 
 def test_an_empty_series_renders_as_unmeasured_not_as_zero() -> None:
@@ -333,7 +379,7 @@ def test_the_rendered_report_carries_totals_but_no_match_row() -> None:
     report = build_report(
         predictions,
         {"m1": (2.0, 3.5, 4.0)},
-        {"m1": 0},
+        {_key("m1", "E0"): 0},
         WEIGHTS,
         tau=0.02,
         method=POWER,
@@ -347,6 +393,7 @@ def test_the_rendered_report_carries_totals_but_no_match_row() -> None:
     assert f"`{WEIGHTS.model_config_sha256}`" in text
     assert "| E0 | 1 | 1 | 1 | 1 | 1 |" in text
     assert "bahis 1" in text
+    assert "sonuç: football-data tarihsel tabanı (haftalık senkron)" in text
 
 
 def _real_weights(tmp_path: Path, **change: str) -> Path:
@@ -366,15 +413,20 @@ def test_the_report_command_reads_only_the_base_series_of_the_frozen_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict[str, Any] = {}
+    history_kwargs: dict[str, Any] = {}
 
     def predictions(conn: object, **kwargs: Any) -> tuple[PredictionRow, ...]:
         seen.update(kwargs)
         return tuple(_predictions("m1", "E0", (2.4, 3.4, 3.6)))
 
+    def history(conn: object, catalog: object, **kwargs: Any) -> dict[str, tuple[HistMatch, ...]]:
+        history_kwargs.update(kwargs)
+        return {"E0": (_played("M1", "H"),)}
+
     monkeypatch.setattr(live_cli, "connect", _Conn)
     monkeypatch.setattr(live_cli, "load_predictions", predictions)
     monkeypatch.setattr(live_cli, "load_closing", lambda conn, ids: {"m1": (2.0, 3.5, 4.0)})
-    monkeypatch.setattr(live_cli, "load_outcomes", lambda conn, ids: {"m1": 0})
+    monkeypatch.setattr(live_cli, "load_matches", history)
     monkeypatch.setattr(live_cli, "load_live_matches", lambda conn, **kwargs: ())
     out = tmp_path / "rapor.md"
 
@@ -396,7 +448,26 @@ def test_the_report_command_reads_only_the_base_series_of_the_frozen_config(
         "strategies": BASE_STRATEGIES,
         "model_config_sha256": file_sha256(MODEL_CONFIG_PATH),
     }
-    assert "Karar verilen maç 1" in out.read_text(encoding="utf-8")
+    assert set(history_kwargs) == {"lock"}  # anahtarsız: holdout dönmez (R128)
+    text = out.read_text(encoding="utf-8")
+    assert "Karar verilen maç 1" in text and "sonuçlu 1" in text
+    assert "- LL harman: ölçülemedi" not in text
+
+
+def test_the_report_stops_on_a_lock_violation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def violated(conn: object, catalog: object, **kwargs: Any) -> None:
+        raise LockViolation("E0/dev: beklenen 10 satır, gerçek 9")
+
+    monkeypatch.setattr(live_cli, "connect", _Conn)
+    monkeypatch.setattr(live_cli, "load_matches", violated)
+    out = tmp_path / "rapor.md"
+
+    code = live_cli.main(["report", "--weights", str(_real_weights(tmp_path)), "--out", str(out)])
+
+    assert code == live_cli.EXIT_LOCK_VIOLATION
+    assert not out.exists()
 
 
 @pytest.mark.parametrize(
@@ -442,7 +513,7 @@ def test_a_partial_latest_closing_round_does_not_fall_back_to_an_earlier_one() -
     report = build_report(
         _predictions("m1", "E0", (2.4, 3.4, 3.6)),
         closing,
-        {"m1": 0},
+        {_key("m1", "E0"): 0},
         WEIGHTS,
         tau=0.02,
         method=POWER,
@@ -469,7 +540,7 @@ def test_a_since_with_an_offset_is_converted_not_relabelled(
     monkeypatch.setattr(live_cli, "connect", _Conn)
     monkeypatch.setattr(live_cli, "load_predictions", predictions)
     monkeypatch.setattr(live_cli, "load_closing", lambda conn, ids: {})
-    monkeypatch.setattr(live_cli, "load_outcomes", lambda conn, ids: {})
+    monkeypatch.setattr(live_cli, "load_matches", lambda conn, catalog, **kwargs: {})
     monkeypatch.setattr(live_cli, "load_live_matches", lambda conn, **kwargs: ())
     weights, out = _real_weights(tmp_path), tmp_path / "rapor.md"
 

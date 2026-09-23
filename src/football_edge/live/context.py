@@ -99,6 +99,12 @@ def canonical(naming: Naming, code: str, live_name: str) -> str | None:
     return naming.known.get(code, {}).get(normalise_team(live_name))
 
 
+def match_key_text(key: MatchKey) -> str:
+    """`model_predictions.match_key` biçimi: gölge satırı bununla yazılır, gölge raporu tarihsel
+    sonucu bununla bulur — biçim tek yerde."""
+    return f"{key.league}|{key.date.isoformat()}|{key.home}|{key.away}"
+
+
 def live_key(match: LiveMatch, naming: Naming) -> MatchKey | None:
     code = naming.codes.get(match.league_id)
     if code is None:

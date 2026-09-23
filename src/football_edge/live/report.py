@@ -1,8 +1,9 @@
 """Haftalık gölge CLV raporu (Faz 4 tasarımı §2 T0a; DEFERRED 16o, 16e).
 
 Girdi `model_predictions`in BAZ satırlarıdır (`store.BASE_STRATEGIES`); harman, donmuş ağırlıkla
-(`live/weights.py`) burada kurulur. Kapanış mühürlü defterin `is_closing` turudur, sonuç
-`match_results`in en yeni tamamlanmış gözlemi. Rapor yalnız toplu sayı basar. Jev'li stratejiyle
+(`live/weights.py`) burada kurulur. Kapanış mühürlü defterin `is_closing` turudur; sonuç
+football-data tarihsel tabanından (`outcomes_of`, anahtar `match_key`) — defterin `match_results`i
+dolmaz. Rapor yalnız toplu sayı basar. Jev'li stratejiyle
 fark bu modülde HESAPLANMAZ (spec §5/5): mühür testi `tests/test_live_report.py`de.
 Veritabanına dokunmaz — okuyucular `live/store.py`de.
 """
@@ -15,9 +16,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 
+from football_edge.backtest.context import record_of
 from football_edge.backtest.walkforward import BLEND_COMPONENTS, MARKET
 from football_edge.backtest.wf_eval import bet_clv
 from football_edge.backtest.wf_run import format_interval
+from football_edge.history.types import RESULTS, HistMatch
+from football_edge.live.context import match_key_text
 from football_edge.live.store import BASE_STRATEGIES, PredictionRow
 from football_edge.live.weights import BlendWeights, weights_for
 from football_edge.market.devig import InvalidPrices, devig
@@ -42,6 +46,7 @@ class ShadowReport:
     decided: int  # gölge satırı olan maç
     incomplete: int  # bileşeni eksik: harmana girmez
     settled: int  # tam ve sonuçlu
+    unsettled: int  # tam ama tarihsel tabanda sonucu yok (henüz oynanmadı/senkronlanmadı, ad farkı)
     closed: int  # tam ve kapanışı çözülen
     bad_closing: int  # kapanış fiyatı var ama vig'i temizlenemedi (16i, sessiz değil)
     blend_log_loss: Interval | None
@@ -56,6 +61,7 @@ class ShadowReport:
 
 @dataclass(frozen=True)
 class _Match:
+    match_key: str
     league: str
     components: Mapping[str, tuple[float, float, float]]
     pre: tuple[float, float, float]
@@ -70,12 +76,27 @@ def _matches(predictions: Sequence[PredictionRow]) -> dict[str, _Match]:
         grouped.setdefault(row.match_id, []).append(row)
     return {
         match_id: _Match(
+            match_key=rows[0].match_key,
             league=rows[0].league,
             components=MappingProxyType({row.strategy: row.probs for row in rows}),
             pre=rows[0].pre,
         )
         for match_id, rows in grouped.items()
     }
+
+
+def outcomes_of(history: Mapping[str, Sequence[HistMatch]]) -> Mapping[str, int]:
+    """Gölge satırının `match_key`i → sonucun RESULTS sırası (0 ev, 1 beraberlik, 2 deplasman).
+    Kaynak football-data tarihsel tabanıdır — gölge modelin kendi sonuç kaynağı (anahtarsız
+    `load_matches`: DEV + POST, holdout yok). Anahtar maç kimliği DEĞİL, `match_key_text`."""
+    return MappingProxyType(
+        {
+            match_key_text(record_of(match).key): RESULTS.index(match.result)
+            for matches in history.values()
+            for match in matches
+            if match.result in RESULTS
+        }
+    )
 
 
 def _interval(values: Sequence[float], resamples: int) -> Interval | None:
@@ -86,7 +107,7 @@ def _coverage(
     fixtures: Mapping[str, str],
     matches: Mapping[str, _Match],
     blends: Mapping[str, tuple[float, ...]],
-    outcomes: Mapping[str, int],
+    settled: frozenset[str],
     closings: Mapping[str, tuple[float, ...]],
 ) -> Mapping[str, LeagueCoverage]:
     leagues: dict[str, list[str]] = {}
@@ -98,7 +119,7 @@ def _coverage(
                 fixtures=len(ids),
                 decided=sum(1 for i in ids if i in matches),
                 complete=sum(1 for i in ids if i in blends),
-                settled=sum(1 for i in ids if i in blends and i in outcomes),
+                settled=sum(1 for i in ids if i in settled),
                 closed=sum(1 for i in ids if i in blends and i in closings),
             )
             for league, ids in sorted(leagues.items())
@@ -118,7 +139,9 @@ def build_report(
     fixtures: Mapping[str, str] = MappingProxyType({}),
 ) -> ShadowReport:
     """Harman = donmuş ağırlıkla havuz; LL ve ΔLL tam + sonuçlu maçlarda, bahis CLV'si tam +
-    kapanışlı maçlarda (§6.4 kuralı, `wf_eval.bet_clv`). `fixtures`: maç → lig kodu (16e)."""
+    kapanışlı maçlarda (§6.4 kuralı, `wf_eval.bet_clv`). `closing` ve `fixtures` maç kimliğiyle
+    (`fixtures`: maç → lig kodu, 16e), `outcomes` ise gölge satırının `match_key`iyle anahtarlıdır
+    (`outcomes_of`): maç kimliğiyle verilen sonuç eşleşmez, maç sonuçsuz sayılır."""
     matches = _matches(predictions)
     blends = {
         match_id: pool(
@@ -133,8 +156,8 @@ def build_report(
         if match_id in closing:
             with contextlib.suppress(InvalidPrices):
                 closings[match_id] = devig(closing[match_id], method)
-    settled = sorted(match_id for match_id in blends if match_id in outcomes)
-    results = [outcomes[match_id] for match_id in settled]
+    settled = sorted(match_id for match_id in blends if matches[match_id].match_key in outcomes)
+    results = [outcomes[matches[match_id].match_key] for match_id in settled]
     blend_ll = per_match_log_loss([blends[i] for i in settled], results) if settled else ()
     market_ll = (
         per_match_log_loss([matches[i].components[MARKET] for i in settled], results)
@@ -152,6 +175,7 @@ def build_report(
         decided=len(matches),
         incomplete=len(matches) - len(blends),
         settled=len(settled),
+        unsettled=len(blends) - len(settled),
         closed=len(closings),
         bad_closing=sum(1 for match_id in blends if match_id in closing) - len(closings),
         blend_log_loss=_interval(blend_ll, resamples),
@@ -163,7 +187,7 @@ def build_report(
         fallback=tuple(
             sorted({matches[i].league for i in blends if matches[i].league not in weights.leagues})
         ),
-        leagues=_coverage(fixtures, matches, blends, outcomes, closings),
+        leagues=_coverage(fixtures, matches, blends, frozenset(settled), closings),
     )
 
 
@@ -177,10 +201,12 @@ def render_report(report: ShadowReport, *, generated_at: datetime) -> str:
             f"Üretim: {generated_at.isoformat()} · `model_config_sha256` "
             f"`{report.model_config_sha256}` · harman donmuş ağırlıkla "
             "(`config/blend_weights_faz3.yaml`). Yalnız baz serisi okundu "
-            f"({', '.join(sorted(BASE_STRATEGIES))}).",
+            f"({', '.join(sorted(BASE_STRATEGIES))}). "
+            "Kapanış: mühürlü defter; sonuç: football-data tarihsel tabanı (haftalık senkron).",
             "",
             f"Karar verilen maç {report.decided} · bileşeni eksik {report.incomplete} · "
-            f"sonuçlu {report.settled} · kapanışlı {report.closed} · "
+            f"sonuçlu {report.settled} · sonuçsuz {report.unsettled} · "
+            f"kapanışlı {report.closed} · "
             f"vig'i temizlenemeyen kapanış {report.bad_closing}",
             f"Havuz ağırlığıyla harmanlanan ligler: {fallback}",
             "",

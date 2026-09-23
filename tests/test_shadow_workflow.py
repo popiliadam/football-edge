@@ -82,7 +82,9 @@ def _run_report(
     return result, calls.read_text(encoding="utf-8").splitlines()
 
 
-@pytest.mark.parametrize(("code", "named"), [(0, ""), (11, "ağırlığı"), (3, "beklenmedik")])
+@pytest.mark.parametrize(
+    ("code", "named"), [(0, ""), (9, "kilit"), (11, "ağırlığı"), (3, "beklenmedik")]
+)
 def test_the_tuesday_report_goes_to_the_step_summary_and_names_every_exit_code(
     tmp_path: Path, code: int, named: str
 ) -> None:
