@@ -19,6 +19,7 @@ from football_edge import collect
 from football_edge.calibration import CalibrationReport
 from football_edge.jev import ChoiceAnswer
 from tests.fake_jev import FakeJev
+from tests.fake_spend_db import FakeSpendConn
 
 
 def _explode(*_a: object, **_k: object) -> object:
@@ -118,7 +119,10 @@ def test_calibrate_command_writes_a_report_and_prints_the_verdict(
         encoding="utf-8",
     )
     fake = FakeJev(ChoiceAnswer(choice="relevant", confidence=0.9, probabilities={}))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setattr(collect, "TypeSafeJev", lambda: fake)
+    # Tek bağlantı harcama defteridir (son inceleme I-1); sınaması `test_jev_spend_paths.py`de.
+    monkeypatch.setattr(collect, "connect", FakeSpendConn)
 
     code = collect._calibrate_command("tr", calibration_dir=tmp_path)
 
@@ -148,18 +152,19 @@ def test_calibrate_command_refuses_a_missing_label_file_without_constructing_jev
 
 
 def test_calibrate_command_requires_typesafe_api_key_when_labels_exist(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Anahtarsız SESSİZCE geçmez: `TypeSafeJev()` adıyla patlar — canlı çağrı asla
-    denenmez, kurulum hatası hemen görünür olur (map-entities'le AYNI desen)."""
+    """Anahtarsız SESSİZCE geçmez: adıyla `EXIT_NO_JEV_KEY` (son inceleme I-1; önceden çıplak
+    RuntimeError) — canlı çağrı asla denenmez, veritabanına da bağlanılmaz."""
     (tmp_path / "tr.jsonl").write_text(
         '{"title":"a","url":"u","language":"tr","team":"Galatasaray","relevant":true}\n',
         encoding="utf-8",
     )
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr(collect, "connect", _explode)
 
-    with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY"):
-        collect._calibrate_command("tr", calibration_dir=tmp_path)
+    assert collect._calibrate_command("tr", calibration_dir=tmp_path) == collect.EXIT_NO_JEV_KEY
+    assert "TYPESAFE_API_KEY" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

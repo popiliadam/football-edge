@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -24,12 +25,28 @@ def _explode(*_a: object, **_k: object) -> object:
     raise AssertionError("bu kolaborasyon ÇAĞRILMAMALIYDI")
 
 
+class _Exploding:
+    """Jev yerine: sorulursa test kırmızı — boş turda tek kuruş harcanmaz."""
+
+    def ask_choice(self, *_a: object, **_k: object) -> object:
+        return _explode()
+
+    def ask_battery(self, *_a: object, **_k: object) -> object:
+        return _explode()
+
+
+# Komut istemciyi yalnız `resolve_source_aliases`e geçirir; o da bu testlerde taklittir.
+_CLIENT: Any = object()
+
+
 @dataclass
 class _NullConn:
     """`connect()`in yerini tutar; hiçbir yolda gerçekten sorgulanmaz (her kolaborasyon
-    monkeypatch'li), yalnız `with connect() as conn:` biçiminin çalışması için var."""
+    monkeypatch'li), yalnız `with connect() as conn:` biçiminin çalışması için var. Harcama
+    bağlantısı da budur (`autocommit`); boş turda defter hiç sorulmaz."""
 
     closed: bool = field(default=False)
+    autocommit: bool = field(default=False)
 
     def __enter__(self) -> _NullConn:
         return self
@@ -58,7 +75,7 @@ def test_map_entities_command_reports_written_and_unresolved_counts(
         ),
     )
 
-    code = collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+    code = collect._map_entities_command(object(), _CLIENT, "footystats", "tur.1", NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -87,21 +104,21 @@ def test_map_entities_command_passes_source_league_and_canonical_through(
 
     monkeypatch.setattr(collect, "resolve_source_aliases", fake_resolve_source_aliases)
 
-    collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+    collect._map_entities_command(object(), _CLIENT, "footystats", "tur.1", NOW)
 
     assert seen == [("footystats", "tur.1", ("Galatasaray",), NOW)]
 
 
-def test_map_entities_command_stops_before_constructing_jev_when_no_canonical_teams(
+def test_map_entities_command_stops_before_asking_jev_when_no_canonical_teams(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Kanonik liste boşsa (bu lig `matches`te hiç yok) Jev KURULMAZ, `resolve_source_
-    aliases` hiç ÇAĞRILMAZ — boş bir turda bile `TYPESAFE_API_KEY` istemek gereksizdir."""
+    """Kanonik liste boşsa (bu lig `matches`te hiç yok) Jev'e SORULMAZ, `resolve_source_
+    aliases` hiç ÇAĞRILMAZ. Anahtar ise artık veritabanından ÖNCE istenir (son inceleme I-1:
+    `features tier1` deseni) — o sınama `test_jev_spend_paths.py`de."""
     monkeypatch.setattr(collect, "canonical_team_names", lambda conn, league: ())
-    monkeypatch.setattr(collect, "TypeSafeJev", _explode)
     monkeypatch.setattr(collect, "resolve_source_aliases", _explode)
 
-    code = collect._map_entities_command(object(), "footystats", "tur.9", NOW)
+    code = collect._map_entities_command(object(), _Exploding(), "footystats", "tur.9", NOW)
 
     out = capsys.readouterr().out
     assert code == 0
@@ -116,24 +133,26 @@ def test_map_entities_command_reports_no_observations_when_nothing_matched_the_l
     monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setattr(collect, "resolve_source_aliases", lambda *a, **k: None)
 
-    code = collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+    code = collect._map_entities_command(object(), _CLIENT, "footystats", "tur.1", NOW)
 
     out = capsys.readouterr().out
     assert code == 0
     assert "footystats/tur.1 için gözlem yok" in out
 
 
-def test_map_entities_command_requires_typesafe_api_key(
-    monkeypatch: pytest.MonkeyPatch,
+def test_map_entities_requires_typesafe_api_key(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Anahtarsız SESSİZCE geçmez: `TypeSafeJev()` adıyla patlar (brief'in prerequisite-gap
-    talimatı) — canlı bir çağrı asla denenmez, kurulum hatası hemen görünür olur."""
-    monkeypatch.setattr(collect, "canonical_team_names", lambda conn, league: ("Galatasaray",))
+    """Anahtarsız SESSİZCE geçmez: adıyla `EXIT_NO_JEV_KEY` (son inceleme I-1; önceden çıplak
+    RuntimeError) — canlı bir çağrı asla denenmez, kurulum hatası hemen görünür olur."""
+    monkeypatch.setattr(collect, "canonical_team_names", _explode)
     monkeypatch.setattr(collect, "resolve_source_aliases", _explode)
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
 
-    with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY"):
-        collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+    code = collect._map_entities_main("footystats", "tur.1", NOW)
+
+    assert code == collect.EXIT_NO_JEV_KEY
+    assert "TYPESAFE_API_KEY" in capsys.readouterr().out
 
 
 def test_map_entities_command_reports_a_contract_violation_instead_of_a_bare_traceback(
@@ -156,7 +175,7 @@ def test_map_entities_command_reports_a_contract_violation_instead_of_a_bare_tra
 
     monkeypatch.setattr(collect, "resolve_source_aliases", boom)
 
-    code = collect._map_entities_command(object(), "footystats", "tur.1", NOW)
+    code = collect._map_entities_command(object(), _CLIENT, "footystats", "tur.1", NOW)
 
     out = capsys.readouterr().out
     assert code == collect.EXIT_SOURCE_FAILED
@@ -181,6 +200,7 @@ def test_main_rejects_map_entities_without_a_league(capsys: pytest.CaptureFixtur
 def test_main_routes_map_entities_end_to_end(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setattr(collect, "connect", lambda: _NullConn())
     monkeypatch.setattr(collect, "canonical_team_names", lambda conn, league: ())
 
@@ -195,6 +215,7 @@ def test_main_routes_map_entities_with_explicit_source(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seen: list[str] = []
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setattr(collect, "connect", lambda: _NullConn())
 
     def fake_canonical(conn: object, league: str) -> tuple[str, ...]:

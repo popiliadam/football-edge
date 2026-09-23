@@ -23,7 +23,15 @@ from football_edge.anchors import (
 )
 from football_edge.calibration import language_config_violations, run_calibration
 from football_edge.db import chain_head, connect
-from football_edge.jev import TypeSafeJev
+from football_edge.jev import EXIT_NO_JEV_KEY, JevClient, MissingJevKey, TypeSafeJev
+from football_edge.jev_budget import (
+    ESTIMATE_USD_UNMEASURED,
+    EXIT_BUDGET,
+    MONTHLY_CAP_USD,
+    BudgetedJev,
+    BudgetExceeded,
+    PostgresSpendLedger,
+)
 from football_edge.leagues import active_leagues, load_leagues
 from football_edge.ledger import (
     ChainResult,
@@ -358,15 +366,43 @@ def _exit_code(result: CollectResult) -> int:
 DEFAULT_MAPPING_SOURCE = "footystats"
 
 
+def _budgeted(jev: JevClient, spend_conn: psycopg.Connection[Any]) -> JevClient:
+    """`features tier1` ile AYNI tavan (spec §9, R159): her çağrı `jev_spend`e ayrı, autocommit
+    bağlantıda yazılır — komutun işlemi geri alınsa da faturalanan çağrının kaydı kalır."""
+    spend_conn.autocommit = True
+    return BudgetedJev(
+        jev,
+        PostgresSpendLedger(spend_conn),
+        cap_usd=MONTHLY_CAP_USD,
+        estimate_usd=ESTIMATE_USD_UNMEASURED,
+        clock=lambda: datetime.now(UTC),
+    )
+
+
+def _map_entities_main(source_id: str, league_id: str, now: datetime) -> int:
+    """Anahtar veritabanından ÖNCE sorulur: anahtarsız komut bağlanmadan adıyla çıkar (tier1)."""
+    try:
+        jev = TypeSafeJev()
+    except MissingJevKey as error:
+        sys.stdout.write(f"map-entities koşulmadı: {error}\n")
+        return EXIT_NO_JEV_KEY
+    with connect() as conn, connect() as spend_conn:
+        return _map_entities_command(conn, _budgeted(jev, spend_conn), source_id, league_id, now)
+
+
 def _map_entities_command(
-    conn: psycopg.Connection[Any], source_id: str, league_id: str, now: datetime
+    conn: psycopg.Connection[Any],
+    client: JevClient,
+    source_id: str,
+    league_id: str,
+    now: datetime,
 ) -> int:
     """Bir kaynağın bir ligdeki takım takma adlarını kanonik (The Odds API) ada eşler.
 
     Gerçek iş `mapping.resolve_source_aliases`de (KOD aday çıkarır, JEV seçer — spec
     §5.3): eşik altı/'hiçbiri' eşleşme YAZILMAZ ama HER İKİSİ de burada adıyla
     raporlanır — atlanan bir eşleşme, farklı kılıktaki sessiz join hatasıdır. Bu
-    fonksiyon yalnız CLI camı: kanonik listeyi sorar, Jev istemcisini kurar, raporlar.
+    fonksiyon yalnız CLI camı: kanonik listeyi sorar, (tavanlı) Jev'e sordurur, raporlar.
 
     Lig PARAMETREDİR, taranmaz: aynı ad farklı ligde farklı kulüp olabilir
     (`mapping.resolve` docstring'i) — komut bunu OPERATÖRDEN ister, tahmin etmez.
@@ -375,16 +411,19 @@ def _map_entities_command(
     if not canonical:
         sys.stdout.write(f"map-entities: {league_id} için matches tablosunda takım yok\n")
         return 0
-    client = TypeSafeJev()
     try:
         report: MappingReport | None = resolve_source_aliases(
             conn, client, source_id, league_id, canonical, now
         )
+    except BudgetExceeded as exc:
+        # `BudgetExceeded` bir RuntimeError'dır: aşağıdaki koldan ÖNCE yakalanmazsa tavan
+        # "kaynak arızası" diye okunurdu. Eşleşme yazılmaz; faturalanan çağrılar defterde.
+        sys.stdout.write(f"map-entities: {source_id}/{league_id} durdu — {exc}\n")
+        return EXIT_BUDGET
     except RuntimeError as exc:
         # Kardeşleriyle AYNI şekil: adıyla stdout satırı + EXIT_SOURCE_FAILED — çıplak
-        # traceback değil (review, Minor #3 promoted). `TypeSafeJev()`in KENDİ
-        # RuntimeError'ı (anahtar eksik) buraya GİRMEZ: try bloğu yalnız `resolve_
-        # source_aliases`i sarıyor, o kurulum hatası hâlâ adıyla, yukarıda, patlıyor.
+        # traceback değil (review, Minor #3 promoted). Anahtar eksikliği buraya GİRMEZ:
+        # `_map_entities_main` onu veritabanından önce EXIT_NO_JEV_KEY'e çevirir.
         sys.stdout.write(f"map-entities: {source_id}/{league_id} eşlenemedi — {exc}\n")
         return EXIT_SOURCE_FAILED
     if report is None:
@@ -416,13 +455,25 @@ def _check_languages_command(*, languages_path: Path = LANGUAGES_PATH) -> int:
 def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR) -> int:
     """Jev'i ELLE etiketlenmiş kümede koşturur; AĞA ÇIKAR, PARA HARCAR, kapı ÇAĞIRMAZ (R4).
 
-    Etiket yoksa Jev hiç KURULMAZ; anahtarsız `TypeSafeJev()` çıplak patlar (map-entities gibi).
+    Etiket yoksa Jev hiç KURULMAZ, veritabanına da bağlanılmaz. Anahtar yoksa bağlanmadan
+    `EXIT_NO_JEV_KEY`. Her çağrı tavandan geçer ve `jev_spend`e yazılır: bağlantı YALNIZ bu
+    defter içindir; tavan dolarsa rapor yazılmaz, `EXIT_BUDGET`.
     """
     labels_path = calibration_dir / f"{language}.jsonl"
     if not labels_path.is_file():
         sys.stdout.write(f"calibrate: {labels_path} yok — önce elle etiketlenmeli\n")
         return EXIT_LANGUAGE_UNCALIBRATED
-    path, reason = run_calibration(language, calibration_dir, TypeSafeJev())
+    try:
+        jev = TypeSafeJev()
+    except MissingJevKey as error:
+        sys.stdout.write(f"calibrate koşulmadı: {error}\n")
+        return EXIT_NO_JEV_KEY
+    try:
+        with connect() as spend_conn:
+            path, reason = run_calibration(language, calibration_dir, _budgeted(jev, spend_conn))
+    except BudgetExceeded as error:
+        sys.stdout.write(f"calibrate: {language} durdu, rapor yazılmadı — {error}\n")
+        return EXIT_BUDGET
     sys.stdout.write(f"calibrate: {reason}\n")
     sys.stdout.write(f"rapor yazıldı: {path}\n")
     return 0
@@ -534,6 +585,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # `connect()` AÇILMADAN ÖNCE: veritabanına DOKUNMAZ — DATABASE_URL yokken de kırılmaz.
     # `check-languages`/`calibrate` de BURADA dallanır (Ruling R4), aynı gerekçeyle.
+    # `calibrate` ve `map-entities` Jev anahtarını bağlanmadan sorar; bağlandıklarında harcama
+    # defteri için ayrı bir bağlantı açarlar (son inceleme I-1).
     if args.command == "sources-audit":
         return _sources_audit_command(today=now.date())
     if args.command == "check-languages":
@@ -542,18 +595,18 @@ def main(argv: list[str] | None = None) -> int:
         if not args.language:
             parser.error("calibrate için --language zorunlu")
         return _calibrate_command(args.language)
-    if args.command == "map-entities" and not args.league:
-        parser.error(
-            "map-entities için --league zorunlu (aynı ad farklı ligde farklı kulüp olabilir)"
-        )
+    if args.command == "map-entities":
+        if not args.league:
+            parser.error(
+                "map-entities için --league zorunlu (aynı ad farklı ligde farklı kulüp olabilir)"
+            )
+        return _map_entities_main(args.source, args.league, now)
 
     with connect() as conn:
         if args.command == "verify-chain":
             return _verify_chain_command(conn, full=args.full)
         if args.command == "publish-head":
             return _publish_head_command(conn, now)
-        if args.command == "map-entities":
-            return _map_entities_command(conn, args.source, args.league, now)
         if args.command in (
             "fetch-footystats",
             "fetch-tff",
