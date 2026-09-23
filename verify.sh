@@ -30,8 +30,11 @@ step "pytest"      uv run pytest -q
 # boşaltılması kasıtlıdır — import'un src/'den değil kurulumdan geldiğini kanıtlar.
 # Kırmızı verirse onarım `uv sync --reinstall-package football-edge`; kapı gevşetilmez.
 # Faz 3: scipy'ın derlenmiş optimizer'ı da yüklenebilmeli (Dixon-Coles, havuz, seçim).
+# Oturum 9 Task 3: Scrapling adaptörü (`football_edge.scrape`) `scrape` ekstrasına bağlı; kapı
+# ekstrayla koşar (CI: `uv sync --frozen --extra scrape`, yerelde bir kez aynısı). Ekstra yoksa
+# bu adım adıyla kırmızı verir — `uv run` ekstrayı kaldırmaz, düz `uv sync` kaldırır.
 step "paket-kurulu" env PYTHONPATH= uv run python -c \
-  "import football_edge, scipy.optimize, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
+  "import football_edge, football_edge.scrape, scipy.optimize, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
 
 # Kaynak politikası ÇEVRİMDIŞI sorulur: ağ yok, secret yok, her push'ta koşar. Canlı sapmayı
 # sources-audit.yml günde bir ölçer. Robots'u ölçmeden "izinli" demek, spec §3.2'yi prose'a
