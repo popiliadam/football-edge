@@ -136,3 +136,15 @@ Takma adlar (`config/history_aliases.yaml`, 38 çift) TAHMİN edilmedi: her canl
 dosyasında, aynı ev/deplasman konumundaki TEK football-data satırından okundu (öteki taraf zaten eşlenmiş ya da
 günün eşlenmemiş tek satırı). ned.1 ve bel.1'in canlı maçı bu pencerede yoktu (milli ara) — onların `Date`
 eşleşmesi ilk maç haftasından sonra ölçülür; AUT kapalı (§3/38 AUT için açık).
+
+## Task 13 — açılış öncesi (2026-09-23)
+
+| Ölçüm | Sonuç |
+|---|---|
+| Dalga 5 birleşmiş `main` | `leakage` 336 (değişmedi); 1790 passed / 3 skipped; taze klon yeşil |
+| `model-selftest` yerel (anahtarsız) | exit 0 · 86 sn · tepe RSS ~833 MB |
+| `history.yml` elle (run 35837046245, runner) | yeşil; iş ~7,5 dk. W1 GEÇTİ ΔLL 0,00025 [0,00002, 0,00050] ≤ 0,001 (n = 45.510) · W2 GEÇTİ fit Elo − iskele −0,01622 [−0,01899, −0,01342] · W3 GEÇTİ DC 1,02268 < S oranları 1,07719 · W4 b = 1,012, ECE = 0,0026 — yerel koşuyla aynı sayılar |
+| Ön kayıt (`c129cc3`) | model yapılandırması `26b81642…`, kilit `39967912…`, katalog `6b513c87…`; C1–C6, τ = 0,02, duyarlılık {0, 0,05}, B = 2.000 |
+| Prova (`final-eval --rehearse`) | exit 0 · 77 sn · tepe RSS ~877 MB · "holdout AÇILMADI"; sahte holdout 2024/25 (12.252 satır); C1 ΔLL −0,0001 [−0,0008, 0,0006]; Placebo CLV −0,0749; C6 boş (beklenen, plan "ölçmedikleri" 27) |
+| `holdout_access_log` prova sonrası | 0 |
+| Kırmızı takım (`docs/reports/2026-09-23-faz3-sizinti-denetimi.md`) | 33 deney; sızıntı kanıtlanamadı; 5 Minor (B1–B5), Critical/Important yok |
