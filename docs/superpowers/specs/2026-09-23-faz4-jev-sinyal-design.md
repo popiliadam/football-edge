@@ -26,6 +26,7 @@ ana tasarım `2026-09-19-football-edge-design.md` §4, §5, §6.2, §9 · yol ha
 | R168 | Jev özellikleri **harman çıkışında logit kaydırma** `p_jev ∝ p_harman · exp(β·f)`; `f = 0 ⇒ p_jev = p_harman` | Piyasa zaten harmanda; eşleştirme maç başına kesin; gölge serisi bölünmez | Harman içindeki ağırlıkla etkileşim modellenmez |
 | R169 | Budama: genişleyen katlarda marjinal ΔLL, **BH q = 0,10**, **≤ 15** özellik, **\|ρ\| > 0,8** çiftten biri atılır | Spec §5.2 sayısal disiplin | Eşikler keyfî başlangıç; ön kayda girer |
 | R170 | **Kapı ölçüsü D1 (eşleştirilmiş ΔLL)**, CLV (D3) ikincil — spec §9'un "marjinal CLV" ifadesinden bilinçli sapma | Faz 3 holdout'u sezonda 54 bahis üretti; CLV GA'sı her gerçekçi etkiyi içerir | Kâr ölçülmez (zaten ölçülmüyordu) |
+| R172 | **Bizim saatimiz `first_seen_at`:** `news_items` her haberin ilk görüldüğü anı veritabanı saatiyle tutar; canlı `available_at = max(first_seen_at, published_at_claimed)`; `sync-news` `collect-news` iş akışında toplamanın hemen ardından koşar | `source_observations.observed_at` ajansspor için YAYINCININ iddiasıdır, toplama saati değil (`collectors/news.py` `news_observation`, R23) — plan yazımında bulundu (2026-09-23) | 2026-09-04'ten beri biriken haberler ilk senkron anından itibaren "mevcut" sayılır (tutucu) |
 | R171 | Canlı pencerede **uzatma yok:** ≥ 1.800 haberli maç **ya da** 2027-03-31, hangisi önce; ulaşılmazsa "güç yetersiz" | İsteğe bağlı durdurma canlı p-hacking'dir | Güç yetersiz sonuç |
 
 ---
@@ -85,10 +86,12 @@ onayı · ücretli harcamayı açan commit (kullanıcı koşar) · T11 açılı�
 1. **Lisans ve robots:** GDELT ve CC-NEWS (ve spike'ın bulduğu başka açık arşiv). Kaynak politikası spec §3.2 ve
    §3.2.1 aynen: ham içerik yeniden yayınlanmaz, yalnız sayısal özellik türetilir. TR + EN kapsamı, lig × sezon
    dağılımı (E bölgesi 2019/20–2024/25 ve holdout 2025/26).
-2. **Yayın zamanının güvenilirliği:** 2026-09-04'ten beri `ajansspor` haberleri kendi `observed_at`imizle
-   gözlendi. Arşivde aynı haberlerin (URL / başlık eşleşmesi) zaman damgası ile farkının dağılımı ölçülür:
-   medyan, p95, p99, arşivin bizden **önce** damgaladığı pay. Güvenlik payı = ölçülen **p99** (yukarı yuvarlanır);
-   ön kayda girer.
+2. **Yayın zamanının güvenilirliği:** `source_observations.observed_at` yayıncının iddiasıdır (R172), bizim
+   saatimiz değil. Bu yüzden iki ölçüm: (a) T0c'de arşiv damgası ↔ yayıncı iddiası uyumu (aynı haber, URL /
+   başlık eşleşmesi; medyan, p95, p99, eşleşmeyen pay) — iki iddianın tutarlılığı; (b) Task 9 birleştikten sonra
+   canlıda yayıncı iddiası ↔ `first_seen_at` farkı (bizim saatimiz; toplama aralığı 2 saat olduğu için yukarı
+   yanlı = tutucu), en az 2 hafta birikim. Güvenlik payı = max((a)'nın p99'u, (b)'nin p99'u), bir üst tam saate
+   yuvarlanır; Plan 2'de ölçülür ve ön kayda girer.
 3. **Haber gövdesi:** `ajansspor` makale sayfaları robots'a göre okunabilir mi. Okunamıyorsa sinyal başlık
    düzeyinde kalır (§11).
 4. **EN canlı kaynak adayları:** robots, ToS, RSS/sitemap, lig kapsamı. Bir tanesi seçilir (T2).
@@ -106,13 +109,14 @@ sorgusuyla; append-only tablolara deneme satırı yazılmaz.
 
 | Tablo | Bir satır | Tekil anahtar |
 |---|---|---|
-| `news_items` | kaynak, `lang`, başlık, gövde (nullable), URL, `published_at_claimed` (nullable), `available_at`, `availability_basis` ∈ {`observed`, `archive_claimed`}, `content_hash` | `(source_id, content_hash)` |
+| `news_items` | kaynak, `lang`, başlık, gövde (nullable), URL, `published_at_claimed` (nullable), `first_seen_at`, `available_at`, `availability_basis` ∈ {`observed`, `archive_claimed`}, `content_hash` | `(source_id, content_hash)` |
 | `jev_item_answers` | kademe 1: haber × T1 sorusu; `match_id` (nullable), taraf, küme kimliği, olasılıklar, `confidence`, `prompt_version`, `jev_model`, `asked_at`, `cost_usd` | `(item_id, prompt_version, question_id)` |
 | `jev_match_answers` | kademe 2: maç × `decided_at` × soru; `item_set_hash`, olasılıklar, `confidence`, `prompt_version`, `jev_model`, `asked_at`, `cost_usd`; kanarya satırları `variant` ∈ {`real`, `blank`, `shuffled`} | `(match_id, decided_at, prompt_version, question_id, variant)` |
 | `jev_spend` | her çağrı: zaman, maliyet, çağrı türü | `id` |
 | `model_predictions` (var) | `harman_jev` yeni bir `strategy`, kendi `model_config_sha256`ı (`model_faz4.yaml`) | mevcut |
 
-- **Canlı haber:** `available_at = observed_at`. **Arşiv haberi:** `available_at = published_at_claimed + güvenlik
+- **Canlı haber:** `available_at = max(first_seen_at, published_at_claimed)`; `first_seen_at` veritabanı saatidir
+  (R172). **Arşiv haberi:** `available_at = published_at_claimed + güvenlik
   payı` (§3/2). `source_observations` değişmez; `news_items` canlı toplayıcılardan da beslenir (tek okuma yolu).
 - Soru metinleri ve `question_id`ler `config/jev_questions.yaml`da, sürümlü; `prompt_version` dosyanın sha256'sı.
 
@@ -240,6 +244,9 @@ okumaması · harcama tavanı · `0012` append-only tetikleyicileri (DB bağlıy
 9. Kapı kâr ölçmez; D3'ün gücü düşüktür.
 10. Kalibrasyon 100 örnekle; insan etiketi tek kişiden.
 11. Faz 3 §3.1–§3.3'ün geçerli maddeleri aynen sürer.
+12. `first_seen_at` toplama aralığı kadar (≤ 2 saat + iş akışı süresi) geç damgalar: haber bizden erken yayındaydı;
+    yön tutucudur (özellik geç görür), bedeli kaçan sinyaldir ve ölçülmez.
+13. 2026-09-04 → Task 9 senkronu arasındaki haberlerin gerçek toplama anı bilinmez; ilk senkron anı kullanılır.
 
 ---
 
