@@ -3,6 +3,7 @@ SENTETİK (tests/model_builders.py) — canlı taraf aynı maçları defter biç
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
@@ -26,8 +27,8 @@ from football_edge.live.context import (
     naming_from,
 )
 from football_edge.live.report import outcomes_of
-from football_edge.live.shadow import ShadowRow, shadow_rows, write_shadow
-from football_edge.market.devig import POWER, devig
+from football_edge.live.shadow import ShadowRow, rejected_prices, shadow_rows, write_shadow
+from football_edge.market.devig import METHODS, POWER, devig
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModel, EloModelConfig
 from tests.model_builders import season
@@ -43,13 +44,18 @@ NAMING = naming_from({"E0": HISTORY}, {"t.1": "E0"}, MappingProxyType({}))
 CONFIG = ModelConfig("x", "c", "l", POWER, EloModelConfig(), DCConfig(min_matches=40), 7, 0.02, ())
 SHA256 = "e" * 64
 GIT = "f" * 40
+# Σ 1/o ≈ 0,889 < 1: negatif marjlı kitabı hiçbir yöntem temizlemez (16i).
+REJECTED = (3.0, 3.6, 3.6)
 
 
 def _slot_matches(week_day: datetime) -> list[int]:
     return [index for index, m in enumerate(GROUP) if m.date == week_day.date()]
 
 
-def _batch(indexes: list[int]) -> Any:
+def _batch(
+    indexes: list[int], prices: Mapping[int, tuple[float, ...]] = MappingProxyType({})
+) -> Any:
+    """`prices`: maç sırası → karar anı fiyatının yerine geçen 1X2 (yoksa tabanın `Avg`'i)."""
     live = [
         LiveMatch(f"id-{i}", "t.1", GROUP[i].kickoff, GROUP[i].home, GROUP[i].away) for i in indexes
     ]  # type: ignore[arg-type]
@@ -59,7 +65,9 @@ def _batch(indexes: list[int]) -> Any:
         Quote(m.match_id, decided - timedelta(hours=4), "b1", "h2h", name, price)
         for m, i in zip(live, indexes, strict=True)
         for name, price in zip(
-            (m.home, "Draw", m.away), GROUP[i].prices("Avg", H2H, PRE_CLOSING) or (), strict=True
+            (m.home, "Draw", m.away),
+            prices.get(i, GROUP[i].prices("Avg", H2H, PRE_CLOSING) or ()),
+            strict=True,
         )
     ]
     return build_batch(
@@ -88,6 +96,29 @@ def test_each_decided_match_gets_market_elo_and_dixon_coles_rows() -> None:
     for row in rows:
         assert sum(row.probs) == pytest.approx(1.0)
         assert (row.model_config_sha256, row.git_sha) == (SHA256, GIT)
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_a_rejected_decision_price_writes_no_market_row_and_is_counted(method: str) -> None:
+    """17g: karar anı fiyatını devig reddederse piyasa satırı yazılmaz — ama red SAYILIR (sessiz
+    değil); Elo ve DC satırları yine yazılır, öteki maçlar etkilenmez."""
+    indexes = _slot_matches(datetime(2026, 10, 3))
+    batch = _batch(indexes, MappingProxyType({indexes[0]: REJECTED}))
+    config = replace(CONFIG, method=method)
+
+    rows = shadow_rows(
+        batch, config=config, rating_groups=GROUPS, config_sha256=SHA256, git_sha=GIT
+    )
+
+    assert rejected_prices(batch, method) == 1
+    assert {(row.match_id, row.strategy) for row in rows} == {
+        (f"id-{i}", name) for i in indexes for name in (DC, ELO, MARKET)
+    } - {(f"id-{indexes[0]}", MARKET)}
+    assert {row.pre for row in rows if row.match_id == f"id-{indexes[0]}"} == {REJECTED}
+
+
+def test_a_clean_batch_counts_no_rejected_price() -> None:
+    assert rejected_prices(_batch(_slot_matches(datetime(2026, 10, 3))), POWER) == 0
 
 
 @pytest.mark.leakage
