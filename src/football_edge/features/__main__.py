@@ -18,9 +18,6 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
-
-import psycopg
 
 from football_edge.collect import EXIT_SOURCE_FAILED, configure_logging
 from football_edge.collector import ContractViolation
@@ -38,13 +35,11 @@ from football_edge.features.tier1 import (
     run_tier1,
     write_item_answers,
 )
-from football_edge.jev import EXIT_NO_JEV_KEY, JevClient, MissingJevKey, TypeSafeJev
+from football_edge.jev import EXIT_NO_JEV_KEY, MissingJevKey, TypeSafeJev
 from football_edge.jev_budget import (
-    ESTIMATE_USD_UNMEASURED,
     EXIT_BUDGET,
     MONTHLY_CAP_USD,
-    BudgetedJev,
-    PostgresSpendLedger,
+    budgeted_jev,
 )
 
 LOGGER = logging.getLogger("football_edge.features")
@@ -82,16 +77,6 @@ def _sync_news(args: argparse.Namespace) -> int:
     return 0
 
 
-def _budgeted(jev: JevClient, spend_conn: psycopg.Connection[Any]) -> JevClient:
-    return BudgetedJev(
-        jev,
-        PostgresSpendLedger(spend_conn),
-        cap_usd=MONTHLY_CAP_USD,
-        estimate_usd=ESTIMATE_USD_UNMEASURED,
-        clock=_now,
-    )
-
-
 def _report(run: Tier1Run, items: int, written: int, marked: int) -> None:
     LOGGER.info("jev: soru %d · başarısız %d", run.asked, run.failed)
     LOGGER.info(
@@ -117,7 +102,6 @@ def _tier1(args: argparse.Namespace) -> int:
     # Varsayılan pencere: adayı hâlâ başlamamış olabilecek haberler (fikstür ufku kadar geri).
     since = args.since or now - HORIZON
     with connect() as conn, connect() as spend_conn:
-        spend_conn.autocommit = True
         window = load_news(conn, since=since - CLUSTER_WINDOW)
         ids = [item.item_id for item in window if item.item_id is not None]
         asked = asked_item_ids(conn, questions.prompt_version, ids)
@@ -125,7 +109,7 @@ def _tier1(args: argparse.Namespace) -> int:
         items = tuple(n for n in window if n.item_id not in asked and n.available_at >= since)
         run = run_tier1(
             items,
-            _budgeted(jev, spend_conn),
+            budgeted_jev(jev, spend_conn, clock=_now),
             questions,
             # Başlamış maç için sorulan cevap hiçbir karara yetişmez; yalnız gelecek fikstürler.
             fixtures=load_fixtures(conn, since=now, until=now + HORIZON),

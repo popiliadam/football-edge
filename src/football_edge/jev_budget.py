@@ -248,3 +248,18 @@ class BudgetedJev:
             output_tokens=answer.output_tokens,
         )
         return answer
+
+
+def budgeted_jev(
+    jev: JevClient, spend_conn: psycopg.Connection[Any], *, clock: Callable[[], datetime]
+) -> BudgetedJev:
+    """Her Jev çağrı yolunun ortak tavanı (spec §9, R159): her çağrı `jev_spend`e AYRI,
+    autocommit bağlantıda yazılır — komutun işlemi geri alınsa da ödenen çağrı kayıtlı kalır."""
+    spend_conn.autocommit = True
+    return BudgetedJev(
+        jev,
+        PostgresSpendLedger(spend_conn),
+        cap_usd=MONTHLY_CAP_USD,
+        estimate_usd=ESTIMATE_USD_UNMEASURED,
+        clock=clock,
+    )

@@ -535,13 +535,13 @@ def test_load_fixtures_returns_live_matches_in_the_window() -> None:
 def _cli(monkeypatch: pytest.MonkeyPatch, db: FakeNewsDb, client: Any) -> list[Any]:
     budgeted: list[Any] = []
 
-    def _budgeted(jev: Any, spend_conn: Any) -> Any:
-        budgeted.append(spend_conn.autocommit)
+    def _budgeted(jev: Any, spend_conn: Any, *, clock: Any) -> Any:
+        budgeted.append(clock())
         return jev
 
     monkeypatch.setattr(cli, "connect", lambda: db)
     monkeypatch.setattr(cli, "TypeSafeJev", lambda: client)
-    monkeypatch.setattr(cli, "_budgeted", _budgeted)
+    monkeypatch.setattr(cli, "budgeted_jev", _budgeted)
     monkeypatch.setattr(cli, "_now", lambda: T0 + timedelta(hours=1))
     return budgeted
 
@@ -557,7 +557,8 @@ def test_tier1_command_asks_unasked_news_writes_and_reports(
         code = cli.main(["tier1"])
 
     assert code == 0
-    assert budgeted == [True], "harcama defteri autocommit bağlantıda olmalı"
+    # Defterin autocommit'i `budgeted_jev`in kendi testinde; burada: tek sarmalayıcı, komutun saati.
+    assert budgeted == [T0 + timedelta(hours=1)], "Jev tavan sarmalayıcısından geçmeli"
     assert {a["item_id"] for a in db.answers} == {1, 2}
     assert db.commits == 1
     assert "jev: soru 4 · başarısız 0" in caplog.text

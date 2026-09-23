@@ -26,6 +26,7 @@ from tests.fake_spend_db import FakeSpendConn
 SRC = Path(__file__).resolve().parent.parent / "src" / "football_edge"
 # Sarmalayıcının kendisi ve sarılan istemci: kural bu ikisinin DIŞINDAKİ her modüle uygulanır.
 EXEMPT = frozenset({SRC / "jev.py", SRC / "jev_budget.py"})
+BUDGET_MODULE = SRC / "jev_budget.py"
 LABELS = "".join(
     f'{{"title":"{title}","url":"u{n}","language":"tr","team":"Galatasaray","relevant":true}}\n'
     for n, title in enumerate(("a", "b"))
@@ -238,7 +239,11 @@ def _call_sites() -> Iterator[tuple[str, bool]]:
         if path in EXEMPT:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        parents, wrappers = _parents(tree), _wrappers(tree)
+        parents = _parents(tree)
+        # Bütçe modülünün kendi sarmalayıcıları (`budgeted_jev`) import edilip çağrılır; o modülün
+        # SARMAYAN fonksiyonları tanınmaz — `_wrappers` yalnız `BudgetedJev(ilk_param, …)` kuranları
+        # sayar.
+        wrappers = _wrappers(tree) | _wrappers(ast.parse(BUDGET_MODULE.read_text(encoding="utf-8")))
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Name | ast.Attribute) and _name(node) == "TypeSafeJev"):
                 continue
