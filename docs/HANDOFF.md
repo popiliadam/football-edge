@@ -25,10 +25,94 @@ koşulları: **`docs/phases/03-baz-model/HANDOFF.md`**. Kısaca:
 - Ertelenenler DEFERRED §16 (16a–16c **bir sonraki açılıştan ÖNCE**). Defter (gitignored)
   `.superpowers/sdd/2026-09-23-faz3-model-walkforward/`.
 
-**Sıradaki oturum — FAZ 4 TASARIMI:** gölge CLV raporu (P25, DEFERRED 16o) ilk görev; dil kalibrasyonu + Jev.
-Önce `superpowers:brainstorming` (kullanıcıyla), plan onayından önce kod yok.
+### 0.1 Sıradaki oturum — FAZ 4 TASARIMI (taze oturum)
 
-**İzlenecekler (Faz 3'ün ekledikleri)**
+**Başlatma istemi (yeni oturuma yapıştır):**
+> "`docs/HANDOFF.md` §0'dan devam et. Faz 4 tasarımını `superpowers:brainstorming` ile benimle başlat;
+> §0.3'teki açık kararları bana sor. Kod yazma; tasarım onayından sonra `superpowers:writing-plans`."
+
+**Okuma sırası (bu sırayla, başka bir şey okumadan):**
+1. Bu bölüm (§0.1–§0.5).
+2. `docs/phases/03-baz-model/HANDOFF.md` — Faz 3'ün sonucu, §3 ölçülmeyenler (özellikle §3.3), §6 Faz 4 ön koşulları.
+3. `docs/DEFERRED.md` §16 (Faz 3), §15 (İz A), §14 (Faz 2).
+4. Ana tasarım `docs/superpowers/specs/2026-09-19-football-edge-design.md` §4 (model), **§5 (Jev / soru bataryası /
+   boru hattı rolleri / çok dillilik)**, §6.2 (holdout politikası), §9 (fazlar: Faz 4 = "Jev sinyal katmanı + özellik
+   deposu + budama", kapı "baz çizgiye karşı marjinal CLV").
+5. Yol haritası `docs/superpowers/plans/2026-09-21-yol-haritasi-v2-paralel-izler.md` §2 (Faz 4 dalgaları: T1 Jev
+   istemcisi · T7 özellik deposu → T2–T5 soru bataryaları · T6 boru hattı rolleri → T8 budama · T9 eşdoğrusallık),
+   §3 (K1/K2/K3 kademeleri), §4 (paralellik), §5 (insan kararları).
+6. Faz 3 tasarımı `docs/superpowers/specs/2026-09-23-faz3-model-walkforward-design.md` — yalnız Faz 4'ün tüketeceği
+   arayüzler: §5 (walk-forward bölgeleri S/E), §7 (canlı bağlam, E1–E3), §8 (ön kayıt ve tek açılış), §10 (gölge).
+
+**Faz 3'ün Faz 4'e bıraktığı baz çizgi (karşılaştırılacak sayılar):**
+- Holdout (2025/26, tek açılış): C1 ΔLL harman − piyasa 0,0001 [−0,0005, 0,0007]; LL piyasa 1,0026 · DC 1,0241 ·
+  fit Elo 1,0254; harman bahis CLV −0,0497 (54 bahis); Placebo CLV −0,0868. E bölgesi (2019/20–2024/25): ΔLL 0,0002
+  [0,0000, 0,0005]. **Sonuç: dil sinyali olmayan model piyasayı yenmiyor; model payı piyasadan ~0,022 LL geride.**
+- Donmuş model `config/model_faz3.yaml` (sha256 `26b81642…`); harman ağırlıkları `backtest/wf_eval.frozen_weights`.
+
+### 0.2 Faz 4'ün önündeki gerçek (2026-09-23 ölçüldü — tasarımın ilk sorusu)
+
+1. **Dil sinyalinin tarihi YOK.** Walk-forward'un gücü 13 sezonluk fiyat tarihinden geliyordu; haber için böyle bir
+   arşiv yok. `source_observations`: haber yalnız `ajansspor` (TR), **1.243 kayıt, 2026-09-04'ten beri**; başka dil
+   yok. Faz 4'ün kapısı "baz çizgiye karşı marjinal CLV" ise örneklem yalnız CANLI birikimden gelir (gölge sicili +
+   haber). Tasarım bunu çözmek zorunda: (a) geriye dönük haber arşivi kaynağı (lisans + robots, spec §3.2) var mı;
+   (b) yoksa ölçüm yalnız ileriye dönük gölge üzerinde mi — o zaman ne kadar hafta gerekir (güç hesabı);
+   (c) holdout politikası (§6.2) canlı-yalnız bir sinyal için nasıl uygulanır.
+2. **Jev hiç çağrılmadı.** `.env`de `TYPESAFE_API_KEY` yok. `src/football_edge/jev.py` bir `JevClient` protokolü ve
+   `TypeSafeJev` sarmalayıcısı taşır (Faz 1, varlık eşlemesi için; testler protokolü taklit eder). `typesafe-sdk`
+   bağımlılığı `pyproject.toml`da. **Ön koşul (insan): API anahtarı.**
+3. **Dil kalibrasyonu yapılmadı.** `config/languages.yaml`: `tr` ve `en` `production_enabled: false`;
+   `data/calibration/tr.jsonl` yalnız 10 BİÇİM örneği (gerçek etiket değil). Spec §5.4: dil başına ~100 insan etiketli
+   haber; ölçülmeden hiçbir dil üretime alınmaz (kapının `dil-kalibrasyonu` adımı zorlar). Yol haritası önerisi:
+   Opus ön-etiketler, insan onaylar, ölçüm insan etiketine karşı.
+4. **Gölge sicili yeni başladı:** `model_predictions` boş; ilk karar günlü tur 2026-09-26 cuma 12:35 UTC. Faz 3
+   HANDOFF §3.3/8: eşlenemeyen tek canlı ad o ülke grubunu 10 gün bayat yapar (takma ad hijyeni şart).
+5. **Maliyet tavanı:** Odds API bütçesi 500/ay (8 aktif lig, beklenen ≈455/ay, İz A R125); Jev ~$0,0004/maç (spec §5.1,
+   ölçülmedi); ~35 soru × maç × lig. Haber toplama ücretsiz kaynaklarla (spec §3.2).
+
+### 0.3 Kullanıcıya sorulacak açık kararlar (brainstorming'de)
+
+1. Faz 4'ün değerlendirme stratejisi: geriye dönük haber arşivi mi aranacak, yoksa yalnız ileriye dönük gölge
+   birikimi mi (kaç hafta, hangi güçte)? Bu karar fazın takvimini belirler.
+2. `TYPESAFE_API_KEY` ne zaman verilecek; aylık Jev harcama tavanı.
+3. Dil kalibrasyonu: hangi diller (TR + EN? 8 aktif ligin dilleri: EN, ES, IT, DE, FR, TR, NL)? Etiket yükü
+   (dil başına ~100) kimde; Opus ön-etiket + insan onayı kabul mü?
+4. Faz 4'ün ilk görevi gölge CLV raporu mu (P25, DEFERRED 16o), yoksa Faz 4'ten önce ayrı bir iş olarak mı?
+5. Izgara ucu (DEFERRED 16n): Faz 4'te baz model yeniden seçilecekse ızgara genişletilsin mi?
+6. Bir sonraki holdout: Faz 3 holdout'u (2025/26) harcandı; R128'e göre Faz 5 açılışından sonra durum verisi olur.
+   Faz 4'ün kendi holdout'u ne (2026/27'nin bir dilimi mi)? Ön kayıt DEFERRED 16c'ye göre raporun bastığını birebir
+   listelemeli.
+7. Paralel iz: İz B (Netlify + alan adı — kullanıcıdan hâlâ bekleniyor) Faz 4'le paralel başlasın mı?
+
+### 0.4 Bir sonraki holdout açılışından ÖNCE düzeltilecekler (Faz 4 planına girmeli)
+
+DEFERRED **16a** (açılış sonrası arıza yolları: `--out` yoklaması, `fit_weights` yakınsamama), **16b** (ön kayıt
+kanonik yol), **16c** (ön kayıt ↔ rapor: eşleştirilmiş ΔLL + `incomplete`/`fallback`), **16d** (faz parametresi).
+Bunlar plansız kalırsa bir sonraki tek açılış riske girer.
+
+### 0.5 Çalışma disiplini (bu projede kanıtlanmış; taze oturum bunları bilmez)
+
+- **Süreç:** tasarım → kullanıcı onayı → plan (`writing-plans`; planın kodu plan metninden tek ağaca kurulup kapıdan
+  geçirilir) → bağımsız plan incelemesi → `subagent-driven-development`. Faz 3 bu düzende 1 günde bitti.
+- **Kapı:** `TMPDIR=$(mktemp -d) ./verify.sh > <log> 2>&1`, sonuç LOG DOSYASINDAN; 10 PASS + `SKIP: zincir` adıyla
+  (DB bağlıyken 11/11). Her commit'ten sonra tam kapı; `main`e `--no-ff`; push öncesi `git fetch && git merge --no-ff
+  origin/main`; taze klon kapısı; CI yeşil. Force/rebase yok (bot çıpaları).
+- **Worktree:** `git worktree add .worktrees/wt-<görev> -b feat/<faz>-<görev> main` (Agent'ın `isolation: worktree`ü
+  bu makinede çalışmıyor). Dalga başına ≤ 4 paralel implementer, ayrık dosya kümeleri.
+- **SDD betikleri** (`review-package`, `task-brief`) ANA depo kökünden koşulur (worktree'den koşulursa paketi
+  worktree'nin `.superpowers/`una yazar).
+- **Her dispatch'e:** "HİÇBİR ŞEY SİLME", ayrı scratch alt dizini, rapor dosyası + kısa son mesaj, holdout'u AÇMA,
+  DB/.env yok (gerekmedikçe). Model parametresi verilmez (opus miras); K1 incelemeleri ve kırmızı takım `fable`.
+- **İnceleme kalıbı:** inceleyici görev kodunun planla bayt eşliğini mekanik doğrular ve mutasyon tablosunu `git archive`
+  kopyasında BAĞIMSIZ koşar; kendi mutasyonlarını da dener — Faz 3'te üç Important (R153–R155) böyle bulundu.
+- **Ölçüm önce:** gerçek veri kararları (kadans, süre, yineleme) ölçülür, ölçüm belgesine komutuyla yazılır.
+- **Takma adlar TAHMİN edilmez:** aynı gün, aynı lig, aynı ev/deplasman konumundaki tek satırdan okunur.
+- **Migration'lar** Supabase `apply_migration` (proje `aaxadphezxavohkhqdrf`), doğrulama yalnız okuma sorgusuyla;
+  append-only tablolara deneme satırı yazılmaz.
+- **Temizlik:** Faz 3'ün worktree ve dalları 2026-09-23'te silindi (kullanıcı onayı); SDD defterleri
+  (`.superpowers/sdd/*`, gitignored) korunur — kararların tam kaydı oradadır.
+
+### 0.6 İzlenecekler (Faz 3'ün ekledikleri)
 1. **2026-09-26 cuma 12:35 UTC** ilk karar günlü gölge turu: `gölge: karar N · yazılan satır M · eşlenemeyen U ·
    bayat durum B`; `U > 0` ise adlar aynı gün/lig/konum kuralıyla `config/history_aliases.yaml`a (yoksa grup 10 gün
    bayat). ned.1/bel.1'in ilk canlı maçlarından sonra `live parity` (E3) yeniden.
@@ -118,12 +202,13 @@ kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
 6. **İz A sonrası:** ~~06:22 snapshot 8 anahtar~~ (09-23 yeşil); N1/B1 maçlı ilk mühür turu yeşil ve maçı mühürlüyor
    (milli ara sonrası ilk hafta); 10:40 yerel footystats turu 8 lig ok (bel.1 satır sayısı — DEFERRED 15d).
 
-**Kullanıcıdan beklenenler**
+**Kullanıcıdan beklenenler** (2026-09-23 güncel)
 1. Depoyu GitHub'da **Watch** etmek (alarm e-postaları) — ölçülemedi (`gh` token'ında `notifications` yok).
 2. DEFERRED 10t kararı (yerel işi yetkisiz ayrı macOS kullanıcısında koşturmak) — şimdilik kabul.
 3. İz B için Netlify sitesi ve alan adı.
-4. ~~Faz 2 Task 12'de lig önerisi~~ — **verildi:** N1, B1, AUT.
-5. ~~Faz 2 worktree'lerini ve dallarını silme onayı~~ — **yapıldı 2026-09-23** (DEFERRED 14t; SDD defterleri korundu).
+4. **Faz 4 için `TYPESAFE_API_KEY`** ve dil kalibrasyon etiketleri (dil başına ~100; §0.3/2–3).
+5. ~~Faz 2 Task 12'de lig önerisi~~ — verildi (N1, B1, AUT). ~~Worktree/dal silme onayları~~ — Faz 2 ve Faz 3 için yapıldı.
+6. ~~Faz 3 holdout açılışı~~ — **2026-09-23 onaylandı ve yapıldı** (tek açılış).
 
 ---
 

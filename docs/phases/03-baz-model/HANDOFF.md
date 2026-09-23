@@ -156,3 +156,7 @@ sözü (C2/C5 eşleştirilmiş). Gölge CLV raporu (P25) Faz 4'ün ilk görevi.
 - **R128:** holdout (2025/26) Faz 5 açılışından sonra durum verisi olur; bir sonraki fazın holdout'u ayrıca tasarlanır.
 - **Bir sonraki açılıştan önce:** DEFERRED §16'nın "açılış öncesi" satırları, `preregistration.PHASE` parametreleşir
   (M5), ön kayıt tam olarak raporun bastığını listeler.
+- **Dil sinyalinin tarihi yok (2026-09-23 ölçüldü):** haber yalnız `ajansspor` (TR), 1.243 kayıt, 2026-09-04'ten
+  beri; `TYPESAFE_API_KEY` yok; `config/languages.yaml` bütün diller `production_enabled: false`. Faz 4'ün "marjinal
+  CLV" kapısının örneklemi canlı birikimden mi, geriye dönük bir haber arşivinden mi gelecek — Faz 4 tasarımının
+  ilk kararı (`docs/HANDOFF.md` §0.2–§0.3).
