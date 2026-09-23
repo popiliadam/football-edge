@@ -99,6 +99,26 @@ def fetch_odds(
     if commence_time_to is not None:
         params["commenceTimeTo"] = commence_time_to
 
-    response = client.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=30.0)
-    response.raise_for_status()
+    response = _get(client, f"/sports/{sport_key}/odds", params)
     return flatten_odds(response.json()), read_quota(response.headers)
+
+
+def fetch_event_times(
+    client: httpx.Client, api_key: str, sport_key: str, *, commence_time_to: str
+) -> tuple[str, ...]:
+    """Ufuktaki fikstürlerin başlama saatleri — ÜCRETSİZ `/events` ucundan.
+
+    Boş tur bekçisinin sorusu: `/odds` hem milli arada hem sessiz bir arızada boş döner;
+    ufukta fikstür olup olmadığını bu uç söyler. Kredi yemez (ölçüldü: `x-requests-last: 0`)
+    ve o yüzden `Quota` DÖNDÜRMEZ: kredi muhasebesi yalnız ücretli `/odds` çağrısından okunur.
+    """
+    params = {"apiKey": api_key, "dateFormat": "iso", "commenceTimeTo": commence_time_to}
+    response = _get(client, f"/sports/{sport_key}/events", params)
+    return tuple(str(event["commence_time"]) for event in response.json())
+
+
+def _get(client: httpx.Client, path: str, params: Mapping[str, str]) -> httpx.Response:
+    """İki ucun ortak isteği: aynı zaman aşımı, HTTP hatası aynı yoldan fırlar."""
+    response = client.get(f"{BASE_URL}{path}", params=dict(params), timeout=30.0)
+    response.raise_for_status()
+    return response
