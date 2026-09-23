@@ -65,6 +65,16 @@ class EloModelConfig:
             raise ValueError(
                 f"sıralı lojit s ve c pozitif olmalı: {self.ordered_scale}, {self.ordered_cut}"
             )
+        # K = 0 reytingi dondurur (meşru uç: ortalamaya dönüş tek başına ölçülür); negatif K
+        # öğrenmeyi tersine çevirir, NaN her reytingi NaN yapar.
+        if not (math.isfinite(self.k) and self.k >= 0.0):
+            raise ValueError(f"K sonlu ve ≥ 0 olmalı: {self.k}")
+        if not math.isfinite(self.home_advantage):
+            raise ValueError(f"ev avantajı sonlu olmalı: {self.home_advantage}")
+        if not (math.isfinite(self.initial) and self.initial > 0.0):
+            raise ValueError(f"başlangıç reytingi pozitif ve sonlu olmalı: {self.initial}")
+        if type(self.season_gap_days) is not int or self.season_gap_days < 1:
+            raise ValueError(f"sezon arası ≥ 1 tam gün olmalı: {self.season_gap_days!r}")
 
 
 def margin_multiplier(home_goals: int, away_goals: int, form: str) -> float:

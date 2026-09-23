@@ -98,3 +98,10 @@ def test_non_finite_probabilities_are_refused(
 ) -> None:
     with pytest.raises(ValueError, match="sonlu olmayan"):
         shift(probs, beta, f)
+
+
+@pytest.mark.parametrize("probs", [(0.5, 0.5), (0.2, 0.3, 0.3, 0.2)])
+def test_a_probability_vector_that_is_not_three_way_is_refused(probs: tuple[float, ...]) -> None:
+    """`β·f = 0` kısa yolu girdiyi aynen döndürürdü: 2'li vektör 1X2 diye geçerdi (DEFERRED 17m)."""
+    with pytest.raises(ValueError, match="üç olasılık"):
+        shift(probs, [], [])  # type: ignore[arg-type]

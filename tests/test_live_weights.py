@@ -194,6 +194,7 @@ def _payload() -> dict[str, Any]:
         (lambda p: p.pop("fallback"), "üst alanlar"),
         (lambda p: p.update(extra=1), "üst alanlar"),
         (lambda p: p.update(version=2), "sürüm"),
+        (lambda p: p.update(version=True), "sürüm"),
         (lambda p: p.update(components=[MARKET, DC, ELO]), "bileşenler"),
         (lambda p: p.update(pooled=[1.0, 0.0]), "pooled"),
         (lambda p: p.update(pooled=[1.0, -0.1, 0.0]), "≥ 0"),

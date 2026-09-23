@@ -13,6 +13,8 @@ from collections.abc import Sequence
 def shift(
     probs: tuple[float, float, float], beta: Sequence[float], f: Sequence[float]
 ) -> tuple[float, float, float]:
+    if len(probs) != 3:
+        raise ValueError(f"üç olasılık (ev, beraberlik, deplasman) olmalı: {probs}")
     if len(beta) != len(f):
         raise ValueError(f"β ({len(beta)}) ve f ({len(f)}) aynı uzunlukta olmalı")
     if not all(math.isfinite(value) for value in (*probs, *beta, *f)):

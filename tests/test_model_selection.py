@@ -180,13 +180,22 @@ def test_the_model_config_round_trips(tmp_path: Path) -> None:
     "corrupt",
     [
         lambda text: text.replace("version: 1", "version: 2"),
+        lambda text: text.replace("version: 1", "version: true"),
         lambda text: text.replace("method: power", "method: guess"),
         lambda text: text.replace("  k: 25.0\n", ""),
         lambda text: text.replace("margin: linear", "margin: square"),
         lambda text: text + "extra: 1\n",
         lambda text: "[",
     ],
-    ids=["version", "method", "missing-field", "invalid-value", "extra-field", "broken-yaml"],
+    ids=[
+        "version",
+        "version-bool",
+        "method",
+        "missing-field",
+        "invalid-value",
+        "extra-field",
+        "broken-yaml",
+    ],
 )
 def test_a_bad_model_config_is_refused(tmp_path: Path, corrupt: object) -> None:
     _files(tmp_path)
