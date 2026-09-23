@@ -7,19 +7,31 @@
   Yoksa ADIYLA atlanır (`zincir` adımı gibi). 0013 uygulanmamış bir veritabanında KIRMIZIDIR.
 - KUM HAVUZU testleri `SANDBOX_DATABASE_URL` varsa BOŞ bir Supabase kabında (supabase/postgres 17.6)
   0001–0013'ü TEK işlemde uygular, davranışı sınar ve işlemi GERİ ALIR. Hedefte `odds_snapshots`
-  zaten varsa hiçbir şey uygulanmadan KIRMIZI verir: canlıya yanlışlıkla bağlanmanın kilidi.
-"""
+  zaten varsa hiçbir şey uygulanmadan KIRMIZI verir: canlıya yanlışlıkla bağlanmanın kilidi. Kilit
+  zaman aşımı testi aynı sunucuda ayrı bir `fe_lock_probe` veritabanı kullanır (0001+0002 commit'li,
+  yeniden kullanılır): iki bağlantının göreceği tablo commit'li olmalı.
+
+Kapı ve CI iki DB katmanını da ATLAR (DEFERRED 18a). Yerelde tek komut (docker gerekir; canlıya
+bağlanmaz, `.env` okunmaz):
+
+    scripts/sandbox_db.sh up      # iki kap: 0001… uygulanmış (katalog) + boş (kum havuzu)
+    scripts/sandbox_db.sh test    # bu dosya + öteki DB testleri, iki adres betikten
+    scripts/sandbox_db.sh stop    # ya da `rm --yes` (yalnız betiğin kendi kapları)
+
+Ayrıntı: docs/RUNBOOK.md §4."""
 
 from __future__ import annotations
 
 import os
 import re
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
 
 from football_edge.db import connect
 
@@ -40,6 +52,7 @@ SANDBOX_URL = "SANDBOX_DATABASE" + "_URL"
 NO_DATABASE = f"{LIVE_URL} yok — 0013 gerçek veritabanında sınanmadı"
 NO_SANDBOX = f"{SANDBOX_URL} yok — 0001–0013 boş bir Supabase kabında uygulanmadı"
 TABLE_PRIVILEGES = "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
+LOCK_PROBE_DB = "fe_lock_probe"
 
 
 def _sql() -> str:
@@ -62,6 +75,11 @@ def test_0013_enables_rls_on_the_six_old_tables_without_force_or_policy() -> Non
         assert f"alter table {table} enable row level security;" in sql, table
     assert "create policy" not in sql, "politika API rollerine satır açar"
     assert "force row level security" not in sql, "FORCE sahibi de politikaya bağlar"
+
+
+def test_0013_first_bounds_how_long_it_waits_for_a_lock() -> None:
+    """Canlıda sert kilit beklemesi arkasındaki mühür yazımını da bekletir: önce süre sınırı."""
+    assert _statements().startswith("set local lock_timeout = '5s'; alter table leagues ")
 
 
 def test_0013_revokes_existing_and_default_privileges_from_the_api_roles() -> None:
@@ -393,3 +411,39 @@ def test_sandbox_dispatch_path_survives_the_lockdown(box: psycopg.Cursor[Any]) -
 
     assert isinstance(request_id, int)
     assert jobs == [("postgres",)]
+
+
+@needs_sandbox
+def test_sandbox_migration_gives_up_on_a_held_lock_within_seconds(
+    sandbox: psycopg.Cursor[Any],
+) -> None:
+    """Bir yazar `odds_snapshots`u tutarken 0013 beş saniyede `LockNotAvailable` ile düşer (M5).
+
+    `sandbox` bağımlılığı kum havuzu kilidini (boş `postgres` veritabanı) önce koşturur. Sınır
+    kalkarsa `statement_timeout` testi asılı bırakmaz; `QueryCanceled` onu kırmızı yapar."""
+    admin = psycopg.connect(os.environ[SANDBOX_URL], autocommit=True)
+    try:
+        found = admin.execute("SELECT 1 FROM pg_database WHERE datname = %s", (LOCK_PROBE_DB,))
+        if found.fetchone() is None:
+            admin.execute(f"CREATE DATABASE {LOCK_PROBE_DB}")
+    finally:
+        admin.close()
+    dsn = make_conninfo(os.environ[SANDBOX_URL], dbname=LOCK_PROBE_DB)
+    with connect(dsn) as setup, setup.cursor() as cur:
+        for name in ("0001_init.sql", "0002_sources.sql"):
+            _apply(cur, MIGRATIONS / name)
+
+    holder, migrator = connect(dsn), connect(dsn)
+    try:
+        holder.execute("LOCK TABLE odds_snapshots IN ROW EXCLUSIVE MODE")  # yazan bir mühür turu
+        migrator.execute("SET statement_timeout = '30s'")
+        started = time.monotonic()
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            _apply(migrator.cursor(), MIGRATION)
+        waited = time.monotonic() - started
+    finally:
+        for conn in (holder, migrator):
+            conn.rollback()
+            conn.close()
+
+    assert 4.0 <= waited < 10.0, waited

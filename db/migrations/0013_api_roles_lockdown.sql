@@ -13,6 +13,13 @@
 -- `service_role`e DOKUNULMAZ: gizli anahtarın rolüdür, BYPASSRLS taşır; append-only tablolarda
 -- onu da satır ve TRUNCATE tetikleyicileri durdurur.
 
+-- ── Kilit bekleme sınırı ──────────────────────────────────────────────────────────────────────
+-- `enable row level security` ve tetikleyici kurmak altı tabloda sert kilit ister. Bir mühür turu
+-- `odds_snapshots`a yazarken migration kuyrukta beklerse, ARKASINA dizilen her okuma/yazma da bekler.
+-- Beş saniyede kilit alınamazsa migration hatayla düşer (bütünüyle geri alınır) ve sakin bir
+-- dakikada yeniden koşulur. `local`: yalnız bu işlem; migration işlem içinde uygulanır.
+set local lock_timeout = '5s';
+
 -- ── RLS: politikasız, FORCE değil (0006/0007 deseni) ───────────────────────────────────────────
 alter table leagues enable row level security;
 alter table matches enable row level security;
@@ -43,9 +50,12 @@ alter default privileges for role postgres in schema public
 alter default privileges for role postgres in schema public
   revoke all on functions from anon, authenticated;
 -- Fonksiyonların PUBLIC EXECUTE'u şemaya bağlı girdiden değil Postgres'in genel varsayılanından
--- gelir; şemaya bağlı bir REVOKE onu kaldırmaz (kapta ölçüldü). Genel girdi yalnız `postgres`in
--- yeni fonksiyonlarını etkiler: sahip EXECUTE'u korur, pg_cron işleri `postgres` olarak koşar,
--- `public`teki şemaya bağlı girdi `service_role`e EXECUTE vermeye devam eder.
+-- gelir; şemaya bağlı bir REVOKE onu kaldırmaz (kapta ölçüldü). Genel girdi `postgres`in HER
+-- şemadaki YENİ fonksiyonlarını etkiler; var olanlara ve eklentilerin (`supabase_admin` sahipli)
+-- fonksiyonlarına dokunmaz. `public`te şemaya bağlı girdi `service_role`e EXECUTE vermeye devam eder;
+-- `public` DIŞINDA (`ops`, `extensions`, yeni bir şema) `postgres`in yeni fonksiyonu yalnız
+-- sahibine açıktır; `service_role` de EXECUTE alamaz. Oraya `service_role`/RPC için fonksiyon yazan
+-- migration EXECUTE'u açıkça vermelidir. Bugün her çağıran `postgres`tir (pg_cron işleri dâhil).
 alter default privileges for role postgres
   revoke execute on functions from public;
 

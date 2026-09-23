@@ -219,6 +219,13 @@ concurrency grubundadır, ama bir dizüstünden koşulan `collect snapshot` o gr
 alter table odds_snapshots rename to odds_snapshots_kirik_20260919;
 alter table odds_snapshots_kirik_20260919 rename constraint odds_snapshots_row_hash_key
   to odds_snapshots_kirik_20260919_row_hash_key;
+--    Adlı indeksler ve dizi de taşınır: 0001 `create index if not exists odds_match_idx` der ve ad
+--    kırık tabloda durdukça yeni defter indekssiz kurulur (sessizce, "already exists, skipping").
+alter table odds_snapshots_kirik_20260919 rename constraint odds_snapshots_pkey
+  to odds_snapshots_kirik_20260919_pkey;
+alter index odds_match_idx rename to odds_snapshots_kirik_20260919_match_idx;
+alter index odds_closing_idx rename to odds_snapshots_kirik_20260919_closing_idx;
+alter sequence odds_snapshots_id_seq rename to odds_snapshots_kirik_20260919_id_seq;
 
 -- 2) Yeni defter 0001_init.sql'den yeniden kurulur (tetikleyici dâhil).
 --    Eski tablo yerinde durduğu için hiçbir satır kaybolmaz.
@@ -229,8 +236,12 @@ alter table odds_snapshots_kirik_20260919 rename constraint odds_snapshots_row_h
 0001'i yeniden koşmak `forbid_ledger_mutation`ı eski gövdesine döndürür (her tabloda
 "odds_snapshots" diyen mesaj, sabitlenmemiş `search_path`) ve yeni tabloda RLS ile TRUNCATE
 bekçisi yoktur; 0013 üçünü de geri kurar. API rollerinin yeni tablodaki yetkisi 0013'ün
-varsayılan yetki ayarı sayesinde zaten kapalıdır. Aynısı 0002 yeniden koşulursa da geçerlidir.
-Doğrulama: `DATABASE_URL` tanımlıyken `uv run pytest tests/test_api_roles_lockdown_db.py -k catalog`.
+varsayılan yetki ayarı sayesinde zaten kapalıdır. 0002 fonksiyonu yeniden tanımlamaz, ama yeniden
+koşulup yeni bir `source_observations`/`match_results` kurarsa onlarda da RLS ve TRUNCATE bekçisi
+yoktur — yine 0013. Doğrulama: yeni tabloda dört indeks (`odds_snapshots_pkey`,
+`odds_snapshots_row_hash_key`, `odds_match_idx`, `odds_closing_idx`) ve `DATABASE_URL` tanımlıyken
+`uv run pytest tests/test_api_roles_lockdown_db.py -k catalog`. Prosedür yerel kapta, geri alınan tek
+işlemde sınandı (oturum 9 Task 6 düzeltme turu 1): dört indeks ve dizi özgün adlarıyla yeniden kuruldu.
 
 Sonra çıpalar §1.4'teki prosedürle `ledger/archive/` altına **taşınır** (silinmez) ve
 gerekçe notuna **ne kaybedildiği** yazılır:
@@ -537,3 +548,35 @@ kısmi boşluk her gün yanlış alarm verirdi. Tek bir ligin sessizce boş dön
 (bilinmeyen sport key büyük olasılıkla 404 verir, o zaten exit 3'tür — ölçülmedi). **Aranın sonunda
 olası tek yanlış 19:** oranı geç açılan bir ligin fikstürü ufka girdiğinde öteki ligler hâlâ
 boşsa bekçi bir kez kırmızı verebilir; sonraki yeşil tur alarmı kapatır (son inceleme M-2). Mühür turu (`seal`) bekçiyi hiç koşmaz.
+
+---
+
+## 4. Migration'ları yerel kapta sınamak (kum havuzu)
+
+**Neden var.** Kapı ve CI veritabanına bağlanmaz: DB testleri (`tests/test_*_db.py`) orada adıyla
+SKIP'e düşer (DEFERRED 18a). Yetki, RLS, tetikleyici ve kilit davranışının kanıtı yalnız bu yolla
+ölçülür. Canlıya bağlanmaz; `.env` okunmaz. Docker ve `public.ecr.aws/supabase/postgres:17.6.1.143`
+imajı gerekir (canlıyla aynı ana sürüm; `anon`/`authenticated`/`service_role`, pg_cron, pg_net ve
+Vault hazır gelir).
+
+```bash
+scripts/sandbox_db.sh up      # iki kap kurar (varsa başlatır)
+scripts/sandbox_db.sh test    # DB test dosyaları; argüman verilirse pytest'e geçer
+scripts/sandbox_db.sh stop    # kapları durdurur; `rm --yes` kaldırır
+```
+
+- `football-edge-sandbox-applied` (127.0.0.1:55480): bütün migration'lar sırayla, her biri kendi
+  işleminde, COMMIT'li. Katalog testleri buna bakar (betik `test` komutunda veritabanı adresini
+  bu kaba ÇEVİRİR — kabuktaki değer ezilir). Yeni bir migration yazıldıysa: `scripts/sandbox_db.sh apply`.
+- `football-edge-sandbox-empty` (127.0.0.1:55481): BOŞ kalır. Kum havuzu testleri (`SANDBOX_DATABASE_URL`)
+  bütün migration'ları tek işlemde uygular ve geri alır; hedefte `odds_snapshots` varsa hiçbir şey
+  uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe` veritabanını (0001+0002
+  commit'li) yeniden kullanır.
+- Kaplar `football-edge.sandbox=1` etiketini taşır; betik etiketsiz aynı adlı bir kaba dokunmaz.
+  Ön ek ve port: `FE_SANDBOX_PREFIX`, `FE_SANDBOX_PORT`.
+- Elle koşu için `scripts/sandbox_db.sh env` iki `export` satırı basar (yerel parola içerir; kabın
+  kendisinde durur, depoya girmez).
+
+**Beklenen:** `tests/test_api_roles_lockdown_db.py` 21 geçer (kilit testi ~5 sn bekler); öteki DB
+dosyaları da koşar. Canlıya uygulanmamış bir migration'ın katalog testleri canlıda KIRMIZIDIR — bu
+kapta yeşil olması canlının durumunu söylemez.
