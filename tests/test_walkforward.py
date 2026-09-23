@@ -353,8 +353,9 @@ def _wednesday(day: date, home: str, away: str, prices: tuple[float, float, floa
     )
 
 
-# E bölgesinde üç kusurlu maç: cuma 11:00 UTC başlama (karar 12:00 Londra = 12:00 UTC, kasımda
-# GMT), grupta ilk kez görülen takım, Σ 1/o = 0.909 olan piyasa fiyatı.
+# E bölgesinde dört kusurlu maç: cuma 11:00 UTC başlama (karar 12:00 Londra = 12:00 UTC, kasımda
+# GMT), grupta ilk kez görülen takım, Σ 1/o = 0.909 olan piyasa fiyatı ve — yine Σ 1/o = 0.909 —
+# gruba 3 yıllık DC penceresinden sonra dönen takım: görülmüş (ilk günü değil) ama DC'siz, `other`.
 EARLY = hist_match(
     day=date(2019, 11, 1),
     kickoff=datetime(2019, 11, 1, 11, tzinfo=UTC),
@@ -364,13 +365,16 @@ EARLY = hist_match(
 )
 NEWCOMER = _wednesday(date(2019, 11, 6), "Yeni", "Alfa", (2.0, 3.4, 3.8))
 UNDER_ROUND = _wednesday(date(2019, 11, 13), "Gama", "Delta", (2.2, 4.4, 4.4))
+LEFT = replace(_wednesday(date(2016, 3, 2), "Dönen", "Alfa", (2.0, 3.4, 3.8)), season="1516")
+RETURNED = _wednesday(date(2019, 11, 20), "Dönen", "Delta", (2.2, 4.4, 4.4))
 
 
 @pytest.fixture(scope="module")
 def flawed() -> tuple[dict[str, tuple[HistMatch, ...]], tuple[Row, ...]]:
     groups = dict(
         group_matches(
-            {"E0": (*main_history(2017, 2020), EARLY, NEWCOMER, UNDER_ROUND)}, {"E0": "Ülke"}
+            {"E0": (*main_history(2017, 2020), EARLY, NEWCOMER, UNDER_ROUND, LEFT, RETURNED)},
+            {"E0": "Ülke"},
         )
     )
     found = tuple(
@@ -392,7 +396,11 @@ def test_each_match_left_out_of_the_common_rows_is_named_by_its_reason(
     assert tuple(reasons) == MISSING_REASONS
     assert reasons[KICKOFF_BEFORE_DECISION] == 1
     assert reasons[UNSEEN_TEAM] == 1
-    assert reasons[OTHER] == 1  # reddedilen piyasa fiyatı: `rejected_prices` ayrıca sayar
+    # reddedilen piyasa fiyatı (`rejected_prices` ayrıca sayar) ve ilk günü olmayan DC'siz maç: iki
+    # `other`, etiket takası da ilk-gün koşulunu kaldırmak da sayımı değiştirir
+    assert reasons[OTHER] == 2
+    (back,) = [r for r in found if r.key.home == "Dönen" and r.key.date == RETURNED.date]
+    assert DC not in back.components and ELO in back.components
     rowless = sum(
         1
         for matches in groups.values()
@@ -412,7 +420,7 @@ def test_a_price_set_under_one_hundred_percent_is_counted_not_silently_dropped(
 
     rejected = rejected_prices(groups, KINDS, method=POWER)
 
-    assert rejected == {"1x2/pre": 1, "1x2/close": 1, "ou25/pre": 0, "ou25/close": 0}
+    assert rejected == {"1x2/pre": 2, "1x2/close": 2, "ou25/pre": 0, "ou25/close": 0}
     (row,) = [r for r in found if r.key.home == "Gama" and r.key.date == date(2019, 11, 13)]
     assert MARKET not in row.components and row.closing is None
 
