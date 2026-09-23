@@ -20,6 +20,17 @@ kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/1
 ölçümler `docs/superpowers/specs/2026-09-23-faz4-olcumler.md`, ertelenenler **DEFERRED §17**. SDD defteri (gitignored,
 bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/progress.md`.
 
+### 0.0 Taze oturum — başlatma
+
+**Başlatma istemi (yeni oturuma yapıştır):**
+> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.3 izlenecekleri kontrol et (gölge turu, salı raporu, collect-news
+> senkronu). Tarih 2026-10-07'den önceyse Plan 2'ye başlama: §0.2'deki kontrol listesi bekler; bana §0.4'teki ara iş
+> seçeneklerini sor. 2026-10-07 veya sonrasıysa §0.2'yi sırayla yürüt, sonra Plan 2'yi `superpowers:writing-plans`
+> ile yaz."
+
+**Kullanıcı kararı (2026-09-23):** §0.2'deki ön koşullar acil değil — Plan 2'nin başlangıç kontrol listesidir. Haber
+senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 2 yazılırken (en erken 2026-10-07) yapılır.
+
 ### 0.1 Ne yapıldı (hepsi görev incelemesi + bütün-dal incelemesinden geçti)
 - **Dalga 0:** T1 `live freeze-weights` + `config/blend_weights_faz3.yaml` (19 lig; çoğunda model ağırlığı 0 — Faz 3
   bulgusuyla tutarlı) · T2 haftalık gölge CLV raporu (`shadow.yml` salı adımı, yalnız baz stratejileri — mühür testli;
@@ -34,7 +45,7 @@ bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/
 - **Gerçek veritabanı işlemleri:** `0012` uygulandı ve okuma sorgularıyla doğrulandı · `sync-news --since 2026-09-04`
   geri doldurması 1.259 haber (önce ROLLBACK'li kuru koşu) · 16i ölçümü: 1X2/pre red 0, W1–W4 GEÇTİ.
 
-### 0.2 Plan 2'nin ön koşulları (Plan 2 bunlar olmadan yazılmaz)
+### 0.2 Plan 2'nin başlangıç kontrol listesi (acil değil — en erken 2026-10-07; Plan 2 bunlar olmadan yazılmaz)
 1. **Arşiv kapsamı runner'da (DEFERRED 17k)** — asistan yapar: geçici dal + `workflow_dispatch`, T0c betiği. ≥ %30 ise
    arşiv ayağı yeniden açılır; değilse spec §7.3 yalnız-canlı yolu (seçim dilimi ≥ 900 haberli maç, kapı dilimi ≥ 1.800,
    2027-06-30). **Şu anki karar: KAPALI** (koşul ölçülmediği için).
@@ -55,7 +66,15 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
 3. `collect-news` her turda yeni "Haber deposunu güncelle" adımını koşar; kırmızıysa alarm (ops_alert).
 4. `history.yml` model W1–W4 16i sonrası da GEÇTİ (yerelde ölçüldü); runner'da ilk tur 2026-09-26/29.
 
-### 0.4 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
+### 0.4 Plan 2'ye kadar ara iş seçenekleri (kullanıcıya sorulur; hiçbiri Plan 2'yi bloklamaz)
+1. **İz B** (Faz 6 iskeleti, Netlify + alan adı) — kullanıcının Netlify sitesi ve alan adı kararı gerekir.
+2. **Küçük borç temizliği** (K2/K3): DEFERRED 16j/17i kod tekrarları, 16g DC memo anahtarı, 16k yapılandırma okuyucusu,
+   17m küçükleri — her biri kısa TDD görevi, kapı ve inceleme kuralları aynen.
+3. **Takma ad hijyeni** (Faz 3 §3.3/8, DEFERRED 16e): 09-26 gölge turunun `eşlenemeyen U` satırından sonra
+   `config/history_aliases.yaml` (aynı gün/lig/konum kuralı, tahmin yok).
+4. Hiçbiri — 2026-10-07'ye kadar yalnız izleme.
+
+### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
 - SDD betikleri ANA depo kökünden, BASE/HEAD açık SHA ile (`review-package`); worktree'ler `.worktrees/wt-faz4-*`.
 - Plan yazımı: sözleşmeli paralel yazar ajanlar + tek-ağaç bağımsız plan incelemesi (iki tur) — dört görevler arası
   kırılmayı yürütmeden önce yakaladı.
