@@ -2,7 +2,8 @@
 
 `q_i = 1/o_i`, `B = Σ q_i`. Üç yöntem saf fonksiyondur; kök bulma stdlib ikiye bölmesidir
 (scipy yok, D15). Her iki kök fonksiyonu da parametresinde kesin azalandır — bu yüzden tek kök
-vardır ve ikiye bölme onu bulur.
+vardır ve ikiye bölme onu bulur. `B < 1` (negatif marj: borsa ya da en iyi fiyat kümesi) HİÇBİR
+yöntemde temizlenmez (16i): multiplicative ve power onu sessizce kabul edip olasılığı şişiriyordu.
 """
 
 from __future__ import annotations
@@ -71,16 +72,14 @@ def _bisect(excess: Callable[[float], float], low: float, high: float) -> float:
     return (low + high) / 2.0
 
 
-def _power(implied: tuple[float, ...], total: float) -> tuple[float, ...]:
+def _power(implied: tuple[float, ...]) -> tuple[float, ...]:
     def excess(k: float) -> float:
         return math.fsum(math.pow(q, k) for q in implied) - 1.0
 
-    # Σ q^k k'da azalır ve k = 1'de B − 1'dir: B > 1 ise kök k > 1'de, B < 1 ise k < 1'de.
-    low, high = (1.0, 2.0) if total > 1.0 else (0.5, 1.0)
+    # Σ q^k k'da azalır ve k = 1'de B − 1 > 0'dır (`devig` B > 1'i garanti eder): kök k > 1'de.
+    low, high = 1.0, 2.0
     while excess(high) > 0.0:
         high *= 2.0
-    while excess(low) <= 0.0:
-        low /= 2.0
     k = _bisect(excess, low, high)
     return tuple(math.pow(q, k) for q in implied)
 
@@ -93,9 +92,6 @@ def _shin_probs(implied: tuple[float, ...], total: float, z: float) -> tuple[flo
 
 
 def _shin(implied: tuple[float, ...], total: float) -> tuple[float, ...]:
-    if total < 1.0:
-        raise InvalidPrices(f"Shin yöntemi Σ 1/o ≥ 1 ister, {total:.6f} verildi")
-
     def excess(z: float) -> float:
         return math.fsum(_shin_probs(implied, total, z)) - 1.0
 
@@ -108,18 +104,21 @@ def _shin(implied: tuple[float, ...], total: float) -> tuple[float, ...]:
 def devig(prices: Sequence[float], method: str) -> tuple[float, ...]:
     """Vig'i temizlenmiş olasılıklar, `prices` sırasıyla; toplamları 1'dir.
 
-    ≥ 2 fiyat, hepsi sonlu ve > 1.0; SHIN için Σ 1/o ≥ 1 — değilse InvalidPrices.
+    ≥ 2 fiyat, hepsi sonlu ve > 1.0; Σ 1/o ≥ 1 (BÜTÜN yöntemlerde, 16i) — değilse InvalidPrices.
     """
     _check_method(method)
     implied = _implied(prices)
     total = math.fsum(implied)
-    if total == 1.0:
-        # Adil kitap: marj yok, her yöntemde p = q. Kök aramak yalnız yuvarlama gürültüsü katar.
+    if abs(total - 1.0) <= TOLERANCE:
+        # Adil kitap: marj yok, her yöntemde p = q. Tolerans: `(1.04, 26.0)` kesin adildir ama
+        # float toplamı 1'in bir ulp altıdır — reddedilmemeli.
         return implied
+    if total < 1.0:
+        raise InvalidPrices(f"Σ 1/o = {total:.6f} < 1: negatif marjlı kitabın vig'i temizlenemez")
     if method == MULTIPLICATIVE:
         return tuple(q / total for q in implied)
     if method == POWER:
-        return _power(implied, total)
+        return _power(implied)
     return _shin(implied, total)
 
 

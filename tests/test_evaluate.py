@@ -134,20 +134,16 @@ def test_bets_without_a_complete_avg_closing_stay_out_of_clv() -> None:
     assert evaluation.clv.estimate == pytest.approx(2.2 * fair_home - 1)
 
 
-@pytest.mark.parametrize(
-    ("method", "bets"),
-    [(SHIN, 0), (MULTIPLICATIVE, 1)],
-    ids=["shin-refuses", "multiplicative-accepts"],
-)
-def test_closing_prices_the_method_refuses_stay_out_of_clv(method: str, bets: int) -> None:
-    thin = quote("Avg", CLOSING, (2.5, 3.6, 3.6))  # Σ 1/o < 1: Shin için geçersiz
+@pytest.mark.parametrize("method", [SHIN, MULTIPLICATIVE])
+def test_closing_prices_the_method_refuses_stay_out_of_clv(method: str) -> None:
+    thin = quote("Avg", CLOSING, (2.5, 3.6, 3.6))  # Σ 1/o < 1: hiçbir yöntemde geçerli değil (16i)
 
     evaluation = evaluate(
         _replay(bets={0: Bet("H", 2.6, "Avg")}, closings={0: thin}), method=method, resamples=500
     )
 
-    assert evaluation.bets == bets
-    assert (evaluation.clv is None) is (bets == 0)
+    assert evaluation.bets == 0
+    assert evaluation.clv is None
 
 
 def test_an_empty_replay_cannot_be_evaluated() -> None:

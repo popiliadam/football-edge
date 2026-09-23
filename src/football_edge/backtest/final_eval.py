@@ -1,10 +1,11 @@
-"""Faz 3'ün TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R128, R130, R135).
+"""Bir fazın TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R128, R130, R135).
 
 `open_holdout`ın anılabildiği TEK modül (`tests/test_holdout_access_rule.py`). Anahtar yalnız
 `load_matches`e verilir ve hemen bırakılır: değerlendirme anahtarı değil SEÇİLMİŞ SATIRLARI alır
-(DEFERRED 12i). Açılıştan önce ön kayıt denetimi (`preflight`) ve açılış sayımı: Faz 3 için önceki
-bir açılış varsa açılmaz — yalnız çöküş sonrası, rapor üretilmemişse ve git SHA'sı aynıysa tek bir
-kayıtlı yeniden koşu (`faz3-rerun`). Veritabanında `0010`un tekil indeksi ikinci katmandır.
+(DEFERRED 12i). Açılıştan önce ön kayıt denetimi (`preflight`) ve açılış sayımı: aynı faz için
+önceki bir açılış varsa açılmaz — yalnız çöküş sonrası, rapor üretilmemişse ve git SHA'sı aynıysa
+tek bir kayıtlı yeniden koşu (`<faz>-rerun`). Veritabanında `0010`un tekil indeksi ikinci
+katmandır. Faz ön kaydın `phase` alanından gelir (16d).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from functools import partial
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import psycopg
@@ -22,17 +24,24 @@ import psycopg
 from football_edge.backtest.evaluate import clv_values
 from football_edge.backtest.harness import replay
 from football_edge.backtest.model_config import ModelConfig
-from football_edge.backtest.preregistration import PHASE, RERUN, Preregistration
+from football_edge.backtest.preregistration import Preregistration
 from football_edge.backtest.strategies import EloPointInTime, Placebo
 from football_edge.backtest.walkforward import (
     ELO_SCAFFOLD,
     Row,
     group_matches,
     group_rows,
+    missing_reasons,
+    rejected_prices,
     zone_of,
 )
 from football_edge.backtest.wf_eval import Summary, frozen_weights, summarise
-from football_edge.backtest.wf_run import format_interval, model_strategies, score_table
+from football_edge.backtest.wf_run import (
+    format_counts,
+    format_interval,
+    model_strategies,
+    score_table,
+)
 from football_edge.history.catalog import Catalog
 from football_edge.history.holdout import HOLDOUT, POST, open_holdout, period_of
 from football_edge.history.lock import HistoryLock
@@ -41,11 +50,16 @@ from football_edge.history.types import HistMatch
 from football_edge.market.devig import devig
 from football_edge.market.metrics import Interval, bootstrap_mean
 
-_OPENINGS = "SELECT purpose, git_sha FROM holdout_access_log WHERE purpose LIKE %s ORDER BY id"
+# 0010'un tekil indeksiyle aynı ifade: `purpose`un ilk alanı fazın ya da yeniden koşusunun TAM adı.
+# `LIKE 'faz3%'` `faz30`u da sayardı (16d).
+_OPENINGS = (
+    "SELECT purpose, git_sha FROM holdout_access_log "
+    "WHERE split_part(purpose, ':', 1) IN (%s, %s) ORDER BY id"
+)
 
 
 class AlreadyOpened(RuntimeError):
-    """Faz 3 holdout'u zaten açıldı; yeniden koşu kuralı karşılanmadı."""
+    """Fazın holdout'u zaten açıldı; yeniden koşu kuralı karşılanmadı."""
 
 
 class OpenedButFailed(RuntimeError):
@@ -65,33 +79,40 @@ class FinalReport:
     placebo_post: Interval | None
     holdout_rows: int
     predictions_sha256: str
+    missing: Mapping[str, Mapping[str, int]]  # bölge → ortak kümeye girmeme nedeni (16p)
+    rejected: Mapping[str, Mapping[str, int]]  # bölge → vig'i temizlenemeyen fiyat kümesi (16i)
 
 
-def previous_openings(conn: psycopg.Connection[Any]) -> tuple[tuple[str, str], ...]:
+def rerun_of(phase: str) -> str:
+    return f"{phase}-rerun"
+
+
+def previous_openings(conn: psycopg.Connection[Any], *, phase: str) -> tuple[tuple[str, str], ...]:
     with conn.cursor() as cur:
-        cur.execute(_OPENINGS, (f"{PHASE}%",))
+        cur.execute(_OPENINGS, (phase, rerun_of(phase)))
         return tuple((str(row[0]), str(row[1])) for row in cur.fetchall())
 
 
 def purpose_for(
     previous: Sequence[tuple[str, str]],
     *,
+    phase: str,
     prereg_sha256: str,
     git_sha: str,
     report_exists: bool,
     rerun_reason: str | None,
 ) -> str:
-    """İlk açılış `faz3:<sha>`; yeniden koşu YALNIZ tek ilk açılıştan sonra, rapor yokken, aynı
-    SHA ile ve adıyla (`faz3-rerun:<neden>:<sha>`)."""
+    """İlk açılış `<faz>:<sha>`; yeniden koşu YALNIZ tek ilk açılıştan sonra, rapor yokken, aynı
+    SHA ile ve adıyla (`<faz>-rerun:<neden>:<sha>`)."""
     if not previous:
         if rerun_reason is not None:
             raise AlreadyOpened("yeniden koşu istendi ama önceki açılış yok")
-        return f"{PHASE}:{prereg_sha256}"
+        return f"{phase}:{prereg_sha256}"
     if rerun_reason is None or not rerun_reason.strip():
-        raise AlreadyOpened(f"Faz 3 holdout'u zaten açıldı ({len(previous)} kayıt)")
+        raise AlreadyOpened(f"{phase} holdout'u zaten açıldı ({len(previous)} kayıt)")
     if len(previous) != 1 or report_exists or previous[0][1] != git_sha:
         raise AlreadyOpened("yeniden koşu kuralı: tek açılış, rapor yok ve aynı git SHA'sı")
-    return f"{RERUN}:{rerun_reason.strip()}:{prereg_sha256}"
+    return f"{rerun_of(phase)}:{rerun_reason.strip()}:{prereg_sha256}"
 
 
 def check_holdout_count(lock: HistoryLock, leagues: Mapping[str, Sequence[HistMatch]]) -> int:
@@ -191,6 +212,18 @@ def evaluate_selected(
         placebo_post=placebo_post,
         holdout_rows=sum(1 for row in rows if row.zone == HOLDOUT),
         predictions_sha256=digest,
+        missing=MappingProxyType(
+            {
+                zone: missing_reasons(groups, rows, kinds, zone=zone, zoning=zoning)
+                for zone in (HOLDOUT, POST)
+            }
+        ),
+        rejected=MappingProxyType(
+            {
+                zone: rejected_prices(groups, kinds, method=config.method, zone=zone, zoning=zoning)
+                for zone in (HOLDOUT, POST)
+            }
+        ),
     )
 
 
@@ -217,7 +250,8 @@ def run_final(
         # Kilit ve yineleme (C1) holdout dahil AÇILIŞTAN ÖNCE: ihlal açılış harcamaz.
         load_matches(conn, catalog, lock=lock)
         purpose = purpose_for(
-            previous_openings(conn),
+            previous_openings(conn, phase=prereg.phase),
+            phase=prereg.phase,
             prereg_sha256=prereg_sha256,
             git_sha=git_sha,
             report_exists=report_path.exists(),
@@ -263,8 +297,20 @@ def run_final(
         ) from error
 
 
+def _coverage(label: str, summary: Summary, report: FinalReport, zone: str) -> list[str]:
+    """Ortak kümenin dışında kalan satır, nedeni, reddedilen fiyat ve geri düşülen ağırlık —
+    sessiz kalmasın (16c, 16i, 16p)."""
+    fallback = ", ".join(summary.fallback) or "yok"
+    return [
+        f"{label}: satır {summary.rows} · bileşeni eksik (ortak kümeye girmedi) "
+        f"{summary.incomplete} · geri düşülen ağırlık {len(summary.fallback)} ({fallback})",
+        f"{label}, ortak kümeye girmeyen ana lig maçı: {format_counts(report.missing[zone])}",
+        f"{label}, vig'i temizlenemeyen fiyat kümesi: {format_counts(report.rejected[zone])}",
+    ]
+
+
 def render_final(report: FinalReport, *, generated_at: datetime) -> str:
-    """Yalnız toplu sayı; ham satır yok. C1–C6 ön kayıttaki adlarıyla."""
+    """Yalnız toplu sayı; ham satır yok. C1–C6 ön kayıttaki adlarıyla; C2 ve C5 eşleştirilmiş."""
     return "\n".join(
         [
             f"# Faz 3 holdout raporu — {generated_at.date().isoformat()}",
@@ -273,12 +319,21 @@ def render_final(report: FinalReport, *, generated_at: datetime) -> str:
             f"özeti sha256 `{report.predictions_sha256}`. Tek açılış (R135); ağırlıklar ve "
             "hiperparametreler yalnız geliştirme döneminden.",
             "",
+            *_coverage("Holdout", report.holdout, report, HOLDOUT),
+            *_coverage("Sonrası", report.post, report, POST),
+            "",
             *score_table("C1–C4 · holdout, ana ligler, 1X2 (ortak satırlar)", report.holdout.main),
             f"C1 ΔLL harman − piyasa: {format_interval(report.holdout.blend_gap)}",
+            *(
+                f"C2 ΔLL {name} − piyasa: {format_interval(gap)}"
+                for name, gap in report.holdout.component_gaps.items()
+            ),
             f"C3 Placebo CLV (negatif kontrol): {format_interval(report.placebo_holdout)}",
             "",
             *score_table("Holdout, ek ligler (yalnız model)", report.holdout.extra),
             *score_table("C5 · holdout, Ü/A 2.5", report.holdout.totals),
+            f"C5 ΔLL dixon_coles − piyasa (Ü/A 2.5): {format_interval(report.holdout.totals_gap)}",
+            "",
             *score_table("C6 · sonrası dönemi, tam durum", report.post.main),
             f"C6 ΔLL harman − piyasa: {format_interval(report.post.blend_gap)}",
             f"C6 Placebo CLV: {format_interval(report.placebo_post)}",

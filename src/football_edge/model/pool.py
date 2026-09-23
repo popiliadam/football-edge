@@ -25,6 +25,10 @@ class TooFewMatches(ValueError):
     """Ağırlık fiti için maç sayısı `MIN_FIT_MATCHES`in altında."""
 
 
+class NotConverged(ValueError):
+    """L-BFGS-B yakınsamadı: ağırlık yok. Uzunluk uyuşmazlığı gibi programlama hatası değildir."""
+
+
 def _logs(components: npt.ArrayLike) -> Floats:
     return np.log(np.maximum(np.asarray(components, dtype=np.float64), LOG_FLOOR))
 
@@ -76,5 +80,5 @@ def fit_weights(
         bounds=[(0.0, MAX_WEIGHT)] * count,
     )
     if not bool(result.success):
-        raise ValueError(f"ağırlık fiti yakınsamadı: {result.message}")
+        raise NotConverged(f"ağırlık fiti yakınsamadı: {result.message}")
     return tuple(float(value) for value in np.asarray(result.x, dtype=np.float64))
