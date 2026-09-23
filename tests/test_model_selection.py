@@ -185,6 +185,7 @@ def test_the_model_config_round_trips(tmp_path: Path) -> None:
         lambda text: text.replace("version: 1", "version: true"),
         lambda text: text.replace("method: power", "method: guess"),
         lambda text: text.replace("  k: 25.0\n", ""),
+        lambda text: text.replace("  draw: 0.28\n", ""),
         lambda text: text.replace("margin: linear", "margin: square"),
         lambda text: text + "extra: 1\n",
         lambda text: "[",
@@ -194,6 +195,7 @@ def test_the_model_config_round_trips(tmp_path: Path) -> None:
         "version-bool",
         "method",
         "missing-field",
+        "quadratic-draw-yok",
         "invalid-value",
         "extra-field",
         "broken-yaml",
@@ -203,6 +205,39 @@ def test_a_bad_model_config_is_refused(tmp_path: Path, corrupt: object) -> None:
     _files(tmp_path)
     path = tmp_path / "model.yaml"
     path.write_text(corrupt(dump_model_config(_config(tmp_path))), encoding="utf-8")  # type: ignore[operator]
+
+    with pytest.raises(ModelConfigError):
+        load_model_config(path)
+
+
+def _ordered(tmp: Path) -> ModelConfig:
+    elo = EloModelConfig(k=25.0, draw_form=ORDERED, ordered_scale=1.2, ordered_cut=0.6)
+    return replace(_config(tmp), elo=elo)
+
+
+def test_an_ordered_model_config_may_omit_the_draw(tmp_path: Path) -> None:
+    """16k-b: `ordered`da δ ölü alandır; bir sonraki model dosyası onu yazmayabilir."""
+    _files(tmp_path)
+    path = tmp_path / "model.yaml"
+    text = dump_model_config(_ordered(tmp_path))
+    path.write_text(text.replace("  draw: 0.26\n", ""), encoding="utf-8")
+
+    assert "  draw:" not in path.read_text(encoding="utf-8")
+    assert load_model_config(path) == _ordered(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda text: text.replace("  draw: 0.26\n", "").replace("  ordered_cut: 0.6\n", ""),
+        lambda text: text.replace("  draw: 0.26\n", "  draw: 0.9\n"),
+    ],
+    ids=["öteki-alan-yine-zorunlu", "yazılan-draw-yine-denetlenir"],
+)
+def test_the_optional_draw_loosens_nothing_else(tmp_path: Path, corrupt: object) -> None:
+    _files(tmp_path)
+    path = tmp_path / "model.yaml"
+    path.write_text(corrupt(dump_model_config(_ordered(tmp_path))), encoding="utf-8")  # type: ignore[operator]
 
     with pytest.raises(ModelConfigError):
         load_model_config(path)

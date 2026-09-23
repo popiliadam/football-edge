@@ -21,7 +21,7 @@ from football_edge.history.lock import EXIT_LOCK_VIOLATION, LockViolation
 from football_edge.history.types import H2H, PRE_CLOSING, HistMatch
 from football_edge.live import __main__ as live_cli
 from football_edge.live.context import LiveMatch, Quote
-from football_edge.market.devig import POWER
+from football_edge.market.devig import POWER, SHIN
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModelConfig
 from tests.model_builders import season
@@ -106,6 +106,7 @@ def _patch(
     live: tuple[LiveMatch, ...] = LIVE,
     quotes: tuple[Quote, ...] = QUOTES,
     lock_error: bool = False,
+    method: str = POWER,
 ) -> list[str]:
     """Yamalar; dönen liste yapılandırma dosyalarının CLI argümanlarıdır."""
     for name in ("catalog", "lock", "config", "aliases"):
@@ -114,7 +115,7 @@ def _patch(
         "2026-10-01",
         file_sha256(tmp / "catalog.yaml"),
         file_sha256(tmp / "lock.yaml"),
-        POWER,
+        method,
         EloModelConfig(),
         DCConfig(min_matches=40),
         7,
@@ -182,6 +183,35 @@ def test_the_shadow_line_counts_a_rejected_decision_price_by_name(
     sayar ve öteki sayıları değiştirmez."""
     caplog.set_level(logging.INFO, logger="football_edge.live")
     files = _patch(monkeypatch, tmp_path, _Db(), quotes=quotes)
+
+    assert live_cli.main(["shadow", *files]) == 0
+    assert (
+        f"gölge: karar 4 · yazılan satır {written} · eşlenemeyen 0 · bayat durum 0 · fiyatsız 0 · "
+        f"reddedilen fiyat {rejected}"
+    ) in caplog.messages
+
+
+# Σ 1/o = 2: power temizler, Shin'in z < 0,5 aralığında kökü yoktur — yargıyı YÖNTEM verir.
+SHIN_REJECTS = tuple(
+    replace(quote, price=1.5) if quote.match_id == LIVE[0].match_id else quote for quote in QUOTES
+)
+
+
+@pytest.mark.parametrize(
+    ("method", "written", "rejected"), [(POWER, 12, 0), (SHIN, 11, 1)], ids=["power", "shin"]
+)
+def test_the_shadow_line_judges_prices_with_the_configured_method(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    method: str,
+    written: int,
+    rejected: int,
+) -> None:
+    """17n (son inceleme M-3): gölge satırının sayısı `config.method`le ölçülür. Öteki fikstür
+    POWER'dır; sabit `POWER` yazan bir mutant orada yaşıyordu — aynı fiyatı Shin reddeder."""
+    caplog.set_level(logging.INFO, logger="football_edge.live")
+    files = _patch(monkeypatch, tmp_path, _Db(), quotes=SHIN_REJECTS, method=method)
 
     assert live_cli.main(["shadow", *files]) == 0
     assert (
