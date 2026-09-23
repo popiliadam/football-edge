@@ -222,7 +222,15 @@ alter table odds_snapshots_kirik_20260919 rename constraint odds_snapshots_row_h
 
 -- 2) Yeni defter 0001_init.sql'den yeniden kurulur (tetikleyici dâhil).
 --    Eski tablo yerinde durduğu için hiçbir satır kaybolmaz.
+
+-- 3) HEMEN ARDINDAN 0013_api_roles_lockdown.sql yeniden uygulanır (idempotent).
 ```
+
+0001'i yeniden koşmak `forbid_ledger_mutation`ı eski gövdesine döndürür (her tabloda
+"odds_snapshots" diyen mesaj, sabitlenmemiş `search_path`) ve yeni tabloda RLS ile TRUNCATE
+bekçisi yoktur; 0013 üçünü de geri kurar. API rollerinin yeni tablodaki yetkisi 0013'ün
+varsayılan yetki ayarı sayesinde zaten kapalıdır. Aynısı 0002 yeniden koşulursa da geçerlidir.
+Doğrulama: `DATABASE_URL` tanımlıyken `uv run pytest tests/test_api_roles_lockdown_db.py -k catalog`.
 
 Sonra çıpalar §1.4'teki prosedürle `ledger/archive/` altına **taşınır** (silinmez) ve
 gerekçe notuna **ne kaybedildiği** yazılır:
