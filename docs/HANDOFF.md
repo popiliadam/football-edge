@@ -38,7 +38,7 @@ bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/
 1. **Arşiv kapsamı runner'da (DEFERRED 17k)** — asistan yapar: geçici dal + `workflow_dispatch`, T0c betiği. ≥ %30 ise
    arşiv ayağı yeniden açılır; değilse spec §7.3 yalnız-canlı yolu (seçim dilimi ≥ 900 haberli maç, kapı dilimi ≥ 1.800,
    2027-06-30). **Şu anki karar: KAPALI** (koşul ölçülmediği için).
-2. **`TYPESAFE_API_KEY`** `.env`e ve GitHub secret'ına (kullanıcı). Ücretli harcamayı açan commit'i asistan yapamaz —
+2. ~~`TYPESAFE_API_KEY`~~ — **2026-09-23 eklendi** (secret + `.env`). Ücretli harcamayı açan commit'i asistan yapamaz —
    tek satırlık komutu kullanıcıya verir.
 3. **`lag_b_p99`**: `sync-news` en az 2 hafta koşmuş olmalı (en erken **2026-10-07**) — yayıncı iddiası ↔ `first_seen_at`.
 4. **Gölge raporunun ilk turları** (ilk salı 2026-09-29): canlı ΔLL SD'si → güç yeniden hesabı (spec §7.3).
@@ -61,8 +61,10 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
   kırılmayı yürütmeden önce yakaladı.
 - Gerçek DB'ye ilk yazım öncesi aynı SQL ROLLBACK içinde koşulur; K1 inceleyicileri yerel Postgres kabında (supabase
   17.6 imajı) migration ve INSERT'i gerçekten koşabilir.
-- Temizlik YALNIZ kullanıcı onayıyla: `.worktrees/wt-faz4-{a,b,c,d,e,f,fix}` ve dalları `feat/faz4-{a..f}`,
-  `fix/faz4-plan1-final` (hepsi birleşti).
+- Temizlik: `.worktrees/wt-faz4-{a,b,c,d,e,f,fix}` ve dalları `feat/faz4-{a..f}`, `fix/faz4-plan1-final` 2026-09-23'te
+  silindi (kullanıcı onayı; hepsi birleşmişti, uzakta dal yoktu). SDD defteri korunur.
+- `TYPESAFE_API_KEY` 2026-09-23'te GitHub secret'ına ve `.env`e eklendi (kullanıcı; değer okunmadı). Anahtar henüz hiç
+  çağrılmadı — ilk ücretli çağrı Plan 2'nin maliyet ölçümünde, kullanıcı onayıyla.
 
 ## 0.eski Önceki oturum (2026-09-23, Faz 3 kapanışında yazıldı — tarihçe)
 
