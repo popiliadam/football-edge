@@ -42,3 +42,25 @@ Kapı: `verify.sh` 10 PASS + `SKIP: zincir (DATABASE_URL yok)`; pytest 1.553 pas
 Mutasyon: `"scipy>=1.14",` çıkarılıp `uv sync` → `FAIL: paket-kurulu`, `KAPI KIRMIZI`; geri alındı. (`mypy`
 bu anda kırmızı olmaz: `src`de henüz scipy içe alan modül yok.) `uv.lock`: scipy 1.17.1 (Python 3.11) ve
 1.18.1 (daha yeni Python işaretleri için).
+
+## Task 5 (dalga 1 sonu) — 2026-09-23, yerel (macOS), dalga 1 birleşmiş `main`
+
+| Ölçüm | Sonuç |
+|---|---|
+| `leakage` etiketli test | **269** (265 + Task 1 · 2 · 4'ün 1 + 1 + 2'si) → `EXPECTED_MIN_LEAKAGE=269` |
+| İngiltere grubu (en büyük), DEV maç sayısı | 51.138 |
+| Elo replay (İngiltere, DEV, varsayılan yapılandırma) | 1,4 sn |
+| Dixon-Coles fiti (1095 gün pencere, 4 karar günü ortalaması) | **0,02 sn/fit**; dördü de yakınsadı (124–126 takım, ev 0,25–0,30, ρ −0,025…−0,003) |
+| Tepe RSS | ~719 MB (yükleme baskın) |
+| Derecelendirme grubu | 27 |
+
+**Kadans kararı (P18, plan Task 5 Step 3 kuralı):** üst sınır kestirimi — 27 grubun hepsi İngiltere kadar büyük
+sayılırsa, S + E ≈ 13 sezon × 52 hafta × 2 karar günü ≈ 1.350 fit/grup × 0,02 sn × 27 ≈ **12 dk** (H2H ve Ü/A
+aynı memo'yu paylaşır). 45 dk'nın altında → **`cadence_days = 1`**. Seçimin ızgarası (DC ξ × sırt) bu süreyi aday
+başına yineler; gerçek süre Task 9'da ölçülür (P17 eşiği 90 dk).
+
+Mutasyon: `tests/test_dixon_coles.py`den bir `@pytest.mark.leakage` çıkarıldı → `FAIL: sızıntı`, `KAPI KIRMIZI`;
+geri alındı.
+
+Komut (plan Task 5 Step 3, aynen), ayrıca yakınsama denetimi için aynı dört günde `fit(...)` dönüşünün takım
+sayısı, ev ve ρ değerleri yazdırıldı.

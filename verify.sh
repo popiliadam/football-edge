@@ -107,7 +107,7 @@ step "veri-sözleşmesi" bash -c '
 # altındaysa pytest hiç koşmadan kırmızı — bir `leakage` işareti sessizce düşerse kapı görür.
 # Sabit yalnız ölçülerek büyütülür (Task 5, Task 12).
 step "sızıntı" bash -c '
-  EXPECTED_MIN_LEAKAGE=265
+  EXPECTED_MIN_LEAKAGE=269
 
   collect_output=$(uv run pytest tests/ -q -m leakage --collect-only 2>&1)
   collect_code=$?
