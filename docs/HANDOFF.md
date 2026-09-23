@@ -1,10 +1,10 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-23 (oturum 8 kapanışı) · **Durum:** Faz 4 tasarımı + Plan 1 `main`de; oturum 8'de borç
-temizliği, 17a/17b/17g, takma ad hijyeni, boş tur bekçisi (exit 19), kaynak koşulları raporu (`f640fa1` ve belgeler) ·
-**FIFA milli arası: kulüp maçı 2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken 2026-10-07 · holdout Faz 4'te
-açılmadı · **Dal:** `main` = `origin/main`, açık worktree yok · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DB
-bağlıyken 11/11) · `EXPECTED_MIN_LEAKAGE` 418
+**Son güncelleme:** 2026-09-24 (oturum 9) · **Durum:** Dalga A `main`de (`932bfa3`, CI yeşil) — **0013 API rolleri
+kilidi CANLIDA** (2026-09-23 21:36 UTC); İz B spec'i + B-1/B-2 planları `docs/s9-iz-b-tasarim` dalında (kullanıcı
+onayı bekler, §0.7/10) · **FIFA milli arası: kulüp maçı 2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken
+2026-10-07 · holdout açılmadı · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DB bağlıyken 11/11; kurulum artık
+`uv sync --extra scrape`) · `EXPECTED_MIN_LEAKAGE` 418 · `EXPECTED_MIN_CONTRACT` 25
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -28,6 +28,29 @@ bütün kararlar ve kanıtlar) `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/
 > girdisi GEREKMEYEN işler) dalga dalga yürüt — ayrık dosya kümeli işler paralel ajanlarla, her dalga bağımsız
 > inceleme ve tam kapıdan geçer. §0.7'deki kullanıcı taleplerini SORMA; kullanıcı onları toplu olarak verecek.
 > 2026-10-07 veya sonrasıysa §0.2 kontrol listesini de yürüt."
+
+### 0.0a Oturum 9 (2026-09-23/24) — ne bitti, nerede duruyor
+SDD defteri (gitignored, bütün kararlar/incelemeler): `.superpowers/sdd/2026-09-23-oturum9-dalga-a/progress.md`.
+Plan `docs/superpowers/plans/2026-09-23-oturum9-dalga-a.md` (T1–T6). Her görev bağımsız incelemeden (mutasyonlu,
+`git archive` kopyasında) + bütün-dal incelemesinden geçti; taze klon kapısı ve CI yeşil.
+- **T1** EN alan adı sıralaması (GDELT GKG, yerelde — ham dosya sunucusu açık; runner yolu holdout sonuçlu
+  `Matches.csv`'yi public repoya itmeyi gerektirirdi): 198 isabet / 93 alan adı; önerilen izin listesinin 3 sessiz
+  alanı **0 isabet**; ilk 15 alan adı okundu → sessiz pay **%3,0**. Rapor `docs/reports/2026-09-23-kaynak-kosullari.md`.
+- **T2** erişim kapısı R77b'ye göre yeniden yazıldı (fetcher'lar yalnız `scrape.py` tek geçidinde; doğrulama çözme,
+  proxy, adı verilmiş bot, Scrapling CLI bayrakları kırmızı). **T3** Scrapling adaptörü (`src/football_edge/scrape.py`,
+  `scrape` ekstrası yalnız `ci.yml`de) + TFF PFDK ayrıştırıcısı (`tff-pfdk`, `enabled: false`; fixture'lar kırpılmış
+  ve takma adlı). Tarayıcı taşıyıcıları gerçek tarayıcıyla ölçülene kadar kapalı (DEFERRED 11g).
+- **T4** 17n, 17h (17a bekçisi kaçışları), 16k-b kapandı. **T5** 100 TR haber ön-etiketi + bağımsız ikinci etiket
+  (uyum %94, κ 0,86) → onay dosyası §0.7/5. EN yok (`news_items`ta EN haber yok).
+- **T6 (eklendi, K1):** 6 eski tabloda RLS yoktu ve `anon`/`authenticated` tam yetkiliydi (advisor ERROR ×6). `0013`
+  yazıldı, kapta test edildi (`scripts/sandbox_db.sh`, RUNBOOK §4), ROLLBACK kuru koşusundan sonra **canlıya
+  uygulandı**; ilk mühür turu yeşil; advisors ERROR/WARN yok. DEFERRED 12a kapandı, §18 açıldı.
+- **İz B (Dalga B):** spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md` (4 düzeltme turu → "Planlanabilir";
+  mimari A: Actions'ta salt okuma rolüyle statik üretim, tarayıcıya/Netlify'a DB anahtarı gitmez; açık kararlar
+  AK1–AK22 spec §16) + planlar `…/plans/2026-09-24-faz6-iz-b-1-okuma-katmani.md` (K1, T0–T9) ve
+  `…-b-2-web-yuzeyi.md` (T0–T10) — dal `docs/s9-iz-b-tasarim`, `main`e henüz birleşmedi. Plan incelemesi sonucu
+  defterde. **Yürütme sırası:** B-1 T0–T1 → B-2 T0'dan başlayabilir; 0014 canlıya UYGULANMAZ (§0.7/3).
+- **Açık worktree'ler** (`.worktrees/wt-s9-*`) ve yerel dallar birleşti ama silinmedi (silme onayı §0.7/11).
 
 **Kullanıcı kararı (2026-09-23):** §0.2'deki ön koşullar acil değil — Plan 2'nin başlangıç kontrol listesidir. Haber
 senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 2 yazılırken (en erken 2026-10-07) yapılır.
@@ -102,12 +125,17 @@ La Liga ve Süper Lig 2026-10-09. `odds_snapshots`ta 09-20'den beri satır yok �
    500/500 yol izinli (ClaudeBot 0/500) → anlık görüntü (runner diff'inden birebir kuruldu, hunk sayıları doğrulandı)
    ve `robots_verified_at` güncellendi; test yeni kural listesini birebir sabitler. **Sınır:** football-data verisi
    Jev'e/AI'a verilmiyor — Plan 2'de verilecekse bu kaynak yeniden değerlendirilir (sitenin niyeti açık).
+7. **0013 sonrası (oturum 9):** bütün zamanlanmış işler `postgres` ile bağlanır ve etkilenmemeli — 21:45 mühür turu
+   yeşil ölçüldü. İlk `collect-news`, `snapshot` (06:22), `collect-daily`, `shadow`, `history` turlarında bir yetki
+   hatası (`permission denied`) görülürse RUNBOOK §4 ve DEFERRED 18; geri dönüş tek satır `grant`tir.
 
 ### 0.4 Plan 2'ye kadar ara iş
 Yerini §0.6 (kullanıcı girdisi gerekmeyen iş listesi) ve §0.7 (toplu kullanıcı talepleri) aldı. Oturum 8'de
 yapılanlar §0.2b'de.
 
 ### 0.6 Taze oturum iş listesi — kullanıcı girdisi GEREKMEYEN işler (oturum 9 için)
+**Oturum 9 durumu:** Dalga A 1–4 BİTTİ (§0.0a); madde 5 (İz B tasarımı + planlar) bitti, onay bekler; madde 6 (İz B
+yapımı) planları incelendikten sonra başlar — yürütme durumu SDD defterinde. İsteğe bağlı 7–8 yapılmadı.
 Kullanıcı kararı (2026-09-23): Netlify'a kadar yapılabilecek her şey taze oturumda bitirilir; kullanıcıdan
 istenenler (§0.7) sonra toplu verilir. Alt ajanlar Opus 5.5 high (`~/.claude/settings.json`, bellek
 `subagents-opus-high`). Her dalga: ayrık dosya kümesi → worktree başına bir ajan → entegrasyon dalı → bağımsız
@@ -178,6 +206,25 @@ hazır olur.
    üzerinden bizi bağlayıp bağlamadığı (kaynak koşulları raporu §Açık sorular 2–3).
 8. **Holdout 2. açılışı için açık "evet"** (Plan 2 T11 — çok sonra, ön kayıt ve kırmızı takımdan sonra).
 9. İsteğe bağlı: Odds API planı (kredi; maçlar 10-09'da başlayınca tüketim ölçülür).
+
+**Oturum 9'un eklediği kullanıcı kararları (2026-09-24):**
+4b. **EN kaynağı — yeni ölçüm (T1):** izin listesi önerisi GDELT'te fiilen boş (sessiz pay %3,0: dailytrust, el-balad);
+   ilk 15 alan adının 12'si yasaklıyor (AOL, thehardtackle ticari yeniden kullanım; Newsquest veritabanı/ticari).
+   **CaughtOffside/JustArsenal sahibi (Rocket Sports)** arama dışı her otomatik erişimi lisanssız sayıp makale başına
+   £500 talep eden bir "Search Only" sözleşmesi yayımlıyor; koşul okuması bu iki siteye robots izinli 3 istek attı
+   (rapor yöntem bölümünde) — avukat sorusuna eklendi. Karar: GDELT EN ayağı hangi politikayla (ya da hiç)?
+5b. **Dil kalibrasyonu onay dosyası:** `.superpowers/sdd/2026-09-23-oturum9-dalga-a/calibration/tr.review.md`
+   (100 madde; önce 6 uyuşmazlık, sonra 29 sınırda). Dosyanın başındaki **açık soru:** "yaklaşan maç" haberin
+   yayımlandığı ana göre mi (öneri) bugüne göre mi. Ayrıca `team` yazımı (Odds API "Fenerbahce" ↔ README "Fenerbahçe").
+10. **İz B spec onayı ve AK1–AK22** (spec §16; öneriler yazılı) + planların onayı ve yürütme yöntemi (öneri: subagent
+   driven; B-1 K1). Onaysız da yerel yürütme sürer (deploy yok, 0014 canlıya uygulanmaz).
+11. **Silme onayları:** birleşmiş worktree'ler `.worktrees/wt-s9-{a1,borc,rls,scrapling,scrapling-clean,integ}` ve
+   dalları; **yerel `feat/s9-scrapling` dalı gerçek adlı PFDK fixture'larını taşıyor** (`922a445`; hiç push
+   edilmedi, `main`de yok) — silinmesi önerilir; `.superpowers/sdd/…/t3-scratch` (~1,5 GB ölçüm artığı); B-2 plan
+   yazarının `/tmp`ye bıraktığı atıklar (`b2fake/`, `b2fe.bak`, `b2-tsconfig-before.json`, `b2build.log`, `x`).
+12. **TFF koşulları** (`pageID=179`): bilgi "ticari amaçlarla kullanılamaz", kaynak gösterilmeden kopyalanamaz.
+   Açık `tff` kaynağını (hakem atamaları, günlük) ve kapalı `tff-pfdk`yi etkiler. Ayrıca `tests/fixtures/tff/` tam
+   sayfa kopyaları (hakem adları) public repoda — kırpılsın mı?
 
 ### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
 - **Model (2026-09-23, kullanıcı):** bütün alt ajanlar Opus 5.5 high — `~/.claude/settings.json`
