@@ -1,44 +1,43 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-22 (oturum 4, Faz 2 kapanışı) · **Durum:** **Faz 2 TAMAMLANDI — `main`de** (son
-commit `450d95d`; devir belgesi `docs/phases/02-tarihsel-taban/HANDOFF.md`) · tarihsel taban canlı (0006/0007/0008,
-kilit `a647f36`, haftalık `history.yml` salı 09:50 UTC) · İz C canlı (mühür, snapshot, toplayıcılar pg_cron'dan;
-footystats Mac'te) · **Dal:** `main` = `origin/main` · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL
-bağlıyken 11/11)
+**Son güncelleme:** 2026-09-23 (oturum 6, Faz 3 kapanışı) · **Durum:** **Faz 3 TAMAMLANDI — `main`de** (devir
+belgesi `docs/phases/03-baz-model/HANDOFF.md`) · holdout Faz 3 için **TEK kez açıldı** (`holdout_access_log` id 13,
+git `485134b`) · gölge sicili canlı (`shadow-dispatch` salı/cuma 12:35 UTC, 0009/0011) · tarihsel taban haftalık
+(salı + cuma 09:50 UTC, `history.yml`'de model W1–W4) · **Dal:** `main` = `origin/main` · kapı **10 adım yeşil +
+`zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
-> **Faz 2'nin devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/02-tarihsel-taban/HANDOFF.md` §3.**
+> **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
+> Faz 2'nin devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/02-tarihsel-taban/HANDOFF.md` §3.**
 > Faz 1'inki: `docs/phases/01-toplayicilar/HANDOFF.md` §3. Faz 0'ınki: `docs/phases/00-kayit-altyapisi/HANDOFF.md` §3.
 > Arıza prosedürleri: `docs/RUNBOOK.md`.
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-22, Faz 2 kapanışında güncellendi)
+## 0. Sonraki oturum — buradan başla (2026-09-23, Faz 3 kapanışında güncellendi)
 
-**Faz 2 bitti.** 13 görevin hepsi `main`de (dalga 0–4, Task 11 denetimi ve düzeltmesi, Task 12 raporları);
-ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve Faz 3 ön koşulları:
-**`docs/phases/02-tarihsel-taban/HANDOFF.md`**. Kısaca:
-- Kapı: 1530 passed / 2 skipped · contract 18 · leakage 265. `holdout_access_log` = **0 açılış**.
-- Kilit `config/history_lock.yaml` (`a647f36`): holdout 7.646 ana + 4.446 ek (R112).
-- Gerçek veride bilinen sonuçlar (yöntem power): K1 0.0036 [0.0029, 0.0043] 22/22 · K3 0.0003 [0.0001, 0.0004]
-  348/348 · K4 −0.0713 [−0.0721, −0.0704] · D1 tekdüze. `DEFAULT_METHOD = power` (R118, Shin'den ~7e-5 iyi).
-- Verimlilik raporu: 38 lig, aday 32/38; köprü n = 4. Lig önerisi kullanıcı onaylı: **N1, B1, AUT** (T1 zaten canlı).
-- Defterler (gitignored, bu makinede): `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md` (R78–R100),
-  `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` (R101–R121). Ertelenenler DEFERRED §12, §14.
+**Faz 3 bitti.** 14 görevin hepsi `main`de; ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, R149–R156 ve Faz 4 ön
+koşulları: **`docs/phases/03-baz-model/HANDOFF.md`**. Kısaca:
+- Kapı: 1790 passed / 3 skipped (üçü `DATABASE_URL yok`) · `leakage` 336 · migration 0009/0010/0011 canlı.
+- **Holdout — tek açılış** (kullanıcı onaylı): C1 ΔLL harman − piyasa 0,0001 [−0,0005, 0,0007]; harman bahis CLV
+  −0,0497 (54 bahis), Placebo −0,0868; C6 0,0002 [−0,0013, 0,0018]. Jev'siz baz model piyasayı yenmiyor — Faz 4'ün
+  baz çizgisi. Rapor `docs/reports/2026-09-23-faz3-holdout.md`.
+- Ertelenenler DEFERRED §16 (16a–16c **bir sonraki açılıştan ÖNCE**). Defter (gitignored)
+  `.superpowers/sdd/2026-09-23-faz3-model-walkforward/`.
 
-**Oturum 5 durumu (2026-09-23 ~06:45 UTC) — İz A ve İz B BİRLEŞTİ:**
-- **İz A** (`dd038f7`, CI yeşil): N1 (`ned.1`) ve B1 (`bel.1`) `active: true`, kredi harcaması kullanıcı onaylı (R125;
-  beklenen ≈455/ay, üst sınır ≈563/ay, pay ≈45); AUT `active: false`. Defter `.superpowers/sdd/2026-09-23-leagues-n1-b1-aut/`
-  (R122–R127); artıklar DEFERRED §15. İlk 8 ligli snapshot (09-23 06:22) yeşil: 8 anahtar çağrıldı, olay yok (milli ara),
-  0 kredi, kalan 485.
-- **İz B** (`2bc6636`, CI yeşil): Faz 3 tasarımı `docs/superpowers/specs/2026-09-23-faz3-model-walkforward-design.md`
-  ve TDD planı `docs/superpowers/plans/2026-09-23-faz3-model-walkforward.md` (14 görev / 7 dalga) **kullanıcı onaylı**.
-  K1–K12 = R128–R139; bağımsız plan incelemesi + kapsamlı yeniden inceleme temiz (C1 holdout-içi yinelenen maç, I1–I6,
-  N1 kapandı); controller kuralları R140–R148 (R142 Elo beraberlik iki form seçime; R143 W1 bootstrap eşdeğersizlik).
-  Plan metninden a398c31'e kurulan ağaç bayt-özdeş, 1781 passed / 3 skipped, 55 mutasyon kırmızı. Sıradaki kural R149.
-  Defter `.superpowers/sdd/2026-09-23-faz3-plan/` (plan-review.md, plan-rereview.md, izB-report.md).
+**Sıradaki oturum — FAZ 4 TASARIMI:** gölge CLV raporu (P25, DEFERRED 16o) ilk görev; dil kalibrasyonu + Jev.
+Önce `superpowers:brainstorming` (kullanıcıyla), plan onayından önce kod yok.
 
-**Oturum 6 durumu (2026-09-23 ~09:00 UTC) — FAZ 3 UYGULAMASI, AÇILIŞ ÖNCESİ DURAKTA:**
+**İzlenecekler (Faz 3'ün ekledikleri)**
+1. **2026-09-26 cuma 12:35 UTC** ilk karar günlü gölge turu: `gölge: karar N · yazılan satır M · eşlenemeyen U ·
+   bayat durum B`; `U > 0` ise adlar aynı gün/lig/konum kuralıyla `config/history_aliases.yaml`a (yoksa grup 10 gün
+   bayat). ned.1/bel.1'in ilk canlı maçlarından sonra `live parity` (E3) yeniden.
+2. **2026-09-26 cuma 09:50 UTC** ilk `history-dispatch-friday`; **2026-09-29 salı 09:50** haftalık `history.yml`
+   (selftest + model W1–W4, ~7,5 dk).
+3. `history_leagues.yaml`/`history_lock.yaml` değişirse gölge ve model adımı exit 11 — `model_faz3.yaml` yeniden
+   üretilmeli (Faz 3 HANDOFF §3.3/7).
+
+**Geçmiş: oturum 6'nın açılış öncesi durağı (2026-09-23 ~09:00 UTC; kullanıcı "evet" dedi, açılış yapıldı):**
 - Task 0–12 `main`de (son `bf5a06d`, CI yeşil); defter `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md`
   (R149–R156). Migration 0009/0010/0011 canlı; I6 kanıtı (0010 önce kırmızı, sonra yeşil); DB bağlı kapı 11/11.
 - Seçim (S) `config/model_faz3.yaml`: Elo k=10, ha=65, linear, regress 0,2, newcomer 75, **ordered**; DC ξ=0,003,

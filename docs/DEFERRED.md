@@ -709,3 +709,27 @@ ertelenmedi, hepsi kapatıldı.
 | 15c | Beklenen ay sonu kredi bakiyesi ≈45 < bekçi eşiği 60 → `🔴 bekçi kırmızı` ay sonlarında rutin açılabilir | Kullanıcıya bildirildi; eşik kararı ayrı | İlk tam ay tüketimi ölçülünce (≈2026-10-22): eşik ya da bütçe |
 | 15d | 34/51 eşzamanlılık oranı ve "olaysız çağrı 0 kredi" tek hafta (milli ara) ölçümü; bel.1 footystats 18 takım (lig 16) | Küçük örneklem | İlk tam ay sonra yeniden ölç; ilk Mac footystats turunda bel.1 satır sayısı |
 | 15e | AUT (`aut.1`) yapılandırmada `active: false`; `config/history_aliases.yaml` N1/B1 için yok | AUT: bütçe (R125); ad eşlemesi ilk canlı kapanışları bekler (ad TAHMİN edilmez) | Ad eşlemesi: N1/B1'in ilk mühürlü maçlarından sonra |
+
+## 16. Faz 3'ten ertelenenler (2026-09-23)
+
+Kaynak: bütün dal incelemesi, kırmızı takım (`docs/reports/2026-09-23-faz3-sizinti-denetimi.md` B1–B5), defterin
+`minor (deferred)` satırları. Ayrıntı: `docs/phases/03-baz-model/HANDOFF.md` §3.3.
+
+| # | Ne | Neden bekliyor | Ne zaman bakılır |
+|---|---|---|---|
+| 16a | **Açılış sonrası arıza yolları:** `--out` dizini yoksa/yazılamazsa rapor açılıştan SONRA düşer (exit 14); `pool.fit_weights` yakınsamazsa çıplak `ValueError` → `frozen_weights` yakalamaz → exit 14 | Faz 3 açılışı kanonik yolla, yeşil geçti | **Bir sonraki holdout açılışından ÖNCE** (Faz 4/5 görev 0): preflight'ta `--out` yoklaması; `_fit_or_none` `ValueError`ı da yakalayıp `fallback`a saysın |
+| 16b | **B3 — ön kayıt kanonik yola bağlı değil** (`--prereg/--config/--lock/--catalog` serbest) | Risk operatör hatası; açılış varsayılan yollarla yapıldı | Bir sonraki açılıştan ÖNCE: prova dışı koşuda yollar kanonik değilse `EXIT_PREFLIGHT` |
+| 16c | **Ön kayıt ↔ rapor sözü:** tasarım §8.1 C2/C5'i eşleştirilmiş ΔLL + GA der, rapor strateji başına LL basar; `render_final` `incomplete`/`fallback` basmaz; strateji listesi ve tohum ön kayıt dosyasında değil | Faz 3 raporu yazıldı, holdout satırları yeniden hesaplanamaz | Bir sonraki ön kayıt, raporun bastığını birebir listeler; renderer eşleştirilmiş ΔLL + `incomplete`/`fallback` basar |
+| 16d | `preregistration.PHASE`/`COMPARISONS` sabit; `_OPENINGS` `LIKE 'faz3%'` (`faz30`u da sayar — güvenli yön) | Tek faz vardı | Faz parametresi, bir sonraki açılıştan önce |
+| 16e | **Gölge bayatlık yarıçapı:** eşlenemeyen tek fikstür o ülke grubunu 10 gün bayat yapar (`is_stale` `None` anahtarı eksik sayar); `pre_prices` son tur eksikse önceki tura düşmez | Tasarım §7.3 muhafazakârlığı | Faz 4 gölge CLV raporu: yalnız eşlenmiş fikstürleri yargılamak mı, takma ad hijyeni mi — ölçüp karar |
+| 16f | **B2:** bayat koruması karara göre 10 gün, gölge defteri `now − 10 gün`den yükler | Zamanlanmış koşuda fark < 1 gün | `since = now − LOOKBACK − 1 gün`; Faz 4'ün ilk `live/` değişikliği |
+| 16g | **B1:** DC memo'su aynı nesne başka maç kümesine oynatılırsa fitleri taşır (üretimde tetiklenmiyor, AST ile kanıtlı) | Gizil | Memo anahtarına gruptaki gözlem sayısı; `model/strategies.py`nin ilk değişikliği |
+| 16h | **B4/B5:** AST kuralları walrus/AnnAssign/demet hedef/`getattr`/`__dict__`/`importlib` kaçışlarını görmez | Tasarım §12.12 (kazara girişi durdurur) | Kırmızı takım raporundaki algılayıcı değişiklikleri; bir sonraki açılıştan önce düşük öncelik |
+| 16i | `devig` power/multiplicative toplamı 1'in altındaki satırı kabul eder (E raporundaki Ü/A "piyasa 1 bahis") | 1X2'de rastlanmadı | Bütün yöntemlerde koruma + sayım (sessiz değil) |
+| 16j | Kod tekrarları: `_gap` (wf_eval, model_selftest), `_unmeasured` (selftest, model_selftest), üç aralık biçimleyici, `"Avg"` sabiti ×4, `_LOG_FLOOR` ×4; `kinds_of`/`rating_groups` bir CLI modülünde (`live/__main__` oradan alır) | Plan metni aynen yazıldı | `kinds_of`/`rating_groups` → `history/catalog.py`; tek `format_interval`, tek kitap sabiti |
+| 16k | `frozen_weights` hedeflerinde ek lig anahtarları (anlamsız `fallback` girdileri); `EloModelConfig.draw` `ordered` biçimde ölü alan; `EloModelConfig` k/ha/gap/initial doğrulanmıyor | Zararsız | Yapılandırma okuyucusu sağlamlaştırılırken |
+| 16l | Test boşlukları: havuz `MAX_WEIGHT` sınırını zorlayan veri (bounds=None mutantı sağ); `_shadow`/`_parity` sahte `connect` ile; Task 10'un bağlantı düşüşü testi `leakage` etiketsiz | Kod doğru, test zayıf | Faz 4 görev 0; etiket eklenince `EXPECTED_MIN_LEAKAGE` yeniden ölçülür |
+| 16m | DC Ü/A kalibrasyonu zayıf (E b = 0,633, holdout b = 0,538); DC'nin τ taban kırpmasında gradyan kırpılmamış τ türevi | İkincil market, kapı değil | Faz 4 model iyileştirmesi |
+| 16n | Izgara ucu (Elo k = 10, DC ξ = 0,003, sırt = 0,003) | Genişletmek yeni seçimdir; kullanıcı açılışı ızgarayı genişletmeden onayladı | Faz 4'te model yeniden seçilirse ızgara genişletilir |
+| 16o | Gölge CLV raporu (harman + bahis + mühürlü kapanış, haftalık; P25/R145) ve R128'in canlı ayağı (C6 − gölge) | Faz 3 sicil biriktirir | Faz 4'ün ilk görevi |
+| 16p | 111 holdout maçı satır üretmedi (12.092 − 11.981), nedeni sınıflanmadı; anahtarsız vekil: DEV E'de `no_decision` payı | Holdout satırları gitti | Faz 4'te anahtarsız ölçüm |
