@@ -107,22 +107,33 @@ def _secret_paths(node: Any, path: tuple[Any, ...] = ()) -> list[tuple[Any, ...]
     return [path] if _secret_expressions(str(node)) else []
 
 
+# Veritabanına yazan adımlar: toplayıcı ve collect-news'te hemen ardından haber deposu (R172).
+DATABASE_STEPS = {
+    COLLECT_DAILY: ("football_edge.collect",),
+    COLLECT_NEWS: ("football_edge.collect", "football_edge.features sync-news"),
+}
+
+
 @pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
 def test_only_the_collector_step_gets_a_secret_and_only_the_database_one(path: Path) -> None:
     """Toplayıcılar ücretli API çağırmaz: `ODDS_API_KEY` verilen bir workflow kredi harcayabilir ve
-    pg_cron onu kimse bakmadan koşar. `DATABASE_URL` de YALNIZ toplama adımının `env`inde durur:
-    workflow ya da job `env`ine taşınırsa secret taramasına, üçüncü taraf `setup-uv` eylemine,
-    `uv sync`e ve alarm adımlarına da açılır."""
+    pg_cron onu kimse bakmadan koşar. `DATABASE_URL` de YALNIZ veritabanına yazan adımların
+    (toplama; collect-news'te ayrıca haber deposu senkronu) `env`inde durur: workflow ya da job
+    `env`ine taşınırsa secret taramasına, üçüncü taraf `setup-uv` eylemine, `uv sync`e ve alarm
+    adımlarına da açılır."""
     text = path.read_text(encoding="utf-8")
     secrets = sorted(set(_secret_expressions(text)))
     document = yaml.safe_load(text)
     ((job_id, job),) = document["jobs"].items()
-    collector = _index_of(job["steps"], "football_edge.collect")
+    expected = [
+        ("jobs", job_id, "steps", _index_of(job["steps"], needle), "env", "DATABASE_URL")
+        for needle in DATABASE_STEPS[path]
+    ]
     reached = _secret_paths(document)
 
     assert secrets == ["secrets.DATABASE_URL"], f"{path.name} beklenmeyen secret okuyor: {secrets}"
-    assert reached == [("jobs", job_id, "steps", collector, "env", "DATABASE_URL")], (
-        f"{path.name}: secret'ın ulaştığı yerler {reached} — yalnız toplama adımının env'i olmalı"
+    assert reached == expected, (
+        f"{path.name}: secret'ın ulaştığı yerler {reached} — yalnız {expected} olmalı"
     )
 
 

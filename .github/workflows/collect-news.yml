@@ -53,6 +53,23 @@ jobs:
           esac
           # Hiçbir kod yutulmaz: 7 de işi kırmızıya düşürür, yalnız adıyla.
           exit "$code"
+      - name: Haber deposunu güncelle
+        # Toplamanın HEMEN ardından (R172): `news_items.first_seen_at` veritabanı saatidir ve
+        # toplamayla senkron arasındaki her dakika onu geç damgalar. Toplama kırmızıysa bu adım
+        # koşmaz; yedi günlük pencere (`SYNC_LOOKBACK`) kaçan haberi sonraki yeşil turda taşır.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.features sync-news
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "haber deposu güncel" ;;
+            7) echo "::error::sync-news: haber gözlemi sözleşmeye uymuyor (exit 7) — ayrıntı yukarıdaki satırlarda" ;;
+            *) echo "::error::sync-news beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
       - name: Alarm aç
         # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
         # gövdesi güncellenir (her tur yeni bildirim üretseydi alarm gürültüye gömülürdü).
