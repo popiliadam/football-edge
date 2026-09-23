@@ -112,9 +112,19 @@ def test_odds_keys_agree_with_the_history_catalog() -> None:
 # ── Uçtan uca: anahtar kapalıyken ücretli istek ATILMAZ ─────────────────────
 
 
-def _patch_main(monkeypatch: pytest.MonkeyPatch, db: FakeLedgerDb, requested: list[str]) -> None:
+def _patch_main(
+    monkeypatch: pytest.MonkeyPatch,
+    db: FakeLedgerDb,
+    requested: list[str],
+    free: list[str] | None = None,
+) -> None:
+    """`requested` ücretli `/odds` çağrılarını tutar. Boş tur bekçisinin ücretsiz `/events`
+    çağrıları (yalnız her lig boşken) ayrı `free` listesine düşer — karışsalar ücretli çağrı
+    sayısı şişer ve pasif lige giden bir bekçi çağrısı gözden kaçabilir."""
+
     def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(request.url.path.split("/")[3])  # /v4/sports/<key>/odds
+        _, _, _, key, endpoint = request.url.path.split("/")  # /v4/sports/<key>/<uç>
+        (requested if endpoint == "odds" or free is None else free).append(key)
         return httpx.Response(200, json=[], headers=quota_headers(400))
 
     monkeypatch.setattr(collect, "LEAGUES_PATH", LEAGUES_PATH)
@@ -131,12 +141,15 @@ def test_snapshot_with_the_real_config_calls_only_the_eight_live_keys(
 ) -> None:
     db = FakeLedgerDb()
     requested: list[str] = []
-    _patch_main(monkeypatch, db, requested)
+    free: list[str] = []
+    _patch_main(monkeypatch, db, requested, free)
 
     assert collect.main(["snapshot"]) == 0
 
     capsys.readouterr()
     assert tuple(requested) == LIVE_KEYS
+    # Her lig boş döndü: bekçi ücretsiz `/events`i de YALNIZ canlı anahtarlara sorar.
+    assert tuple(free) == LIVE_KEYS
     # Ayna tüm yapılandırmayı taşır (yabancı anahtar için) — `active` bayrağıyla birlikte.
     assert {league_id: row[6] for league_id, row in db.leagues.items() if row[6] is False} == {
         "aut.1": False,

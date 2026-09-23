@@ -7,7 +7,6 @@ satır karar anının bütün girdisini (bileşenler, kapanış öncesi fiyat) t
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -53,6 +52,21 @@ def _pre(decision: LiveDecision) -> tuple[float, float, float]:
     return home, draw, away
 
 
+def _market(pre: tuple[float, float, float], method: str) -> tuple[float, ...] | None:
+    """Karar anı fiyatının adil olasılığı; devig reddederse (ör. Σ 1/o < 1, 16i) None."""
+    try:
+        return devig(pre, method)
+    except InvalidPrices:
+        return None
+
+
+def rejected_prices(batch: LiveBatch, method: str) -> int:
+    """17g: karar anı fiyatını devig'in reddettiği karar sayısı — bunlara piyasa satırı yazılmaz;
+    sayı gölge satırında adıyla görünür (sessizce düşmez). Yargı `shadow_rows`unkiyle AYNI
+    (`_market`): sayı ile yazılmayan piyasa satırı iki ayrı kurala ayrışamaz."""
+    return sum(1 for decision in batch.decisions if _market(_pre(decision), method) is None)
+
+
 def _states(
     decisions: Sequence[LiveDecision], config: ModelConfig, rating_groups: Mapping[str, str]
 ) -> dict[tuple[str, datetime], dict[str, Strategy]]:
@@ -91,8 +105,9 @@ def shadow_rows(
         key = decision.record.key
         pre = _pre(decision)
         found: dict[str, tuple[float, ...]] = {}
-        with contextlib.suppress(InvalidPrices):
-            found[MARKET] = devig(pre, config.method)
+        market = _market(pre, config.method)
+        if market is not None:
+            found[MARKET] = market
         slot = (rating_groups.get(key.league, key.league), decision.context.decision_at)
         for name, state in states[slot].items():
             prediction = state.predict(decision.context)

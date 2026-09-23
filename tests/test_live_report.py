@@ -326,6 +326,7 @@ def test_the_report_blends_with_the_frozen_weights_and_counts_every_loss() -> No
     expected_clv = bet_clv(m1, (2.4, 3.4, 3.6), devig((2.0, 3.5, 4.0), POWER), 0.02)
     assert expected_clv is not None
     assert (report.decided, report.incomplete, report.settled, report.closed) == (4, 1, 2, 1)
+    assert report.rejected_price == 0  # m3'ün eksiği DC: fiyat reddi değil
     assert report.unsettled == 1  # m4: tam ama tarihsel tabanda sonucu yok
     assert report.bad_closing == 1
     assert report.blend_log_loss is not None and report.blend_gap is not None
@@ -341,6 +342,44 @@ def test_the_report_blends_with_the_frozen_weights_and_counts_every_loss() -> No
         "E1": (1, 1, 1, 1, 0),
         "SP1": (1, 0, 0, 0, 0),
     }
+
+
+def test_a_rejected_decision_price_is_counted_apart_from_a_missing_component() -> None:
+    """17g: piyasa satırı olmayan maçın saklı `pre`sini donmuş yöntem reddediyorsa maç "bileşeni
+    eksik"e karışmaz, "fiyatı reddedilen" olarak adıyla sayılır. `pre`si temiz olan piyasasız maç
+    ve piyasa dışında da bileşeni eksik olan maç eksik kalır."""
+    rejected = (3.0, 3.6, 3.6)  # Σ 1/o ≈ 0,889 < 1: hiçbir yöntem temizlemez (16i)
+    predictions = [
+        *_predictions("m1", "E0", (2.4, 3.4, 3.6)),  # tam
+        *_predictions("m2", "E0", rejected, (ELO, DC)),  # yalnız piyasa yok, fiyat reddedilir
+        *_predictions("m3", "E0", (2.0, 3.4, 4.2), (ELO, DC)),  # piyasa yok, fiyat temiz: eksik
+        *_predictions("m4", "E0", rejected, (ELO,)),  # DC de yok: eksik
+    ]
+
+    report = build_report(
+        predictions, {}, {}, WEIGHTS, tau=0.02, method=POWER, resamples=20, fixtures={}
+    )
+    text = render_report(report, generated_at=DECIDED)
+
+    assert (report.decided, report.incomplete, report.rejected_price) == (4, 2, 1)
+    assert "Karar verilen maç 4 · bileşeni eksik 2 · fiyatı reddedilen 1 · sonuçlu 0" in text
+
+
+def test_a_complete_series_has_no_rejected_price() -> None:
+    report = build_report(
+        _predictions("m1", "E0", (2.4, 3.4, 3.6)),
+        {},
+        {},
+        WEIGHTS,
+        tau=0.02,
+        method=POWER,
+        resamples=20,
+    )
+
+    assert (report.decided, report.incomplete, report.rejected_price) == (1, 0, 0)
+    assert "bileşeni eksik 0 · fiyatı reddedilen 0 · sonuçlu 0" in render_report(
+        report, generated_at=DECIDED
+    )
 
 
 def test_a_result_keyed_by_match_id_is_not_a_result_and_the_gap_is_visible() -> None:

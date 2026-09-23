@@ -23,6 +23,13 @@ maç cevabı) `jev_item_answers`e numaralı bir İŞARET satırı bırakır — 
 `t1_failed:<n>`, `choice` = sebep, olasılık yok, maliyet 0 (harcama `jev_spend`te). Yeni tablo yok,
 satır yalnız eklenir. İşaret "sorulmuş" sayılmaz (`asked_item_ids`), kapıya girmez (`gates_from`);
 `MAX_ATTEMPTS` işareti olan haber bu `prompt_version` için bir daha satın alınmaz.
+
+Kesinti (DEFERRED 17b; son inceleme I-2): art arda `OUTAGE_STREAK` haber Jev hatasıyla
+(`REASON_ERROR`) düşerse düşüş haberlerin değil Jev'in sonucudur. Koşu orada DURUR — bir kesinti
+koşusu en çok `OUTAGE_STREAK` çağrıya mal olur, tavan korunur —, serinin işaretleri yazılmaz ve
+`Tier1Run.outage` bildirilir; yoksa üç kesinti koşusu haberleri bu `prompt_version` için kalıcı
+olarak kapsam dışı bırakırdı. Seriden önceki cevaplar ve işaretler (ödendi) korunur. Seriye
+ulaşmayan hata (tek başına hep düşen haber) bugünkü gibi işaretlenir ve `MAX_ATTEMPTS`te bırakılır.
 """
 
 from __future__ import annotations
@@ -63,6 +70,8 @@ MIN_TOKEN = 4
 EARLIER_PREFIX = "item:"
 FAILED_PREFIX = "t1_failed:"
 MAX_ATTEMPTS = 3
+# Art arda bu kadar Jev hatası kesintidir: koşu durur, serinin işareti yazılmaz (17b; inceleme I-2).
+OUTAGE_STREAK = 3
 REASON_INVALID = "match_invalid"
 REASON_ERROR = "jev_error"
 # Hata çağrısında model bilinmez; 0012 `jev_model`i NOT NULL ister.
@@ -113,6 +122,7 @@ class Tier1Run:
     budget_hit: bool  # tavan: kalan haberler sorulmadı
     failures: tuple[ItemAnswerRow, ...] = ()  # cevapsız denemelerin işaretleri (`FAILED_PREFIX`)
     given_up: int = 0  # `MAX_ATTEMPTS` kez başarısız olduğu için sorulmayan haber
+    outage: bool = False  # sorulan her haber Jev hatasıyla düştü: işaret dönülmez (17b)
 
 
 # ── Adaylar ────────────────────────────────────────────────────────────────────────────────
@@ -343,12 +353,14 @@ def run_tier1(
 
     Tavan (`BudgetExceeded`) çağrıdan ÖNCE düşer: o ana kadarki cevaplar kaybolmaz, dönülür.
     Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır. `attempts` haber
-    başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz.
+    başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz. Art arda
+    `OUTAGE_STREAK` Jev hatasında koşu kesinti olarak durur (`outage`; modül belgesi).
     """
     templates = {question.question_id: question for question in questions.tier1}
     pool = (*history, *items)
     rows: tuple[ItemAnswerRow, ...] = ()
     failures: tuple[ItemAnswerRow, ...] = ()
+    streak: tuple[ItemAnswerRow, ...] = ()  # art arda Jev hatalarının henüz yazılmamış işaretleri
     asked = failed = no_candidate = given_up = 0
     for item in sorted(items, key=_order):
         item_id = _order(item)[1]
@@ -371,7 +383,7 @@ def run_tier1(
                 failed,
                 no_candidate,
                 budget_hit=True,
-                failures=failures,
+                failures=(*failures, *streak),  # tavan kesinti değil: bekleyen seri işaretlenir
                 given_up=given_up,
             )
         at = clock()
@@ -384,13 +396,37 @@ def run_tier1(
         )
         asked, failed = asked + len(battery), failed + len(battery) - len(new)
         rows = (*rows, *new)
+        if isinstance(answer, str) and answer.startswith(f"{REASON_ERROR}:"):
+            marker = _failure(
+                item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
+            )
+            streak = (*streak, marker)
+            if len(streak) >= OUTAGE_STREAK:
+                return Tier1Run(
+                    rows,
+                    asked,
+                    failed,
+                    no_candidate,
+                    budget_hit=False,
+                    failures=failures,
+                    given_up=given_up,
+                    outage=True,
+                )
+            continue
+        failures, streak = (*failures, *streak), ()
         if not new:
             marker = _failure(
                 item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
             )
             failures = (*failures, marker)
     return Tier1Run(
-        rows, asked, failed, no_candidate, budget_hit=False, failures=failures, given_up=given_up
+        rows,
+        asked,
+        failed,
+        no_candidate,
+        budget_hit=False,
+        failures=(*failures, *streak),
+        given_up=given_up,
     )
 
 

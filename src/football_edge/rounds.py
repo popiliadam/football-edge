@@ -12,7 +12,14 @@ import psycopg
 from football_edge.db import insert_snapshots, upsert_leagues, upsert_matches
 from football_edge.leagues import League
 from football_edge.ledger import canonical_timestamp
-from football_edge.odds_api import PriceRow, Quota, QuotaExhausted, fetch_odds, guard_quota
+from football_edge.odds_api import (
+    PriceRow,
+    Quota,
+    QuotaExhausted,
+    fetch_event_times,
+    fetch_odds,
+    guard_quota,
+)
 
 LOGGER = logging.getLogger("football_edge.rounds")
 
@@ -45,6 +52,9 @@ class CollectResult:
     missed_seals: tuple[str, ...] = ()
     quota_exhausted: bool = False
     leagues_mirrored: bool = True
+    # Boş tur bekçisi: HİÇBİR lig satır yazmadığı hâlde ufukta fikstürü olan ligler. Yalnız
+    # snapshot turu doldurur; bkz. `_leagues_with_fixtures`.
+    fixtures_without_odds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,16 +201,73 @@ def run_snapshot(
     horizon_days: int = 7,
     min_remaining: int = 10,
 ) -> CollectResult:
-    return _collect(
+    horizon = horizon_iso(now, horizon_days)
+    result = _collect(
         conn,
         client,
         api_key,
         leagues,
         now,
-        commence_time_to=horizon_iso(now, horizon_days),
+        commence_time_to=horizon,
         is_closing=False,
         min_remaining=min_remaining,
     )
+    if not _silently_empty(result):
+        return result
+    flagged = _leagues_with_fixtures(client, api_key, leagues, horizon)
+    return replace(result, fixtures_without_odds=flagged)
+
+
+def _silently_empty(result: CollectResult) -> bool:
+    """Tur arızasız bitti ama HİÇBİR lig satır yazmadı: milli ara mı, sessiz arıza mı?
+
+    Kredi bitişi ya da düşen lig turu zaten kırmızıya çevirir ve boşluğu açıklayabilir —
+    bekçi onlara karışmaz. Kısmi boşluk (bir lig yazdı, öteki boş) KASITLI olarak soru
+    değildir: bazı liglerin eu-bölge oranı fikstürden günler sonra açılır.
+    """
+    return result.written == 0 and not result.failed_leagues and not result.quota_exhausted
+
+
+def _leagues_with_fixtures(
+    client: httpx.Client, api_key: str, leagues: tuple[League, ...], horizon: str
+) -> tuple[str, ...]:
+    """Oranı boş dönen ligler arasında ufukta fikstürü olanlar — ücretsiz `/events` ucundan.
+
+    Ufuk, `/odds`a giden `commenceTimeTo` ile AYNI metindir ve istemci tarafında da
+    uygulanır: API parametreyi yok sayarsa milli aradaki 16 gün sonraki fikstür arızaya
+    dönmesin. Bekçinin kendi arızası turu KIRMIZIYA ÇEVİRMEZ (bir ağ hıçkırığı toplayıcıyı
+    düşürmemeli) — ama o lig için boşluğun doğrulanamadığı logda adıyla yazılır.
+    """
+    limit = datetime.fromisoformat(canonical_timestamp(horizon))
+    flagged: tuple[str, ...] = ()
+    for league in leagues:
+        try:
+            times = fetch_event_times(
+                client, api_key, league.odds_api_key, commence_time_to=horizon
+            )
+            # Ayrıştırma da bekçinin işidir: bozuk saat turu çökertmez (son inceleme M-1).
+            upcoming = sum(
+                1 for time in times if datetime.fromisoformat(canonical_timestamp(time)) <= limit
+            )
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            LOGGER.warning(
+                "lig=%s fikstür kontrolü yapılamadı (%s) — boş tur doğrulanamadı, "
+                "tur bu yüzden kırmızıya çevrilmiyor",
+                league.id,
+                _describe(error),
+            )
+            continue
+        LOGGER.info("lig=%s oran yok, ufuktaki fikstür=%d", league.id, upcoming)
+        if upcoming:
+            flagged = (*flagged, league.id)
+    return flagged
+
+
+def _describe(error: Exception) -> str:
+    """URL'siz tanım: `HTTPStatusError` metni tam URL'yi, yani anahtarı taşır."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"HTTP {error.response.status_code}"
+    return type(error).__name__
 
 
 def _seal_candidates(

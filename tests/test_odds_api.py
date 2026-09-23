@@ -8,6 +8,7 @@ import pytest
 from football_edge.odds_api import (
     Quota,
     QuotaExhausted,
+    fetch_event_times,
     fetch_odds,
     flatten_odds,
     guard_quota,
@@ -134,3 +135,66 @@ def test_fetch_odds_raises_on_http_error() -> None:
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(httpx.HTTPStatusError):
         fetch_odds(client, "BAD", "soccer_epl")
+
+
+# ── Boş tur bekçisi: ücretsiz `/events` ucu ─────────────────────────────────
+# `/odds` milli arada da, sessiz bir arızada da (anahtar adı değişti, bölge değişti) AYNI boş
+# listeyi döner. Ufukta fikstür olup olmadığını ücretsiz `/events` söyler (ölçüldü:
+# `x-requests-last: 0`); ikisini ayıran tek soru bu.
+
+EVENTS_PAYLOAD = [
+    {
+        "id": "abc123",
+        "sport_key": "soccer_epl",
+        "sport_title": "EPL",
+        "commence_time": "2026-10-09T18:45:00Z",
+        "home_team": "Arsenal",
+        "away_team": "Chelsea",
+    },
+    {
+        "id": "def456",
+        "sport_key": "soccer_epl",
+        "sport_title": "EPL",
+        "commence_time": "2026-10-10T14:00:00Z",
+        "home_team": "Leeds",
+        "away_team": "Fulham",
+    },
+]
+
+
+def test_fetch_event_times_asks_the_free_events_endpoint_with_the_same_horizon() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(
+            200,
+            json=EVENTS_PAYLOAD,
+            headers={
+                "x-requests-remaining": "499",
+                "x-requests-used": "1",
+                "x-requests-last": "0",
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    times = fetch_event_times(client, "KEY", "soccer_epl", commence_time_to="2026-09-30T06:22:00Z")
+
+    assert times == ("2026-10-09T18:45:00Z", "2026-10-10T14:00:00Z")
+    parsed = urlparse(str(captured["url"]))
+    assert parsed.path == "/v4/sports/soccer_epl/events"
+    params = parse_qs(parsed.query)
+    assert params["apiKey"] == ["KEY"]
+    assert params["commenceTimeTo"] == ["2026-09-30T06:22:00Z"]
+    assert params["dateFormat"] == ["iso"]
+    # `/events` bölge ve piyasa almaz: ikisi `/odds`un kredi çarpanıdır, burada yeri yok.
+    assert "regions" not in params and "markets" not in params
+
+
+def test_fetch_event_times_raises_on_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"message": "down"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(httpx.HTTPStatusError):
+        fetch_event_times(client, "KEY", "soccer_epl", commence_time_to="2026-09-30T06:22:00Z")

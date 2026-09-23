@@ -6,8 +6,10 @@ senkron arasındaki her dakika onu geç damgalar. Varsayılan pencere `SYNC_LOOK
 beri biriken geçmiş bir kez `--since 2026-09-04` ile taşınır.
 `tier1`: sorulmamış haberlere kademe 1 bataryasını sorar — AĞA ÇIKAR, PARA HARCAR; kapı onu
 çağırmaz (Ruling R4). Anahtar yoksa `EXIT_NO_JEV_KEY`; aylık tavan dolarsa o ana kadarki cevaplar
-yazılır ve `EXIT_BUDGET`. Harcama defteri AYRI, autocommit bir bağlantıdadır: cevap işlemi geri
-alınsa bile harcama kaydı kalır (`PostgresSpendLedger`).
+yazılır ve `EXIT_BUDGET`. Jev kesintisinde (art arda `OUTAGE_STREAK` Jev hatası) koşu durur,
+serinin işareti yazılmaz, haberler sonraki koşuda yeniden sorulur ve `EXIT_SOURCE_FAILED`.
+Harcama defteri AYRI, autocommit bir bağlantıdadır: cevap işlemi geri alınsa bile harcama
+kaydı kalır (`PostgresSpendLedger`).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from football_edge.features.tier1 import (
     CLUSTER_WINDOW,
     HORIZON,
     MAX_ATTEMPTS,
+    OUTAGE_STREAK,
     Tier1Run,
     asked_item_ids,
     failed_attempts,
@@ -125,6 +128,14 @@ def _tier1(args: argparse.Namespace) -> int:
     if run.budget_hit:
         LOGGER.error("jev: aylık tavan $%.2f doldu — kalan haberler sorulmadı", MONTHLY_CAP_USD)
         return EXIT_BUDGET
+    if run.outage:
+        # Kesinti bir bağımlılığın (Jev) arızasıdır, haberlerin değil: `sync-news`in kaynak kodu.
+        LOGGER.error(
+            "jev: kesinti — art arda %d haber Jev hatasıyla düştü, koşu durdu; serinin işareti "
+            "yazılmadı, sonraki koşu yeniden sorar",
+            OUTAGE_STREAK,
+        )
+        return EXIT_SOURCE_FAILED
     return 0
 
 

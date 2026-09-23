@@ -45,7 +45,7 @@ from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
 from football_edge.live.context import LiveMatch, build_batch, live_key, naming_from, season_of
 from football_edge.live.report import build_report, outcomes_of, render_report
-from football_edge.live.shadow import shadow_rows, write_shadow
+from football_edge.live.shadow import rejected_prices, shadow_rows, write_shadow
 from football_edge.live.store import (
     BASE_STRATEGIES,
     load_closing,
@@ -161,12 +161,14 @@ def _shadow(args: argparse.Namespace) -> int:
     except LockViolation as error:
         return refuse_on_violation(LOGGER, error, "gölge tahmin koşulmadı")
     LOGGER.info(
-        "gölge: karar %d · yazılan satır %d · eşlenemeyen %d · bayat durum %d · fiyatsız %d",
+        "gölge: karar %d · yazılan satır %d · eşlenemeyen %d · bayat durum %d · fiyatsız %d · "
+        "reddedilen fiyat %d",
         len(batch.decisions),
         written,
         len(batch.unmapped),
         len(batch.stale),
         len(batch.no_quote),
+        rejected_prices(batch, config.method),
     )
     return 0
 
