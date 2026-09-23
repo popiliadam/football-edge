@@ -124,7 +124,8 @@ adlarının (ör. Inter, Milan, Leeds) başlıkları ve takım adı geçmeyen fu
 dailymail.co.uk'tan ayrı sayıldı; koşulları okunmadı (aynı şirket, büyük olasılıkla aynı metin).
 
 ### İlk 15 alan adının koşulları
-Yöntem yukarıdaki tabloyla aynı: her sitede önce canlı robots.txt soruldu (dürüst UA, projenin `_guarded_get`i);
+Yöntem yukarıdaki tabloyla aynı: her sitede önce canlı robots.txt soruldu (dürüst UA; bir istek dışında hepsi
+projenin `_guarded_get`i, bkz. §Yöntem);
 banner/form/doğrulamaya dokunulmadı; WebSearch yalnız thehardtackle ve punchng koşul sayfasını aramak için. Aynı
 sahipli siteler (footer'daki koşul bağlantısı aynı metne gidiyor) tek satırda. "robots": altı yapay zekâ botundan
 kaçı `/news/2026/09/22/example-football-article` yolunda engelli.
@@ -133,7 +134,7 @@ kaçı `/news/2026/09/22/example-football-article` yolunda engelli.
 |---|---|---|---|---|
 | aol.co.uk (35) | yasaklıyor (otomatik toplama, ticari yeniden kullanım) | legal.aol.com/terms (en-GB, 24.11.2025): robot/kazıyıcı/veri madenciliği "her amaçla" izinsiz yok; hizmetin "herhangi bir bölümünü" ticari amaçla yeniden kullanmak yok; içerikten rakip/ikame "birleştirilmiş veri kaynağı" kurmak yok; yapay zekâ maddesi yalnız AOL'un kendi özellikleri. Sahip **AOL Media LLC** (Yahoo değil) | Hayır | 6/6 |
 | caughtoffside.com (14), justarsenal.com (3) | yasaklıyor | Rocket Sports ToS v1.0 (08.06.2026) + bağlı "Search Only Terms Contract" (m4ow.uk/socw/2.txt): yalnız arama dizini; md. 7.3 eğitim, embedding, veri seti, "yapay zekâ üretimini zenginleştirme" yasak; lisanssız erişime ürün başına £500 "erişim ücreti" | Evet | 0/6 |
-| thehardtackle.com (10) | yasaklıyor (otomatik toplama, ticari kullanım) | /terms-of-service/ (30.11.2025): izinsiz kazıma/otomatik erişim ve bot yok; lisans yalnız kişisel, ticari olmayan kullanım; içerik yazılı izinsiz ticari amaçla kullanılamaz | Hayır | 0/6 |
+| thehardtackle.com (10) | yasaklıyor (otomatik toplama, ticari kullanım) | /terms-of-service/ (30.11.2025): izinsiz kazıma/otomatik erişim ve bot yok; lisans yalnız kişisel, ticari olmayan kullanım ("Use content for commercial purposes without prior written consent" lisans dışı); md. 4.3 "No Commercial Use": yazılı izinsiz çoğaltma/dağıtım yok | Hayır | 0/6 |
 | fourfourtwo.com (8) | yasaklıyor | futureplc.com/terms-and-conditions-uk/ (07.04.2025): TDM ve kazıma "her amaçla" yok, yapay zekâ eğitimi dahil; 2019/790 Md. 4(3) hakkı saklı; ticari kullanım lisansa bağlı | Evet | 0/6 |
 | bournemouthecho.co.uk (6), ipswichstar.co.uk (5), chelmsfordcitynews.co.uk (3) | yasaklıyor (veritabanı/ticari) | newsquest.co.uk/legal/terms-conditions/ (15.12.2025, sürüm toa_2025.09.29; üç sitenin footer'ı /legal/'e gider): yapay zekâ/TDM/otomatik toplama maddesi yok, ama "Rights": yalnız özel amaç, "not for any advertising or other commercial purpose"; yazılı izinsiz "copy, store … create a database … from downloaded materials" yok; siteyi başka elektronik erişim sisteminde saklamak izne bağlı. /legal/ai-notice/ (17.12.2025) yalnız kendi yapay zekâ kullanımları | Hayır (yapay zekâ sözü yok; veritabanı/ticari kaydı geniş) | 5/6 |
 | barcablaugranes.com (3), sbnation.com (3) | yasaklıyor | pmc.com/terms-of-use (21.08.2026; SB Nation Penske Media'ya bağlı): yapay zekâ araçları/bot ile erişim-kazıma; içeriği yapay zekâyı eğitmek **veya grounding** için kullanmak | Evet | 5/6 |
@@ -142,8 +143,10 @@ kaçı `/news/2026/09/22/example-football-article` yolunda engelli.
 | **el-balad.com (3)** | **sessiz** | /terms (tarih görünmüyor): bağlantı paylaşmak ve atıfla referans izinli; izinsiz kopyalama/yeniden yayın ve **izinsiz ticari kullanım yok** (sessiz ≠ ticari kullanım izni) | — | 0/6 |
 | punchng.com (3) | okunamadı (koşul sayfası bulunamadı) | /privacy-policy/ "the terms of use found on the site"a atıf yapıyor, ama altbilgide koşul bağlantısı yok, aramayla bulunamadı; /terms/ → 301 /terms-and-condition/ → 200, gövde boş. Bulunan tek metin makale altı ibare: yazılı izinsiz çoğaltma, yayın, "rewritten" ve yeniden dağıtım yok. /affiliate-disclaimer-guidelines/ yalnız bahis | Belirsiz | 0/6 |
 
-"Sessiz" = yapay zekâ/TDM/otomatik toplama maddesi yok; ticari kullanım izni anlamına gelmez (el-balad, önceki
-tablodaki sportsmole ticari kullanımı izne bağlıyor).
+"Sessiz" = yapay zekâ/TDM/otomatik toplama maddesi yok **ve saklama/veritabanı maddesi yok**; ticari kullanım izni
+anlamına gelmez (el-balad, önceki tablodaki sportsmole ticari kullanımı izne bağlıyor). el-balad ile Newsquest'i
+ayıran sınır bu saklama/veritabanı maddesidir (ikisi de izinsiz ticari kullanımı yasaklıyor); manşet sessiz payını
+3 (yalnız dailytrust) yerine 6 yapan da o: el-balad Newsquest gibi sayılsaydı pay 3/198 (%1,5) olurdu.
 
 Robots yine ToS'un göstergesi değil: Rocket ve Future robots'ta hiçbir yapay zekâ botunu engellemiyor ama ToS'ta
 en sert metinler onların.
@@ -160,15 +163,18 @@ Bu ağdan bugün erişilemedi (TLS reset). 2026-09-22 runner okuması: yalnız s
 500/500).
 
 ## Yöntem
-Oturum 8: GDELT'e toplam 2 istek (robots 404; bir DOC sorgusu 429 → durdu; GKG o oturumda indirilmedi). 32 alan adının robots.txt'i
-dürüst UA ile okundu, protego ile değerlendirildi. Koşul sayfaları için önce robots'a soruldu; Reuters ve Sun
-koşul sayfaları robots'ta kapalı olduğu için okunmadı. Banner/form/Cloudflare doğrulamasına dokunulmadı.
-WebSearch yalnız sayfa bulmak için; kanıt birincil sayfalar.
+Oturum 8: GDELT'e toplam 2 istek (robots 404; bir DOC sorgusu 429 → durdu; GKG o oturumda indirilmedi).
+32 alan adının robots.txt'i dürüst UA ile okundu, protego ile değerlendirildi. Koşul sayfaları için önce robots'a
+soruldu; Reuters ve Sun koşul sayfaları robots'ta kapalı olduğu için okunmadı.
+Banner/form/Cloudflare doğrulamasına dokunulmadı. WebSearch yalnız sayfa bulmak için; kanıt birincil sayfalar.
 
 Oturum 9 eki (2026-09-23): ilk 15 alan adı için robots.txt, ana sayfa (koşul bağlantısını bulmak için) ve koşul
-sayfaları dürüst UA ile, projenin `_guarded_get`i üzerinden okundu; hepsi robots izinli. legal.aol.com robots.txt
-403 → RFC 9309 gereği kısıtsız sayıldı. Sıralama için controller 28 GKG dosyasını data.gdeltproject.org'dan
-indirdi (robots canlı soruldu, 1 sn aralık). punchng.com için ek okuma: /privacy-policy/ ve /terms/ yönlendirmesi. Not: Rocket sözleşmesi arama dizini dışındaki otomatik erişimi
+sayfaları dürüst UA ile okundu; hepsi robots izinli. Bir istek dışında hepsi projenin `_guarded_get`i üzerinden
+(robots + 2 sn aralık) gitti. İstisna: punchng.com `/terms/` yönlendirmesini görmek için yalın bir httpx isteği
+(yönlendirme izlenmeden); robots bu yola izinliydi, UA dürüsttü, ama 2 sn aralık uygulanmadı — robots isteğinin
+hemen ardından gitti. legal.aol.com robots.txt 403 → RFC 9309 gereği kısıtsız sayıldı. Sıralama için controller
+28 GKG dosyasını data.gdeltproject.org'dan indirdi (robots canlı soruldu, 1 sn aralık). punchng.com için ek
+okuma: /privacy-policy/ ve /terms/ yönlendirmesi. Not: Rocket sözleşmesi arama dizini dışındaki otomatik erişimi
 "lisanssız" sayar; bu okuma caughtoffside.com ve justarsenal.com'a robots + ana sayfa + koşul sayfası isteği içerdi.
 
 ## Açık sorular
@@ -181,6 +187,9 @@ indirdi (robots canlı soruldu, 1 sn aralık). punchng.com için ek okuma: /priv
 3. **Başlık telifi:** Birleşik Krallık NLA v Meltwater; AB TDM istisnası (2019/790 Md. 4) hak sahibinin itirazıyla
    kapanır — Goal, Daily Mail, NYT itirazı açık.
 4. **ajansspor:** yayıncıya sormak (kullanıcı onayı) ya da `ai-input=yes`'i yeterli saymak.
-5. **Okunamayanlar** (independent.ie, talksport, si, nbcsports, eurosport; Reuters, Sun koşulları; punchng.com) izin listesinde
-   varsayılan dışarıda.
+5. **Okunamayanlar** (independent.ie, talksport, si, nbcsports, eurosport; Reuters, Sun koşulları;
+   punchng.com) izin listesinde varsayılan dışarıda.
 6. **Reach bölge siteleri** (MEN, Liverpool Echo) tek tek okunmadı.
+7. **İlk 15 dışındaki olası Newsquest siteleri** (sahiplik doğrulanmadı): gazette-news.co.uk 2,
+   messengernewspapers.co.uk 2, yorkpress.co.uk 1, cotswoldjournal.co.uk 1, denbighshirefreepress.co.uk 1, belki
+   countypress.co.uk 1 — bilinmeyen 92 isabetin ~8'i; Newsquest sınıfı benimsenirse senaryo 65 → ≤73.
