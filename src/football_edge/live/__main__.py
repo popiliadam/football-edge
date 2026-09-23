@@ -92,16 +92,8 @@ def _codes(catalog: Catalog) -> Mapping[str, str]:
 
 
 def _shadow(args: argparse.Namespace) -> int:
-    try:
-        config = load_model_config(args.config)
-    except ModelConfigError as error:
-        LOGGER.error("model yapılandırması: %s", error)
-        return EXIT_CONFIG_MISMATCH
-    if (file_sha256(args.catalog), file_sha256(args.lock)) != (
-        config.catalog_sha256,
-        config.lock_sha256,
-    ):
-        LOGGER.error("katalog ya da kilit model yapılandırmasındaki özetle uyuşmuyor")
+    config = _frozen_config(args)
+    if config is None:
         return EXIT_CONFIG_MISMATCH
     catalog = load_catalog(args.catalog)
     now = datetime.now(UTC)

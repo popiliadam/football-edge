@@ -259,3 +259,18 @@ def test_a_league_without_its_own_weights_takes_the_pooled_ones(league: str) -> 
     )
 
     assert weights_for(weights, league) == weights.pooled != weights.leagues["E0"]
+
+
+def test_shadow_refuses_a_lock_whose_digest_does_not_match_before_touching_the_db(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`shadow` de `_frozen_config`ten geçer: kilit özeti uyuşmazsa exit 11, tabana gidilmez."""
+    lock = tmp_path / "lock.yaml"
+    lock.write_text(live_cli.LOCK_PATH.read_text(encoding="utf-8") + "\n# fark\n", encoding="utf-8")
+
+    def connect() -> None:
+        raise AssertionError("uyuşmazlıkta tabana bağlanılmaz")
+
+    monkeypatch.setattr(live_cli, "connect", connect)
+
+    assert live_cli.main(["shadow", "--lock", str(lock)]) == live_cli.EXIT_CONFIG_MISMATCH
