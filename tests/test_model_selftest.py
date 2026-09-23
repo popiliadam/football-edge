@@ -43,7 +43,7 @@ def test_honest_model_rows_pass_w2_and_w3_and_report_w4(rows: tuple[Row, ...]) -
 
     assert [check.id for check in checks.values()] == ["W1", "W2", "W3", "W4"]  # type: ignore[attr-defined]
     assert checks["W2"].passed and checks["W3"].passed  # type: ignore[attr-defined]
-    assert checks["W4"].gate is False  # type: ignore[attr-defined]
+    assert [check.gate for check in checks.values()] == [True, True, True, False]  # type: ignore[attr-defined]
 
 
 def _market_table(market_right: bool, count: int = 3000) -> tuple[Row, ...]:
@@ -115,6 +115,39 @@ def test_without_rows_every_gate_is_unmeasured_and_red() -> None:
     checks = _checks(())
 
     assert all("ölçülemedi" in c.detail and not c.passed for c in checks.values())  # type: ignore[attr-defined]
+    assert [c.gate for c in checks.values()] == [True, True, True, False]  # type: ignore[attr-defined]
+
+
+def _rate_row(zone: str, outcome: int, index: int) -> Row:
+    dc = (0.25, 0.3, 0.45)
+    return Row(
+        key=MatchKey("E0", date(2020, 1, 1), f"Ev {zone}-{index}", "Konuk"),
+        kind=MAIN,
+        zone=zone,
+        season="1718" if zone == "S" else "1920",
+        outcome=outcome,
+        totals_outcome=0,
+        components=MappingProxyType({DC: dc}),
+        totals=MappingProxyType({}),
+        pre=None,
+        closing=None,
+        totals_pre=None,
+        totals_closing=None,
+    )
+
+
+def test_w3_compares_against_the_outcome_rates_of_s_not_of_e() -> None:
+    """S oranları (0.6, 0.25, 0.15), E oranları (0.2, 0.3, 0.5); DC (0.25, 0.3, 0.45) E'nin kendi
+    oranlarından kötü, S'ninkinden iyi. Taban E'den alınsaydı W3 kalırdı (sızıntılı bir taban)."""
+    s = [0] * 60 + [1] * 25 + [2] * 15
+    e = [0] * 20 + [1] * 30 + [2] * 50
+    rows = tuple(_rate_row("S", o, i) for i, o in enumerate(s)) + tuple(
+        _rate_row("E", o, i) for i, o in enumerate(e)
+    )
+
+    w3 = _checks(rows)["W3"]
+
+    assert w3.passed is True, w3.detail  # type: ignore[attr-defined]
 
 
 def test_the_scaffold_elo_is_in_the_rows(rows: tuple[Row, ...]) -> None:

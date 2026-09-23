@@ -21,6 +21,7 @@ from football_edge.backtest.model_config import (
     load_model_config,
 )
 from football_edge.backtest.selection import coordinate_descent, dc_loss, elo_loss, select
+from football_edge.backtest.selftest import Check
 from football_edge.backtest.walkforward import DC, ELO, SELECTION, group_rows
 from football_edge.backtest.wf_eval import summarise
 from football_edge.backtest.wf_run import (
@@ -268,6 +269,67 @@ def test_walkforward_writes_an_aggregate_report(
     assert "ΔLL harman − piyasa" in report and "holdout ve sonrası dönemi okunmadı" in report
     assert re.search(r"satır özeti sha256 `[0-9a-f]{64}`", report), "rapor tahmin özetini taşımıyor"
     assert not any(team in report for team in TEAMS)
+
+
+MODEL_GREEN = (
+    Check("W1", True, True, "w1 ayrıntı"),
+    Check("W2", True, True, "w2 ayrıntı"),
+    Check("W3", True, True, "w3 ayrıntı"),
+)
+
+
+@pytest.mark.parametrize(
+    ("checks", "expected", "named"),
+    [
+        (MODEL_GREEN, 0, None),
+        ((*MODEL_GREEN, Check("W4", False, False, "w4 ayrıntı")), 0, None),
+        ((Check("W1", True, False, "w1 kaldı"), *MODEL_GREEN[1:]), cli.EXIT_GATE_FAILED, "W1"),
+        ((*MODEL_GREEN[:2], Check("W3", True, False, "w3 kaldı")), cli.EXIT_GATE_FAILED, "W3"),
+    ],
+    ids=["hepsi-gecti", "rapor-kaldi", "w1-kapi-kaldi", "w3-kapi-kaldi"],
+)
+def test_model_selftest_exits_one_only_for_a_red_gate_check(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    checks: tuple[Check, ...],
+    expected: int,
+    named: str | None,
+) -> None:
+    """Kırmızı bir W1–W3 exit 1 vermezse history.yml'nin alarmı hiç açılmaz (R155/I1)."""
+    _files(tmp_path)
+    _patch(monkeypatch)
+    seen: list[int] = []
+
+    def fake_checks(rows: tuple[object, ...], *, resamples: int) -> tuple[Check, ...]:
+        seen.append(resamples)
+        return checks
+
+    monkeypatch.setattr(cli, "model_checks", fake_checks)
+    caplog.set_level(logging.INFO)
+    config = tmp_path / "model.yaml"
+    config.write_text(dump_model_config(_config(tmp_path)), encoding="utf-8")
+
+    code = cli.main(
+        [
+            "model-selftest",
+            "--config",
+            str(config),
+            "--catalog",
+            str(tmp_path / "catalog.yaml"),
+            "--lock",
+            str(tmp_path / "lock.yaml"),
+            "--resamples",
+            "20",
+        ]
+    )
+
+    assert code == expected
+    assert seen == [20]
+    if named is None:
+        assert not any(m.startswith("kırmızı model denetimi") for m in caplog.messages)
+    else:
+        assert f"kırmızı model denetimi: {named}" in caplog.messages
 
 
 def test_select_writes_a_loadable_config(
