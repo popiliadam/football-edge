@@ -624,13 +624,20 @@ def test_a_real_opening_refuses_a_path_that_is_not_canonical(tmp_path: Path, nam
 
 @pytest.mark.leakage
 def test_the_cli_refuses_a_real_opening_from_non_canonical_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """16b: kanonik olmayan yolla gerçek açılış exit 12; `run_final`e hiç girilmez."""
+    """16b: kanonik olmayan yolla gerçek açılış exit 12; `run_final`e hiç girilmez.
+
+    Yükleyiciler saplanır: exit 12 yalnız kanonik yol denetiminden gelebilir, bozuk bir test
+    dosyasının `ModelConfigError`ından değil (review Task 3, M3 `canonical=None`).
+    """
     from football_edge.backtest import __main__ as cli
 
     paths = _prereg_files(tmp_path)
     monkeypatch.setattr(cli, "real_git", lambda: _git())
+    monkeypatch.setattr(cli, "load_model_config", lambda path: CONFIG)
+    monkeypatch.setattr(cli, "load_catalog", lambda path: CATALOG)
+    monkeypatch.setattr(cli, "load_lock", lambda path: LOCK)
 
     def run_final(*args: object, **kwargs: object) -> object:
         raise AssertionError("açılış denendi")
@@ -657,6 +664,7 @@ def test_the_cli_refuses_a_real_opening_from_non_canonical_paths(
     )
 
     assert returned == 12 and not out.exists()
+    assert "kanonik yolda değil" in caplog.text
 
 
 def test_a_canonical_path_spelled_another_way_is_the_same_file(
