@@ -151,7 +151,8 @@ JSON'la A içinde çözülür; anon anahtarı gerekmez.
 
 ### 4.2 Rol, yetki ve görünüm sahipliği
 
-- `create role site_reader nologin noinherit` (idempotent `DO` bloğu). **Parola ve `LOGIN` migration'da YOK** —
+- `create role site_reader nologin noinherit` — idempotent: `DO` bloğu `pg_roles`ta rol yoksa yaratır (rol küme
+  düzeyindedir; test oturumları ve şablon kopyaları aynı kümeyi paylaşır, §4.4/4). **Parola ve `LOGIN` migration'da YOK** —
   onaydan sonra RUNBOOK adımıyla verilir: parola kullanıcı tarafından istemci tarafı SCRAM ile girilir (`psql`
   `\password site_reader` ya da Supabase paneli); `ALTER ROLE … PASSWORD '…'` SQL editöründe ya da `execute_sql` ile
   YAZILMAZ (deyim loglarına düz metin düşebilir). Asistan parolayı görmez ve girmez (AK18).
@@ -261,12 +262,31 @@ kapanışında olamaz). Davranış eşitliği mevcut `pre_prices` testleriyle ko
    düzeyinde olur; 0003 `pg_cron`u yalnız `cron.database_name` (`postgres`) veritabanında yaratabilir; `postgres`
    veritabanı şablon olamaz (pg_cron başlatıcısı ve pg_net işçisi ona sürekli bağlı).
    - **Şablon** `site_tpl`, `postgres` rolüyle yalnız sitenin kapanışındaki ve 0013'ün dokunduğu migration'larla
-     kurulur: **0001, 0002, 0013, 0014** (0001+0002+0013'ün ayrı veritabanına uygulanabildiği bugün
-     `test_api_roles_lockdown_db.py`nin kilit sondasıyla kanıtlı). cron/Vault dispatch'leri (0003–0005, 0008, 0011)
-     ve sitenin okumadığı tablolar (0006, 0007, 0009, 0010, 0012) dışarıda kalır. **Metin testi** atlanan
-     migration'ların `leagues`/`matches`/`odds_snapshots`e, `site*` şemalarına ve `public`/`anon`/`authenticated`
-     yetkilerine dokunmadığını sınar — yani alt küme sitenin gördüğü dünyayı değiştirmez. Tam sıranın kendisi (i)'de
-     `postgres` veritabanında ölçülür.
+     kurulur: **0001, 0002, 0013, 0014**. Kanıt durumu: 0001+0002'nin ayrı bir veritabanına uygulanabildiği
+     `test_api_roles_lockdown_db.py`nin kilit sondasıyla kanıtlı (sonda 0013'ün kilitte DÜŞMESİNİ bekler, onu
+     uygulamaz); 0013'ün uygulanabildiği analizle beklenir — adla yalnız 0001/0002 nesnelerine başvurur, `ops`/`cron`/
+     `vault`a başvurmaz — ve B-1 T0'da ölçülür. cron/Vault dispatch'leri (0003–0005, 0008, 0011) ve sitenin okumadığı
+     tablolar (0006, 0007, 0009, 0010, 0012) dışarıda kalır. Tam sıranın kendisi (i)'de `postgres` veritabanında ölçülür.
+   - **Alt küme sadakat testi (metin, her kapıda) — "dokunma" DEYİM HEDEFİYLE tanımlanır.** Atlanan migration'lar
+     yorumlar ayıklanmış metinde şu deyimlerden hiçbirini taşımaz: hedefi `leagues`, `matches` ya da `odds_snapshots`
+     olan `alter table`, `create trigger … on`, `create policy … on`, `create index … on`, `grant … on (table )?`,
+     `revoke … on (table )?`; `… on schema (public|site|site_input|site_audit)` taşıyan `grant`/`revoke`; `create
+     schema site*`; `alter default privileges`. **Adıyla izinli iki istisna:** (1) `references matches(id)` (0009,
+     0012) — Postgres `matches` üzerine iç RI tetikleyicileri ekler, ama bunlar yalnız `matches`in UPDATE/DELETE'inde
+     ateşlenir; site yalnız okur, testler yalnız ekler, dolayısıyla sitenin gördüğü dünya değişmez; (2) `revoke … on
+     function ops.*` ve `revoke … on schema ops` (0003, 0004, 0005, 0008, 0011) — hedef `ops` şemasıdır ve `ops`
+     şablonda yoktur. Başka her eşleşme kırmızıdır; yeni bir istisna ancak gerekçesiyle spec'e yazılarak eklenir.
+     **Kendi mutasyon kanıtı (planda):** atlanan bir migration'a (ör. 0012) `grant select on matches to anon` ya da
+     `alter table odds_snapshots …` eklenince test kırmızı; istisna satırlarından birinin hedefi `matches` yerine
+     `leagues` yapılınca (ör. `create trigger … on leagues`) yine kırmızı.
+   - **Oturum kurulumu (yerel ve CI, her oturum sıfırdan):** önce `DROP DATABASE IF EXISTS site_tpl` ve artık
+     `site_t_*` veritabanları silinir, sonra şablon yeniden kurulur — önceki oturumdan kalan bayat bir `site_tpl`
+     eski bir 0014'e karşı test koşturmaz. Roller küme düzeyinde kalır; 0014'teki rol yaratımı idempotenttir (`DO` +
+     `pg_roles` denetimi; `NOLOGIN` metin testi değişmez), bu yüzden önceki oturumdan kalan `site_reader` hata
+     vermez. Şablon kurulumu ile (i)'nin işlemi SIRALIDIR, eşzamanlı değil (açık bir işlemdeki commit'lenmemiş rol
+     satırı öteki kurulumu kilitlerdi). (i) mevcut kum havuzunun hedef kilidini taşır: `current_user = 'postgres'`
+     ve (i)'nin işlemi başında `to_regclass('public.odds_snapshots') IS NULL` — migration'ları zaten uygulanmış bir
+     `sandbox_db.sh` kabına bağlanınca yanlış yere uygulamaz, adıyla reddeder.
    - **Her `sitedb` test modülü** (ve her kurcalama varyantı) `CREATE DATABASE site_t_<rastgele> TEMPLATE site_tpl`
      ile kendi kopyasını alır (dosya düzeyinde kopya: satır/ifade tetikleyicisi ateşlenmez), sonunda
      `DROP DATABASE … WITH (FORCE)` (TRUNCATE/DELETE değildir; tetikleyiciye takılmaz). Fixture şablon bağlantısını
@@ -279,7 +299,8 @@ kapanışında olamaz). Davranış eşitliği mevcut `pre_prices` testleriyle ko
      yani her kurcalama için yeni kap (CI'da iş başına birden çok kap) gerekirdi. (a) bunu tek kapla çözer; bedeli alt
      kümenin sadakatini sınayan metin testidir.
    - **Testte tetikleyiciyi devre dışı bırakmak YASAKTIR:** bir metin testi `tests/test_site_*.py` ve `sitedb`
-     fixture'larında (`tests/conftest.py`nin `sitedb` kısmı) `disable trigger`, `session_replication_role` ve
+     fixture'larının KENDİ dosyasında (`tests/site_db.py`; `sitedb` fixture'ları başka dosyada durmaz, bunu da aynı
+     test sınar) `disable trigger`, `session_replication_role` ve
      `alter table … disable` kalıplarının geçmediğini sınar; kalıplar testte parçalardan kurulur (kendini eşlemesin).
      Kapsam bilinçli olarak dardır: `tests/test_runbook.py` bugün RUNBOOK'tan alıntılanmış bir "DISABLE TRIGGER"
      literali taşır ve bu kuralın konusu değildir.
@@ -327,13 +348,18 @@ düzeyi GUC'lerin (`statement_timeout`, `default_transaction_read_only`) pooler 
      (`ledger._canonical`; sayılar metin olarak, tipler açık) serileştirilir. **`site_audit` satırlarını TAŞIMAZ**:
      zincir doğrulaması 1. adımda biter, türetim onlara bakmaz. Döküm kitap bazında fiyat taşır (`site_input`) →
      **diske yazılmaz**, alt sürece **stdin** ile verilir, loga düşmez (redaksiyon testi dökümden bir parçanın loga
-     girmediğini sınar).
+     girmediğini sınar). Alt sürecin **stdout ve stderr'i ana süreç tarafından yakalanır ve loga AKTARILMAZ**:
+     çocuk çökerse traceback bir değer (ör. `ValueError` mesajında fiyat) taşıyabilir; ana süreç yalnız
+     adlandırılmış bir hata basar ("ikinci türetim alt süreci düştü, çıkış kodu N"). Redaksiyon testine "çocuk
+     çöker" vakası eklenir (çocuğa fiyat içeren bir istisna attırılır; public loga giden çıktıda fiyat yok).
   5. **İki türetim de AYNI dökümden:** süreç içinde `derive(load(döküm))`, ayrıca ayrı bir alt süreçte farklı
      `PYTHONHASHSEED` ile aynı çağrı (DB'ye bağlanmadan). DB'nin ham tipleri (`Decimal`, `datetime`) türetime hiç
      girmez; ikisi de dökümden çözülen tiplerle çalışır — ölçülen tek fark hash tohumudur ve iki `content_sha256` eşit
      olmalı. **Mutasyon kanıtları (planda, ayrı ayrı):** (a) dizi kurulumunda bir `str` KÜMESİ üzerinde dönmek → bu
      adım kırmızı (`int` hash'i tohumlanmaz; iki türetim aynı dökümü aynı sırayla okuduğu için yalnız küme sırası
-     farkı doğurur); (b) `sorted(...)`ı kaldırmak → `verify-snapshot`in sıralılık kontrolü kırmızı (bu adım değil).
+     farkı doğurur). Kanıt olasılıklı OLMAMALI: mutasyon fixture'ı ≥ 32 farklı takım adı taşır VE kanıt iki sabit,
+     farklı `PYTHONHASHSEED` ile önce bu fixture'da küme sırasının gerçekten farklı olduğunu sınar, sonra adımın
+     kırmızı olduğunu; (b) `sorted(...)`ı kaldırmak → `verify-snapshot`in sıralılık kontrolü kırmızı (bu adım değil).
   6. §6.4/3d–e kontrolleri.
   Hepsi geçerse `snapshot.json` + `snapshot.sha256` (dosya baytlarının sha256'sı) yazar; biri kırmızıysa hiçbir dosya
   yazmadan adıyla exit. Log yalnız sayı ve hash basar. **Test:** `export` sonrası `--out` dizini TAM OLARAK
@@ -658,7 +684,9 @@ aynı dosyaya aynı anda yazmaz; sıralama kuralı korur (yol haritası §4).
 11. The Odds API koşullarına ve TR mevzuatına uyum (AK13, AK17).
 12. **Dolu sicilin defter tarafı** (görünüm → dışa aktarıcı → CLV yeniden hesabı) Faz 5 `publications` gelene kadar
     yalnız sahte DB ile sınanır; kapta uçtan uca yalnız boş sicil koşar (§6.4/2).
-13. Belirlenimcilik kontrolü (§5.1/5) hash tohumuna bağlı sıra ve `now()`/rastgelelik kullanımını yakalar; işlemler
+13. Belirlenimcilik kontrolü (§5.1/5) hash tohumuna bağlı sıra ve `now()`/rastgelelik kullanımını yakalar — küme
+    sırası hatasını ancak OLASILIKLA yakalar (küçük bir `str` kümesi iki tohumda aynı sırada dönebilir; üretimde
+    tohumlar rastgeledir); işlemler
     arası (DB değiştikten sonra) yeniden üretilebilirliği ölçmez ve vaat etmez.
 14. Kesim tutarlılığı defter yazarlarının `lock_ledger` ile serileştiği varsayımına dayanır (§5.1/3); varsayımı bir
     test sınar ama kilitsiz bir yazarın canlı DB'ye başka yoldan (elle SQL) yazmasını durdurmaz.
@@ -754,7 +782,7 @@ tests/test_site_*.py
 
 ---
 
-## 17. Öz-inceleme (2026-09-24, düzeltme turu 3 sonrası)
+## 17. Öz-inceleme (2026-09-24, düzeltme turu 4 sonrası)
 
 - **Yer tutucu dışında TBD yok:** açık kalanlar §16'da satır ya da plana bırakılan uygulama ayrıntısı (JSON Schema
   doğrulayıcı seçimi, imaj etiketi, CI süresi, HTML ayrıştırma sağlamlığı) olarak adıyla işaretli.
@@ -819,7 +847,15 @@ id'lerin öneki, boşluk olabilir") · r3 (§5.1/5 iki ayrı mutasyon) · r4 (§
 verilir, `"Avg"` yok; H1f yasak listeyle) · r5 (§4.4/4 metin testi kapsamı ve `test_runbook.py` istisnası) · r6 (§12.1
 `RUNNER_TEMP` yedekli yol, başta boşaltma, `FE_VERIFY_RUN_ID` ile bayat dosya reddi) · r7 (§10.1 yasal metinler düz TSX).
 
-### 18.4 Açık küçük noktalar (plana bırakılan ölçümler)
+### 18.4 Tur 4 (`izb-spec-rereview3.md`)
+**Kapatılanlar:** I1 (§4.4/4 "dokunma" deyim hedefiyle; iki adlandırılmış istisna ve gerekçesi; testin kendi mutasyon
+kanıtı) · n1 (kanıt ifadesi: 0001+0002 kanıtlı, 0013 analizle beklenir ve T0'da ölçülür) · n2 (§4.2 idempotent rol;
+§4.4/4 oturum başında `site_tpl` ve `site_t_*` silinip yeniden kurulur, şablon ile (i) sıralı, (i) kum havuzu kilidi)
+· n3 (§5.1/5 ≥ 32 adlı fixture + iki sabit tohumla önce sıra farkı; §12.4/13 olasılık notu) · n4 (§5.1/4 alt süreç
+çıktısı yakalanır, adlandırılmış hata, redaksiyon testinde çöken çocuk vakası) · n5 (`sitedb` fixture'ları
+`tests/site_db.py`de; metin testinin kapsamı dosya adıyla).
+
+### 18.5 Açık küçük noktalar (plana bırakılan ölçümler)
 1. `supabase/postgres` tam imaj etiketi ve kapta 0003–0005'in koştuğu — B-1 T0 (M9).
 2. Bağımlılıksız HTML ayrıştırmanın sağlamlığı; kırılgansa tarayıcı kapsamı daraltılır ya da bağımlılık bilinçli
    eklenir (M12).
