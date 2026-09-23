@@ -26,12 +26,24 @@ ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve
 - Defterler (gitignored, bu makinede): `.superpowers/sdd/2026-09-22-faz2-hazirlik/progress.md` (R78–R100),
   `.superpowers/sdd/2026-09-22-faz2-tarihsel-taban/progress.md` (R101–R121). Ertelenenler DEFERRED §12, §14.
 
-**Oturum 5 durumu (2026-09-22 ~22:00 UTC):**
-- **İz A BİRLEŞTİ** (`dd038f7`, CI yeşil): N1 (`ned.1`) ve B1 (`bel.1`) `active: true` — kredi harcaması kullanıcı onaylı
-  (R125; beklenen ≈455/ay, üst sınır ≈563/ay, pay ≈45); AUT `active: false`. Defter
-  `.superpowers/sdd/2026-09-23-leagues-n1-b1-aut/`, R122–R127; artıklar DEFERRED §15.
-- **İz B:** tasarım (`docs/faz3-plan`, `f25a821`) kullanıcı onaylı — K1–K12 hepsi önerilen seçenek; TDD planı yazılıyor.
-  Uygulama plan onayından sonra (A artık birleşti). Defter `.superpowers/sdd/2026-09-23-faz3-plan/`.
+**Oturum 5 durumu (2026-09-23 ~06:45 UTC) — İz A ve İz B BİRLEŞTİ:**
+- **İz A** (`dd038f7`, CI yeşil): N1 (`ned.1`) ve B1 (`bel.1`) `active: true`, kredi harcaması kullanıcı onaylı (R125;
+  beklenen ≈455/ay, üst sınır ≈563/ay, pay ≈45); AUT `active: false`. Defter `.superpowers/sdd/2026-09-23-leagues-n1-b1-aut/`
+  (R122–R127); artıklar DEFERRED §15. İlk 8 ligli snapshot (09-23 06:22) yeşil: 8 anahtar çağrıldı, olay yok (milli ara),
+  0 kredi, kalan 485.
+- **İz B** (`2bc6636`, CI yeşil): Faz 3 tasarımı `docs/superpowers/specs/2026-09-23-faz3-model-walkforward-design.md`
+  ve TDD planı `docs/superpowers/plans/2026-09-23-faz3-model-walkforward.md` (14 görev / 7 dalga) **kullanıcı onaylı**.
+  K1–K12 = R128–R139; bağımsız plan incelemesi + kapsamlı yeniden inceleme temiz (C1 holdout-içi yinelenen maç, I1–I6,
+  N1 kapandı); controller kuralları R140–R148 (R142 Elo beraberlik iki form seçime; R143 W1 bootstrap eşdeğersizlik).
+  Plan metninden a398c31'e kurulan ağaç bayt-özdeş, 1781 passed / 3 skipped, 55 mutasyon kırmızı. Sıradaki kural R149.
+  Defter `.superpowers/sdd/2026-09-23-faz3-plan/` (plan-review.md, plan-rereview.md, izB-report.md).
+
+**Sıradaki oturum — FAZ 3 UYGULAMASI:** "`docs/HANDOFF.md` §0'dan devam et" → planı `superpowers:subagent-driven-development`
+ile yürüt; yeni worktree (`git worktree add`), dalga 0 (Task 0: scipy controller commit'i + iki gerçek veri ölçümü).
+Durma noktaları: Task 13 holdout açılışı ÖNCESİ kullanıcının açık "evet"i (P14). Plan, ölçülmeyenler listesini ve
+yürütme defterini kendisi taşır.
+
+**Geçmiş: oturum 5'in başlatma tablosu (izler bitti)**
 
 **Sıradaki oturum — PARALEL İZLER (kullanıcı kararı 2026-09-22: izler birbirini kırmadan paralel yürür)**
 
@@ -92,10 +104,10 @@ kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
    ikisi de yeşil, `açık alarm yok`. TFF atanmamış günlerde `tff: 0 yeni gözlem` normaldir (R72).
 3. Bekçinin yeni kodla ilk turu (seal'in seyrek `schedule` turu): `🔴 bekçi kırmızı` açılmamalı.
 4. 2026-09-26'dan itibaren `sources-audit` (05:41 UTC) robots tarihini ilk kez kendisi ilerletir.
-6. **İz A sonrası (2026-09-23):** 06:22 UTC snapshot logunda 8 anahtar ve kalan kredi; N1/B1 maçlı ilk mühür turu
-   yeşil ve maçı mühürlüyor; 10:40 yerel footystats turu 8 lig ok (bel.1 satır sayısı — DEFERRED 15d).
 5. CI'da bir kez `astral-sh/setup-uv` 10 dk takıldı (2026-09-22, rerun yeşil); tekrarlarsa adım düzeyi timeout
    (DEFERRED 14u).
+6. **İz A sonrası:** ~~06:22 snapshot 8 anahtar~~ (09-23 yeşil); N1/B1 maçlı ilk mühür turu yeşil ve maçı mühürlüyor
+   (milli ara sonrası ilk hafta); 10:40 yerel footystats turu 8 lig ok (bel.1 satır sayısı — DEFERRED 15d).
 
 **Kullanıcıdan beklenenler**
 1. Depoyu GitHub'da **Watch** etmek (alarm e-postaları) — ölçülemedi (`gh` token'ında `notifications` yok).
