@@ -110,7 +110,7 @@ sorgusuyla; append-only tablolara deneme satırı yazılmaz.
 | Tablo | Bir satır | Tekil anahtar |
 |---|---|---|
 | `news_items` | kaynak, `lang`, başlık, gövde (nullable), URL, `published_at_claimed` (nullable), `first_seen_at`, `available_at`, `availability_basis` ∈ {`observed`, `archive_claimed`}, `content_hash` | `(source_id, content_hash)` |
-| `jev_item_answers` | kademe 1: haber × T1 sorusu; `match_id` (nullable), taraf, küme kimliği, olasılıklar, `confidence`, `prompt_version`, `jev_model`, `asked_at`, `cost_usd` | `(item_id, prompt_version, question_id)` |
+| `jev_item_answers` | kademe 1: haber × T1 sorusu (ayrıca başarısız deneme işaretleri `question_id = t1_failed:<n>`, `probabilities {}`, `cost_usd 0` — okuyan her sorgu `FAILED_PREFIX`i süzer ya da satırı `gates_from`a verir; Plan 1 son inceleme I-3); `match_id` (nullable), taraf, küme kimliği, olasılıklar, `confidence`, `prompt_version`, `jev_model`, `asked_at`, `cost_usd` | `(item_id, prompt_version, question_id)` |
 | `jev_match_answers` | kademe 2: maç × `decided_at` × soru; `item_set_hash`, olasılıklar, `confidence`, `prompt_version`, `jev_model`, `asked_at`, `cost_usd`; kanarya satırları `variant` ∈ {`real`, `blank`, `shuffled`} | `(match_id, decided_at, prompt_version, question_id, variant)` |
 | `jev_spend` | her çağrı: zaman, maliyet, çağrı türü | `id` |
 | `model_predictions` (var) | `harman_jev` yeni bir `strategy`, kendi `model_config_sha256`ı (`model_faz4.yaml`) | mevcut |
