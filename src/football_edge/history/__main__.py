@@ -52,8 +52,6 @@ from football_edge.sources import Source, enabled_sources, load_sources, robots_
 LOGGER = logging.getLogger("football_edge.history")
 
 CATALOG_PATH = Path("config/history_leagues.yaml")
-# Kilit ihlali: kilitli dönemin bir satırı değişti ya da kayboldu (tasarım §5.2). Karar insanındır;
-# `collect`in EXIT_* kodlarından (2–8) ve 0/1'den ayrı.
 
 
 def _source() -> Source:

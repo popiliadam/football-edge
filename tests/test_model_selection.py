@@ -26,6 +26,7 @@ from football_edge.backtest.walkforward import DC, ELO, SELECTION, group_rows
 from football_edge.backtest.wf_eval import summarise
 from football_edge.backtest.wf_run import (
     development_groups,
+    format_interval,
     gap_penalty,
     render_walkforward,
     rows_digest,
@@ -34,6 +35,7 @@ from football_edge.backtest.wf_run import (
 from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
 from football_edge.history.lock import build_lock, dump_lock
 from football_edge.market.devig import POWER
+from football_edge.market.metrics import Interval
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import (
     ORDERED,
@@ -465,3 +467,11 @@ def test_the_production_selection_grid_offers_both_draw_forms() -> None:
     from football_edge.backtest.selection import ELO_GRID
 
     assert set(ELO_GRID["draw_form"]) == {QUADRATIC, ORDERED}
+
+
+def test_the_walk_forward_interval_text_is_pinned() -> None:
+    """Walk-forward ve açılış raporlarının aralık biçimi (DEFERRED 16j; son inceleme I-1)."""
+    assert format_interval(Interval(estimate=0.123456, low=-0.000049, high=1.5)) == (
+        "0.1235 [-0.0000, 1.5000]"
+    )
+    assert format_interval(None) == "ölçülemedi"

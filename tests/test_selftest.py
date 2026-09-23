@@ -464,7 +464,8 @@ def test_k4_and_d1_measure_only_the_main_leagues() -> None:
 
 
 # ── Düzeltme turu 1: aralık ölçütü, yöntem, havuz sırası, resamples, K2 kabulü ──────────────
-INTERVAL = re.compile(r"\) (\S+) \[%95 (\S+), (\S+)\]")
+# Dört basamak sabittir (`interval_text` varsayılanı; DEFERRED 16j — son inceleme I-1).
+INTERVAL = re.compile(r"\) (-?\d+\.\d{4}) \[%95 (-?\d+\.\d{4}), (-?\d+\.\d{4})\]")
 THIN: Prices = (2.5, 3.6, 3.6)  # Σ 1/o < 1: çarpımsal ve power kabul eder, Shin reddeder
 
 

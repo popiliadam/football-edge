@@ -75,7 +75,6 @@ LOCK_PATH = Path("config/history_lock.yaml")
 CATALOG_PATH = Path("config/history_leagues.yaml")
 # 1: bir kapı denetimi kırmızı. Python'ın beklenmedik arızası da 1 verir; ayrım logdadır.
 EXIT_GATE_FAILED = 1
-# collect.EXIT_* (2–8) ile çakışmaz; history.yml'deki selftest adımı bu kodu adıyla karşılar.
 # 10 köprünün (`market bridge`) "eşleşme yok"u; 11: model yapılandırması okunamadı ya da
 # katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
 EXIT_CONFIG_MISMATCH = 11

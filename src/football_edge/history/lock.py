@@ -57,7 +57,10 @@ class LockViolation(RuntimeError):
         super().__init__(f"kilit ihlali — {len(differences)} fark:\n" + "\n".join(differences))
 
 
-EXIT_LOCK_VIOLATION = 9  # kilidi okuyan her CLI'ın veri farkı çıkışı (R99)
+# Kilitli dönemin bir satırı değişti ya da kayboldu (tasarım §5.2; R99): karar insanındır. Kilidi
+# okuyan her CLI (`history`, `market`, `backtest`, `live`) bu TEK kodu verir; `collect`in EXIT_*
+# kodlarından (2–8) ve 0/1'den ayrı — `history.yml`deki selftest adımı onu adıyla karşılar.
+EXIT_LOCK_VIOLATION = 9
 
 
 def refuse_on_violation(logger: logging.Logger, error: LockViolation, what: str) -> int:

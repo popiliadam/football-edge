@@ -76,10 +76,12 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
 2. ~~**Küçük borç temizliği**~~ — **yapıldı 2026-09-23** (oturum 8, plan
    `docs/superpowers/plans/2026-09-23-kucuk-borc-temizligi.md`, 7 görev, satır içi yürütme + bütün-dal incelemesi):
    16j ve 17i kapandı, 16k-c ve 17m'nin iki doğrulama açığı kapandı; 16g, 16k-a/b ve 17m kalanları gerekçesiyle
-   DEFERRED'da. **Kapının ölçmediği:** birleştirmeler rapor metnini bayt bayt korur ama bunu yalnız metni test
-   edilen satırlar için kanıtlar — `model_selftest`in 5 basamaklı biçimi hiç sabit değildi (mutant yaşadı), şimdi
-   `test_w1_and_w2_report_their_interval_with_five_decimals` sabitler; metnini test etmeyen başka bir rapor satırı
-   kayarsa kapı görmez.
+   DEFERRED'da. Bütün-dal incelemesi (24 mutasyon, `git archive` kopyasında): dört aralık çağıranından yalnız
+   `selftest` etiketi sabitti — dördü de artık birebir metinle sabit (`model_selftest` 5 basamak, `selftest` 4
+   basamak + `%95`, `wf_run.format_interval`, `efficiency._interval`); bütçe bekçisi yalnız `jev_budget`tan takma
+   adsız import edilen ve yerelde yeniden tanımlanmayan sarmalayıcı adına güvenir. **Kapının ölçmediği:** kilit
+   ihlali satırlarının çağrı yeri başına `what` metni (CLI testleri yalnız çıkış kodunu sınar; bayt eşliği incelemede
+   git-grep ile doğrulandı).
 3. **Takma ad hijyeni** (Faz 3 §3.3/8, DEFERRED 16e): 09-26 gölge turunun `eşlenemeyen U` satırından sonra
    `config/history_aliases.yaml` (aynı gün/lig/konum kuralı, tahmin yok).
 4. Hiçbiri — 2026-10-07'ye kadar yalnız izleme.

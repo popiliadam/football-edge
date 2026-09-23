@@ -46,8 +46,6 @@ LOGGER = logging.getLogger("football_edge.market")
 LOCK_PATH = Path("config/history_lock.yaml")
 CATALOG_PATH = Path("config/history_leagues.yaml")
 ALIASES_PATH = Path("config/history_aliases.yaml")
-# Kilitli dönemin bir satırı değişti ya da kayboldu: `history` CLI'ıyla aynı kod; `collect`in 2–8'i
-# ve 0/1 dışında.
 # Köprü: karşılaştırılabilir tek eşleşme yok (N = 0 → aralık tanımsız). Rapor yazılmaz; çoğu kez
 # takma ad eksiktir (Task 8 Step 12).
 EXIT_NO_PAIRS = 10
