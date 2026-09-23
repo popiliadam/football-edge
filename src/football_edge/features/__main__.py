@@ -30,8 +30,10 @@ from football_edge.features.questions import QUESTIONS_PATH, load_questions
 from football_edge.features.tier1 import (
     CLUSTER_WINDOW,
     HORIZON,
+    MAX_ATTEMPTS,
     Tier1Run,
     asked_item_ids,
+    failed_attempts,
     load_fixtures,
     run_tier1,
     write_item_answers,
@@ -90,10 +92,17 @@ def _budgeted(jev: JevClient, spend_conn: psycopg.Connection[Any]) -> JevClient:
     )
 
 
-def _report(run: Tier1Run, items: int, written: int) -> None:
+def _report(run: Tier1Run, items: int, written: int, marked: int) -> None:
     LOGGER.info("jev: soru %d · başarısız %d", run.asked, run.failed)
     LOGGER.info(
         "kademe 1: haber %d · adaysız %d · yazılan cevap %d", items, run.no_candidate, written
+    )
+    # Vazgeçilen haber bu `prompt_version` için bir daha sorulmaz: operatör onu buradan görür.
+    LOGGER.info(
+        "kademe 1: başarısızlık işareti %d · vazgeçilen haber %d (%d başarısız deneme)",
+        marked,
+        run.given_up,
+        MAX_ATTEMPTS,
     )
 
 
@@ -112,6 +121,7 @@ def _tier1(args: argparse.Namespace) -> int:
         window = load_news(conn, since=since - CLUSTER_WINDOW)
         ids = [item.item_id for item in window if item.item_id is not None]
         asked = asked_item_ids(conn, questions.prompt_version, ids)
+        attempts = failed_attempts(conn, questions.prompt_version, ids)
         items = tuple(n for n in window if n.item_id not in asked and n.available_at >= since)
         run = run_tier1(
             items,
@@ -122,10 +132,12 @@ def _tier1(args: argparse.Namespace) -> int:
             clock=_now,
             # Pencerenin kalanı küme adayıdır: sorulmuşlar ve `since`ten önceki (72 saatlik) kuyruk.
             history=tuple(n for n in window if n.item_id in asked or n.available_at < since),
+            attempts=attempts,
         )
         written = write_item_answers(conn, run.rows)
+        marked = write_item_answers(conn, run.failures)
         conn.commit()
-    _report(run, len(items), written)
+    _report(run, len(items), written, marked)
     if run.budget_hit:
         LOGGER.error("jev: aylık tavan $%.2f doldu — kalan haberler sorulmadı", MONTHLY_CAP_USD)
         return EXIT_BUDGET

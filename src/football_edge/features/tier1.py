@@ -17,6 +17,12 @@ model listede olmayanı seçemez, listede olmayan bir değer dönerse cevap geç
 - **Güvenilirlik (`t1_guvenilirlik`)**: seçenekleri soru dosyasında.
 
 Cevap `asked_at` = çağrı DÖNDÜKTEN sonraki an: canlıda `asked_at < decided_at` bu ana bakar.
+
+Yeniden deneme sınırı (son inceleme I-3): cevapsız kalan her deneme (Jev hatası ya da geçersiz/eksik
+maç cevabı) `jev_item_answers`e numaralı bir İŞARET satırı bırakır — `question_id` =
+`t1_failed:<n>`, `choice` = sebep, olasılık yok, maliyet 0 (harcama `jev_spend`te). Yeni tablo yok,
+satır yalnız eklenir. İşaret "sorulmuş" sayılmaz (`asked_item_ids`), kapıya girmez (`gates_from`);
+`MAX_ATTEMPTS` işareti olan haber bu `prompt_version` için bir daha satın alınmaz.
 """
 
 from __future__ import annotations
@@ -55,6 +61,12 @@ MAX_FIXTURES = 6
 MAX_EARLIER = 8
 MIN_TOKEN = 4
 EARLIER_PREFIX = "item:"
+FAILED_PREFIX = "t1_failed:"
+MAX_ATTEMPTS = 3
+REASON_INVALID = "match_invalid"
+REASON_ERROR = "jev_error"
+# Hata çağrısında model bilinmez; 0012 `jev_model`i NOT NULL ister.
+NO_MODEL = "-"
 # Birçok kulüp adında geçen, tek başına kulüp ayırt etmeyen sözcükler.
 GENERIC_TOKENS = frozenset(
     {
@@ -99,6 +111,8 @@ class Tier1Run:
     failed: int  # cevapsız ya da geçersiz cevaplı soru
     no_candidate: int  # adayı olmadığı için sorulmayan haber
     budget_hit: bool  # tavan: kalan haberler sorulmadı
+    failures: tuple[ItemAnswerRow, ...] = ()  # cevapsız denemelerin işaretleri (`FAILED_PREFIX`)
+    given_up: int = 0  # `MAX_ATTEMPTS` kez başarısız olduğu için sorulmayan haber
 
 
 # ── Adaylar ────────────────────────────────────────────────────────────────────────────────
@@ -269,6 +283,46 @@ def _answer_rows(
     )
 
 
+def is_failure(row: ItemAnswerRow) -> bool:
+    return row.question_id.startswith(FAILED_PREFIX)
+
+
+def _failure(
+    item_id: int,
+    attempt: int,
+    outcome: BatteryAnswer | str,
+    *,
+    prompt_version: str,
+    at: datetime,
+) -> ItemAnswerRow:
+    """Cevapsız denemenin işareti: `outcome` Jev hatasının sebebi ya da geçersiz cevaplı yanıt."""
+    return ItemAnswerRow(
+        item_id=item_id,
+        prompt_version=prompt_version,
+        question_id=f"{FAILED_PREFIX}{attempt}",
+        choice=outcome if isinstance(outcome, str) else REASON_INVALID,
+        probabilities=MappingProxyType({}),
+        confidence=0.0,
+        match_id=None,
+        jev_model=NO_MODEL if isinstance(outcome, str) else outcome.jev_model,
+        asked_at=at,
+        cost_usd=0.0,
+    )
+
+
+def _ask(
+    client: JevClient, state: Mapping[str, Any], battery: Sequence[Question], item_id: int
+) -> BatteryAnswer | str:
+    """Yanıt ya da başarısızlık sebebi. Tavan (`BudgetExceeded`) çağırana çıkar: koşu durur."""
+    try:
+        return client.ask_battery(state, battery)
+    except BudgetExceeded:
+        raise
+    except Exception as error:
+        LOGGER.exception("jev: haber %s sorulamadı", item_id)
+        return f"{REASON_ERROR}:{type(error).__name__}"
+
+
 def _split(choice: str) -> tuple[str | None, str | None]:
     """`<match_id>:<taraf>` → (maç, taraf); başka her seçim (NO_MATCH) → (None, None)."""
     match_id, _, side = choice.rpartition(":")
@@ -283,17 +337,25 @@ def run_tier1(
     fixtures: Sequence[LiveMatch],
     clock: Callable[[], datetime],
     history: Sequence[StoredNews] = (),
+    attempts: Mapping[int, int] = MappingProxyType({}),
 ) -> Tier1Run:
     """`items`i (zaman, kimlik) sırasıyla sorar; `history` yalnız küme adayıdır, sorulmaz.
 
     Tavan (`BudgetExceeded`) çağrıdan ÖNCE düşer: o ana kadarki cevaplar kaybolmaz, dönülür.
-    Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır.
+    Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır. `attempts` haber
+    başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz.
     """
     templates = {question.question_id: question for question in questions.tier1}
     pool = (*history, *items)
     rows: tuple[ItemAnswerRow, ...] = ()
-    asked = failed = no_candidate = 0
+    failures: tuple[ItemAnswerRow, ...] = ()
+    asked = failed = no_candidate = given_up = 0
     for item in sorted(items, key=_order):
+        item_id = _order(item)[1]
+        attempt = attempts.get(item_id, 0) + 1
+        if attempt > MAX_ATTEMPTS:
+            given_up += 1
+            continue
         candidates = candidate_fixtures(item, fixtures)
         if not candidates:
             no_candidate += 1
@@ -301,23 +363,35 @@ def run_tier1(
         earlier = cluster_candidates(item, pool, candidates)
         battery = _battery(templates, candidates, earlier)
         try:
-            answer = client.ask_battery(_state(item, candidates, earlier), battery)
+            answer = _ask(client, _state(item, candidates, earlier), battery, item_id)
         except BudgetExceeded:
-            return Tier1Run(rows, asked, failed, no_candidate, budget_hit=True)
-        except Exception:
-            LOGGER.exception("jev: haber %s sorulamadı", item.item_id)
-            asked, failed = asked + len(battery), failed + len(battery)
-            continue
-        new = _answer_rows(
-            _order(item)[1],
-            battery,
-            answer,
-            prompt_version=questions.prompt_version,
-            asked_at=clock(),
+            return Tier1Run(
+                rows,
+                asked,
+                failed,
+                no_candidate,
+                budget_hit=True,
+                failures=failures,
+                given_up=given_up,
+            )
+        at = clock()
+        new = (
+            ()
+            if isinstance(answer, str)
+            else _answer_rows(
+                item_id, battery, answer, prompt_version=questions.prompt_version, asked_at=at
+            )
         )
         asked, failed = asked + len(battery), failed + len(battery) - len(new)
         rows = (*rows, *new)
-    return Tier1Run(rows, asked, failed, no_candidate, budget_hit=False)
+        if not new:
+            marker = _failure(
+                item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
+            )
+            failures = (*failures, marker)
+    return Tier1Run(
+        rows, asked, failed, no_candidate, budget_hit=False, failures=failures, given_up=given_up
+    )
 
 
 # ── Kapı özeti ─────────────────────────────────────────────────────────────────────────────
@@ -358,7 +432,8 @@ def gates_from(rows: Sequence[ItemAnswerRow]) -> Mapping[int, ItemGate]:
     if len({row.prompt_version for row in rows}) > 1:
         raise ValueError("gates_from tek bir prompt_version'ın cevaplarını ister")
     by_item: dict[int, dict[str, ItemAnswerRow]] = {}
-    for row in rows:
+    # Başarısızlık işareti cevap değildir: `asked_at`i ve kapıyı etkilemez.
+    for row in (row for row in rows if not is_failure(row)):
         by_item.setdefault(row.item_id, {})[row.question_id] = row
     parents = {
         item_id: _parent(answers.get(CLUSTER_QUESTION)) for item_id, answers in by_item.items()
@@ -390,9 +465,15 @@ _FIXTURES = """
     WHERE commence_time > %s AND commence_time <= %s
     ORDER BY commence_time, id
 """
+# İşaret satırı "sorulmuş" saymaz: yalnız başarısız denemesi olan haber yeniden sorulur.
 _ASKED = """
     SELECT DISTINCT item_id FROM jev_item_answers
-    WHERE prompt_version = %s AND item_id = ANY(%s)
+    WHERE prompt_version = %s AND item_id = ANY(%s) AND NOT starts_with(question_id, %s)
+"""
+_ATTEMPTS = """
+    SELECT item_id, count(*) FROM jev_item_answers
+    WHERE prompt_version = %s AND item_id = ANY(%s) AND starts_with(question_id, %s)
+    GROUP BY item_id
 """
 _ANSWER_COLUMNS: tuple[tuple[str, str], ...] = (
     ("item_id", "bigint"),
@@ -434,8 +515,19 @@ def asked_item_ids(
     if not item_ids:
         return frozenset()
     with conn.cursor() as cur:
-        cur.execute(_ASKED, (prompt_version, list(item_ids)))
+        cur.execute(_ASKED, (prompt_version, list(item_ids), FAILED_PREFIX))
         return frozenset(int(row[0]) for row in cur.fetchall())
+
+
+def failed_attempts(
+    conn: psycopg.Connection[Any], prompt_version: str, item_ids: Sequence[int]
+) -> Mapping[int, int]:
+    """Haber başına bu `prompt_version`daki başarısız deneme (işaret satırı) sayısı."""
+    if not item_ids:
+        return MappingProxyType({})
+    with conn.cursor() as cur:
+        cur.execute(_ATTEMPTS, (prompt_version, list(item_ids), FAILED_PREFIX))
+        return MappingProxyType({int(row[0]): int(row[1]) for row in cur.fetchall()})
 
 
 def _column(row: ItemAnswerRow, name: str) -> Any:

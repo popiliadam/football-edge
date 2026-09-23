@@ -23,7 +23,9 @@ from football_edge.features.questions import (
     load_questions,
 )
 from football_edge.features.tier1 import (
+    FAILED_PREFIX,
     HORIZON,
+    MAX_ATTEMPTS,
     MAX_FIXTURES,
     ItemAnswerRow,
     asked_item_ids,
@@ -73,9 +75,16 @@ def run(
     history: Sequence[StoredNews] = (),
     fixtures: Sequence[LiveMatch] = FIXTURES,
     questions: QuestionSet = QUESTIONS,
+    attempts: Mapping[int, int] | None = None,
 ) -> Any:
     return run_tier1(
-        items, client, questions, fixtures=fixtures, clock=lambda: ASKED, history=history
+        items,
+        client,
+        questions,
+        fixtures=fixtures,
+        clock=lambda: ASKED,
+        history=history,
+        attempts=attempts or {},
     )
 
 
@@ -284,6 +293,64 @@ def test_the_budget_stops_the_run_and_keeps_the_answers_already_paid_for() -> No
 
     assert {r.item_id for r in result.rows} == {1}
     assert (result.asked, result.budget_hit) == (2, True)
+
+
+# ── Yeniden deneme sınırı (son inceleme I-3) ─────────────────────────────────────────────────
+
+
+def test_a_failed_battery_leaves_a_numbered_failure_marker_not_an_answer() -> None:
+    """Deneme sayısı koşular arasında `jev_item_answers`teki numaralı işaretlerden okunur."""
+    client = FakeBatteryJev(error=RuntimeError("400 bad request"))
+
+    result = run([news(1, "Galatasaray'da sakatlık")], client, attempts={1: 1})
+
+    assert result.rows == ()
+    (marker,) = result.failures
+    assert (marker.item_id, marker.question_id, marker.choice, marker.match_id) == (
+        1,
+        f"{FAILED_PREFIX}2",
+        "jev_error:RuntimeError",
+        None,
+    )
+    assert (dict(marker.probabilities), marker.confidence, marker.cost_usd) == ({}, 0.0, 0.0)
+    assert marker.prompt_version == QUESTIONS.prompt_version
+
+
+def test_an_invalid_match_answer_leaves_a_failure_marker() -> None:
+    client = FakeBatteryJev(choices={MATCH_QUESTION: "m-baska:home"})
+
+    result = run([news(1, "Galatasaray'da sakatlık")], client)
+
+    assert result.rows == ()
+    assert [(m.question_id, m.choice, m.jev_model) for m in result.failures] == [
+        (f"{FAILED_PREFIX}1", "match_invalid", "jev-fake")
+    ]
+
+
+def test_an_item_that_failed_max_attempts_times_is_not_bought_again() -> None:
+    client = FakeBatteryJev()
+    items = [
+        news(1, "Galatasaray'da sakatlık", T0),
+        news(2, "Trabzonspor'da kriz", T0 + timedelta(minutes=1)),
+    ]
+
+    result = run(items, client, attempts={1: MAX_ATTEMPTS, 2: MAX_ATTEMPTS - 1})
+
+    assert [call["state"]["news"]["title"] for call in client.seen] == ["Trabzonspor'da kriz"]
+    assert (result.given_up, result.failures) == (1, ())
+    assert {r.item_id for r in result.rows} == {2}
+
+
+def test_gates_ignore_failure_markers() -> None:
+    """İşaret cevap değildir: kapıyı da `asked_at`i de (sonra yazılmış olsa bile) etkilemez."""
+    answers = run([news(7, "Trabzonspor'da kriz")], FakeBatteryJev()).rows
+    failed = run(
+        [news(7, "Trabzonspor'da kriz")], FakeBatteryJev(error=TimeoutError("zaman aşımı"))
+    ).failures
+    later = tuple(replace(m, asked_at=ASKED + timedelta(hours=1)) for m in failed)
+
+    assert gates_from([*later, *answers]) == gates_from(answers)
+    assert gates_from(later) == {}
 
 
 @pytest.mark.leakage
@@ -498,18 +565,25 @@ def test_tier1_command_asks_unasked_news_writes_and_reports(
     assert "Rizespor" not in offered, "başlamış maç aday olmamalı (cevabı hiçbir karara yetişmez)"
 
 
-def test_an_invalid_match_answer_leaves_the_news_to_be_asked_again(
-    monkeypatch: pytest.MonkeyPatch,
+def test_an_invalid_match_answer_is_retried_across_runs_until_the_attempt_cap(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Geçersiz cevaptan sonra haber yeniden sorulur — ama `MAX_ATTEMPTS` koşudan sonra değil:
+    her koşuda aynı haberi yeniden satın almak tavanı hayalet başarısızlıkla tüketirdi (I-3)."""
     db = _db_with(news(1, "Galatasaray'da sakatlık"))
     client = FakeBatteryJev(choices={MATCH_QUESTION: "m-baska:home"})
     _cli(monkeypatch, db, client)
 
-    cli.main(["tier1"])
-    cli.main(["tier1"])
+    with caplog.at_level(logging.INFO):
+        for _ in range(MAX_ATTEMPTS + 2):
+            cli.main(["tier1"])
 
-    assert db.answers == []
-    assert len(client.seen) == 2, "geçersiz maç cevabından sonra haber yeniden sorulmalı"
+    assert len(client.seen) == MAX_ATTEMPTS
+    assert [a["question_id"] for a in db.answers] == [
+        f"{FAILED_PREFIX}{n}" for n in range(1, MAX_ATTEMPTS + 1)
+    ]
+    assert asked_item_ids(db, QUESTIONS.prompt_version, [1]) == frozenset()  # type: ignore[arg-type]
+    assert "vazgeçilen haber 1" in caplog.text
 
 
 def test_unasked_news_just_before_since_is_a_cluster_candidate_not_asked(
