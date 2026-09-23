@@ -1,0 +1,155 @@
+# Jev soru bataryası (Faz 4 spec §6; ana tasarım §5.2 tablosu). prompt_version = bu dosyanın
+# sha256'sı: tek karakter değişirse yeni sürüm doğar, eski cevaplarla karışmaz.
+#
+# Kademe 1 (tier1) haber başına sorulur ve FİLTREDİR, özellik değil. t1_mac_taraf ile t1_kume'nin
+# seçenekleri haberden kurulur (features/tier1.py) — burada yalnız talimatları durur.
+# Kademe 2–4 karar anında maç başına, TARAF başına ({team}) sorulur; ortak dört düzeyli ölçek
+# (features/questions.py: LEVEL_CRITERIA). T2 çekirdek ve T3 aday özelliktir; T4 yalnız kaydedilir.
+#
+# "Cevabı tabloda zaten var mı?" testinde elenenler (sorulmaz):
+#   hava (collectors/weather.py) · seyahat mesafesi (collectors/venues.py) · maç yoğunluğu ve dinlenme
+#   günü (matches fikstürü) · puan durumu, form, gol (sonuçlar) · hakem ataması (collectors/tff.py) ·
+#   oranlar ve Elo (defter, model). Eşanlamlı soru yok: her soru ayrı bir olguyu sorar.
+
+tier1:
+  - id: t1_mac_taraf
+    instructions: >-
+      The state holds one football news item and the upcoming fixtures whose teams it may mention.
+      Select the fixture and side this news is about: team news, injuries, suspensions, expected
+      line-ups, coach or player statements, or previews for that upcoming match. A report of a match
+      that was already played belongs to an upcoming fixture only if it carries team news for it.
+      If the news is not relevant to any listed fixture, select 'none of the above'.
+  - id: t1_kume
+    instructions: >-
+      The state lists earlier news items about the same teams. Select the earlier item that reports
+      the same event or fact as this news item (a repeat, a follow-up of the same fact, or a
+      translation). If this news reports something none of the earlier items reported, select
+      'new event'.
+  - id: t1_guvenilirlik
+    instructions: >-
+      How reliable is the main claim of this news item?
+    criteria:
+      official: The claim comes from the club, the coach, the league or another official statement
+      reported: A named journalist or outlet reports the claim as fact
+      rumour: The claim is speculation, an unnamed source or social media talk
+      opinion: The item is commentary or analysis without a factual claim
+  - id: t1_celiski
+    instructions: >-
+      Does this news item contradict or deny a claim that the earlier listed news items made?
+    criteria:
+      contradicts: It denies or contradicts an earlier claim
+      consistent: It agrees with or adds to the earlier claims
+      unrelated: The earlier items make no claim this item speaks to
+
+tier2:
+  - id: t2_hucum_eksik
+    instructions: >-
+      How much does the news suggest {team} will miss key attacking players (forwards, wingers,
+      attacking midfielders) through injury or suspension in this match?
+  - id: t2_savunma_eksik
+    instructions: >-
+      How much does the news suggest {team} will miss key defenders through injury or suspension
+      in this match?
+  - id: t2_orta_saha_eksik
+    instructions: >-
+      How much does the news suggest {team} will miss key central or defensive midfielders through
+      injury or suspension in this match?
+  - id: t2_kaleci_eksik
+    instructions: >-
+      How much does the news suggest {team}'s first-choice goalkeeper will not play this match?
+  - id: t2_supheli
+    instructions: >-
+      How much does the news describe important {team} players as doubtful, still recovering or
+      facing a late fitness test for this match?
+  - id: t2_donus
+    instructions: >-
+      How much does the news suggest important {team} players are returning from injury or
+      suspension for this match?
+  - id: t2_rotasyon
+    instructions: >-
+      How much does the news suggest {team} will rest regular starters in this match to save them
+      for another competition or a later match?
+  - id: t2_hoca_degisim
+    instructions: >-
+      How much does the news suggest {team} will be led by a new or interim coach in this match?
+  - id: t2_yeni_transfer
+    instructions: >-
+      How much does the news suggest newly signed {team} players will be available to play in this
+      match for the first time?
+
+tier3:
+  - id: t3_oncelik
+    instructions: >-
+      How much does the news suggest {team} treats this match as a lower priority than another
+      upcoming competition or goal?
+  - id: t3_hoca_baskisi
+    instructions: >-
+      How much does the news suggest the {team} coach's job is at risk depending on this result?
+  - id: t3_derbi_gerilim
+    instructions: >-
+      How much does the news describe this match as a rivalry or grudge match that {team} is
+      especially fired up for?
+  - id: t3_dead_rubber
+    instructions: >-
+      How much does the news suggest {team} has nothing left to play for in this match?
+  - id: t3_taktik_degisim
+    instructions: >-
+      How much does the news suggest {team} will change its usual formation or playing system for
+      this match?
+  - id: t3_seyirci_kisiti
+    instructions: >-
+      How much does the news suggest {team}'s own supporters will be absent or restricted at this
+      match (closed doors, stadium ban, away fan ban)?
+  - id: t3_saha_zemini
+    instructions: >-
+      How much does the news report problems with the pitch or stadium that could hinder {team}
+      in this match?
+  - id: t3_milli_donus
+    instructions: >-
+      How much does the news suggest {team} players return late or tired from international duty
+      before this match?
+  - id: t3_kart_siniri
+    instructions: >-
+      How much does the news suggest key {team} players are one booking away from a suspension and
+      may be protected in this match?
+
+tier4:
+  - id: t4_soyunma_odasi
+    instructions: >-
+      How much does the news report unrest or division inside the {team} dressing room?
+  - id: t4_sozlesme_krizi
+    instructions: >-
+      How much does the news report contract disputes involving important {team} players?
+  - id: t4_taraftar_baskisi
+    instructions: >-
+      How much does the news report pressure or protests from {team} supporters against the team?
+  - id: t4_hakem_tartismasi
+    instructions: >-
+      How much does the news report {team} complaining about refereeing or a referee controversy?
+  - id: t4_yonetim_krizi
+    instructions: >-
+      How much does the news report boardroom or ownership turmoil at {team}?
+  - id: t4_maas_gecikme
+    instructions: >-
+      How much does the news report unpaid or delayed wages at {team}?
+  - id: t4_transfer_soylentisi
+    instructions: >-
+      How much does the news link important {team} players with a transfer away?
+  - id: t4_disiplin
+    instructions: >-
+      How much does the news report {team} players being disciplined or dropped by the club for
+      behaviour?
+  - id: t4_oyuncu_hoca_catisma
+    instructions: >-
+      How much does the news report a public conflict between {team} players and their coach?
+  - id: t4_federasyon_ceza
+    instructions: >-
+      How much does the news report {team} facing a sanction, fine or points deduction from the
+      league or federation?
+  - id: t4_provokasyon
+    instructions: >-
+      How much does the news report provocative statements by {team} players or officials ahead of
+      this match?
+  - id: t4_basin_boykotu
+    instructions: >-
+      How much does the news report {team} boycotting the media or refusing press duties?
