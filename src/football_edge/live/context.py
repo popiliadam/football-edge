@@ -199,8 +199,12 @@ def league_lagging(dates: Sequence[date], decided_on: date) -> bool:
     return gap > usual[int(LAG_QUANTILE * (len(usual) - 1))] + 1
 
 
-def lagging_leagues(group: Sequence[HistMatch], decided: datetime) -> tuple[str, ...]:
-    """Grubun (defterde olsun olmasın) geride kalan ligleri, karar gününe (Londra) göre."""
+def lagging_leagues(
+    group: Sequence[HistMatch], decided: datetime, ledger: frozenset[str] = frozenset()
+) -> tuple[str, ...]:
+    """Grubun, defterde fikstürü OLMAYAN ve geride kalan ligleri, karar gününe (Londra) göre
+    (R141, R153). `ledger`deki ligler yargılanmaz — onları katman (a) `is_stale` doğrular — ama
+    tarihleri öteki liglerin "grup bu arada oynadı mı" sorusunda sayılır."""
     decided_on = decided.astimezone(LONDON).date()
     dates: dict[str, list[date]] = {}
     for match in group:
@@ -208,7 +212,9 @@ def lagging_leagues(group: Sequence[HistMatch], decided: datetime) -> tuple[str,
     return tuple(
         code
         for code in sorted(dates)
-        if league_lagging(dates[code], decided_on) and _group_played_since(dates, code, decided_on)
+        if code not in ledger
+        and league_lagging(dates[code], decided_on)
+        and _group_played_since(dates, code, decided_on)
     )
 
 
@@ -253,7 +259,9 @@ def build_batch(
             for m in live
             if rating_groups.get(naming.codes.get(m.league_id, ""), "") == group_name
         ]
-        if is_stale(match, same_group, naming, keys, decided) or lagging_leagues(group, decided):
+        if is_stale(match, same_group, naming, keys, decided) or lagging_leagues(
+            group, decided, ledger=frozenset(naming.codes.values())
+        ):
             stale.append(match.match_id)
             continue
         prices = pre_prices([q for q in quotes if q.match_id == match.match_id], match, decided)

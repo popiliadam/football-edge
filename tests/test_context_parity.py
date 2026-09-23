@@ -419,3 +419,42 @@ def test_a_league_lags_only_if_the_rest_of_its_group_played_meanwhile() -> None:
 
     assert lagging_leagues([*lower, *paused], decided) == ()
     assert lagging_leagues([*lower, *played], decided) == ("E1",)
+
+
+def test_a_ledger_league_resting_through_a_break_is_not_judged_lagging() -> None:
+    """R153 (R141'in kapsamı): defterdeki lig (E0) milli arada 14 gün dinlenirken defterde olmayan
+    E1 oynadı; E0'ı katman (a) `is_stale` doğrular, katman (b) onu yargılamaz."""
+    last = date(2026, 9, 5)
+    decided_on = last + timedelta(days=14)
+
+    def league(code: str, days: list[date]) -> list[HistMatch]:
+        return [
+            hist_match(day=day, league=code, home=f"{code} {i}", away=f"{code} k{i}", line=i)
+            for i, day in enumerate(days)
+        ]
+
+    top = league("E0", [last - timedelta(weeks=week) for week in range(20)])
+    lower = league("E1", [last + timedelta(weeks=1) - timedelta(weeks=week) for week in range(20)])
+    group = sorted([*top, *lower], key=lambda m: (m.date, m.league))
+    kickoff = datetime.combine(decided_on, time(14), tzinfo=UTC)
+    live = LiveMatch("dinlenen", LEAGUE_ID, kickoff, "E0 0", "E0 k0")
+    decided = decision_at(decided_on, kickoff)
+    assert decided is not None
+    quotes = [
+        Quote(live.match_id, decided, "b1", "h2h", name, price)
+        for name, price in (("E0 0", 2.0), ("Draw", 3.4), ("E0 k0", 3.8))
+    ]
+
+    batch = build_batch(
+        (live,),
+        quotes,
+        {"Ülke": group},
+        now=decided + timedelta(minutes=30),
+        naming=naming_from({"E0": top, "E1": lower}, {LEAGUE_ID: "E0"}, {}),
+        kinds=KINDS,
+        rating_groups=MappingProxyType({"E0": "Ülke", "E1": "Ülke"}),
+    )
+
+    assert batch.stale == () and len(batch.decisions) == 1
+    assert lagging_leagues(group, decided) == ("E0",)  # defter bilinmeden: eski davranış
+    assert lagging_leagues(group, decided, ledger=frozenset({"E0"})) == ()
