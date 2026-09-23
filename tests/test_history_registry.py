@@ -41,11 +41,29 @@ def test_the_source_is_honest_polite_and_robots_based() -> None:
     assert (entry.enabled, entry.access_basis, entry.terms_url) == (True, "robots", "")
 
 
+# 2026-09-23'te ölçülen (sources-audit 35847854256) adıyla kapatılan botlar; `*` açık kaldı.
+_NAMED_BLOCKS = (
+    "GPTBot",
+    "ChatGPT-User",
+    "Google-Extended",
+    "Anthropic-AI",
+    "Claude-Web",
+    "ClaudeBot",
+    "PerplexityBot",
+    "Applebot-Extended",
+    "CCBot",
+    "Meta-ExternalAgent",
+    "Diffbot",
+    "Omgilibot",
+)
+
+
 def test_the_committed_snapshot_is_the_measured_open_policy() -> None:
     text = (ROBOTS / f"{SOURCE_ID}.txt").read_text(encoding="utf-8")
 
     rules = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
-    assert rules == ["User-agent: *", "Disallow:"]
+    named = [rule for bot in _NAMED_BLOCKS for rule in (f"User-agent: {bot}", "Disallow: /")]
+    assert rules == ["User-agent: *", "Disallow:", *named]
 
 
 def test_every_declared_path_passes_the_offline_source_audit() -> None:
