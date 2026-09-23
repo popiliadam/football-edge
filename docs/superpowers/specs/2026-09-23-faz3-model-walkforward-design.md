@@ -510,6 +510,19 @@ ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştir
 - **P25** — §10: haftalık gölge CLV raporu Faz 3'te yazılmaz (Faz 4'ün ilk görevi); R128'nin boşluk cezası bu fazda
   DEV simülasyonu (`walkforward --gap`) ve `final_eval` C6 ile ölçülür, canlı ayağı o rapora kadar ölçülmez.
 
+### 14.3 Controller kararları (2026-09-23) — kullanıcı P1/P9/P11/P25'i controller'a bıraktı
+
+| Ruling | Konu | Karar | Yanlışsa bedeli |
+|---|---|---|---|
+| **R142** | P11 · §6.1 Elo beraberliği | `δ·4E(1−E)` ve sıralı lojit (M5) İKİSİ de S seçiminin ızgarasında tek kategorik hiperparametre (`draw_form`); yalnız seçilen biçim ve S'de fit edilen parametreleri donar ve açılışa girer | seçim ızgarası bir boyut büyür |
+| **R143** | P9 · §9 G4 W1 | W1 daha kötü olmama sınaması: maç başına LL(harman) − LL(piyasa) ortalamasının %95 bootstrap aralığının ÜST ucu ≤ 0.001; bootstrap Faz 2'nin (`market.metrics.bootstrap_mean`, maç düzeyi, tohum 20260922, düzey 0.95, B = 2.000 — `market/efficiency.py` RESAMPLES/SEED/LEVEL) | nokta tahmininden sıkı: gerçek veride W1 daha kolay kırmızı |
+| **R144** | P1 · §7.1–7.4 | bağlam yalnız `Avg` 1X2 kapanış öncesi fiyatını taşır — yazıldığı gibi kabul | başka kitap/market okuyan strateji bağlamdan alamaz |
+| **R145** | P25 · §10, §5.4 | haftalık gölge CLV raporu Faz 4'ün ilk görevi; R128'in canlı ayağı o zamana dek ölçülmez — yazıldığı gibi kabul | ilk haftaların gölge sayıları okunmaz |
+
+Plan yazımında R142'nin uygulanması: **R146** sıralı lojit küresel ve simetrik (tek `s`, tek `c`; M5'teki lig başına
+kesişimler yok) · **R147** Elo adayları S'de `quadratic` biçimle oynatılır, E geri okunur, adayın biçimi o E'de
+fit edilir (reyting yolu biçimden bağımsız). R141 düzeltildiği için P26 yoktur.
+
 ## 15. Karar kaydı
 
 | # | Karar | Bölüm |

@@ -157,12 +157,18 @@ strengths(params) -> Mapping[str, tuple[float, float]]
 # Task 2 — football_edge.model.elo_model
 NO_MARGIN, LINEAR_MARGIN, LOG_MARGIN: str; MARGINS; MAX_DRAW = 0.5
 EloModelConfig(k=20.0, home_advantage=65.0, margin="linear", regress=0.0, newcomer_offset=0.0,
-               draw=0.26, season_gap_days=60, initial=1500.0)
+               draw=0.26, draw_form="quadratic", ordered_scale=1.0, ordered_cut=0.53,
+               season_gap_days=60, initial=1500.0)
 EloModel(config, groups: Mapping[str, str], ratings, last_seen)   # Strategy, name "elo_fit"
 margin_multiplier(home_goals, away_goals, form) -> float
 elo_probs(expected: float, draw: float) -> tuple[float, float, float]   # P(D) = δ·4E(1−E)
-expectation(probs) -> float                                            # E = H + D/2
+ordered_probs(expected: float, scale: float, cut: float) -> tuple[float, float, float]   # R142
+elo_outcome_probs(expected: float, config: EloModelConfig) -> tuple[float, float, float]  # biçime göre
+expectation(probs) -> float                                            # E = H + D/2 (quadratic)
 fit_draw(expectations: Sequence[float], outcomes: Sequence[int]) -> float
+fit_ordered(expectations, outcomes) -> tuple[float, float]             # (s, c)
+fit_outcome_params(config, expectations, outcomes) -> EloModelConfig   # seçili biçim fit edilmiş
+QUADRATIC = "quadratic"; ORDERED = "ordered"; DRAW_FORMS
 
 # Task 3 — football_edge.model.pool
 MIN_FIT_MATCHES = 300; MAX_WEIGHT = 5.0; class TooFewMatches(ValueError)
@@ -232,7 +238,8 @@ shadow_rows(batch, *, config, rating_groups, config_sha256, git_sha) -> tuple[Sh
 write_shadow(conn, rows) -> int; parity(live, history, *, codes, aliases, kinds) -> ParityReport; EXIT_PARITY = 15
 
 # Task 12 — backtest.model_selftest
-W1_MARGIN = 0.001; model_rows(groups, kinds, rating_groups, config); model_checks(rows, *, resamples) -> tuple[Check, ...]
+W1_MARGIN = 0.001; w1_passes(gap: Interval) -> bool   # R143: gap.high <= W1_MARGIN
+model_rows(groups, kinds, rating_groups, config); model_checks(rows, *, resamples) -> tuple[Check, ...]
 ```
 
 ## Paralellik ve worktree protokolü
@@ -259,11 +266,11 @@ bağımlılık VERİdedir: yeni liglerin ilk canlı maçlarından sonra takma ad
 lig; `aut.1` kapalı olduğu için defterde AUT maçı yoktur — gölge ve E3 onu görmez; lig kredi onayıyla açılırsa
 kod değişmeden kapsar.
 
-## Plan yazımında verilen kararlar (P1–P25; R141)
+## Plan yazımında verilen kararlar (P1–P25; R141–R147)
 
 Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen noktalar. Biçim: karar — *yanlışsa bedeli*.
 
-1. **P1** Bağlam yalnız `Avg` 1X2 kapanış öncesi fiyatını taşır (`CONTEXT_BOOK`, `CONTEXT_MARKETS`). Canlı
+1. **P1 → R144** (controller, 2026-09-23: yazıldığı gibi kabul) Bağlam yalnız `Avg` 1X2 kapanış öncesi fiyatını taşır (`CONTEXT_BOOK`, `CONTEXT_MARKETS`). Canlı
    defter yalnız 1X2 toplar (`markets=h2h`) ve kitap ortalaması `Avg`'ye denktir; başka kitap/market bağlamda
    kalsaydı E1 eşitliği sözde kalırdı. Faz 2'nin bir testi (`test_a_decision_context_carries_only_pre_closing_prices`)
    buna göre güncellenir — *`Max`/`PS`/Ü/A kapanış öncesi fiyatı okuyan bir strateji bağlamdan alamaz
@@ -280,15 +287,20 @@ Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen nokta
 7. **P7** Ek liglerde S `2013-01-01`den başlar (2012 ısınma); tasarım "2012 →" diyordu — *S'den bir yıl eksik.*
 8. **P8** Lig kendi eğitim satırı `< 1000` ise havuzlanmış ağırlık (`LEAGUE_MIN_MATCHES`) — *bir ligin ilk E
    katları kendi ağırlığını değil ana liglerin ortak ağırlığını kullanır.*
-9. **P9** W1 = "ortalama ΔLL(harman − piyasa) ≤ δ = 0.001" (tasarım §9 G4'ün metni); aralığın alt ucu değil.
-   Sentetik ölçüm: tek ligin ~400 maçlık katında örneklem dışı ağırlık gürültüsü δ'yı aşıyordu (P8 bu yüzden) —
-   *δ keyfîdir; gerçek veride W1 kırmızıysa kapı gevşetilmez, Task 12 eskalasyonu.*
+9. **P9 → R143** (controller, 2026-09-23) W1 bir DAHA KÖTÜ OLMAMA sınamasıdır: maç başına ΔLL(harman − piyasa)
+   ortalamasının %95 bootstrap aralığının ÜST ucu ≤ δ = 0.001 (P9'un nokta tahmini ölçütünün yerine). Bootstrap
+   Faz 2'ninki: `market.metrics.bootstrap_mean`, maç düzeyinde yeniden örnekleme, tohum 20260922, düzey 0.95,
+   B = 2.000 (`market/efficiency.py:53-55` RESAMPLES/SEED/LEVEL). P8'in 1.000 eşiği gürültüyü sınırlar —
+   *δ keyfîdir ve üst uç ölçütü nokta tahmininden sıkıdır: gerçek veride W1 kırmızıysa kapı gevşetilmez, Task 12
+   eskalasyonu.*
 10. **P10** Seçim: tek turluk koordinat inişi, sabit ızgaralar — Elo `k` {10,15,20,25,30}, ev avantajı
     {40,65,90}, marj {yok, doğrusal, log}, dönüş {0,0.2,0.4}, yeni takım farkı {0,75,150}; DC `ξ`
-    {0.0010,0.0019,0.0030}, sırt {0.003,0.01,0.03}; fit penceresi 1095 gün sabit — *yerel optimum; iz raporda.*
-11. **P11** Elo'nun 1X2 eşlemesi `P(D) = δ·4E(1−E)`, `H = E − D/2` (tek parametre, kapalı biçimde fit);
-    tasarım §6.1 "sıralı lojit" diyordu — *beraberlik reyting farkına bağlı ama tek biçimli; sıralı lojit
-    Faz 5 istiflemesinde denenebilir.*
+    {0.0010,0.0019,0.0030}, sırt {0.003,0.01,0.03}; fit penceresi 1095 gün sabit; R142 ile Elo ızgarasına son boyut
+    `draw_form` ∈ {quadratic, ordered} — *yerel optimum; iz raporda.*
+11. **P11 → R142** (controller, 2026-09-23) Elo'nun beraberlik eşlemesi İKİ adaydır ve S seçer: `quadratic`
+    `P(D) = δ·4E(1−E)` ve `ordered` sıralı lojit (tasarım M5) `η = s·logit(E)`, `P(H) = σ(η − c)`,
+    `P(A) = σ(−η − c)`. `draw_form` kategorik bir hiperparametredir (P10'un ızgarası); yalnız seçilen biçim
+    ve onun S'de fit edilmiş parametreleri donar ve açılışa girer.
 12. **P12** E3'te başlama farkı eşiği 30 dk: saat dilimi/yaz saati hatası ≥ 60 dk kaydırır — *30 dk altı
     kaymalar (yayın saati) görünmez.*
 13. **P13** `final_eval` kilidi açılıştan ÖNCE anahtarsız yüklemeyle doğrular (+~10 sn, ~760 MB) — *kilit ihlali
@@ -319,7 +331,7 @@ Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen nokta
     `rating_groups`) içe alır — *iki CLI arasında bağ; ayrı bir modüle taşımak ek dosya.*
 24. **P24** Gölge her koşuda grubun durumunu DEV + POST'tan baştan kurar (grup başına bir Elo, bir DC fiti) —
     *koşu başına ~10 sn yükleme + fit; Task 13'te ölçülür.*
-25. **P25** Tasarım §10'un gölge CLV raporu (harman + bahis + mühürlü kapanış, haftalık) Faz 3'te YAZILMAZ: Faz 3
+25. **P25 → R145** (controller, 2026-09-23: yazıldığı gibi kabul) Tasarım §10'un gölge CLV raporu (harman + bahis + mühürlü kapanış, haftalık) Faz 3'te YAZILMAZ: Faz 3
     sicili biriktirir, rapor Faz 4'ün ilk görevidir (DEFERRED'a, Task 13 Step 10). R128'nin canlı ayağı (C6 −
     gölge) da bu rapora kadar ölçülmez; boşluk cezası bu fazda DEV simülasyonu (`walkforward --gap`, Task 7/9)
     ve C6 ile ölçülür — *ilk haftaların gölge sayıları okunmaz; sicil yine append-only birikir.*
@@ -330,8 +342,17 @@ Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen nokta
     21 günü aşan ara yargılanmaz). P26'ya gerek kalmadı — *sezgiseldir: bir ligin olağan aralığı içinde kalan
     (ör. tek maçlık) gecikme görünmez; milli ara başında yanlış "bayat" tahmin kaybettirir (güvenli yön).*
 
-**Kullanıcı onayı isteyenler (plan incelemesi):** P1, P9, P11, P25 ve R141 onaylı spec'i ya da onaylı bir kapıyı
-değiştirir; plan onayıyla birlikte AYRICA onaylanır. P4 ve P8 bilgi içindir.
+**Plan incelemesinin onay listesi — KAPANDI (2026-09-23):** kullanıcı P1/P9/P11/P25'i controller'a bıraktı;
+controller kararları R144 (P1 kabul), R143 (P9 → daha kötü olmama), R142 (P11 → iki biçim, S seçer), R145 (P25
+kabul); R141 düzeltildi, P26 yok. P4 ve P8 bilgi içindir.
+
+27. **R146** (plan yazımında, R142'nin uygulanması) — sıralı lojit KÜRESEL ve SİMETRİKTİR: tek ölçek `s` ve tek
+    kesim `c`, bütün ligler için S'de birlikte fit edilir; tasarım M5'teki lig başına kesişimler yoktur — *ligler
+    arası beraberlik oranı farkı yakalanmaz (quadratic'te de yok); iki biçimin kıyası adil kalır.*
+28. **R147** (plan yazımında) — Elo adayları S'de hep `quadratic` biçimle oynatılır ve E tahminden geri okunur;
+    reyting güncellemesi yalnız E'yi kullandığı için yol biçimden bağımsızdır, adayın kendi biçimi o E dizisinde
+    fit edilir — *ordered aday için oynatma sayısı iki katına çıkmaz; E'nin geri okunması `expectation`ın
+    quadratic tersine dayanır (testle sabit).*
 
 ## Plan incelemesinin düzeltmeleri (2026-09-23, "approve with fixes")
 
@@ -355,8 +376,8 @@ değiştirir; plan onayıyla birlikte AYRICA onaylanır. P4 ve P8 bilgi içindir
 ## Plan-zamanı ölçümler
 
 Bu plan yazılırken veritabanına bağlanılmadı; gerçek veride hiçbir şey ölçülmedi. Aşağıdakiler SENTETİK veride
-ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.757 passed / 3 skipped (taban `a398c31`: 1.553 passed / 2 skipped; üçüncü SKIP `test_holdout_phase_db`, `DATABASE_URL yok`); `leakage`
-işaretli 333 (taban 265); DC fiti 6 takım × 180 maçta ~0,6 ms (gerçek bir ülke grubunda
+ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.777 passed / 3 skipped (taban `a398c31`: 1.553 passed / 2 skipped; üçüncü SKIP `test_holdout_phase_db`, `DATABASE_URL yok`); `leakage`
+işaretli 334 (taban 265); DC fiti 6 takım × 180 maçta ~0,6 ms (gerçek bir ülke grubunda
 takım ve maç sayısı onlarca kat büyük — süre Task 5'te ölçülür, tahmin edilmez). Gerçek veri ölçümleri (saatsiz satır,
 yineleme, DC ve Elo süresi/RSS, seçim ve walk-forward süresi) Task 0, 5 ve 9'da, ölçüm belgesi
 `docs/superpowers/specs/2026-09-23-faz3-olcumler.md`e yazılır.
@@ -1010,7 +1031,7 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 
 **Kademe:** K1 · **Dalga:** 1 · **Worktree/dal:** `.worktrees/wt-elo` · `feat/faz3-elo`
 
-İskele `EloPointInTime`ın yerine geçen, seçimi S bölgesinde yapılacak Elo (tasarım §6.1): marj biçimi (yok/doğrusal/log), sezon arası ortalamaya dönüş (`season_gap_days` aşılınca), görülmemiş takımın grup ortalamasının `newcomer_offset` altından başlaması ve beraberliğin reyting farkına bağlanması `P(D) = δ·4E(1−E)` (P11). `fit_draw` δ'yı sabit E dizisinde kapalı biçimde fit eder: seçim her aday için δ'yı yeniden oynatmadan bulur. Reyting (grup, takım) anahtarlı (R94). Testler bağlamı YALNIZ `harness._context`/`replay` ile kurar (Task 4 aynı dalgada `DecisionContext`i taşıyor).
+İskele `EloPointInTime`ın yerine geçen, seçimi S bölgesinde yapılacak Elo (tasarım §6.1): marj biçimi (yok/doğrusal/log), sezon arası ortalamaya dönüş (`season_gap_days` aşılınca), görülmemiş takımın grup ortalamasının `newcomer_offset` altından başlaması ve beraberliğin reyting farkına bağlanması. R142: beraberlik eşlemesinin İKİ biçimi vardır — `quadratic` `P(D) = δ·4E(1−E)` ve `ordered` simetrik kesimli sıralı lojit `η = s·logit(E)`, `P(H) = σ(η − c)`, `P(A) = σ(−η − c)` (tasarım M5) — ve hangisinin donacağını Task 7'nin S seçimi belirler. `fit_outcome_params` seçilen biçimin parametrelerini (δ ya da s, c) sabit E dizisinde fit eder: seçim her aday için yeniden oynatmadan bulur; reyting yolu biçimden bağımsızdır. Reyting (grup, takım) anahtarlı (R94). Testler bağlamı YALNIZ `harness._context`/`replay` ile kurar (Task 4 aynı dalgada `DecisionContext`i taşıyor).
 
 **Files:**
 - Create: `src/football_edge/model/elo_model.py`
@@ -1018,7 +1039,7 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 
 **Interfaces:**
 - Consumes: `football_edge.elo.expected_home`, `EloConfig`; harness'ın `DecisionContext`, `Prediction`, `ResultRecord`; scipy `minimize_scalar`.
-- Produces: `EloModelConfig`, `EloModel` (`name == "elo_fit"`), `margin_multiplier`, `elo_probs`, `expectation`, `fit_draw`, `MAX_DRAW`, marj sabitleri.
+- Produces: `EloModelConfig` (+ `draw_form`, `ordered_scale`, `ordered_cut`), `EloModel` (`name == "elo_fit"`), `margin_multiplier`, `elo_probs`, `ordered_probs`, `elo_outcome_probs`, `expectation`, `fit_draw`, `fit_ordered`, `fit_outcome_params`, `MAX_DRAW`, `QUADRATIC`, `ORDERED`, `DRAW_FORMS`, marj sabitleri.
 
 Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: `git apply --check` önce, sonra
 `git apply`. Yeni dosyalar bloktaki içerikle AYNEN yazılır.
@@ -1035,6 +1056,7 @@ kurulur: `DecisionContext`in alanları dalga 1'in başka bir görevinde değişe
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from types import MappingProxyType
 
@@ -1048,12 +1070,16 @@ from football_edge.model.elo_model import (
     LINEAR_MARGIN,
     LOG_MARGIN,
     NO_MARGIN,
+    ORDERED,
     EloModel,
     EloModelConfig,
     elo_probs,
     expectation,
     fit_draw,
+    fit_ordered,
+    fit_outcome_params,
     margin_multiplier,
+    ordered_probs,
 )
 from tests.backtest_builders import hist_match
 
@@ -1228,6 +1254,78 @@ def test_fit_draw_recovers_the_draw_share() -> None:
 def test_fit_draw_refuses_mismatched_input() -> None:
     with pytest.raises(ValueError):
         fit_draw([0.5], [])
+
+
+# ── Sıralı lojit (R142): quadratic'in rakibi, seçimi S yapar ─────────────────────────────
+
+
+@pytest.mark.parametrize("expected", [0.0, 0.05, 0.3, 0.5, 0.71, 0.97, 1.0])
+def test_ordered_probabilities_are_valid_distributions(expected: float) -> None:
+    home, draw, away = ordered_probs(expected, 1.3, 0.6)
+
+    assert min(home, draw, away) > 0.0
+    assert home + draw + away == pytest.approx(1.0)
+
+
+def test_the_ordered_draw_shrinks_as_the_rating_gap_grows_either_way() -> None:
+    """P(D) E = 0.5 iken en büyük; |ΔElo| büyüdükçe tekdüze azalır, iki yönde simetrik."""
+    upward = [ordered_probs(e, 1.2, 0.5)[1] for e in (0.5, 0.6, 0.7, 0.8, 0.9, 0.99)]
+    downward = [ordered_probs(1.0 - e, 1.2, 0.5)[1] for e in (0.5, 0.6, 0.7, 0.8, 0.9, 0.99)]
+
+    assert all(a > b for a, b in zip(upward, upward[1:], strict=False))
+    assert upward == pytest.approx(downward)
+    assert ordered_probs(0.5, 1.2, 0.5)[1] == pytest.approx(math.tanh(0.25))
+
+
+def test_the_ordered_home_probability_rises_with_the_expectation() -> None:
+    homes = [ordered_probs(e, 1.0, 0.5)[0] for e in (0.2, 0.4, 0.6, 0.8)]
+
+    assert homes == sorted(homes) and homes[0] < homes[-1]
+
+
+def test_the_prediction_follows_the_configured_draw_form() -> None:
+    config = EloModelConfig(draw_form=ORDERED, ordered_scale=1.4, ordered_cut=0.7)
+    model = EloModel(
+        config=config, ratings=MappingProxyType({("E0", "Alfa"): 1600.0, ("E0", "Beta"): 1500.0})
+    )
+
+    prediction = model.predict(_context())
+
+    expected = expected_home(1600.0, 1500.0, EloConfig())
+    assert prediction.probs == pytest.approx(ordered_probs(expected, 1.4, 0.7))
+    assert prediction.probs != pytest.approx(elo_probs(expected, config.draw))
+
+
+def test_fit_ordered_recovers_the_scale_and_the_cut() -> None:
+    rng = np.random.default_rng(12)
+    expectations = [float(value) for value in rng.uniform(0.15, 0.85, 8000)]
+    outcomes = [int(rng.choice(3, p=ordered_probs(e, 1.3, 0.6))) for e in expectations]
+
+    scale, cut = fit_ordered(expectations, outcomes)
+
+    assert scale == pytest.approx(1.3, abs=0.12) and cut == pytest.approx(0.6, abs=0.05)
+
+
+def test_fit_outcome_params_fits_only_the_selected_form() -> None:
+    rng = np.random.default_rng(13)
+    expectations = [float(value) for value in rng.uniform(0.2, 0.8, 3000)]
+    outcomes = [int(rng.choice(3, p=elo_probs(e, 0.3))) for e in expectations]
+    base = EloModelConfig()
+
+    quadratic = fit_outcome_params(base, expectations, outcomes)
+    ordered = fit_outcome_params(replace(base, draw_form=ORDERED), expectations, outcomes)
+
+    assert (
+        quadratic.draw == pytest.approx(0.3, abs=0.04) and quadratic.ordered_cut == base.ordered_cut
+    )
+    assert ordered.draw == base.draw and ordered.ordered_cut != base.ordered_cut
+
+
+def test_an_unknown_draw_form_or_non_positive_ordered_parameters_are_refused() -> None:
+    with pytest.raises(ValueError, match="beraberlik biçimi"):
+        EloModelConfig(draw_form="probit")
+    with pytest.raises(ValueError, match="pozitif"):
+        EloModelConfig(ordered_cut=0.0)
 ```
 
 - [ ] **Step 2: Kırmızı olduğunu gör**
@@ -1244,9 +1342,11 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.model.el
 """Fit edilebilir Elo (Faz 3 tasarımı §6.1, R131): iskele `EloPointInTime`ın yerine geçen strateji.
 
 Yenilikler: marj biçimi seçilir (yok / doğrusal / log), sezon arası ortalamaya dönüş, görülmemiş
-takımın grup ortalamasının altından başlaması ve beraberliğin reyting farkına bağlanması
-(`P(D) = δ · 4E(1 − E)`; iskele sabit `draw_rate` kullanıyordu). Reyting (grup, takım)
-anahtarlıdır (R94). Değerler iskeledir; seçimi walk-forward'un S bölgesi yapar (R129).
+takımın grup ortalamasının altından başlaması ve beraberliğin reyting farkına bağlanması. Beraberlik
+eşlemesinin İKİ biçimi vardır ve biri S'de seçilir (R142): `quadratic` — `P(D) = δ · 4E(1 − E)` —
+ve `ordered` — simetrik kesimli sıralı lojit, `η = s · logit(E)`, `P(H) = σ(η − c)`,
+`P(A) = σ(−η − c)`. İkisi de reyting yolunu değiştirmez (güncelleme yalnız E'yi kullanır). Reyting
+(grup, takım) anahtarlıdır (R94). Değerler iskeledir; seçimi walk-forward'un S bölgesi yapar (R129).
 """
 
 from __future__ import annotations
@@ -1258,7 +1358,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any
 
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize, minimize_scalar
 
 from football_edge.backtest.harness import DecisionContext, Prediction, ResultRecord
 from football_edge.elo import EloConfig, expected_home
@@ -1268,6 +1368,12 @@ LINEAR_MARGIN = "linear"
 LOG_MARGIN = "log"
 MARGINS = frozenset({NO_MARGIN, LINEAR_MARGIN, LOG_MARGIN})
 MAX_DRAW = 0.5
+QUADRATIC = "quadratic"
+ORDERED = "ordered"
+DRAW_FORMS = frozenset({QUADRATIC, ORDERED})
+_SCALE_BOUNDS = (0.05, 5.0)
+_CUT_BOUNDS = (1e-3, 3.0)
+_LOGIT_CLIP = 1e-9
 _LOG_FLOOR = 1e-15
 
 Key = tuple[str, str]
@@ -1280,7 +1386,10 @@ class EloModelConfig:
     margin: str = LINEAR_MARGIN
     regress: float = 0.0  # sezon arasında ortalamaya dönüş payı, [0, 1]
     newcomer_offset: float = 0.0  # görülmemiş takım: grup ortalaması − offset
-    draw: float = 0.26  # δ, [0, MAX_DRAW]
+    draw: float = 0.26  # δ, [0, MAX_DRAW] — yalnız `quadratic`
+    draw_form: str = QUADRATIC
+    ordered_scale: float = 1.0  # s — yalnız `ordered`
+    ordered_cut: float = 0.53  # c; E = 0.5'te P(D) = tanh(c/2) ≈ 0.26
     season_gap_days: int = 60
     initial: float = 1500.0
 
@@ -1291,6 +1400,12 @@ class EloModelConfig:
             raise ValueError(f"beraberlik payı [0, {MAX_DRAW}] dışında: {self.draw}")
         if not 0.0 <= self.regress <= 1.0:
             raise ValueError(f"ortalamaya dönüş payı [0, 1] dışında: {self.regress}")
+        if self.draw_form not in DRAW_FORMS:
+            raise ValueError(f"bilinmeyen beraberlik biçimi: {self.draw_form!r}")
+        if self.ordered_scale <= 0.0 or self.ordered_cut <= 0.0:
+            raise ValueError(
+                f"sıralı lojit s ve c pozitif olmalı: {self.ordered_scale}, {self.ordered_cut}"
+            )
 
 
 def margin_multiplier(home_goals: int, away_goals: int, form: str) -> float:
@@ -1308,8 +1423,30 @@ def elo_probs(expected: float, draw: float) -> tuple[float, float, float]:
     return expected - tie / 2.0, tie, 1.0 - expected - tie / 2.0
 
 
+def _sigmoid(value: float) -> float:
+    return 1.0 / (1.0 + math.exp(-value))
+
+
+def ordered_probs(expected: float, scale: float, cut: float) -> tuple[float, float, float]:
+    """Sıralı lojit (R142): η = s · logit(E); P(H) = σ(η − c), P(A) = σ(−η − c), D kalan.
+
+    `c > 0` iken üçü de pozitif ve toplam 1; P(D) = σ(c − η) − σ(−c − η), |η| büyüdükçe azalır.
+    """
+    clipped = min(max(expected, _LOGIT_CLIP), 1.0 - _LOGIT_CLIP)
+    eta = scale * math.log(clipped / (1.0 - clipped))
+    home, away = _sigmoid(eta - cut), _sigmoid(-eta - cut)
+    return home, 1.0 - home - away, away
+
+
+def elo_outcome_probs(expected: float, config: EloModelConfig) -> tuple[float, float, float]:
+    if config.draw_form == ORDERED:
+        return ordered_probs(expected, config.ordered_scale, config.ordered_cut)
+    return elo_probs(expected, config.draw)
+
+
 def expectation(probs: Sequence[float]) -> float:
-    """`elo_probs`un tersi: E = H + D/2 (δ'dan bağımsız)."""
+    """`elo_probs`un (quadratic) tersi: E = H + D/2 (δ'dan bağımsız). Seçim E'yi bununla geri
+    okur ve bu yüzden adayları hep `quadratic` biçimle oynatır (reyting yolu biçimden bağımsız)."""
     return probs[0] + probs[1] / 2.0
 
 
@@ -1326,6 +1463,34 @@ def fit_draw(expectations: Sequence[float], outcomes: Sequence[int]) -> float:
 
     result: Any = minimize_scalar(loss, bounds=(0.0, MAX_DRAW), method="bounded")
     return float(result.x)
+
+
+def fit_ordered(expectations: Sequence[float], outcomes: Sequence[int]) -> tuple[float, float]:
+    """Sabit E dizisi ve sonuçlar → log loss'u en küçük (s, c)."""
+    if len(expectations) != len(outcomes) or not outcomes:
+        raise ValueError(f"{len(expectations)} beklenti, {len(outcomes)} sonuç")
+
+    def loss(params: Any) -> float:
+        scale, cut = float(params[0]), float(params[1])
+        return -math.fsum(
+            math.log(max(ordered_probs(e, scale, cut)[o], _LOG_FLOOR))
+            for e, o in zip(expectations, outcomes, strict=True)
+        ) / len(outcomes)
+
+    result: Any = minimize(
+        loss, [1.0, 0.53], method="L-BFGS-B", bounds=[_SCALE_BOUNDS, _CUT_BOUNDS]
+    )
+    return float(result.x[0]), float(result.x[1])
+
+
+def fit_outcome_params(
+    config: EloModelConfig, expectations: Sequence[float], outcomes: Sequence[int]
+) -> EloModelConfig:
+    """Adayın beraberlik biçiminin parametreleri verilen (S) satırlarda fit edilmiş hâli."""
+    if config.draw_form == ORDERED:
+        scale, cut = fit_ordered(expectations, outcomes)
+        return replace(config, ordered_scale=scale, ordered_cut=cut)
+    return replace(config, draw=fit_draw(expectations, outcomes))
 
 
 def _empty_ratings() -> Mapping[Key, float]:
@@ -1401,14 +1566,14 @@ class EloModel:
     def predict(self, context: DecisionContext) -> Prediction:
         home = self._current(self._key(context.league, context.home), context.date)
         away = self._current(self._key(context.league, context.away), context.date)
-        probs = elo_probs(self._expected(home, away), self.config.draw)
+        probs = elo_outcome_probs(self._expected(home, away), self.config)
         return Prediction(context.match_index, self.name, probs)
 ```
 
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_elo_model.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — 18 passed
+Expected: PASS — 31 passed
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
@@ -1416,15 +1581,19 @@ hepsi KIRMIZI görüldü)
 | # | Mutasyon | Kırmızı olması gereken test |
 |---|---|---|
 | 1 | `elo_probs`: `tie / 2.0` yerine `tie` (normalize bozulur) | `tests/test_elo_model.py` |
-| 2 | `_current`: `(1.0 - regress)` yerine `regress` | `tests/test_elo_model.py::test_a_long_gap_regresses_the_rating_toward_the_group_mean` |
-| 3 | `_current`: `- newcomer_offset` yerine `+` | `tests/test_elo_model.py::test_a_newcomer_starts_below_the_group_mean` |
+| 2 | `ordered_probs`: `σ(η − c)` → `σ(η + c)` (toplam 1 değil) | `tests/test_elo_model.py::test_ordered_probabilities_are_valid_distributions` |
+| 3 | `ordered_probs`: `η = s·logit(E)` → `η = s·E` (|ΔElo|'da tekdüzelik/simetri bozulur) | `tests/test_elo_model.py::test_the_ordered_draw_shrinks_as_the_rating_gap_grows_either_way` |
+| 4 | `EloModel.predict`: biçime bakmadan `elo_probs` | `tests/test_elo_model.py::test_the_prediction_follows_the_configured_draw_form` |
+| 5 | `fit_outcome_params`: `ORDERED` dalı `if False:` | `tests/test_elo_model.py::test_fit_outcome_params_fits_only_the_selected_form` |
+| 6 | `_current`: `(1.0 - regress)` yerine `regress` | `tests/test_elo_model.py::test_a_long_gap_regresses_the_rating_toward_the_group_mean` |
+| 7 | `_current`: `- newcomer_offset` yerine `+` | `tests/test_elo_model.py::test_a_newcomer_starts_below_the_group_mean` |
 
 - [ ] **Step 6: Commit ve kapı**
 
 ```bash
 git add src/football_edge/model/elo_model.py \
   tests/test_elo_model.py
-git commit -m "feat: Faz 3 T3 — fit edilebilir Elo (marj biçimi, ortalamaya dönüş, reyting farkına bağlı beraberlik)
+git commit -m "feat: Faz 3 T3 — fit edilebilir Elo (marj biçimi, ortalamaya dönüş; beraberlik quadratic ya da sıralı lojit)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 TMPDIR=$(mktemp -d) ./verify.sh > /tmp/verify-$$.log 2>&1; echo exit=$?; grep -E '^(PASS|FAIL|SKIP)|KAPI' /tmp/verify-$$.log
@@ -3637,7 +3806,7 @@ alt sınırı` → taze klon kapısı → push. Dalga 3 (Task 7, 8) bu commit'te
 
 **Kademe:** K1 · **Dalga:** 3 · **Worktree/dal:** `.worktrees/wt-select` · `feat/faz3-select`
 
-R129: hiperparametreler S'de BİR kez seçilir, `config/model_faz3.yaml`da dondurulur (katalog ve kilidin sha256'sıyla). Seçim tek turluk koordinat inişi (P10); Elo'nun δ'sı her adayda `fit_draw` ile. `walkforward` yapılandırmayı okur, katalog/kilit özeti değiştiyse exit 11 ve rapor YAZMAZ; yalnız DEV okunur (`development_groups`), rapor yalnız toplu sayı. Rapor yardımcıları (`score_table`, `format_interval`) Task 10'un holdout raporunca da kullanılır — adları sözleşmede. `gap_penalty` R128'nin DEV simülasyonudur: E'nin 2022/23 sezonu girdiden çıkarılır, 2023/24'ün AYNI maçları iki koşuda karşılaştırılır (`walkforward --gap`). Rapor satırların sha256 özetini taşır (`rows_digest`, tasarım §5.3). `select` girdiyi S'nin sonunda keser: S tahminleri ondan sonrasına bağlı değildir, E'yi her adayda yeniden oynatmak boşa süre (inceleme m6).
+R129: hiperparametreler S'de BİR kez seçilir, `config/model_faz3.yaml`da dondurulur (katalog ve kilidin sha256'sıyla). Seçim tek turluk koordinat inişi (P10). R142: Elo ızgarasının son boyutu kategorik `draw_form` ∈ {quadratic, ordered}; her aday `quadratic` biçimle oynatılır (reyting yolu biçimden bağımsız, E tahminden tam geri okunur) ve adayın biçiminin parametreleri S'nin E dizisinde fit edilir; `select` yalnız kazananı fit edilmiş hâliyle döner — yalnız o donar. `walkforward` yapılandırmayı okur, katalog/kilit özeti değiştiyse exit 11 ve rapor YAZMAZ; yalnız DEV okunur (`development_groups`), rapor yalnız toplu sayı. Rapor yardımcıları (`score_table`, `format_interval`) Task 10'un holdout raporunca da kullanılır — adları sözleşmede. `gap_penalty` R128'nin DEV simülasyonudur: E'nin 2022/23 sezonu girdiden çıkarılır, 2023/24'ün AYNI maçları iki koşuda karşılaştırılır (`walkforward --gap`). Rapor satırların sha256 özetini taşır (`rows_digest`, tasarım §5.3). `select` girdiyi S'nin sonunda keser: S tahminleri ondan sonrasına bağlı değildir, E'yi her adayda yeniden oynatmak boşa süre (inceleme m6).
 
 **Files:**
 - Create: `src/football_edge/backtest/model_config.py`
@@ -3680,7 +3849,7 @@ from football_edge.backtest.model_config import (
     file_sha256,
     load_model_config,
 )
-from football_edge.backtest.selection import coordinate_descent, dc_loss, elo_loss
+from football_edge.backtest.selection import coordinate_descent, dc_loss, elo_loss, select
 from football_edge.backtest.walkforward import DC, ELO
 from football_edge.backtest.wf_eval import summarise
 from football_edge.backtest.wf_run import (
@@ -3694,7 +3863,7 @@ from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
 from football_edge.history.lock import build_lock, dump_lock
 from football_edge.market.devig import POWER
 from football_edge.model.dixon_coles import DCConfig
-from football_edge.model.elo_model import EloModelConfig
+from football_edge.model.elo_model import ORDERED, QUADRATIC, EloModelConfig
 from tests.model_builders import TEAMS, main_history
 
 KINDS = MappingProxyType({"E0": MAIN})
@@ -3735,10 +3904,13 @@ def test_coordinate_descent_keeps_the_first_of_equal_losses() -> None:
 
 
 @pytest.mark.leakage
-def test_selection_losses_read_only_the_selection_zone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """S bölgesinin sonuçları değişince kayıp değişir; E bölgesininkiler değişince DEĞİŞMEZ."""
+@pytest.mark.parametrize("form", [QUADRATIC, ORDERED])
+def test_selection_losses_read_only_the_selection_zone(form: str) -> None:
+    """S bölgesinin sonuçları değişince kayıp değişir; E bölgesininkiler değişince DEĞİŞMEZ — iki
+    beraberlik biçiminde de (R142: biçimin parametreleri de yalnız S'de fit edilir)."""
     groups = development_groups(HISTORY, GROUPS)
-    base = elo_loss(groups, KINDS, GROUPS, EloModelConfig(), method=POWER)
+    config = EloModelConfig(draw_form=form)
+    base = elo_loss(groups, KINDS, GROUPS, config, method=POWER)
     late = {
         "E0": tuple(
             replace(
@@ -3753,20 +3925,46 @@ def test_selection_losses_read_only_the_selection_zone(monkeypatch: pytest.Monke
         )
     }
 
-    assert (
-        elo_loss(development_groups(late, GROUPS), KINDS, GROUPS, EloModelConfig(), method=POWER)
-        == base
-    )
+    assert elo_loss(development_groups(late, GROUPS), KINDS, GROUPS, config, method=POWER) == base
 
 
 def test_selection_losses_are_finite_and_the_draw_is_fitted() -> None:
     groups = development_groups(HISTORY, GROUPS)
 
-    loss, draw = elo_loss(groups, KINDS, GROUPS, EloModelConfig(), method=POWER)
+    loss, fitted = elo_loss(groups, KINDS, GROUPS, EloModelConfig(), method=POWER)
+    ordered_loss, ordered = elo_loss(
+        groups, KINDS, GROUPS, EloModelConfig(draw_form=ORDERED), method=POWER
+    )
     dc = dc_loss(groups, KINDS, GROUPS, DCConfig(min_matches=40), cadence_days=7, method=POWER)
 
-    assert 0.5 < loss < 1.2 and 0.0 <= draw <= 0.5
+    assert 0.5 < loss < 1.2 and 0.0 <= fitted.draw <= 0.5
+    assert 0.5 < ordered_loss < 1.2 and ordered.draw_form == ORDERED
+    assert ordered.ordered_cut != EloModelConfig().ordered_cut
     assert 0.5 < dc < 1.2
+
+
+def test_the_draw_form_is_chosen_on_s_and_only_the_winner_is_returned_fitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R142: biçim kategorik hiperparametre; `select` kazananı S'de fit edilmiş hâliyle döner."""
+    monkeypatch.setattr(
+        "football_edge.backtest.selection.ELO_GRID", {"draw_form": (QUADRATIC, ORDERED)}
+    )
+    monkeypatch.setattr("football_edge.backtest.selection.DC_GRID", {"xi": (0.0019,)})
+    groups = development_groups(HISTORY, GROUPS)
+    losses = {
+        form: elo_loss(groups, KINDS, GROUPS, EloModelConfig(draw_form=form), method=POWER)
+        for form in (QUADRATIC, ORDERED)
+    }
+
+    elo, _, trials = select(groups, KINDS, GROUPS, cadence_days=7, method=POWER)
+
+    winner = min(losses, key=lambda form: losses[form][0])
+    assert elo == losses[winner][1]
+    assert {trial.params["draw_form"] for trial in trials if trial.model == "elo"} == {
+        QUADRATIC,
+        ORDERED,
+    }
 
 
 def _config(tmp: Path) -> ModelConfig:
@@ -4139,11 +4337,13 @@ from football_edge.model.elo_model import (
     LINEAR_MARGIN,
     LOG_MARGIN,
     NO_MARGIN,
+    ORDERED,
+    QUADRATIC,
     EloModel,
     EloModelConfig,
-    elo_probs,
+    elo_outcome_probs,
     expectation,
-    fit_draw,
+    fit_outcome_params,
 )
 from football_edge.model.strategies import DixonColesStrategy
 
@@ -4154,6 +4354,8 @@ ELO_GRID: Mapping[str, tuple[Any, ...]] = MappingProxyType(
         "margin": (NO_MARGIN, LINEAR_MARGIN, LOG_MARGIN),
         "regress": (0.0, 0.2, 0.4),
         "newcomer_offset": (0.0, 75.0, 150.0),
+        # R142: beraberlik eşlemesi kategorik bir hiperparametredir; S seçer, yalnız seçilen donar.
+        "draw_form": (QUADRATIC, ORDERED),
     }
 )
 DC_GRID: Mapping[str, tuple[Any, ...]] = MappingProxyType(
@@ -4229,23 +4431,28 @@ def elo_loss(
     config: EloModelConfig,
     *,
     method: str,
-) -> tuple[float, float]:
-    """(S log loss'u, o adayda fit edilen δ)."""
+) -> tuple[float, EloModelConfig]:
+    """(S log loss'u, adayın beraberlik parametreleri S'de fit edilmiş hâli).
+
+    Aday `quadratic` biçimle oynatılır: reyting yolu beraberlik biçiminden bağımsızdır ve E bu
+    biçimde tahminden tam geri okunur (`expectation`); adayın kendi biçimi E'de fit edilir (R142).
+    """
+    replayed = replace(config, draw_form=QUADRATIC)
     rows = [
         row
         for row in _selection_rows(
-            groups, kinds, lambda _: {ELO: EloModel(config=config, groups=rating_groups)}, method
+            groups, kinds, lambda _: {ELO: EloModel(config=replayed, groups=rating_groups)}, method
         )
         if ELO in row.components
     ]
     expectations = [expectation(row.components[ELO]) for row in rows]
     outcomes = [row.outcome for row in rows]
-    draw = fit_draw(expectations, outcomes)
+    fitted = fit_outcome_params(config, expectations, outcomes)
     loss = -math.fsum(
-        math.log(max(elo_probs(e, draw)[o], _LOG_FLOOR))
+        math.log(max(elo_outcome_probs(e, fitted)[o], _LOG_FLOOR))
         for e, o in zip(expectations, outcomes, strict=True)
     ) / len(rows)
-    return loss, draw
+    return loss, fitted
 
 
 def dc_loss(
@@ -4286,11 +4493,10 @@ def select(
     groups = MappingProxyType(
         {name: _before_selection_end(matches, kinds) for name, matches in groups.items() if matches}
     )
-    draws: dict[EloModelConfig, float] = {}
+    fitted: dict[EloModelConfig, EloModelConfig] = {}
 
     def elo_objective(candidate: EloModelConfig) -> float:
-        loss, draw = elo_loss(groups, kinds, rating_groups, candidate, method=method)
-        draws[candidate] = draw
+        loss, fitted[candidate] = elo_loss(groups, kinds, rating_groups, candidate, method=method)
         return loss
 
     elo, elo_trace = coordinate_descent(EloModelConfig(), ELO_GRID, elo_objective)
@@ -4304,7 +4510,7 @@ def select(
     trials = tuple(Trial("elo", params, loss) for params, loss in elo_trace) + tuple(
         Trial("dixon_coles", params, loss) for params, loss in dc_trace
     )
-    return replace(elo, draw=draws[elo]), dc, trials
+    return fitted[elo], dc, trials
 ```
 
 `src/football_edge/backtest/wf_run.py`:
@@ -4738,7 +4944,7 @@ def render_walkforward(
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_model_selection.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — 17 passed; `tests/test_backtest_cli.py` (Faz 2) değişmeden yeşil
+Expected: PASS — 19 passed; `tests/test_backtest_cli.py` (Faz 2) değişmeden yeşil
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
@@ -4749,6 +4955,7 @@ hepsi KIRMIZI görüldü)
 | 2 | `_checked_config`: özet karşılaştırması `if False:` | `tests/test_model_selection.py::test_walkforward_refuses_a_changed_catalog_or_lock` |
 | 3 | `gap_penalty`: atlanan sezon girdiden çıkarılmaz (`tuple(ms)`) | `tests/test_model_selection.py::test_the_gap_penalty_rescores_the_same_matches_without_the_skipped_season` |
 | 4 | `rows_digest`: olasılıklar özete girmez (inceleme m8) | `tests/test_model_selection.py::test_the_rows_digest_is_stable_and_sees_a_changed_probability` |
+| 5 | `select`: kazanan fit edilmemiş hâliyle döner (`return elo, …`) | `tests/test_model_selection.py::test_the_draw_form_is_chosen_on_s_and_only_the_winner_is_returned_fitted` |
 
 - [ ] **Step 6: Commit ve kapı**
 
@@ -5538,13 +5745,13 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 **Kademe:** — (controller) · **Dalga:** 3 sonu · **Önkoşul:** Task 7 ve 8 `complete`.
 
 - [ ] **Step 1: Birleştir** — `feat/faz3-select`, `feat/faz3-live` sırayla `--no-ff`, her birinden sonra kapı.
-`leakage` sayısı ölçülür (plan yazımında 286), `EXPECTED_MIN_LEAKAGE` güncellenir.
+`leakage` sayısı ölçülür (plan yazımında 287), `EXPECTED_MIN_LEAKAGE` güncellenir.
 
 - [ ] **Step 2: Seçim (yalnız S)** — `--cadence-days` Task 5'in kararıdır.
 
 Run: `/usr/bin/time -l uv run --env-file .env python -m football_edge.backtest select --cadence-days <Task 5 kararı> > /tmp/select.log 2>&1; echo exit=$?`
 Expected: exit 0; `config/model_faz3.yaml` yazıldı; logda her aday için `aday elo …`/`aday dixon_coles …` satırı
-(koordinat inişi her parametrede bir değeri zaten ölçtüğü için Elo 1 + 4 + 2 + 2 + 2 + 2 = 13, DC 1 + 2 + 2 = 5
+(koordinat inişi her parametrede bir değeri zaten ölçtüğü için Elo 1 + 4 + 2 + 2 + 2 + 2 + 1 = 14 — son boyut R142'nin `draw_form`u —, DC 1 + 2 + 2 = 5
 aday); süre ve tepe RSS ölçüm belgesine. Seçilen değerler
 bir ızgaranın UCUNDAYSA (ör. `k = 30`) bu bir bulgudur: ölçüm belgesine yazılır, ızgara bu fazda GENİŞLETİLMEZ
 (genişletmek S'de ikinci bir arama, yani yeni bir seçimdir — kullanıcıya sorulur).
@@ -8134,7 +8341,7 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 **Dalga 4 sonu (controller, Task 10 ve 11 birleşince):**
 
 - [ ] `feat/faz3-final-eval`, `feat/faz3-shadow` sırayla `--no-ff`, her birinden sonra kapı. `leakage` ölçülür
-  (plan yazımında 333), `EXPECTED_MIN_LEAKAGE` güncellenir, commit `ci: Faz 3 dalga 4 — sızıntı alt sınırı`.
+  (plan yazımında 334), `EXPECTED_MIN_LEAKAGE` güncellenir, commit `ci: Faz 3 dalga 4 — sızıntı alt sınırı`.
 - [ ] **Migration'lar canlıya** (Supabase `apply_migration`, ad = dosya adı, içerik = dosyanın kendisi):
   `0009_model_predictions`, `0010_holdout_phase`, `0011_shadow_dispatch`. Doğrulama YALNIZ okuma sorgusuyla —
   append-only tablolara deneme satırı YAZILMAZ (DEFERRED §2.3):
@@ -8169,7 +8376,7 @@ select jobname, schedule, command, active from cron.job
 
 **Kademe:** K1 · **Dalga:** 5 · **Worktree/dal:** `.worktrees/wt-model-selftest` · `feat/faz3-model-selftest`
 
-Tasarım §9 G4. Kapı: W1 ortalama ΔLL(harman − piyasa) ≤ δ = 0.001 (P9) · W2 fit Elo iskeleden isabetli · W3 DC, S'nin sonuç oranlarından isabetli. Rapor: W4 harman kalibrasyonu. Ölçülemeyen denetim GEÇMEZ. `history.yml` `Bilinen sonuçlar`dan sonra, alarmdan önce `Model bilinen sonuçları` adımını koşar; iş zaman aşımı 120 dk (P17). **Başlamadan önce:** Task 9'un ölçtüğü walk-forward süresi 60 dk'yı aşıyorsa bu görev başlamaz, eskalasyon.
+Tasarım §9 G4. Kapı: W1 DAHA KÖTÜ OLMAMA sınaması (R143) — maç başına ΔLL(harman − piyasa) ortalamasının %95 bootstrap aralığının ÜST ucu ≤ δ = 0.001; bootstrap Faz 2'ninki (`market.metrics.bootstrap_mean`, maç düzeyi, tohum 20260922, düzey 0.95, B = 2.000 — `market/efficiency.py:53-55`) · W2 fit Elo iskeleden isabetli · W3 DC, S'nin sonuç oranlarından isabetli. Rapor: W4 harman kalibrasyonu. Ölçülemeyen denetim GEÇMEZ. `history.yml` `Bilinen sonuçlar`dan sonra, alarmdan önce `Model bilinen sonuçları` adımını koşar; iş zaman aşımı 120 dk (P17). **Başlamadan önce:** Task 9'un ölçtüğü walk-forward süresi 60 dk'yı aşıyorsa bu görev başlamaz, eskalasyon.
 
 **Files:**
 - Create: `src/football_edge/backtest/model_selftest.py`
@@ -8180,7 +8387,7 @@ Tasarım §9 G4. Kapı: W1 ortalama ΔLL(harman − piyasa) ≤ δ = 0.001 (P9) 
 
 **Interfaces:**
 - Consumes: Task 6, Task 7 (`model_strategies`, `development_groups`, `_checked_config`, `_locked_matches`), Task 10'un `__main__.py`si, Faz 2 `Check`, `EloPointInTime`.
-- Produces: `model_rows`, `model_checks`, `W1_MARGIN`; CLI `model-selftest`; `history.yml` adımı.
+- Produces: `model_rows`, `model_checks`, `w1_passes`, `W1_MARGIN`; CLI `model-selftest`; `history.yml` adımı.
 
 Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: `git apply --check` önce, sonra
 `git apply`. Yeni dosyalar bloktaki içerikle AYNEN yazılır.
@@ -8203,12 +8410,13 @@ import numpy as np
 import pytest
 
 from football_edge.backtest.model_config import ModelConfig
-from football_edge.backtest.model_selftest import model_checks, model_rows
+from football_edge.backtest.model_selftest import model_checks, model_rows, w1_passes
 from football_edge.backtest.records import MatchKey
 from football_edge.backtest.walkforward import DC, ELO, ELO_SCAFFOLD, MARKET, Row
 from football_edge.backtest.wf_run import development_groups
 from football_edge.history.catalog import MAIN
 from football_edge.market.devig import POWER
+from football_edge.market.metrics import Interval, bootstrap_mean
 from football_edge.model.dixon_coles import DCConfig
 from football_edge.model.elo_model import EloModelConfig
 from tests.model_builders import main_history
@@ -8311,6 +8519,34 @@ def test_without_rows_every_gate_is_unmeasured_and_red() -> None:
 
 def test_the_scaffold_elo_is_in_the_rows(rows: tuple[Row, ...]) -> None:
     assert any(ELO_SCAFFOLD in row.components for row in rows if row.zone == "E")
+
+
+@pytest.mark.parametrize(
+    ("estimate", "low", "high", "passes"),
+    [
+        (0.0005, -0.0010, 0.0020, False),  # nokta tahmini < δ ama üst uç > δ → KALIR (R143)
+        (0.0005, -0.0005, 0.0009, True),
+        (-0.0030, -0.0050, 0.0010, True),  # üst uç tam δ: geçer
+        (0.0020, 0.0015, 0.0030, False),
+    ],
+)
+def test_w1_is_a_non_inferiority_test_on_the_upper_bound(
+    estimate: float, low: float, high: float, passes: bool
+) -> None:
+    assert w1_passes(Interval(estimate, low, high)) is passes
+
+
+def test_w1_uses_the_phase_two_bootstrap_settings() -> None:
+    """R143: yeniden örnekleme birimi, tohum, düzey ve B Faz 2 verimlilik raporlarıyla aynı."""
+    from football_edge.backtest.evaluate import DEFAULT_RESAMPLES
+    from football_edge.market import efficiency
+
+    assert (efficiency.RESAMPLES, efficiency.SEED, efficiency.LEVEL) == (
+        DEFAULT_RESAMPLES,
+        20260922,
+        0.95,
+    )
+    assert bootstrap_mean.__kwdefaults__ == {"resamples": 2000, "seed": 20260922, "level": 0.95}
 ```
 
 `tests/test_history_workflow.py` yaması:
@@ -8424,12 +8660,14 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'football_edge.backtest
 ```python
 """Modelin bilinen sonuçları (Faz 3 tasarımı §9 G4; R130): E bölgesinde, haftalık.
 
-Kapı: W1 harman piyasadan `W1_MARGIN`dan fazla KÖTÜ değil (ortalama ΔLL ≤ δ) — `w = (1, 0, 0)`
-havuzun içinde olduğu için doğru bir fit örneklem içinde buna kesin uyar; örneklem dışında yalnız
-ağırlık tahmin gürültüsü kadar (~ bileşen sayısı / 2n) sapar. Kırmızıysa fit ya da hat bozuktur ·
+Kapı: W1 bir DAHA KÖTÜ OLMAMA (non-inferiority) sınamasıdır (R143): maç başına
+LL(harman) − LL(piyasa) ortalamasının %95 bootstrap aralığının ÜST ucu ≤ δ = `W1_MARGIN`.
+Bootstrap Faz 2'ninkidir (`market.metrics.bootstrap_mean`: maç düzeyinde yeniden örnekleme, tohum
+20260922, düzey 0.95, B = `--resamples`, varsayılan 2.000 — `market/efficiency.py`nin
+RESAMPLES/SEED/LEVEL'i). `w = (1, 0, 0)` havuzun içinde olduğu için doğru bir fit buna uyar;
+kırmızıysa fit ya da hat bozuktur ya da harmanın piyasadan kötü olmadığı gösterilemedi.
 W2 fit Elo iskele Elo'dan isabetli (ortalama ΔLL < 0) · W3 Dixon-Coles S'nin sonuç oranlarından
-isabetli.
-Rapor: W4 harmanın kalibrasyonu. Ölçülemeyen denetim GEÇMEZ ("ölçülemedi" yazar).
+isabetli. Rapor: W4 harmanın kalibrasyonu. Ölçülemeyen denetim GEÇMEZ ("ölçülemedi" yazar).
 """
 
 from __future__ import annotations
@@ -8460,6 +8698,11 @@ from football_edge.market.metrics import Interval, bootstrap_mean, calibration, 
 _LOG_FLOOR = 1e-15
 # ~5 bin maçlık bir katta üç ağırlığın örneklem dışı gürültüsü ~3e-4; δ bunun üç katı.
 W1_MARGIN = 0.001
+
+
+def w1_passes(gap: Interval) -> bool:
+    """R143: daha kötü olmama — ÜST uç ≤ δ (nokta tahmini değil)."""
+    return gap.high <= W1_MARGIN
 
 
 def model_rows(
@@ -8520,8 +8763,8 @@ def _w1(rows: Sequence[Row], resamples: int) -> tuple[Check, Check]:
         Check(
             "W1",
             True,
-            gap.estimate <= W1_MARGIN,
-            f"ΔLL harman − piyasa {_text(gap)} ≤ {W1_MARGIN} n={len(pairs)}",
+            w1_passes(gap),
+            f"ΔLL harman − piyasa {_text(gap)}; üst uç ≤ {W1_MARGIN} n={len(pairs)}",
         ),
         w4,
     )
@@ -8692,14 +8935,15 @@ index fff5eb1..334b4c2 100644
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_model_selftest.py tests/test_history_workflow.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — test_model_selftest 7 · test_history_workflow 26 passed
+Expected: PASS — test_model_selftest 12 · test_history_workflow 26 passed
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
 
 | # | Mutasyon | Kırmızı olması gereken test |
 |---|---|---|
-| 1 | W1: `gap.estimate <= W1_MARGIN` → `>=` | `tests/test_model_selftest.py` |
+| 1 | W1: `w1_passes(gap)` → `not w1_passes(gap)` | `tests/test_model_selftest.py` |
+| 2 | `w1_passes`: üst uç yerine nokta tahmini (`gap.estimate <= W1_MARGIN`; R143) | `tests/test_model_selftest.py::test_w1_is_a_non_inferiority_test_on_the_upper_bound` |
 
 - [ ] **Step 6: Commit ve kapı**
 
@@ -8727,7 +8971,7 @@ history.yml`).
 Bu görevin 8. adımı geri alınamaz: holdout'un Faz 3 açılışı. Önceki her adım onu tek seferde doğru yapmak için.
 
 - [ ] **Step 1: Dalga 5'i birleştir** — `feat/faz3-model-selftest` `--no-ff`, kapı; `leakage` yeniden ölçülür
-  (333 beklenir); push; `gh workflow run history.yml` → `Model bilinen sonuçları` adımı yeşil (W1–W3 GEÇTİ,
+  (334 beklenir); push; `gh workflow run history.yml` → `Model bilinen sonuçları` adımı yeşil (W1–W3 GEÇTİ,
   W4 raporlandı), süre ölçüm belgesine.
 
 - [ ] **Step 2: Ön kayıt** — `config/faz3_preregistration.yaml` (alanlar `load_preregistration`in istediği
@@ -8830,7 +9074,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 10: Faz 3 HANDOFF** — `docs/phases/03-baz-model/HANDOFF.md`: ne bitti; kapı ne ölçtü (adım adım, log
   dosyasından; `SKIP` adıyla); **kapının ölçmedikleri** (aşağıdaki liste + yürütmenin eklediği); verilen kararlar
-  (R128–R139, P1–P25, R141, defterin `Ruling:` satırları); inceleme m4 notu: `report_exists` denetimi farklı bir
+  (R128–R139, P1–P25, R141–R147, defterin `Ruling:` satırları); inceleme m4 notu: `report_exists` denetimi farklı bir
   `--out` ile atlanabilir — aynı SHA + temiz ağaç aynı kodu, yapılandırmayı ve ön kaydı garanti ettiği için
   zararsız, 0010 yeniden koşuyu yine bire sınırlar; **holdout açılış sayısı** (`holdout_access_log`tan; 1 ya da
   yeniden koşuyla 2, adıyla); ertelenenler (`docs/DEFERRED.md` yeni bölüm — gölge CLV raporu P25 dahil); Faz 4 ön koşulları (dil kalibrasyonu,
@@ -8849,7 +9093,8 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 15. **Placebo'nun K4 sayısı değişti** (P4): Faz 2 raporundaki −0.0713 artık yeniden üretilmez.
 16. **Seçim yerel optimumdur** (P10): tek tur koordinat inişi, sabit ızgaralar; ızgara ucunda duran bir değer
     bulgu olarak yazılır ama genişletilmez.
-17. **W1'in δ'sı (0.001) keyfîdir** (P9); P8'in 1.000 eşiği sentetik ölçümden türetildi, gerçek veride ölçülmedi.
+17. **W1'in δ'sı (0.001) keyfîdir** (R143 üst uç ölçütüyle); P8'in 1.000 eşiği sentetik ölçümden türetildi,
+    gerçek veride ölçülmedi. Sıralı lojit küresel ve simetriktir (R146): lig başına beraberlik farkı yakalanmaz.
 18. **Dixon-Coles görülmemiş takımı tahmin etmez**: o maçlar ortak kümeden düşer (sayılır); E sayıları terfi eden
     takımların ilk maçlarını içermez.
 19. **Gölge harmanı, bahsi ve CLV'si bu fazda hesaplanmaz** (P19, P25): tablo bileşenleri ve karar anı fiyatını
@@ -8890,10 +9135,10 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
   karşılaştırıldı.
 - **Kodun kendisi:** planın METNİNDEN (`<!-- plan: yeni|yama … -->` işaretli bloklar, sırayla) `a398c31`'e (İz A birleşmiş) kurulan
   ağaç, kodun yazıldığı ağaçla bayt bayt aynı (`uv.lock` dahil, `uv lock` ile üretilince); tam `verify.sh` 10 PASS
-  + `SKIP: zincir`; 1.757 passed / 3 skipped (üçüncü SKIP `test_holdout_phase_db`: `DATABASE_URL yok`); `leakage` 333. Her dalga sonunda ve paralel görev tek başına tam `verify.sh`
-  koşuldu (hepsi 10 PASS + `zincir` SKIP). Dalga sonu test sayıları: 1.553 · 1.600 · 1.635 · 1.670 · 1.744 ·
-  1.757; paralel görevler tek başına: T1 1.568 · T2 1.571 · T3 1.563 · T4 1.557 · T7 1.652 · T8 1.653 ·
-  T10 1.725 · T11 1.689. Görev tablolarındaki 45 mutasyonun (plan incelemesinin sağ kalan üç mutantı — I2, I3,
+  + `SKIP: zincir`; 1.777 passed / 3 skipped (üçüncü SKIP `test_holdout_phase_db`: `DATABASE_URL yok`); `leakage` 334. Her dalga sonunda ve paralel görev tek başına tam `verify.sh`
+  koşuldu (hepsi 10 PASS + `zincir` SKIP). Dalga sonu test sayıları: 1.553 · 1.613 · 1.648 · 1.685 · 1.759 ·
+  1.777; paralel görevler tek başına: T1 1.568 · T2 1.584 · T3 1.563 · T4 1.557 · T7 1.667 · T8 1.666 ·
+  T10 1.740 · T11 1.704. Görev tablolarındaki 51 mutasyonun (plan incelemesinin sağ kalan üç mutantı — I2, I3,
   m1 — dahil) her biri uygulandı, KIRMIZI görüldü,
   geri alındı.
 - **Bilinen boşluk:** hiçbir sayı gerçek veride ölçülmedi (bağlantı yok); Task 0/5/9'un ölçümleri kararları
@@ -8912,9 +9157,9 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 - **Her dispatch'e:** "HİÇBİR ŞEY SİLME" (kendi scratch'i dahil); paralel ajanlara scratchpad'de AYRI alt dizin;
   rapor son mesajda (bazı implementer'lar dosya yazamıyor, controller kaydeder); holdout'u AÇMA.
 - **Model:** varsayılan opus; K1 incelemeleri, Task 13'ün kırmızı takımı ve bütün-dal incelemesi fable; haiku hiçbir yerde.
-- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R141'den (R140 controller'ın, R122–R127 İz A'nın).
+- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R148'den (R140–R145 controller'ın, R122–R127 İz A'nın, R146–R147 bu planın).
 - **Çalışma zamanı değerleri:** `<tarih>` komutun koşulduğu gün (`YYYY-MM-DD`); `<Task 5 kararı>` Task 5 Step 3'ün
-  kuralının çıktısı (1 ya da 7); `leakage` alt sınırları ölçülerek yazılır (plan yazımında 269 · 282 · 286 · 333).
+  kuralının çıktısı (1 ya da 7); `leakage` alt sınırları ölçülerek yazılır (plan yazımında 269 · 282 · 287 · 334).
 - **Onay kapıları:** (1) bu plan kullanıcı onayından önce uygulanmaz (İz A'nın birleşmesi koşulu `a398c31` ile sağlandı); (2) Task 13
   Step 7 (holdout açılışı) ayrıca kullanıcı "evet"i ister; (3) kredi harcayan hiçbir adım yoktur — K6'nın ek
   snapshot'ı bu planın dışındadır ve ayrı onay ister.
