@@ -490,7 +490,7 @@ lojistik için IRLS). Faz 3 Dixon-Coles'un en çok olabilirlik fiti için scipy'
 | D14 | Yapısal sızıntı korumaları + fable kırmızı takımı | §10 |
 | D15 | Bağımlılık yalnız numpy | §12 |
 | D16 | `HxG`/`AxG` önbellekte, kullanılmaz | §4.6 |
-| D17 | Scrapling benimsenmez (0c), R79/R80 geçerli | §14/4 |
+| D17 | Scrapling benimsenmez (0c), R79/R80 geçerli — **R77b ile değişti (2026-09-23):** Scrapling tam kullanılır; R80 kapısı proxy/doğrulama çözme/adı verilmiş bot/tek geçit kurallarıyla yeniden yazıldı (spec §3.2.1) | §14/4 |
 | D18 | Lisans açık; özel depolama, türetilmiş sayı, ham yayın yok | §4.3, §14/3 |
 | D19 | Ayrı lig kataloğu; `leagues.yaml` değişmez | §4.2 |
 | D20 | `declared_paths` katalogdan, eşitlik testiyle | §4.1 |

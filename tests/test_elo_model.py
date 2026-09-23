@@ -298,7 +298,15 @@ def test_an_invalid_elo_config_is_refused_by_name(field: str, value: object, mes
 
 
 def test_the_sealed_faz3_elo_config_still_loads() -> None:
-    from football_edge.backtest.model_config import load_model_config
+    """16k-b: `draw` `ordered` biçimde isteğe bağlı oldu — mühürlü dosya alanı TAŞIYOR ve aynen
+    okunmalı (reddetmek mühürlü dosyayı kırardı). Dosyanın baytları ön kaydın özetine bağlı."""
+    from football_edge.backtest.model_config import file_sha256, load_model_config
 
-    config = load_model_config(Path("config/model_faz3.yaml"))
+    path = Path("config/model_faz3.yaml")
+    config = load_model_config(path)
     assert config.elo.k == 10.0
+    assert config.elo.draw_form == ORDERED and config.elo.draw == 0.26
+    assert "  draw: 0.26\n" in path.read_text(encoding="utf-8")
+    assert f"model_config_sha256: {file_sha256(path)}\n" in Path(
+        "config/faz3_preregistration.yaml"
+    ).read_text(encoding="utf-8")

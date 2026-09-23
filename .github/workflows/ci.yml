@@ -38,7 +38,12 @@ jobs:
       # KURULU paketi import eder. Kurulum olmadan o adım düşer — ve düşmesi
       # doğrudur, çünkü workflow'lar `python -m football_edge.collect` ile tam da
       # kurulu paketi çağırıyor.
-      - run: uv sync --frozen
+      # `--extra scrape` (Scrapling `fetchers`, oturum 9 Task 3): yalnız bu iş kurar. Soğuk
+      # önbellekte `uv sync --frozen` 1,9 sn / 217 MB iken ekstrayla 44,8 sn / 544 MB ölçüldü;
+      # 15 dakikada bir koşan zamanlanmış işler (`seal`, `snapshot`, …) ekstrasız hafif kalır.
+      # Kapı ekstrasız koşarsa `mypy`, `pytest` ve `paket-kurulu` (`football_edge.scrape`)
+      # kırmızı verir — sessiz geçmez.
+      - run: uv sync --frozen --extra scrape
       - name: Kapı
         env:
           # `verify.sh` logu `${TMPDIR:-/tmp}` altına yazar. Runner'da `TMPDIR`

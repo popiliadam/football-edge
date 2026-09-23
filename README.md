@@ -72,8 +72,11 @@ Gereken: Python ≥ 3.11 ve [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/popiliadam/football-edge.git
 cd football-edge
-uv sync
+uv sync --extra scrape
 ```
+
+`--extra scrape` gerekir, çünkü kapı (`./verify.sh`) Scrapling adaptörünü ve testlerini de sınar;
+zamanlanmış işler bu ekstrayı istemez, onlar ekstrasız (`uv sync --frozen`) kurulur.
 
 ### 1. `DATABASE_URL`
 

@@ -23,15 +23,21 @@ step() {
 step "ruff-check"  uv run ruff check src tests scripts
 step "ruff-format" uv run ruff format --check src tests scripts
 step "mypy"        uv run mypy src scripts
-step "pytest"      uv run pytest -q
+# `--tb=short`: uzun traceback psycopg karesinin yerel değişkenlerini (bağlantı dizesi, PAROLA dâhil)
+# basar; canlı DATABASE_URL'le koşan kapıda bir bağlantı hatası parolayı loga yazardı. Kapı
+# gevşemez, yalnız traceback biçimi kısalır (tests/test_gate_traceback.py sabitler).
+step "pytest"      uv run pytest -q --tb=short
 
 # Testler `pythonpath = ["src"]` ile koşar: KURULU PAKET BOZUK OLSA BİLE geçerler.
 # CI ise `python -m football_edge.collect` ile kurulu paketi çağırır. PYTHONPATH'in
 # boşaltılması kasıtlıdır — import'un src/'den değil kurulumdan geldiğini kanıtlar.
 # Kırmızı verirse onarım `uv sync --reinstall-package football-edge`; kapı gevşetilmez.
 # Faz 3: scipy'ın derlenmiş optimizer'ı da yüklenebilmeli (Dixon-Coles, havuz, seçim).
+# Oturum 9 Task 3: Scrapling adaptörü (`football_edge.scrape`) `scrape` ekstrasına bağlı; kapı
+# ekstrayla koşar (CI: `uv sync --frozen --extra scrape`, yerelde bir kez aynısı). Ekstra yoksa
+# bu adım adıyla kırmızı verir — `uv run` ekstrayı kaldırmaz, düz `uv sync` kaldırır.
 step "paket-kurulu" env PYTHONPATH= uv run python -c \
-  "import football_edge, scipy.optimize, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
+  "import football_edge, football_edge.scrape, scipy.optimize, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
 
 # Kaynak politikası ÇEVRİMDIŞI sorulur: ağ yok, secret yok, her push'ta koşar. Canlı sapmayı
 # sources-audit.yml günde bir ölçer. Robots'u ölçmeden "izinli" demek, spec §3.2'yi prose'a
@@ -74,8 +80,9 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # DOKUNAMAZDI — sabit budur). Bu sabit YALNIZ bugünün ölçümünü taşır; yeniden ölçmeden
 # büyütülmez, bkz. yukarıdaki "DÜZELTİLMİŞ SÜRÜM" notu — kırma/geri-yükleme kanıtı bu
 # görevin raporundadır (task-M-report.md, "EXPECTED_MIN_CONTRACT break-and-restore proof").
+# Oturum 9 Task 3 (2026-09-23): PFDK'nın yedi `contract` testiyle `--collect-only` 18 → 25 ölçüldü.
 step "veri-sözleşmesi" bash -c '
-  EXPECTED_MIN_CONTRACT=18
+  EXPECTED_MIN_CONTRACT=25
 
   collect_output=$(uv run pytest tests/ -q -m contract --collect-only 2>&1)
   collect_code=$?
@@ -92,7 +99,7 @@ step "veri-sözleşmesi" bash -c '
     exit 1
   fi
 
-  uv run pytest tests/ -q -m contract
+  uv run pytest tests/ -q -m contract --tb=short
   code=$?
 
   if [ "$code" -eq 5 ]; then
@@ -124,7 +131,7 @@ step "sızıntı" bash -c '
     exit 1
   fi
 
-  uv run pytest tests/ -q -m leakage
+  uv run pytest tests/ -q -m leakage --tb=short
 '
 
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
