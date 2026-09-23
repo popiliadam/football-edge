@@ -8,15 +8,16 @@ Kaynaklar gerçek `config/sources.yaml`dan gelir (adaptör başkasını kabul et
 `access_basis: robots`, tek beyanlı yol, `crawl_delay_seconds: 2.0`, belirteç `football-edge/0.1`.
 
 Bilinen sınırlar (ölçülmeyen):
-- Tarayıcı taşıyıcısının bekçisi sahte bir sayfa ve rota ile sınanır; gerçek Playwright'ın
-  yönlendirme sıçramalarını rotaya uğratıp uğratmadığı burada ölçülmez (tarayıcı ikilisi yok).
+- Tarayıcı taşıyıcıları KAPALI (DEFERRED 11g): testler reddi ölçer; açıldığında kullanılacak bekçi
+  (`scrape._browser_fetch`) sahte sayfa ve rota ile sınanır. Gerçek Playwright'ın yönlendirme
+  sıçramalarını rotaya uğratmadığı belgelenmiş — bu yüzden kapalı.
 - Gerçek curl_cffi'nin `follow_redirects=False`a uyduğu burada değil, fixture kaydında görüldü.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
@@ -32,6 +33,7 @@ from football_edge.collector import ContractViolation
 from football_edge.scrape import (
     BROWSER_USER_AGENT,
     BrowserTransport,
+    BrowserTransportDisabled,
     Fetched,
     FetcherTransport,
     ScrapeRound,
@@ -160,12 +162,41 @@ def test_another_origin_is_refused_before_any_request(url: str) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["/Default.aspx?pageID=433", "/Default.aspx", "/Default.aspx?pageID=600&x=1"],
+    [
+        "/Default.aspx?pageID=433",
+        "/Default.aspx",
+        "/Default.aspx?pageID=600&x=1",
+        "/default.aspx?pageID=600",  # yol büyük/küçük harfe duyarlı (R7: birebir)
+        "/Default.aspx?pageid=600",
+    ],
 )
 def test_an_undeclared_path_is_refused_before_any_request(path: str) -> None:
     transport = transport_with(NO_ROBOTS, (f"{BASE}{path}", [response(f"{BASE}{path}")]))
     with pytest.raises(SourceBlocked, match="declared_paths"):
         session_for(transport).get(f"{BASE}{path}")
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://x:y@www.tff.org/Default.aspx?pageID=600",
+        "https://evil.example\\@www.tff.org/Default.aspx?pageID=600",
+        "https://@www.tff.org/Default.aspx?pageID=600",
+    ],
+    ids=["kullanıcı-parola", "ters-bölü", "boş-kimlik"],
+)
+def test_a_url_carrying_credentials_is_refused_before_any_request(url: str) -> None:
+    transport = transport_with(NO_ROBOTS, (url, [response(url)]))
+    with pytest.raises(SourceBlocked, match="kimlik bilgisi"):
+        session_for(transport).get(url)
+    assert transport.calls == []
+
+
+def test_a_fragment_is_refused_before_any_request() -> None:
+    transport = transport_with(NO_ROBOTS, (PAGE, [response(PAGE)]))
+    with pytest.raises(SourceBlocked, match="parça"):
+        session_for(transport).get(f"{PAGE}#x")
     assert transport.calls == []
 
 
@@ -219,6 +250,38 @@ def test_robots_crawl_delay_larger_than_the_sources_is_waited_between_requests()
     assert transport.calls == [ROBOTS, PAGE, PAGE]
 
 
+def test_the_source_tokens_crawl_delay_counts_even_when_the_browser_groups_is_smaller() -> None:
+    robots = response(
+        ROBOTS, body="User-agent: football-edge\nCrawl-delay: 10\n\nUser-agent: *\nCrawl-delay: 1\n"
+    )
+    clock = FakeClock()
+    session = session_for(transport_with(robots, (PAGE, [response(PAGE)])), clock)
+    session.get(PAGE)
+    session.get(PAGE)
+    assert clock.sleeps == [10.0, 10.0]
+
+
+def test_a_robots_crawl_delay_smaller_than_the_sources_does_not_shorten_the_wait() -> None:
+    robots = response(ROBOTS, body="User-agent: *\nCrawl-delay: 1\n")
+    clock = FakeClock()
+    session = session_for(transport_with(robots, (PAGE, [response(PAGE)])), clock)
+    session.get(PAGE)
+    session.get(PAGE)
+    assert clock.sleeps == [TFF.crawl_delay_seconds] * 2
+
+
+def test_a_later_transport_with_another_user_agent_gets_its_own_crawl_delay() -> None:
+    robots = response(ROBOTS, body="User-agent: ikinci\nCrawl-delay: 9\n\nUser-agent: *\n")
+    clock = FakeClock()
+    first = transport_with(robots, (PAGE, [response(PAGE)]))
+    scrape_round = ScrapeRound(clock=clock, robots_transport=first)
+    scrape_round.session(TFF, first).get(PAGE)
+    second = transport_with(robots, (PAGE, [response(PAGE)]))
+    second.user_agent = "ikinci/1"
+    scrape_round.session(TFF, second).get(PAGE)
+    assert clock.sleeps == [TFF.crawl_delay_seconds, 9.0]
+
+
 def test_the_sources_crawl_delay_applies_when_robots_sets_none() -> None:
     clock = FakeClock()
     session = session_for(transport_with(NO_ROBOTS, (PAGE, [response(PAGE)])), clock)
@@ -229,8 +292,12 @@ def test_the_sources_crawl_delay_applies_when_robots_sets_none() -> None:
 
 @pytest.mark.parametrize(
     "retry_after",
-    ["30", format_datetime(START + timedelta(seconds=30), usegmt=True)],
-    ids=["saniye", "http-tarihi"],
+    [
+        "30",
+        format_datetime(START + timedelta(seconds=30), usegmt=True),
+        (START + timedelta(seconds=30)).strftime("%a, %d %b %Y %H:%M:%S -0000"),
+    ],
+    ids=["saniye", "http-tarihi", "bolgesiz-tarih"],
 )
 def test_retry_after_delays_the_next_request(retry_after: str) -> None:
     clock = FakeClock()
@@ -264,6 +331,89 @@ def test_a_refusal_halts_the_source_for_the_round(status: int) -> None:
     assert other.calls == []
 
 
+@pytest.mark.parametrize("status", [403, 429])
+@pytest.mark.parametrize(
+    "retry_after",
+    [
+        (START + timedelta(seconds=30)).strftime("%a, %d %b %Y %H:%M:%S -0000"),
+        "tarih değil",
+        "Mon, 99 Foo 99999 99:99:99 GMT",
+        "²",
+    ],
+    ids=["bolgesiz-tarih", "cop", "bozuk-tarih", "ascii-disi-rakam"],
+)
+def test_no_retry_after_form_lets_a_request_through_after_a_refusal(
+    status: int, retry_after: str
+) -> None:
+    """İnceleme Critical 1: robots, PAGE (403 + `-0000` tarihi), PAGE — ikinci PAGE gitmemeli."""
+    refused = response(PAGE, status, headers={"Retry-After": retry_after})
+    transport = transport_with(NO_ROBOTS, (PAGE, [refused, response(PAGE)]))
+    session = session_for(transport)
+    for _ in range(2):
+        with pytest.raises(SourceHalted):
+            session.get(PAGE)
+    assert transport.calls == [ROBOTS, PAGE]
+
+
+@pytest.mark.parametrize("retry_after", ["tarih değil", "Mon, 99 Foo 99999 99:99:99 GMT", "²"])
+def test_an_unreadable_retry_after_is_ignored_not_raised(retry_after: str) -> None:
+    busy = response(PAGE, 503, headers={"Retry-After": retry_after})
+    transport = transport_with(NO_ROBOTS, (PAGE, [busy, response(PAGE, body="ok")]))
+    session = session_for(transport)
+    with pytest.raises(ContractViolation, match="503"):
+        session.get(PAGE)
+    assert session.get(PAGE).body == b"ok"
+
+
+class UnreadableHeaders(Mapping[str, str]):
+    """Okunurken patlayan başlıklar: durma kararı başlık okumaya bağlı olmamalı."""
+
+    def __getitem__(self, key: str) -> str:
+        raise RuntimeError("başlık okunamadı")
+
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError("başlık okunamadı")
+
+    def __len__(self) -> int:
+        return 1
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_the_halt_is_recorded_before_any_header_is_read(status: int) -> None:
+    refused = Fetched(url=PAGE, status=status, headers=UnreadableHeaders(), body=b"")
+    transport = transport_with(NO_ROBOTS, (PAGE, [refused, response(PAGE)]))
+    session = session_for(transport)
+    for _ in range(2):
+        with pytest.raises(SourceHalted):
+            session.get(PAGE)
+    assert transport.calls == [ROBOTS, PAGE]
+
+
+def test_a_retry_after_beyond_the_cap_halts_instead_of_sleeping() -> None:
+    clock = FakeClock()
+    busy = response(PAGE, 503, headers={"Retry-After": "999999999"})
+    transport = transport_with(NO_ROBOTS, (PAGE, [busy, response(PAGE)]))
+    session = session_for(transport, clock)
+    with pytest.raises(ContractViolation, match="503"):
+        session.get(PAGE)
+    with pytest.raises(SourceHalted, match="tavan"):
+        session.get(PAGE)
+    assert transport.calls == [ROBOTS, PAGE]
+    assert max(clock.sleeps) <= scrape.RETRY_AFTER_CAP_SECONDS
+
+
+def test_a_retry_after_at_the_cap_is_waited() -> None:
+    clock = FakeClock()
+    cap = str(int(scrape.RETRY_AFTER_CAP_SECONDS))
+    busy = response(PAGE, 503, headers={"Retry-After": cap})
+    transport = transport_with(NO_ROBOTS, (PAGE, [busy, response(PAGE)]))
+    session = session_for(transport, clock)
+    with pytest.raises(ContractViolation):
+        session.get(PAGE)
+    session.get(PAGE)
+    assert clock.sleeps[-1] == scrape.RETRY_AFTER_CAP_SECONDS
+
+
 def test_a_refused_robots_fetch_also_halts_the_source() -> None:
     transport = transport_with(response(ROBOTS, 403), (PAGE, [response(PAGE)]))
     session = session_for(transport)
@@ -279,7 +429,13 @@ def test_a_refused_robots_fetch_also_halts_the_source() -> None:
 
 @pytest.mark.parametrize(
     "location",
-    ["https://evil.example/x", "https://www.tff.org.evil.com/x", "//evil.example/x"],
+    [
+        "https://evil.example/x",
+        "https://www.tff.org.evil.com/x",
+        "//evil.example/x",
+        "http://www.tff.org/Default.aspx?pageID=600",
+        "https://www.tff.org:8443/Default.aspx?pageID=600",
+    ],
 )
 def test_a_redirect_to_another_origin_is_not_followed(location: str) -> None:
     hop = response(PAGE, 302, headers={"Location": location})
@@ -287,6 +443,22 @@ def test_a_redirect_to_another_origin_is_not_followed(location: str) -> None:
     with pytest.raises(SourceBlocked, match="orijin dışı"):
         session_for(transport).get(PAGE)
     assert transport.calls == [ROBOTS, PAGE]
+
+
+def test_a_redirect_carrying_credentials_is_not_followed() -> None:
+    hop = response(PAGE, 302, headers={"Location": "https://x:y@www.tff.org/baska"})
+    transport = transport_with(NO_ROBOTS, (PAGE, [hop]))
+    with pytest.raises(SourceBlocked, match="kimlik bilgisi"):
+        session_for(transport).get(PAGE)
+    assert transport.calls == [ROBOTS, PAGE]
+
+
+def test_a_response_from_another_origin_is_not_accepted() -> None:
+    """Taşıyıcı sözleşmeyi bozup başka orijinden yanıt dönerse o yanıt kullanılmaz (son ağ)."""
+    moved = Fetched(url="https://evil.example/x", status=200, headers={}, body=b"yabanci")
+    transport = transport_with(NO_ROBOTS, (PAGE, [moved]))
+    with pytest.raises(SourceBlocked, match="orijin dışından"):
+        session_for(transport).get(PAGE)
 
 
 def test_a_same_origin_redirect_into_a_robots_closed_path_is_not_followed() -> None:
@@ -363,9 +535,18 @@ def test_the_default_transport_asks_the_guard_before_sending() -> None:
 def test_the_default_fetcher_is_scraplings_static_fetcher() -> None:
     round_ = ScrapeRound(clock=FakeClock())
     assert isinstance(round_.session(TFF)._transport, FetcherTransport)
-    assert isinstance(round_.session(TFF, fetcher="dynamic")._transport, BrowserTransport)
     assert FetcherTransport()._client is scrapling.fetchers.Fetcher
-    assert BrowserTransport("stealthy")._client is scrapling.fetchers.StealthyFetcher
+
+
+@pytest.mark.parametrize("kind", ["dynamic", "stealthy"])
+def test_browser_transports_are_refused_until_measured_with_a_real_browser(kind: Any) -> None:
+    expected = "gerçek tarayıcıyla ölçülmeden açılmaz — DEFERRED'e bak"
+    with pytest.raises(BrowserTransportDisabled, match=expected):
+        ScrapeRound(clock=FakeClock()).session(TFF, fetcher=kind)
+    with pytest.raises(BrowserTransportDisabled, match=expected):
+        scrape.build_transport(kind)
+    with pytest.raises(BrowserTransportDisabled, match=expected):
+        BrowserTransport(kind)
 
 
 @dataclass
@@ -414,9 +595,10 @@ def test_the_browser_guard_aborts_a_request_to_another_origin() -> None:
     outside = FakeRoute("https://cdn.example/a.js", BROWSER_USER_AGENT)
     client = FakeBrowserClient([inside, outside])
     with pytest.raises(SourceBlocked, match="cdn.example"):
-        BrowserTransport("dynamic", client).get(PAGE, origin_guard)
+        scrape._browser_fetch(client, PAGE, origin_guard, BROWSER_USER_AGENT)
     assert (inside.outcome, outside.outcome) == ("fallback", "abort")
     assert client.kwargs["retries"] == 1
+    assert client.kwargs["disable_resources"] is True
     assert client.kwargs["useragent"] == BROWSER_USER_AGENT
     assert not [key for key in client.kwargs if "prox" in key or "solve" in key]
 
@@ -429,14 +611,14 @@ def test_the_browser_guard_sees_the_user_agent_actually_sent() -> None:
         seen.append(user_agent)
 
     client = FakeBrowserClient([FakeRoute(PAGE, "HeadlessChrome/150")])
-    BrowserTransport("stealthy", client).get(PAGE, record)
+    scrape._browser_fetch(client, PAGE, record, BROWSER_USER_AGENT)
     assert seen == [BROWSER_USER_AGENT, "HeadlessChrome/150"]
 
 
 def test_a_browser_page_whose_guard_was_never_installed_is_discarded() -> None:
     client = FakeBrowserClient([], run_setup=False)
     with pytest.raises(SourceBlocked, match="kurulamadı"):
-        BrowserTransport("dynamic", client).get(PAGE, origin_guard)
+        scrape._browser_fetch(client, PAGE, origin_guard, BROWSER_USER_AGENT)
 
 
 # ── Tek geçit: fetcher sınıfları adaptörden yeniden ihraç edilmez ─────────────

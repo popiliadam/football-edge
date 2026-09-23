@@ -25,8 +25,9 @@ Sözleşme (her biri `tests/test_scrape.py`de mutasyonla kırmızı kanıtlı):
 
 Taşıyıcı (`Transport`) sözleşmesi: attığı HER istekten önce `guard(url, user_agent)`ı çağırır ve
 yönlendirmeyi kendisi izlemez. `FetcherTransport` (varsayılan, curl_cffi) bunu birebir yapar.
-Tarayıcı taşıyıcıları (`dynamic`, `stealthy`) sayfanın her isteğini bir rota işleyicisinde bekçiden
-geçirir; sınırları modül sonunda ve raporda yazılıdır.
+Tarayıcı taşıyıcıları (`dynamic`, `stealthy`) KAPALI: `build_transport` onları
+`BrowserTransportDisabled` ile reddeder (Playwright rotası yönlendirme sıçramalarını göstermiyor;
+gerçek tarayıcıyla ölçülmeden açılmaz — DEFERRED 11g).
 
 Scrapling fetcher sınıfları bu modülün açık adı DEĞİLDİR (`_scrapling` önekli modül takma adıyla
 erişilir): bir sınıfın buradan yeniden ihraç edilip geçidin dışında kullanılması test edilir.
@@ -75,6 +76,14 @@ REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 # Kaynak bizi geri çeviriyor: tur durur (spec §3.2.1 "Yasak", R77b sınır 4).
 HALT_STATUSES = frozenset({403, 429})
 ROBOTS_PATH = "/robots.txt"
+# `Retry-After` bundan uzunsa beklenmez, kaynak bu turda durur (sonsuz uykuya karşı; Minor 3).
+RETRY_AFTER_CAP_SECONDS = 3600.0
+BROWSER_DISABLED_REASON = (
+    "tarayıcı taşıyıcıları (dynamic/stealthy) kapalı: Playwright `page.route` yönlendirme "
+    "sıçramalarını ve service worker isteklerini rota işleyicisine göstermiyor (belgelenmiş "
+    "davranış), yani sıçramalar bekçiden ve crawl-delay'den geçmeden izlenir; "
+    "gerçek tarayıcıyla ölçülmeden açılmaz — DEFERRED'e bak (§11, 11g)"
+)
 
 FetcherKind = Literal["fetcher", "dynamic", "stealthy"]
 Guard = Callable[[str, str], None]
@@ -82,6 +91,10 @@ Guard = Callable[[str, str], None]
 
 class SourceHalted(SourceBlocked):
     """Kaynak 403/429 döndü; bu turda ona istek atılmaz (yakalanıp yeniden denenmez)."""
+
+
+class BrowserTransportDisabled(SourceBlocked):
+    """`dynamic`/`stealthy` istendi: gerçek tarayıcıyla ölçülene kadar reddedilir."""
 
 
 @dataclass(frozen=True)
@@ -167,61 +180,58 @@ class FetcherTransport:
 
 
 class BrowserTransport:
-    """`DynamicFetcher` ya da `StealthyFetcher`: tarayıcı sayfanın isteklerini kendisi atar.
+    """`DynamicFetcher` / `StealthyFetcher` — KAPALI (`BROWSER_DISABLED_REASON`, DEFERRED 11g).
 
-    Bekçi bir rota işleyicisidir (`page_setup` → `page.route("**/*")`): orijin dışı ya da robots'a
-    aykırı her istek `abort` edilir, izinli olan Scrapling'in kendi işleyicisine devredilir
-    (`fallback`). İşleyici kurulamadıysa (Scrapling `page_setup` hatasını yutar) ya da bir istek
-    engellendiyse yanıt KULLANILMAZ. Arka plan kaynakları (`disable_resources`) hiç istenmez."""
+    Kurulamaz: her kurulum `BrowserTransportDisabled` fırlatır. Açıldığında kullanılacak bekçi
+    `_browser_fetch`tedir ve sahte sayfayla sınanır; gerçek Playwright'ın her sıçramayı o bekçiden
+    geçirdiği ölçülmeden bu sınıf açılmaz."""
 
-    def __init__(self, kind: Literal["dynamic", "stealthy"], client: Any = None) -> None:
-        default = _scrapling.DynamicFetcher if kind == "dynamic" else _scrapling.StealthyFetcher
-        self._client = default if client is None else client
+    def __init__(self, kind: Literal["dynamic", "stealthy"]) -> None:
+        raise BrowserTransportDisabled(f"{kind}: {BROWSER_DISABLED_REASON}")
 
-    @property
-    def user_agent(self) -> str:
-        return BROWSER_USER_AGENT
 
-    def get(self, url: str, guard: Guard) -> Fetched:
-        guard(url, self.user_agent)
-        blocked: list[str] = []
-        installed: list[bool] = []
+def _browser_fetch(client: Any, url: str, guard: Guard, user_agent: str) -> Fetched:
+    """Tarayıcı bekçisi (henüz çağıranı yok): `page_setup` → `page.route("**/*")`; orijin dışı ya da
+    robots'a aykırı her istek `abort`, izinli olan Scrapling'in işleyicisine `fallback`. İşleyici
+    kurulamadıysa (Scrapling `page_setup` hatasını yutar) ya da bir istek engellendiyse yanıt
+    KULLANILMAZ. Arka plan kaynakları (`disable_resources`) hiç istenmez."""
+    guard(url, user_agent)
+    blocked: list[str] = []
+    installed: list[bool] = []
 
-        def on_route(route: Any) -> None:
-            request = route.request
-            try:
-                guard(str(request.url), request.headers.get("user-agent", self.user_agent))
-            except SourceBlocked as error:
-                blocked.append(str(error))
-                route.abort()
-                return
-            route.fallback()
+    def on_route(route: Any) -> None:
+        request = route.request
+        try:
+            guard(str(request.url), request.headers.get("user-agent", user_agent))
+        except SourceBlocked as error:
+            blocked.append(str(error))
+            route.abort()
+            return
+        route.fallback()
 
-        def page_setup(page: Any) -> None:
-            page.route("**/*", on_route)
-            installed.append(True)
+    def page_setup(page: Any) -> None:
+        page.route("**/*", on_route)
+        installed.append(True)
 
-        response = self._client.fetch(
-            url,
-            page_setup=page_setup,
-            useragent=self.user_agent,
-            disable_resources=True,
-            retries=1,
-            timeout=TIMEOUT_SECONDS * 1000,
-        )
-        if not installed:
-            raise SourceBlocked(f"{url}: tarayıcı rota bekçisi kurulamadı — yanıt kullanılmadı")
-        if blocked:
-            raise SourceBlocked(
-                f"tarayıcı bekçisi istek engelledi — yanıt kullanılmadı: {blocked[0]}"
-            )
-        return _fetched(response)
+    response = client.fetch(
+        url,
+        page_setup=page_setup,
+        useragent=user_agent,
+        disable_resources=True,
+        retries=1,
+        timeout=TIMEOUT_SECONDS * 1000,
+    )
+    if not installed:
+        raise SourceBlocked(f"{url}: tarayıcı rota bekçisi kurulamadı — yanıt kullanılmadı")
+    if blocked:
+        raise SourceBlocked(f"tarayıcı bekçisi istek engelledi — yanıt kullanılmadı: {blocked[0]}")
+    return _fetched(response)
 
 
 def build_transport(fetcher: FetcherKind) -> Transport:
     if fetcher == "fetcher":
         return FetcherTransport()
-    return BrowserTransport(fetcher)
+    raise BrowserTransportDisabled(f"{fetcher}: {BROWSER_DISABLED_REASON}")
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:
@@ -235,7 +245,15 @@ def _path_of(url: str) -> str:
     return f"{parts.path or '/'}?{parts.query}" if parts.query else (parts.path or "/")
 
 
+def _carries_credentials(url: str) -> bool:
+    """`kullanıcı:parola@` ya da ters bölü: urlsplit ile tarayıcı (WHATWG) host'u farklı okur."""
+    parts = urlsplit(url)
+    return "@" in parts.netloc or "\\" in url or parts.username is not None
+
+
 def _declared_path(source: Source, url: str) -> str:
+    if _carries_credentials(url):
+        raise SourceBlocked(f"{source.id}: URL kimlik bilgisi/ters bölü taşıyor — istek atılmadı")
     if _origin(url) != _origin(source.base_url):
         raise SourceBlocked(f"{source.id}: {url} kaynağın orijininde değil — istek atılmadı")
     if urlsplit(url).fragment:
@@ -251,13 +269,21 @@ def _retry_after_seconds(value: str, now: datetime) -> float | None:
     text = value.strip()
     if not text:
         return None
-    if text.isdigit():
+    if text.isascii() and text.isdigit():
         return float(text)
     try:
         moment = parsedate_to_datetime(text)
-    except (TypeError, ValueError):
+        # `-0000` bölgesi naive döner (stdlib): UTC sayılır (inceleme Critical 1).
+        aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+        return max(0.0, (aware - now).total_seconds())
+    except (TypeError, ValueError, OverflowError, IndexError):
         return None
-    return max(0.0, (moment - now).total_seconds())
+
+
+def _crawl_delay(source: Source, parser: Protego, user_agent: str) -> float:
+    """max(kaynağın `crawl_delay_seconds`i, robots `Crawl-delay`i iki eksen için)."""
+    delays = (parser.crawl_delay(agent) for agent in (source.user_agent, user_agent))
+    return max([source.crawl_delay_seconds, *(float(d) for d in delays if d is not None)])
 
 
 @dataclass(frozen=True)
@@ -327,18 +353,28 @@ class ScrapeRound:
             fetched = transport.get(url, guard)
         finally:
             self._update(source, last_request=self._clock.monotonic())
-        retry_after = _retry_after_seconds(fetched.header("retry-after"), self._clock.now())
-        if retry_after is not None:
-            self._update(source, not_before=self._clock.monotonic() + retry_after)
+        # Durma KARARI başlık okumadan ÖNCE kaydedilir: hiçbir Retry-After biçimi durmayı atlatamaz.
         if fetched.status in HALT_STATUSES:
             reason = f"{source.id}: HTTP {fetched.status} ({url}) — kaynak bu turda durdu"
             self._update(source, halted=reason)
             raise SourceHalted(reason)
+        retry_after = _retry_after_seconds(fetched.header("retry-after"), self._clock.now())
+        if retry_after is not None and retry_after > RETRY_AFTER_CAP_SECONDS:
+            self._update(
+                source,
+                halted=f"{source.id}: Retry-After {retry_after:.0f} sn, tavan "
+                f"{RETRY_AFTER_CAP_SECONDS:.0f} sn — beklenmez, kaynak bu turda durdu",
+            )
+        elif retry_after is not None:
+            self._update(source, not_before=self._clock.monotonic() + retry_after)
         return fetched
 
     def _robots(self, source: Source, user_agent: str) -> Protego:
         state = self._state(source)
         if state.robots is not None:
+            # Turun sonraki bir taşıyıcısı başka UA taşıyabilir: onun Crawl-delay'i de sorulur.
+            delay = max(state.delay, _crawl_delay(source, state.robots, user_agent))
+            self._update(source, delay=delay)
             return state.robots
         robots_url = f"{source.base_url}{ROBOTS_PATH}"
 
@@ -354,13 +390,13 @@ class ScrapeRound:
                 f"{source.id}: robots.txt ölçülemedi (HTTP {fetched.status}) — istek atılmadı"
             )
         parser = Protego.parse(body)
-        delays = (parser.crawl_delay(agent) for agent in (source.user_agent, user_agent))
-        delay = max([source.crawl_delay_seconds, *(float(d) for d in delays if d is not None)])
-        self._update(source, robots=parser, delay=delay)
+        self._update(source, robots=parser, delay=_crawl_delay(source, parser, user_agent))
         return parser
 
     def _guard(self, source: Source, parser: Protego) -> Guard:
         def guard(url: str, user_agent: str) -> None:
+            if _carries_credentials(url):
+                raise SourceBlocked(f"{source.id}: URL kimlik bilgisi taşıyor — istek atılmadı")
             if _origin(url) != _origin(source.base_url):
                 raise SourceBlocked(f"{source.id}: {url} orijin dışı — istek atılmadı")
             for agent in (source.user_agent, user_agent):
@@ -407,9 +443,10 @@ def _accepted(source: Source, fetched: Fetched) -> Fetched:
 
 
 # Bilinen sınırlar (kod dışı; raporda ve tests/test_scrape.py docstring'inde de):
-# - Tarayıcı taşıyıcılarında bekçi Playwright rotasıdır. Yönlendirme sıçramalarının ve servis
-#   çalışanı isteklerinin rotaya uğrayıp uğramadığı bu depoda ÖLÇÜLMEDİ (tarayıcı ikilisi kurulu
-#   değil; testler sahte sayfayla). Sayfanın alt istekleri crawl-delay'e tabi değildir.
+# - Tarayıcı taşıyıcıları kapalı (DEFERRED 11g). Playwright 1.63 `page.route` belgesi: işleyici
+#   yönlendirmede yalnız İLK URL için çağrılır ve service worker'ın yakaladığı istekleri görmez.
+#   Açılırsa sayfanın alt istekleri de crawl-delay'e ve 403/429 durmasına tabi değildir.
+# - `Transport` dikişi: bekçiyi çağırmayan bir taşıyıcı kodla reddedilmez (yalnız testte verilir).
 # - Yönlendirme hedefi yalnız orijin + robots'tan geçer; `declared_paths`e bakılmaz (brief).
 # - robots.txt'in kendisi yönlendirirse "ölçülemedi" sayılır (RFC 9309 izlemeyi önerir; burada
 #   temkinli taraf seçildi).
