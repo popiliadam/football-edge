@@ -77,8 +77,9 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # DOKUNAMAZDI — sabit budur). Bu sabit YALNIZ bugünün ölçümünü taşır; yeniden ölçmeden
 # büyütülmez, bkz. yukarıdaki "DÜZELTİLMİŞ SÜRÜM" notu — kırma/geri-yükleme kanıtı bu
 # görevin raporundadır (task-M-report.md, "EXPECTED_MIN_CONTRACT break-and-restore proof").
+# Oturum 9 Task 3 (2026-09-23): PFDK'nın yedi `contract` testiyle `--collect-only` 18 → 25 ölçüldü.
 step "veri-sözleşmesi" bash -c '
-  EXPECTED_MIN_CONTRACT=18
+  EXPECTED_MIN_CONTRACT=25
 
   collect_output=$(uv run pytest tests/ -q -m contract --collect-only 2>&1)
   collect_code=$?
