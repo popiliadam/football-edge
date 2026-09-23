@@ -134,3 +134,31 @@ GDELT'te bugün 0 isabet).
    önce, yöntem, tohum, atlanan sayısı). Ham metin depoya (izlenen dosyalara) GİRMEZ; Jev ÇAĞRILMAZ;
    `data/calibration/` değişmez.
 **Dosyalar:** yalnız gitignored çıktı dizini.
+
+## Task 6: Eski tablolarda RLS + API rollerinden yetki geri alma + TRUNCATE bekçisi (K1, DEFERRED 12a)
+**Ölçüldü (controller, 2026-09-23, salt okuma + Supabase advisors):** `entity_aliases`, `leagues`, `match_results`,
+`matches`, `odds_snapshots`, `source_observations`te RLS KAPALI; `anon` ve `authenticated` rollerinin bu tablolarda
+SELECT/INSERT/UPDATE/DELETE/TRUNCATE yetkisi VAR (advisor: `rls_disabled_in_public` ERROR × 6). RLS'li yeni
+tablolarda da `anon` yetkileri duruyor (politika yok → erişim yok, ama yetki gereksiz). `forbid_ledger_mutation`
+fonksiyonu değişebilir `search_path` taşıyor (advisor WARN). Bütün boru hattı tablo sahibi `postgres` olarak bağlanır.
+1. Migration `db/migrations/0013_api_roles_lockdown.sql` (idempotent, mevcut migration üslubuyla):
+   - altı tabloda `enable row level security` (FORCE DEĞİL — sahip `postgres` etkilenmez);
+   - `public` şemasındaki bütün tablolardan `anon` ve `authenticated`in bütün yetkilerini geri al; gelecekte
+     oluşturulacak tablolar için `alter default privileges … revoke` (Supabase'in varsayılan yetkilerini
+     kapatır — hangi `for role` gerektiği ölçülür ve gerekçelenir); dizi (sequence) ve fonksiyon yetkileri de
+     ölçülüp aynı biçimde ele alınır;
+   - append-only tablolar (`odds_snapshots`, `source_observations`, `match_results` — 0001–0005'te satır
+     tetikleyicisi olanlar) için deyim düzeyinde `before truncate` tetikleyicisi (0006/0007 deseni, R90);
+   - `forbid_ledger_mutation`: `set search_path = ''` (ya da `pg_catalog`) ve mesajda `tg_table_name` (12a: bugün
+     her tabloda "odds_snapshots" diyor) — gövde tam nitelikli adlarla çalışmalı.
+2. Test: yerel Postgres kabında (supabase/postgres 17.6 imajı; projenin mevcut migration test düzeni neyse o)
+   0001–0013 sırayla uygulanır; `anon`/`authenticated` olarak SELECT/INSERT reddedilir; sahip olarak INSERT
+   çalışır; TRUNCATE sahip için de reddedilir (append-only üçlü); tetikleyici mesajı tablo adını taşır; migration
+   iki kez uygulanınca hata yok. Her kural mutasyonla kırmızı kanıtlı.
+3. Canlıya uygulama controller'da: önce aynı SQL canlıda `begin … rollback` içinde kuru koşulur ve yetki/RLS
+   durumu aynı transaction içinde okunur; sonra Supabase `apply_migration`; doğrulama salt okuma sorgusu +
+   advisors. Implementer canlı veritabanına BAĞLANMAZ.
+4. DEFERRED 12a kapanış notu; İz B spec'i taslağının migration numaraları (0013/0014) bir kaydırılır (0014/0015) —
+   bunu bütünleştirme adımı yapar, bu task değil.
+**Dosyalar:** `db/migrations/0013_api_roles_lockdown.sql`, migration testi (mevcut düzende), `docs/DEFERRED.md`
+(yalnız 12a satırı), gerekirse RUNBOOK'a tek paragraf.
