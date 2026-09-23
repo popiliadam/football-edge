@@ -118,14 +118,24 @@ bütün-dal incelemesi (mutasyonlu) → düzeltme turu → DB bağlı 11/11 → 
    `step6_gdelt_en.py`'yi `doms.most_common(40)` basacak biçimde koş (betik `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/t0c/`;
    GDELT ücretsiz, ≥ 6 sn aralık, 429'da dur). Çıktı kaynak koşulları raporuna (§0.2/5) eklenir: izin listesiyle
    kaç başlık kaybedilir. Kullanıcının EN kararı (§0.7/4) bu veriyle verilir. Dal sonra silinir (uzak dal: onay).
-2. **Scrapling toplayıcı adaptörü (K2, kullanıcı isteği 2026-09-23):** Scrapling'in `Fetcher`/`DynamicFetcher`ı
-   ve uyarlanabilir ayrıştırıcısı, projenin `guard_path` (robots), crawl-delay, dürüst kimlik (`football-edge/0.1`)
-   ve yönlendirme denetimi ARKASINDA; `StealthyFetcher`/parmak izi gizleme/bot doğrulaması aşma KULLANILMAZ (R77,
-   §3.2.1 — kullanıcıya açıkça söylendi; AST bekçisi `StealthyFetcher`/`stealth` importunu kırmızıya bağlar).
-   Yeni kaynaklar `sources.yaml`a `enabled: false` girer; açmak §0.7/4 kararına bağlı. **Scrapling varsayılanları
-   R77'ye aykırı** (`get`: `impersonate="chrome"`, `stealthy_headers=true`; `fetch`: üretilmiş tarayıcı kimliği,
-   `google_search=true`) — adaptör bunları açıkça kapatır, test kimliği/başlıkları sabitler (`docs/reports/2026-09-23-ek-kaynaklar.md`
-   §Scrapling). İlk hedef TFF PFDK kararları (windows-1254, uyarlanabilir seçiciler değer katar).
+2. **Scrapling toplayıcı adaptörü (K2, kullanıcı isteği; kural R77b, spec §3.2.1):** Scrapling TAM kullanılır —
+   `Fetcher`/`DynamicFetcher`/`StealthyFetcher` ve varsayılanları (tarayıcı parmak izi taklidi, gerçekçi başlıklar);
+   "dürüst kimlik" şartı kalktı. Adaptör projenin `guard_path` (robots), crawl-delay, `Retry-After` ve yönlendirme
+   denetiminin ARKASINDA çalışır. **Kodla zorlanan sınırlar (AST/test bekçisi):** `solve_cloudflare` ve benzeri
+   doğrulama çözme seçenekleri kapalı, proxy parametresi yok, User-Agent'ta adı verilmiş bot (`Googlebot`,
+   `ClaudeBot`…) yok, 403/429'da kimlik/yol değiştirip yeniden deneme yok, yalnız `sources.yaml`da politikadan
+   geçmiş kaynak. ToS'u yasaklayan kaynaklar (kaynak koşulları raporundaki 19 yayıncı, Transfermarkt, FPL, UEFA…)
+   kullanılmaz — asistan bunları uygulamaz. Yeni kaynaklar `enabled: false` girer; açmak §0.7/4'e bağlı. İlk
+   hedefler: TFF PFDK kararları (windows-1254, uyarlanabilir seçiciler), ajansspor gövdesi, Fotomaç/A Spor, RSS'siz
+   kulüp sayfaları (koşulları okunup uygun bulunursa).
+   **ÖNCE KAPI DEĞİŞİKLİĞİ (bilinçli, ayrı commit):** `tests/test_access_method_rule.py` (R80 — Scrapling
+   fetcher'ları, `curl_cffi`, `camoufox`, stealth eklentileri BÜTÜNÜYLE yasak) R77b'ye göre yeniden yazılır: bu
+   araçların importu serbest bırakılır, AYNI committe yeni kırmızı testler eklenir — `ProxyRotator`/proxy parametresi,
+   `solve_cloudflare` ve benzeri doğrulama çözme seçenekleri, User-Agent'ta adı verilmiş bot, `sources.yaml` dışı
+   hedef. Her yeni kural mutasyonla kırmızı kanıtlanır (`/loop-kit:judge-selftest` ruhu). R79/R80 kaydı
+   (`docs/superpowers/specs/2026-09-22-faz2-olcumler-ve-kararlar.md`, Faz 2 D17 "Scrapling benimsenmez") ve
+   DEFERRED 11c bu committe "R77b ile değişti" notu alır. Bu kapı gevşetmesi DEĞİL, kullanıcının politika kararıdır
+   (2026-09-23); yine de "kapı gevşetilerek yeşil alınmaz" kuralı gereği yeni sınırlar olmadan eskisi kaldırılmaz.
 3. **Küçük borçlar (K2):** DEFERRED 17n (bekçi test boşlukları), 17h'ye eklenen 17a bekçisi kaçışları (tablo adı
    sabitiyle f-string, büyük harf tablo adı, `GATES_READERS` kümesi — son inceleme M-4/M-5), 16k-b (`draw` alanı
    `ordered` biçimde isteğe bağlı; mühürlü `model_faz3.yaml` okunmaya devam eder).
