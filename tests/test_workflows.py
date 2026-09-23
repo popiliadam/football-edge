@@ -113,6 +113,42 @@ def test_seal_workflow_names_every_exit_code_the_collector_can_return(code: int,
     assert name in arm, f"exit {code} arm'ı arızayı adlandırmıyor ({name!r} geçmiyor): {arm!r}"
 
 
+def _snapshot_run_body() -> str:
+    step = next(
+        step
+        for step in _steps(REPO / ".github/workflows/snapshot.yml")
+        if "football_edge.collect snapshot" in str(step.get("run", ""))
+    )
+    return str(step["run"])
+
+
+# Aynı bağ `snapshot.yml` için. Bu liste de ELLE tutulur ve yalnız `football_edge.collect
+# snapshot`un DÖNEBİLECEĞİ kodları taşır: 5 (kaçan mühür) yalnız `run_seal`den gelir.
+# `EXIT_EMPTY_ROUND = 19` (boş tur bekçisi) bu listenin sebebidir: 19 `*)` dalına düşseydi
+# "beklenmedik kod" derdi ve operatör sessiz arızayı milli aradan ayıran tek satırı göremezdi.
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [
+        (collect.EXIT_QUOTA_EXHAUSTED, "kredi"),
+        (collect.EXIT_LEAGUE_FAILED, "lig"),
+        (collect.EXIT_MIRROR_FAILED, "ayna"),
+        (collect.EXIT_EMPTY_ROUND, "fikstür"),
+    ],
+)
+def test_snapshot_workflow_names_every_exit_code_the_collector_can_return(
+    code: int, name: str
+) -> None:
+    body = _snapshot_run_body()
+    arm = next((line for line in body.splitlines() if line.strip().startswith(f"{code})")), None)
+
+    assert arm is not None, (
+        f"snapshot.yml exit {code} için case arm'ı taşımıyor: '*)' dalına düşer ve "
+        "operatör arızayı adıyla göremez"
+    )
+    assert "::error::" in arm, f"exit {code} arm'ı Actions'ta hata olarak görünmüyor: {arm!r}"
+    assert name in arm, f"exit {code} arm'ı arızayı adlandırmıyor ({name!r} geçmiyor): {arm!r}"
+
+
 # ── C1: CI kapıyı HİÇ koşmuyordu ────────────────────────────────────────────
 # `.github/workflows/` yalnız `snapshot.yml` ve `seal.yml` taşıyordu, ikisi de
 # `schedule` + `workflow_dispatch`. Yani projenin GERÇEK kapısı tek adımdı
