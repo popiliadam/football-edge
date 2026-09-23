@@ -114,7 +114,7 @@ kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
 2. DEFERRED 10t kararı (yerel işi yetkisiz ayrı macOS kullanıcısında koşturmak) — şimdilik kabul.
 3. İz B için Netlify sitesi ve alan adı.
 4. ~~Faz 2 Task 12'de lig önerisi~~ — **verildi:** N1, B1, AUT.
-5. **Faz 2 worktree'lerini ve dallarını (yerel + uzak `measure/r104-width`) silme onayı** (adım 2).
+5. ~~Faz 2 worktree'lerini ve dallarını silme onayı~~ — **yapıldı 2026-09-23** (DEFERRED 14t; SDD defterleri korundu).
 
 ---
 

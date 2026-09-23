@@ -697,7 +697,7 @@ ertelenmedi, hepsi kapatıldı.
 
 | # | Ne | Neden bekliyor | Ne zaman bakılır |
 |---|---|---|---|
-| 14t | Faz 2 worktree'leri ve dalları: `.worktrees/wt-{parser,devig,lock,harness,sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve `feat/faz2-*` dalları; uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı) | Silme kullanıcı onayı ister; hepsi `main`e birleşti (measure hariç — main'e girmez) | Kullanıcı onayı gelince |
+| ~~14t~~ **KAPANDI 2026-09-23** (kullanıcı onayı; `measure/r104-width` → etiket `archive/measure-r104-width`, e1bfc11; SDD defterleri korundu) | Faz 2 worktree'leri ve dalları: `.worktrees/wt-{parser,devig,lock,harness,sync,bridge,efficiency,selftest,r111,method,t11fix,measure}` ve `feat/faz2-*` dalları; uzak dal `measure/r104-width` (R104 ölçümünün geçici dalı) | Silme kullanıcı onayı ister; hepsi `main`e birleşti (measure hariç — main'e girmez) | Kullanıcı onayı gelince |
 | 14u | CI'da `astral-sh/setup-uv@v5` bir kez 10 dk takıldı (hazırlık, rerun yeşil) | Tek olay | Tekrarlarsa adım düzeyi `timeout-minutes` |
 
 ## 15. İz A'dan (lig ekleme N1/B1/AUT) ertelenenler (2026-09-22)
