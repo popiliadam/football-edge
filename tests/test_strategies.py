@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -84,7 +85,8 @@ def _elo_probs(
 
 
 def _pick(strategy: Placebo, index: int) -> str:
-    prediction = strategy.predict(_context(AVG_PRE, index=index))
+    """`index`. maç: adı sıradan gelen ayrı bir maç (tohum kimlikten, sıradan değil — 14l)."""
+    prediction = strategy.predict(_context(AVG_PRE, index=index, home=f"Ev {index}"))
     assert prediction is not None and prediction.bet is not None
     return prediction.bet.outcome
 
@@ -308,12 +310,18 @@ def test_elo_ratings_at_a_decision_come_only_from_results_known_before_it() -> N
     assert probs[2] == pytest.approx(_elo_probs(beta, 1500.0, CONFIG, 0.26))
 
 
+def _sha_pick(seed: int, league: str, day: date, home: str, away: str) -> str:
+    """Sözleşmedeki tohumun testteki bağımsız yazımı (14l)."""
+    digest = hashlib.sha256(f"{seed}|{league}|{day.isoformat()}|{home}|{away}".encode()).digest()
+    return random.Random(int.from_bytes(digest[:8], "big")).choice(RESULTS)
+
+
 def test_placebo_bets_its_seeded_pick_at_the_books_pre_closing_price() -> None:
     strategy = Placebo(devig=_normalise, seed=7)
 
     prediction = strategy.predict(_context(AVG_PRE, index=3))
 
-    pick = random.Random(7 * 1_000_003 + 3).choice(RESULTS)
+    pick = _sha_pick(7, "E0", date(2024, 8, 10), "Alfa", "Beta")
     assert prediction is not None and prediction.bet is not None
     assert prediction.bet.outcome == pick
     assert prediction.bet.price == dict(zip(RESULTS, (2.6, 3.3, 2.8), strict=True))[pick]
@@ -323,15 +331,26 @@ def test_placebo_bets_its_seeded_pick_at_the_books_pre_closing_price() -> None:
     assert strategy.predict(_context(AVG_PRE, index=3)) == prediction
 
 
-def test_placebo_picks_follow_the_per_match_seed_over_a_grid() -> None:
-    """Tek örnek yanlış bir tohum biçimini (ör. `seed + index`) şans eseri geçirebilir."""
+def test_placebo_picks_follow_the_match_identity_seed_over_a_grid() -> None:
+    """Tek örnek yanlış bir tohum biçimini (ör. ev adı atlanmış) şans eseri geçirebilir."""
     grid = [(seed, index) for seed in (1, 7, 20260922) for index in range(6)]
 
     picks = [_pick(Placebo(devig=_normalise, seed=seed), index) for seed, index in grid]
 
     assert picks == [
-        random.Random(seed * 1_000_003 + index).choice(RESULTS) for seed, index in grid
+        _sha_pick(seed, "E0", date(2024, 8, 10), f"Ev {index}", "Beta") for seed, index in grid
     ]
+
+
+def test_placebo_pick_ignores_the_replay_position() -> None:
+    """14l: aynı maç, oynatmadaki sırası değişince aynı sonucu seçer."""
+    strategy = Placebo(devig=_normalise)
+
+    picks = {strategy.predict(_context(AVG_PRE, index=index)) for index in range(20)}
+
+    assert (
+        len({prediction.bet.outcome for prediction in picks if prediction and prediction.bet}) == 1
+    )
 
 
 def test_placebo_picks_vary_across_matches() -> None:

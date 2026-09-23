@@ -13,40 +13,16 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
+from football_edge.backtest.context import check_unique, context_of, record_of, result_of
 from football_edge.backtest.events import DECISION, RESULT, Event, build_events
-from football_edge.history.types import CLOSING, PRE_CLOSING, HistMatch, OddsKey
+from football_edge.backtest.records import DecisionContext as DecisionContext
+from football_edge.backtest.records import MatchKey as MatchKey
+from football_edge.backtest.records import ResultRecord as ResultRecord
+from football_edge.history.types import CLOSING, HistMatch, OddsKey
 
 
 class LeakageError(RuntimeError):
     """Bir karar, anı karar anına eşit ya da sonra olan bir sonucu görmüş olurdu."""
-
-
-@dataclass(frozen=True)
-class ResultRecord:
-    league: str
-    date: dt.date
-    home: str
-    away: str
-    home_goals: int
-    away_goals: int
-    known_at: dt.datetime
-
-
-@dataclass(frozen=True)
-class DecisionContext:
-    """Stratejinin gördüğü TEK kayıt: kapanış, sonuç ve durum görüntüsü alanı yoktur (R98).
-
-    Durum stratejinin içindedir (`observe` yeni değer döner); zamanı harness yönetir.
-    """
-
-    match_index: int
-    league: str
-    season: str
-    date: dt.date
-    home: str
-    away: str
-    decision_at: dt.datetime
-    pre_prices: Mapping[OddsKey, float]  # yalnız PRE_CLOSING anahtarları
 
 
 @dataclass(frozen=True)
@@ -96,28 +72,11 @@ def _phase_prices(match: HistMatch, phase: str) -> Mapping[OddsKey, float]:
 
 
 def _result_record(match: HistMatch, known_at: dt.datetime) -> ResultRecord:
-    return ResultRecord(
-        league=match.league,
-        date=match.date,
-        home=match.home,
-        away=match.away,
-        home_goals=match.home_goals,
-        away_goals=match.away_goals,
-        known_at=known_at,
-    )
+    return result_of(record_of(match), known_at)
 
 
 def _context(index: int, match: HistMatch, decided: dt.datetime) -> DecisionContext:
-    return DecisionContext(
-        match_index=index,
-        league=match.league,
-        season=match.season,
-        date=match.date,
-        home=match.home,
-        away=match.away,
-        decision_at=decided,
-        pre_prices=_phase_prices(match, PRE_CLOSING),
-    )
+    return context_of(index, record_of(match), decided)
 
 
 def _outcome(index: int, match: HistMatch) -> Outcome:
@@ -163,7 +122,12 @@ def _walk(
 
 
 def replay(matches: Sequence[HistMatch], strategy: Strategy) -> ReplayResult:
-    """Maçları olay akışıyla oynatır; sonuç kayıtları döngü BİTTİKTEN sonra kurulur."""
+    """Maçları olay akışıyla oynatır; sonuç kayıtları döngü BİTTİKTEN sonra kurulur.
+
+    Yinelenen `MatchKey` `DuplicateMatch` verir: aynı maçın iki kararı ve çift durum güncellemesi
+    sessiz geçmez (Faz 3 tasarımı §7.5).
+    """
+    check_unique(record_of(match).key for match in matches)
     events = build_events(matches)
     predictions, no_prediction = _walk(matches, events, strategy)
     decisions = sum(1 for event in events if event.kind == DECISION)

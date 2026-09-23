@@ -6,12 +6,14 @@ gerçek bağlantı bütünleşik harness'ta (`functools.partial(devig, method=..
 
 from __future__ import annotations
 
+import hashlib
 import random
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
 from football_edge.backtest.harness import Bet, DecisionContext, Prediction, ResultRecord
+from football_edge.backtest.records import MatchKey
 from football_edge.elo import EloConfig, expected_home, updated
 from football_edge.history.types import H2H, PRE_CLOSING, RESULTS, OddsKey
 
@@ -19,8 +21,6 @@ Devig = Callable[[Sequence[float]], tuple[float, ...]]
 
 _FLOOR = 0.01
 _CEILING = 0.98
-# Maç başına tohum: bir maçın seçimi, başka maçların karar alıp almamasından bağımsızdır.
-_SEED_STRIDE = 1_000_003
 
 
 def _h2h_pre(context: DecisionContext, book: str) -> tuple[float, float, float] | None:
@@ -41,6 +41,17 @@ def _fair(devig: Devig, prices: tuple[float, float, float]) -> tuple[float, floa
     if len(probs) != len(RESULTS):
         raise ValueError(f"vig temizleyici {len(probs)} olasılık döndü, 1X2 üç ister")
     return probs[0], probs[1], probs[2]
+
+
+def placebo_pick(seed: int, key: MatchKey) -> str:
+    """Maç KİMLİĞİNE bağlı tohumlu seçim (DEFERRED 14l).
+
+    Giriş sırasına bağlı tohumda bir lig eklenince seçimlerin çoğu değişirdi; kimlik canlıda da
+    aynıdır (Faz 3 tasarımı §7.5). `hash()` süreçten sürece değiştiği için sha256.
+    """
+    text = f"{seed}|{key.league}|{key.date.isoformat()}|{key.home}|{key.away}"
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return random.Random(int.from_bytes(digest[:8], "big")).choice(RESULTS)
 
 
 def _clamp(value: float) -> float:
@@ -133,7 +144,7 @@ class EloPointInTime:
 
 @dataclass(frozen=True)
 class Placebo:
-    """K4 negatif kontrolü: maç başına tohumlu rastgele sonuç, `book`un kapanış öncesi fiyatı."""
+    """K4 negatif kontrolü: maç kimliğiyle tohumlu sonuç, `book`un kapanış öncesi fiyatı."""
 
     devig: Devig
     seed: int = 20260922
@@ -151,6 +162,6 @@ class Placebo:
         probs = None if prices is None else _fair(self.devig, prices)
         if prices is None or probs is None:
             return None
-        pick = random.Random(self.seed * _SEED_STRIDE + context.match_index).choice(RESULTS)
+        pick = placebo_pick(self.seed, context.key)
         bet = Bet(outcome=pick, price=prices[RESULTS.index(pick)], book=self.book)
         return Prediction(match_index=context.match_index, strategy=self.name, probs=probs, bet=bet)

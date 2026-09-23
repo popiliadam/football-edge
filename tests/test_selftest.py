@@ -6,7 +6,6 @@ Placebo'nun seçtiği tarafın fiyatı kapanışa doğru kısalırsa (gelecek fi
 
 from __future__ import annotations
 
-import random
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, time, timedelta
@@ -15,8 +14,9 @@ from functools import partial
 import pytest
 
 from football_edge.backtest import selftest
+from football_edge.backtest.records import MatchKey
 from football_edge.backtest.selftest import Check, run_selftest
-from football_edge.backtest.strategies import Placebo
+from football_edge.backtest.strategies import Placebo, placebo_pick
 from football_edge.backtest.timeline import LONDON
 from football_edge.history.holdout import DEV, HoldoutKey
 from football_edge.history.types import CLOSING, PRE_CLOSING, RESULTS, HistMatch, OddsKey
@@ -82,8 +82,8 @@ def _match(
         kickoff=kickoff,
         league=league,
         season=season,
-        home=f"{league} ev",
-        away=f"{league} konuk",
+        home=f"{league} ev {line}",
+        away=f"{league} konuk {line}",
         goals=SCORES[result],
         odds=odds,
         line=line,
@@ -331,8 +331,14 @@ def test_k3_measures_main_leagues_only_inside_the_main_window() -> None:
 
 
 def _placebo_pick(index: int) -> str:
-    """Placebo'nun havuzdaki `index`. maç için seçeceği sonuç (Task 4: maç başına tohum)."""
-    return random.Random(PLACEBO_SEED * 1_000_003 + index).choice(RESULTS)
+    """Placebo'nun havuzdaki `index`. maç için seçeceği sonuç (14l: tohum maç kimliğinden).
+
+    `_k4_history`in maçları: cumartesiler 2023-08-05'ten, `line = index + 1`, adlar `_match`ten.
+    """
+    kickoff = _saturdays(index + 1, date(2023, 8, 5))[index]
+    day = kickoff.astimezone(LONDON).date()
+    key = MatchKey("E0", day, f"E0 ev {index + 1}", f"E0 konuk {index + 1}")
+    return placebo_pick(PLACEBO_SEED, key)
 
 
 def _close_for(pick: str, target: float) -> Prices:
