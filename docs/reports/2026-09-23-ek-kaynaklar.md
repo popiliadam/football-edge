@@ -66,7 +66,11 @@ Tahmini maliyet €29/ay + X ≈ $60/ay (40 hesap × 10 gönderi/gün varsayım�
 | NTV Spor | TR | Haber | Web | robots yapay zekâ botlarını kapatıyor | ? | ? | — | okunamadı |
 | PA / Reuters / AP / AFP | EN | Akış | Lisans | Sözleşme | Sözleşme | Sözleşme | Kamuya açık değil | koşullu (lisans) |
 
-## Scrapling notu (entegrasyon için bağlayıcı)
+## Scrapling notu
+> **Güncelleme (aynı gün, R77b):** kullanıcı kararıyla parmak izi/tarayıcı taklidi ve varsayılanlar
+> artık İZİNLİ (spec §3.2.1 R77b). Aşağıdaki "aykırı" notu R77 içindi; değişmeyen sınırlar: doğrulama çözme/atlatma
+> yok (`solve_cloudflare` kapalı), robots/ToS'a uyum, adı verilmiş bot taklidi yok, proxy yok.
+
 - **Varsayılanlar R77'ye aykırı:** `get` Chrome parmak izini taklit eder (`impersonate="chrome"`,
   `stealthy_headers=true`); `fetch` üretilmiş gerçek tarayıcı kimliği ve Google yönlendirme başlığı kullanır
   (`google_search=true`). Kullanımda taklit KAPATILIR, kimlik açıkça `football-edge/0.1 (+github)`, `google_search=false`.

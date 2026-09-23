@@ -139,13 +139,24 @@ sorulur (`guard_path`) ve crawl-delay uygulanır.
 - Kaynağın açık olduğu meşru bir ortamda koşmak (ör. kullanıcının kendi makinesi, R73).
 
 **Yasak:**
-- Kimlik taklidi: başka bir kuruluşun tarayıcısı ya da botu gibi görünmek (User-Agent dahil — R2,
-  ör. `ClaudeBot`) ya da tarayıcı parmak izini gizleyen/taklit eden araçlar (Scrapling
-  `StealthyFetcher`, Camoufox, undetected-chromedriver ve benzerleri).
+- Kimlik taklidi: başka bir kuruluşun **botu** gibi görünmek (User-Agent dahil — R2, ör. `ClaudeBot`,
+  `Googlebot`: adı verilmiş botlar ayrıcalıklı erişim alır). ~~Tarayıcı parmak izini gizleyen/taklit
+  eden araçlar~~ — **R77b ile kaldırıldı** (aşağıda).
 - Bot kontrolü sayfasını (Cloudflare challenge, Turnstile) ya da CAPTCHA'yı çözmek veya atlatmak.
 - IP ya da proxy döndürerek engelden kaçmak (residential proxy havuzları dahil).
 - 403/429'u yok sayıp kimlik, zamanlama ya da yol değiştirerek yeniden denemek; `Retry-After`e ve
   crawl-delay'e uymamak.
+
+**R77b — güncelleme (2026-09-23, kullanıcı kararı):** Scrapling tam olarak kullanılır — `Fetcher`,
+`DynamicFetcher`, `StealthyFetcher` ve varsayılanları (tarayıcı parmak izi/TLS taklidi `impersonate`,
+`stealthy_headers`, `google_search` yönlendirmesi, gerçek tarayıcı kimliği). "Dürüst kimlik" şartı
+(`football-edge/0.1`) kalktı. **Değişmeyen sınırlar (bunlar kaldırılmadı ve asistan uygulamaz):**
+(1) yalnız robots.txt'i ilgili yola izin veren ve ToS'u otomatik erişimi/yapay zekâ kullanımını
+yasaklamayan kaynaklarda (§3.2/1–3, `guard_path` her istekte); (2) bot doğrulaması, Cloudflare/Turnstile
+ya da CAPTCHA çözülmez veya atlatılmaz — Scrapling `solve_cloudflare` ve benzeri seçenekler KAPALI;
+(3) adı verilmiş bir bot taklit edilmez (R2); (4) proxy/IP döndürme yok; 403/429 alan kaynakta kimlik
+ya da yol değiştirerek yeniden denenmez, `Retry-After` ve crawl-delay'e uyulur. Kaynak bir ortamı
+geri çeviriyorsa meşru başka ortam (R73) yine geçerlidir.
 
 ### 3.3 Elenen kaynaklar ve gerekçeleri
 
