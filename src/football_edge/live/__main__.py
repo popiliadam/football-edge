@@ -22,7 +22,6 @@ from types import MappingProxyType
 from football_edge.backtest.__main__ import (
     CATALOG_PATH,
     EXIT_CONFIG_MISMATCH,
-    EXIT_LOCK_VIOLATION,
     LOCK_PATH,
 )
 from football_edge.backtest.context import record_of
@@ -41,7 +40,7 @@ from football_edge.collect import configure_logging
 from football_edge.db import connect
 from football_edge.history.catalog import MAIN, Catalog, kinds_of, load_catalog, rating_groups
 from football_edge.history.holdout import HOLDOUT_END
-from football_edge.history.lock import LockViolation, load_lock
+from football_edge.history.lock import LockViolation, load_lock, refuse_on_violation
 from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
 from football_edge.live.context import LiveMatch, build_batch, live_key, naming_from, season_of
@@ -160,8 +159,7 @@ def _shadow(args: argparse.Namespace) -> int:
             )
             written = write_shadow(conn, rows)
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — gölge tahmin koşulmadı: %s", "; ".join(error.differences))
-        return EXIT_LOCK_VIOLATION
+        return refuse_on_violation(LOGGER, error, "gölge tahmin koşulmadı")
     LOGGER.info(
         "gölge: karar %d · yazılan satır %d · eşlenemeyen %d · bayat durum %d · fiyatsız %d",
         len(batch.decisions),
@@ -217,8 +215,7 @@ def _parity(args: argparse.Namespace) -> int:
             history = load_matches(conn, catalog, lock=load_lock(args.lock))
             live = load_live_matches(conn, since=args.since, until=datetime.now(UTC))
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — eşitlik raporu koşulmadı: %s", "; ".join(error.differences))
-        return EXIT_LOCK_VIOLATION
+        return refuse_on_violation(LOGGER, error, "eşitlik raporu koşulmadı")
     report = parity(
         live,
         history,
@@ -265,8 +262,7 @@ def _freeze_weights(args: argparse.Namespace) -> int:
             # Anahtarsız: holdout dönmez; ağırlık yalnız DEV'in E satırlarından (R161).
             history = load_matches(conn, catalog, lock=load_lock(args.lock))
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — ağırlık dondurulmadı: %s", "; ".join(error.differences))
-        return EXIT_LOCK_VIOLATION
+        return refuse_on_violation(LOGGER, error, "ağırlık dondurulmadı")
     groups = rating_groups(catalog)
     rows = run_rows(development_groups(history, groups), kinds_of(catalog), groups, config)
     try:
@@ -324,8 +320,7 @@ def _report(args: argparse.Namespace) -> int:
             closing = load_closing(conn, tuple(sorted({row.match_id for row in predictions})))
             fixtures = load_live_matches(conn, since=args.since, until=now)
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — gölge raporu koşulmadı: %s", "; ".join(error.differences))
-        return EXIT_LOCK_VIOLATION
+        return refuse_on_violation(LOGGER, error, "gölge raporu koşulmadı")
     codes = _codes(catalog)
     report = build_report(
         predictions,

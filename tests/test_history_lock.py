@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import logging
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -20,6 +21,7 @@ import pytest
 from football_edge.history.holdout import DEV, DEV_END, HOLDOUT, HOLDOUT_END
 from football_edge.history.lock import (
     CANONICAL_VERSION,
+    EXIT_LOCK_VIOLATION,
     Digest,
     HistoryLock,
     LockViolation,
@@ -28,6 +30,7 @@ from football_edge.history.lock import (
     digest,
     dump_lock,
     load_lock,
+    refuse_on_violation,
     verify_lock,
 )
 from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, HistMatch, OddsKey
@@ -497,3 +500,17 @@ def test_verify_lock_lists_every_difference_in_one_violation() -> None:
         "SP1: kilitte var, veride yok",
     )
     assert str(caught.value).splitlines()[1:] == list(caught.value.differences)
+
+
+def test_a_lock_violation_is_logged_by_name_and_exits_nine(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Kilidi okuyan her CLI aynı satırı ve aynı kodu verir (R99; DEFERRED 17i)."""
+    logger = logging.getLogger("test.lock")
+    with caplog.at_level(logging.ERROR, logger="test.lock"):
+        code = refuse_on_violation(
+            logger, LockViolation("E0: a", "E1: b"), "gölge tahmin koşulmadı"
+        )
+
+    assert (code, EXIT_LOCK_VIOLATION) == (9, 9)
+    assert caplog.messages == ["kilit ihlali — gölge tahmin koşulmadı: E0: a; E1: b"]

@@ -18,6 +18,7 @@ yüzden `HoldoutKey` kullanmaz ve `holdout_access_log`a yazmaz — holdout'u OKU
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -54,6 +55,15 @@ class LockViolation(RuntimeError):
     def __init__(self, *differences: str) -> None:
         self.differences = differences
         super().__init__(f"kilit ihlali — {len(differences)} fark:\n" + "\n".join(differences))
+
+
+EXIT_LOCK_VIOLATION = 9  # kilidi okuyan her CLI'ın veri farkı çıkışı (R99)
+
+
+def refuse_on_violation(logger: logging.Logger, error: LockViolation, what: str) -> int:
+    """`kilit ihlali — <ne yapılmadı>: <farklar>` yazar ve kilit çıkış kodunu döner."""
+    logger.error("kilit ihlali — %s: %s", what, "; ".join(error.differences))
+    return EXIT_LOCK_VIOLATION
 
 
 @dataclass(frozen=True)

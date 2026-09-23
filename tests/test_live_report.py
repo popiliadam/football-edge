@@ -18,7 +18,7 @@ from football_edge.backtest.context import record_of
 from football_edge.backtest.model_config import MODEL_CONFIG_PATH, file_sha256, load_model_config
 from football_edge.backtest.walkforward import BLEND_COMPONENTS, DC, ELO, MARKET
 from football_edge.backtest.wf_eval import MARKET_ONLY, bet_clv
-from football_edge.history.lock import LockViolation
+from football_edge.history.lock import EXIT_LOCK_VIOLATION, LockViolation
 from football_edge.history.types import HistMatch
 from football_edge.live import __main__ as live_cli
 from football_edge.live import report as report_module
@@ -477,7 +477,7 @@ def test_the_report_stops_on_a_lock_violation(
 
     code = live_cli.main(["report", "--weights", str(_real_weights(tmp_path)), "--out", str(out)])
 
-    assert code == live_cli.EXIT_LOCK_VIOLATION
+    assert code == EXIT_LOCK_VIOLATION
     assert not out.exists()
 
 
