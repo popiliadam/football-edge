@@ -11,6 +11,7 @@ dependencies = [
     "defusedxml>=0.7",
     "typesafe-sdk>=0.1",
     "numpy>=2.1",
+    "scipy>=1.14",
 ]
 
 [dependency-groups]
@@ -49,3 +50,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "T20"]
 python_version = "3.11"
 strict = true
 files = ["src", "scripts"]
+
+# scipy tip bilgisi taşımaz (Faz 3 dalga 0): dönüşleri çağıran yerde float()/np.asarray ile daraltılır.
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true

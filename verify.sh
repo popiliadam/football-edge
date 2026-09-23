@@ -29,8 +29,9 @@ step "pytest"      uv run pytest -q
 # CI ise `python -m football_edge.collect` ile kurulu paketi çağırır. PYTHONPATH'in
 # boşaltılması kasıtlıdır — import'un src/'den değil kurulumdan geldiğini kanıtlar.
 # Kırmızı verirse onarım `uv sync --reinstall-package football-edge`; kapı gevşetilmez.
+# Faz 3: scipy'ın derlenmiş optimizer'ı da yüklenebilmeli (Dixon-Coles, havuz, seçim).
 step "paket-kurulu" env PYTHONPATH= uv run python -c \
-  "import football_edge, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
+  "import football_edge, scipy.optimize, sys; sys.stdout.write(football_edge.__file__ + chr(10))"
 
 # Kaynak politikası ÇEVRİMDIŞI sorulur: ağ yok, secret yok, her push'ta koşar. Canlı sapmayı
 # sources-audit.yml günde bir ölçer. Robots'u ölçmeden "izinli" demek, spec §3.2'yi prose'a
