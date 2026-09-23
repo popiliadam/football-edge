@@ -23,7 +23,10 @@ step() {
 step "ruff-check"  uv run ruff check src tests scripts
 step "ruff-format" uv run ruff format --check src tests scripts
 step "mypy"        uv run mypy src scripts
-step "pytest"      uv run pytest -q
+# `--tb=short`: uzun traceback psycopg karesinin yerel değişkenlerini (bağlantı dizesi, PAROLA dâhil)
+# basar; canlı DATABASE_URL'le koşan kapıda bir bağlantı hatası parolayı loga yazardı. Kapı
+# gevşemez, yalnız traceback biçimi kısalır (tests/test_gate_traceback.py sabitler).
+step "pytest"      uv run pytest -q --tb=short
 
 # Testler `pythonpath = ["src"]` ile koşar: KURULU PAKET BOZUK OLSA BİLE geçerler.
 # CI ise `python -m football_edge.collect` ile kurulu paketi çağırır. PYTHONPATH'in
@@ -92,7 +95,7 @@ step "veri-sözleşmesi" bash -c '
     exit 1
   fi
 
-  uv run pytest tests/ -q -m contract
+  uv run pytest tests/ -q -m contract --tb=short
   code=$?
 
   if [ "$code" -eq 5 ]; then
@@ -124,7 +127,7 @@ step "sızıntı" bash -c '
     exit 1
   fi
 
-  uv run pytest tests/ -q -m leakage
+  uv run pytest tests/ -q -m leakage --tb=short
 '
 
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para

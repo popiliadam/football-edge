@@ -570,9 +570,12 @@ scripts/sandbox_db.sh stop    # kapları durdurur; `rm --yes` kaldırır
   bu kaba ÇEVİRİR — kabuktaki değer ezilir). Yeni bir migration yazıldıysa: `scripts/sandbox_db.sh apply`.
 - `football-edge-sandbox-empty` (127.0.0.1:55481): BOŞ kalır. Kum havuzu testleri (`SANDBOX_DATABASE_URL`)
   bütün migration'ları tek işlemde uygular ve geri alır; hedefte `odds_snapshots` varsa hiçbir şey
-  uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe` veritabanını (0001+0002
-  commit'li) yeniden kullanır.
+  uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe_<özet>` veritabanını (0001+0002
+  commit'li; ad iki dosyanın özetinden) yeniden kullanır.
 - Kaplar `football-edge.sandbox=1` etiketini taşır; betik etiketsiz aynı adlı bir kaba dokunmaz.
+  **Paralel oturumlar** (iki ajan, iki worktree) kendi `FE_SANDBOX_PREFIX` ve `FE_SANDBOX_PORT`'unu
+  kullanır: önek ortaksa kaplar da ortaktır ve birinin `rm --yes`'i ötekinin kabını kaldırır.
+- `test` pytest'i `--tb=short` ile koşar: uzun traceback bağlantı dizesini (parola dâhil) basar.
   Ön ek ve port: `FE_SANDBOX_PREFIX`, `FE_SANDBOX_PORT`.
 - Elle koşu için `scripts/sandbox_db.sh env` iki `export` satırı basar (yerel parola içerir; kabın
   kendisinde durur, depoya girmez).

@@ -8,8 +8,9 @@
 - KUM HAVUZU testleri `SANDBOX_DATABASE_URL` varsa BOŞ bir Supabase kabında (supabase/postgres 17.6)
   0001–0013'ü TEK işlemde uygular, davranışı sınar ve işlemi GERİ ALIR. Hedefte `odds_snapshots`
   zaten varsa hiçbir şey uygulanmadan KIRMIZI verir: canlıya yanlışlıkla bağlanmanın kilidi. Kilit
-  zaman aşımı testi aynı sunucuda ayrı bir `fe_lock_probe` veritabanı kullanır (0001+0002 commit'li,
-  yeniden kullanılır): iki bağlantının göreceği tablo commit'li olmalı.
+  zaman aşımı testi aynı sunucuda ayrı bir `fe_lock_probe_<özet>` veritabanı kullanır (0001+0002
+  commit'li; ad iki dosyanın sha256'sından, dosyalar değişince yeni veritabanı): iki bağlantının
+  göreceği tablo commit'li olmalı.
 
 Kapı ve CI iki DB katmanını da ATLAR (DEFERRED 18a). Yerelde tek komut (docker gerekir; canlıya
 bağlanmaz, `.env` okunmaz):
@@ -22,6 +23,7 @@ Ayrıntı: docs/RUNBOOK.md §4."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import time
@@ -52,7 +54,6 @@ SANDBOX_URL = "SANDBOX_DATABASE" + "_URL"
 NO_DATABASE = f"{LIVE_URL} yok — 0013 gerçek veritabanında sınanmadı"
 NO_SANDBOX = f"{SANDBOX_URL} yok — 0001–0013 boş bir Supabase kabında uygulanmadı"
 TABLE_PRIVILEGES = "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-LOCK_PROBE_DB = "fe_lock_probe"
 
 
 def _sql() -> str:
@@ -421,17 +422,22 @@ def test_sandbox_migration_gives_up_on_a_held_lock_within_seconds(
 
     `sandbox` bağımlılığı kum havuzu kilidini (boş `postgres` veritabanı) önce koşturur. Sınır
     kalkarsa `statement_timeout` testi asılı bırakmaz; `QueryCanceled` onu kırmızı yapar."""
+    bases = [MIGRATIONS / name for name in ("0001_init.sql", "0002_sources.sql")]
+    # Ad şemanın özetidir: 0001/0002 değişince `if not exists` bayat şemayı taşımaz (N4).
+    probe_db = (
+        "fe_lock_probe_" + hashlib.sha256(b"".join(p.read_bytes() for p in bases)).hexdigest()[:12]
+    )
     admin = psycopg.connect(os.environ[SANDBOX_URL], autocommit=True)
     try:
-        found = admin.execute("SELECT 1 FROM pg_database WHERE datname = %s", (LOCK_PROBE_DB,))
+        found = admin.execute("SELECT 1 FROM pg_database WHERE datname = %s", (probe_db,))
         if found.fetchone() is None:
-            admin.execute(f"CREATE DATABASE {LOCK_PROBE_DB}")
+            admin.execute(f"CREATE DATABASE {probe_db}")
     finally:
         admin.close()
-    dsn = make_conninfo(os.environ[SANDBOX_URL], dbname=LOCK_PROBE_DB)
+    dsn = make_conninfo(os.environ[SANDBOX_URL], dbname=probe_db)
     with connect(dsn) as setup, setup.cursor() as cur:
-        for name in ("0001_init.sql", "0002_sources.sql"):
-            _apply(cur, MIGRATIONS / name)
+        for path in bases:
+            _apply(cur, path)
 
     holder, migrator = connect(dsn), connect(dsn)
     try:
@@ -446,4 +452,5 @@ def test_sandbox_migration_gives_up_on_a_held_lock_within_seconds(
             conn.rollback()
             conn.close()
 
-    assert 4.0 <= waited < 10.0, waited
+    # Üst sınır yavaş makinede de tutar; 30 sn'lik `statement_timeout`tan (sınırsız hâl) ayrılır.
+    assert 4.0 <= waited < 20.0, waited

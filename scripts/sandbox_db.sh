@@ -15,7 +15,8 @@
 #
 # İki kap: `<önek>-applied` (0001… commit'li; katalog testlerinin veritabanı) ve `<önek>-empty` (boş;
 # kum havuzu testleri migration'ları tek işlemde uygulayıp GERİ ALIR). Kaplar `football-edge.sandbox=1`
-# etiketini taşır; aynı adlı etiketsiz bir kaba (başkasının kabı) hiçbir komut dokunmaz.
+# etiketini taşır; aynı adlı etiketsiz bir kaba (başkasının kabı) hiçbir komut dokunmaz. Aynı makinede
+# paralel oturumlar KENDİ FE_SANDBOX_PREFIX/FE_SANDBOX_PORT'unu kullanır: önek ortaksa kaplar da ortaktır.
 # Ayarlar: FE_SANDBOX_PREFIX (football-edge-sandbox), FE_SANDBOX_PORT (55480; boş kap +1),
 # FE_SANDBOX_IMAGE (public.ecr.aws/supabase/postgres:17.6.1.143).
 set -euo pipefail
@@ -54,13 +55,24 @@ psql_in() {
     psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -q "$@"
 }
 
-url() { echo "postgresql://postgres:$(password "$1")@127.0.0.1:$2/postgres"; }
+# Adres, kabın GERÇEKTEN yayımladığı porttan kurulur: FE_SANDBOX_PORT sonradan değişirse o porttaki
+# başka bir sunucuya bağlanılmaz.
+url() {
+  local published
+  published="$(docker port "$1" 5432/tcp 2>/dev/null | head -n 1)" \
+    || die "$1 çalışmıyor — önce: scripts/sandbox_db.sh up"
+  case "$published" in
+    127.0.0.1:*) ;;
+    *) die "$1 5432'yi 127.0.0.1'e yayımlamıyor ($published) — dokunulmadı" ;;
+  esac
+  echo "postgresql://postgres:$(password "$1")@$published/postgres"
+}
 
 start_one() {
   local name="$1" port="$2"
   if exists "$name"; then
     ours "$name" || die "$name adında başkasının kabı var — FE_SANDBOX_PREFIX ile başka önek seç"
-    docker start "$name" >/dev/null
+    docker start "$name" >/dev/null || die "docker start başarısız: $name"
     return 1
   fi
   docker run -d --name "$name" --label "$LABEL=1" \
@@ -109,8 +121,11 @@ cmd_apply() { require_ours "$APPLIED"; wait_ready "$APPLIED"; apply_all; }
 cmd_env() {
   require_ours "$APPLIED"
   require_ours "$EMPTY"
-  printf 'export %s=%q\n' "$DB_VAR" "$(url "$APPLIED" "$PORT")"
-  printf 'export %s=%q\n' "$SANDBOX_VAR" "$(url "$EMPTY" "$((PORT + 1))")"
+  local applied_url empty_url
+  applied_url="$(url "$APPLIED")"
+  empty_url="$(url "$EMPTY")"
+  printf 'export %s=%q\n' "$DB_VAR" "$applied_url"
+  printf 'export %s=%q\n' "$SANDBOX_VAR" "$empty_url"
 }
 
 cmd_test() {
@@ -121,8 +136,12 @@ cmd_test() {
   local arg has_path=0
   for arg in "$@"; do if [ -e "${arg%%::*}" ]; then has_path=1; fi; done
   [ "$has_path" -eq 1 ] || set -- "$@" "${DEFAULT_TESTS[@]}"
-  env "$DB_VAR=$(url "$APPLIED" "$PORT")" "$SANDBOX_VAR=$(url "$EMPTY" "$((PORT + 1))")" \
-    PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider -rs "$@"
+  local applied_url empty_url
+  applied_url="$(url "$APPLIED")"
+  empty_url="$(url "$EMPTY")"
+  # `--tb=short`: uzun traceback psycopg karesindeki bağlantı dizesini (parola dâhil) basar.
+  env "$DB_VAR=$applied_url" "$SANDBOX_VAR=$empty_url" \
+    PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider -rs --tb=short "$@"
 }
 
 cmd_stop() {
@@ -148,5 +167,5 @@ case "${1:-}" in
   env) cmd_env ;;
   stop) cmd_stop ;;
   rm) shift; cmd_rm "$@" ;;
-  *) sed -n '2,22p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,21p' "$0" >&2; exit 2 ;;
 esac
