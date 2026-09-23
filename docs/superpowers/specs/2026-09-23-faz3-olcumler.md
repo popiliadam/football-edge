@@ -117,3 +117,22 @@ aday dixon_coles {'xi': 0.003, 'ridge': 0.03} → S log loss 1.032715
 - Dixon-Coles'un Ü/A kalibrasyonu zayıf: eğim b = 0,633, ECE 0,0247 (aşırı özgüvenli).
 - Boşluk cezası (R128, DEV simülasyonu): Elo 0,0034 [0,0013, 0,0055], DC 0,0064 [0,0034, 0,0094] — bir sezon
   eksik girdinin maliyeti; holdout yılının canlı maliyeti için alt sınır tahmini.
+
+## Dalga 4 sonu — 2026-09-23, canlı veritabanı
+
+| Ölçüm | Sonuç |
+|---|---|
+| `leakage` etiketli test | **336** (plan 334 + Task 10 düzeltme turunun 2 testi) → `EXPECTED_MIN_LEAKAGE=336` |
+| I6: `tests/test_holdout_phase_db.py` 0010 ÖNCESİ | **FAIL** — "ikinci faz99 açılışı kabul edildi" |
+| 0009 · 0010 · 0011 (`apply_migration`) | uygulandı; `holdout_access_log` = 0; indeks `split_part(purpose, ':'::text, 1)`; `model_predictions` iki tetikleyici (`_append_only`, `_no_truncate`), RLS `true`; `shadow-dispatch` (`35 12 * * 2,5`), `history-dispatch` (`50 9 * * 2`), `history-dispatch-friday` (`50 9 * * 5`) active |
+| I6: aynı test 0010 SONRASI | **1 passed**; ardından `holdout_access_log` = 0 |
+| `DATABASE_URL` bağlı tam kapı | **11/11** |
+| Anahtarsız `load_matches` (Task 10'un bütün dönemlerde yineleme reddiyle) | red yok, 38 lig — holdout'ta yineleme yok (C1 gerçek veride kapalı) |
+| İlk gölge turu (`shadow.yml`, run 35835173227, çarşamba) | yeşil; `karar 0 · yazılan satır 0 · eşlenemeyen 27 · bayat durum 0 · fiyatsız 0` (karar günü değil) |
+| E3 (`live parity`) takma adlardan ÖNCE | eşleşen 23 · eşlenemeyen 28 · sezon farkı 0 · başlama farkı 0 |
+| E3 38 takma addan SONRA | **eşleşen 50 · eşlenemeyen 1 · sezon farkı 0 · başlama farkı 0**; kalan 1: tabanda henüz olmayan bir T1 maçı (2026-09-20) |
+
+Takma adlar (`config/history_aliases.yaml`, 38 çift) TAHMİN edilmedi: her canlı ad, aynı gün ve aynı lig
+dosyasında, aynı ev/deplasman konumundaki TEK football-data satırından okundu (öteki taraf zaten eşlenmiş ya da
+günün eşlenmemiş tek satırı). ned.1 ve bel.1'in canlı maçı bu pencerede yoktu (milli ara) — onların `Date`
+eşleşmesi ilk maç haftasından sonra ölçülür; AUT kapalı (§3/38 AUT için açık).
