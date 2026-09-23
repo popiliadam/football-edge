@@ -298,13 +298,33 @@ def test_the_budget_stops_the_run_and_keeps_the_answers_already_paid_for() -> No
 # ── Yeniden deneme sınırı (son inceleme I-3) ─────────────────────────────────────────────────
 
 
+@dataclass
+class FailsFor(FakeBatteryJev):
+    """Başlığı `failing`de olan haberin çağrısı `raises` ile patlar; öbürleri cevap alır."""
+
+    failing: frozenset[str] = frozenset()
+    raises: Exception = field(default_factory=lambda: RuntimeError("jev hatası"))
+
+    def ask_battery(self, state: Mapping[str, Any], questions: Sequence[Question]) -> BatteryAnswer:
+        if state["news"]["title"] in self.failing:
+            self.seen = [*self.seen, {"state": dict(state), "question_ids": ()}]
+            raise self.raises
+        return super().ask_battery(state, questions)
+
+
 def test_a_failed_battery_leaves_a_numbered_failure_marker_not_an_answer() -> None:
-    """Deneme sayısı koşular arasında `jev_item_answers`teki numaralı işaretlerden okunur."""
-    client = FakeBatteryJev(error=RuntimeError("400 bad request"))
+    """Deneme sayısı koşular arasında `jev_item_answers`teki numaralı işaretlerden okunur.
 
-    result = run([news(1, "Galatasaray'da sakatlık")], client, attempts={1: 1})
+    Koşuda cevap alan bir haber daha vardır: hepsi hatayla düşen koşu kesintidir, işaret bırakmaz.
+    """
+    client = FailsFor(
+        failing=frozenset({"Galatasaray'da sakatlık"}), raises=RuntimeError("400 bad request")
+    )
+    items = [news(1, "Galatasaray'da sakatlık"), news(2, "Trabzonspor'da kriz")]
 
-    assert result.rows == ()
+    result = run(items, client, attempts={1: 1})
+
+    assert {r.item_id for r in result.rows} == {2}
     (marker,) = result.failures
     assert (marker.item_id, marker.question_id, marker.choice, marker.match_id) == (
         1,
@@ -341,14 +361,95 @@ def test_an_item_that_failed_max_attempts_times_is_not_bought_again() -> None:
     assert {r.item_id for r in result.rows} == {2}
 
 
+# ── Kesinti (DEFERRED 17b) ────────────────────────────────────────────────────────────────────
+
+
+TWO = (
+    news(1, "Galatasaray'da sakatlık", T0),
+    news(2, "Trabzonspor'da kriz", T0 + timedelta(minutes=1)),
+)
+
+
+def test_a_run_where_every_asked_item_hits_a_jev_error_is_an_outage_without_markers() -> None:
+    """Jev çökükse düşüş haberin değil kesintinin sonucudur: işaret üç koşuda kapsamı yakardı."""
+    result = run(TWO, FakeBatteryJev(error=ConnectionError("jev kapalı")))
+
+    assert result.outage is True
+    assert (result.rows, result.failures) == ((), ())
+    assert (result.asked, result.failed, result.budget_hit) == (4, 4, False)
+
+
+def test_a_mixed_run_marks_the_errored_item_as_before() -> None:
+    client = FailsFor(failing=frozenset({TWO[0].title}), raises=TimeoutError("zaman aşımı"))
+
+    result = run(TWO, client)
+
+    assert result.outage is False
+    assert {r.item_id for r in result.rows} == {2}
+    assert [(m.item_id, m.choice) for m in result.failures] == [(1, "jev_error:TimeoutError")]
+
+
+def test_an_all_invalid_run_is_not_an_outage() -> None:
+    """Geçersiz cevap Jev'in çalıştığını gösterir: işaret bugünkü gibi yazılır."""
+    result = run(TWO, FakeBatteryJev(choices={MATCH_QUESTION: "m-baska:home"}))
+
+    assert result.outage is False
+    assert [(m.item_id, m.choice) for m in result.failures] == [
+        (1, "match_invalid"),
+        (2, "match_invalid"),
+    ]
+
+
+def test_an_error_beside_an_invalid_answer_is_not_an_outage() -> None:
+    client = FailsFor(
+        choices={MATCH_QUESTION: "m-baska:home"},
+        failing=frozenset({TWO[0].title}),
+        raises=TimeoutError("zaman aşımı"),
+    )
+
+    result = run(TWO, client)
+
+    assert result.outage is False
+    assert [(m.item_id, m.choice) for m in result.failures] == [
+        (1, "jev_error:TimeoutError"),
+        (2, "match_invalid"),
+    ]
+
+
+def test_the_budget_stop_keeps_the_markers_of_errored_items() -> None:
+    """Tavan koşuyu keser; ondan önceki hata bugünkü gibi işaretlenir, kesinti sayılmaz."""
+
+    @dataclass
+    class ErrorThenBudget(FakeBatteryJev):
+        calls: int = 0
+
+        def ask_battery(
+            self, state: Mapping[str, Any], questions: Sequence[Question]
+        ) -> BatteryAnswer:
+            self.calls += 1
+            raise TimeoutError("zaman aşımı") if self.calls == 1 else BudgetExceeded("tavan")
+
+    result = run(TWO, ErrorThenBudget())
+
+    assert (result.budget_hit, result.outage) == (True, False)
+    assert [(m.item_id, m.choice) for m in result.failures] == [(1, "jev_error:TimeoutError")]
+
+
+def test_a_run_with_nothing_asked_is_not_an_outage() -> None:
+    result = run([news(1, "Transfer döneminde son gün")], FakeBatteryJev(error=RuntimeError("x")))
+
+    assert (result.outage, result.no_candidate) == (False, 1)
+
+
 def test_gates_ignore_failure_markers() -> None:
     """İşaret cevap değildir: kapıyı da `asked_at`i de (sonra yazılmış olsa bile) etkilemez."""
     answers = run([news(7, "Trabzonspor'da kriz")], FakeBatteryJev()).rows
     failed = run(
-        [news(7, "Trabzonspor'da kriz")], FakeBatteryJev(error=TimeoutError("zaman aşımı"))
+        [news(7, "Trabzonspor'da kriz")], FakeBatteryJev(choices={MATCH_QUESTION: "m-baska:home"})
     ).failures
     later = tuple(replace(m, asked_at=ASKED + timedelta(hours=1)) for m in failed)
 
+    assert [m.item_id for m in later] == [7], "aynı haberin işareti olmalı (boş işaret sınamaz)"
     assert gates_from([*later, *answers]) == gates_from(answers)
     assert gates_from(later) == {}
 
@@ -660,6 +761,24 @@ def test_tier1_command_on_the_budget_writes_what_was_paid_for_and_exits_by_name(
     assert {a["item_id"] for a in db.answers} == {1}
     assert db.commits == 1
     assert "tavan" in caplog.text
+
+
+def test_tier1_command_on_an_outage_writes_no_markers_and_exits_by_name(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Kesinti koşusu işaret yazmaz: `MAX_ATTEMPTS`i aşan kesintiden sonra da haberler sorulur."""
+    db = _db_with(*TWO)
+    client = FakeBatteryJev(error=ConnectionError("jev kapalı"))
+    _cli(monkeypatch, db, client)
+
+    codes = [cli.main(["tier1"]) for _ in range(MAX_ATTEMPTS + 1)]
+
+    assert codes == [cli.EXIT_SOURCE_FAILED] * (MAX_ATTEMPTS + 1)
+    assert cli.EXIT_SOURCE_FAILED == 7
+    assert db.answers == [], "kesinti işareti yazılmamalı"
+    assert len(client.seen) == 2 * (MAX_ATTEMPTS + 1), "kesinti haberi vazgeçilmiş yapmamalı"
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("kesinti" in m and "2 haber" in m for m in errors), errors
 
 
 # ── Review Focus: Türkçe ekler ve modelin liste dışı olasılıkları ─────────────────────────────

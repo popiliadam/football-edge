@@ -23,6 +23,12 @@ maç cevabı) `jev_item_answers`e numaralı bir İŞARET satırı bırakır — 
 `t1_failed:<n>`, `choice` = sebep, olasılık yok, maliyet 0 (harcama `jev_spend`te). Yeni tablo yok,
 satır yalnız eklenir. İşaret "sorulmuş" sayılmaz (`asked_item_ids`), kapıya girmez (`gates_from`);
 `MAX_ATTEMPTS` işareti olan haber bu `prompt_version` için bir daha satın alınmaz.
+
+Kesinti (DEFERRED 17b): koşuda en az bir haber sorulduysa ve sorulan HER haber Jev hatasıyla
+(`REASON_ERROR`) düştüyse — hiç cevap, hiç geçersiz cevap yok — düşüş haberin değil Jev'in
+sonucudur. O koşu işaret bırakmaz ve `Tier1Run.outage` ile bildirilir; yoksa üç kesinti koşusu
+haberleri bu `prompt_version` için kalıcı olarak kapsam dışı bırakırdı. Karışık koşu ve tavan
+duruşu işaretlerini bugünkü gibi bırakır.
 """
 
 from __future__ import annotations
@@ -113,6 +119,7 @@ class Tier1Run:
     budget_hit: bool  # tavan: kalan haberler sorulmadı
     failures: tuple[ItemAnswerRow, ...] = ()  # cevapsız denemelerin işaretleri (`FAILED_PREFIX`)
     given_up: int = 0  # `MAX_ATTEMPTS` kez başarısız olduğu için sorulmayan haber
+    outage: bool = False  # sorulan her haber Jev hatasıyla düştü: işaret dönülmez (17b)
 
 
 # ── Adaylar ────────────────────────────────────────────────────────────────────────────────
@@ -323,6 +330,15 @@ def _ask(
         return f"{REASON_ERROR}:{type(error).__name__}"
 
 
+def _is_outage(rows: Sequence[ItemAnswerRow], failures: Sequence[ItemAnswerRow]) -> bool:
+    """Sorulan her haber işaret aldı (cevap yok) ve her işaret bir Jev hatasıdır."""
+    return (
+        bool(failures)
+        and not rows
+        and all(marker.choice.startswith(f"{REASON_ERROR}:") for marker in failures)
+    )
+
+
 def _split(choice: str) -> tuple[str | None, str | None]:
     """`<match_id>:<taraf>` → (maç, taraf); başka her seçim (NO_MATCH) → (None, None)."""
     match_id, _, side = choice.rpartition(":")
@@ -343,7 +359,8 @@ def run_tier1(
 
     Tavan (`BudgetExceeded`) çağrıdan ÖNCE düşer: o ana kadarki cevaplar kaybolmaz, dönülür.
     Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır. `attempts` haber
-    başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz.
+    başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz. Sorulan her
+    haber Jev hatasıyla düştüyse koşu kesintidir: `outage`, işaretsiz (modül belgesi).
     """
     templates = {question.question_id: question for question in questions.tier1}
     pool = (*history, *items)
@@ -389,8 +406,16 @@ def run_tier1(
                 item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
             )
             failures = (*failures, marker)
+    outage = _is_outage(rows, failures)
     return Tier1Run(
-        rows, asked, failed, no_candidate, budget_hit=False, failures=failures, given_up=given_up
+        rows,
+        asked,
+        failed,
+        no_candidate,
+        budget_hit=False,
+        failures=() if outage else failures,
+        given_up=given_up,
+        outage=outage,
     )
 
 
