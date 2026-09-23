@@ -38,7 +38,17 @@ ayrıntı, kapının ne ölçtüğü ve ÖLÇMEDİKLERİ, 44 kararın listesi ve
   Plan metninden a398c31'e kurulan ağaç bayt-özdeş, 1781 passed / 3 skipped, 55 mutasyon kırmızı. Sıradaki kural R149.
   Defter `.superpowers/sdd/2026-09-23-faz3-plan/` (plan-review.md, plan-rereview.md, izB-report.md).
 
-**Sıradaki oturum — FAZ 3 UYGULAMASI:** "`docs/HANDOFF.md` §0'dan devam et" → planı `superpowers:subagent-driven-development`
+**Oturum 6 durumu (2026-09-23 ~09:00 UTC) — FAZ 3 UYGULAMASI, AÇILIŞ ÖNCESİ DURAKTA:**
+- Task 0–12 `main`de (son `bf5a06d`, CI yeşil); defter `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md`
+  (R149–R156). Migration 0009/0010/0011 canlı; I6 kanıtı (0010 önce kırmızı, sonra yeşil); DB bağlı kapı 11/11.
+- Seçim (S) `config/model_faz3.yaml`: Elo k=10, ha=65, linear, regress 0,2, newcomer 75, **ordered**; DC ξ=0,003,
+  sırt=0,003. **Izgara ucu bulgusu** (k, ξ, sırt) — genişletme kararı kullanıcıda.
+- E raporu `docs/reports/2026-09-23-faz3-walkforward.md`: W1 ham ΔLL 0,0002 [0,0000, 0,0005]; runner'da W1–W3 GEÇTİ.
+- Ön kayıt `config/faz3_preregistration.yaml` (`c129cc3`), prova yeşil (holdout AÇILMADI), kırmızı takım temiz
+  (5 Minor, R156 ile ertelendi). `holdout_access_log` = 0.
+- **Sıradaki adım: Task 13 Step 7 — kullanıcının açık "evet"i, sonra Step 8 TEK açılış** (plan Task 13).
+
+**Önceki plan notu — FAZ 3 UYGULAMASI:** "`docs/HANDOFF.md` §0'dan devam et" → planı `superpowers:subagent-driven-development`
 ile yürüt; yeni worktree (`git worktree add`), dalga 0 (Task 0: scipy controller commit'i + iki gerçek veri ölçümü).
 Durma noktaları: Task 13 holdout açılışı ÖNCESİ kullanıcının açık "evet"i (P14). Plan, ölçülmeyenler listesini ve
 yürütme defterini kendisi taşır.
