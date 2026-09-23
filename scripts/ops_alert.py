@@ -102,6 +102,13 @@ TRIGGERS = (
         max_age=timedelta(days=8),
         hint="pg_cron history-dispatch durmuş olabilir — RUNBOOK §3.3",
     ),
+    # Gölge tahmin salı ve cuma (0011, 12:35): en uzun ara cuma → salı 4 gün; eşik 4 gün 12 sa.
+    Trigger(
+        workflow="shadow.yml",
+        event=None,
+        max_age=timedelta(days=4, hours=12),
+        hint="pg_cron shadow-dispatch durmuş olabilir — RUNBOOK §3.3",
+    ),
 )
 
 
