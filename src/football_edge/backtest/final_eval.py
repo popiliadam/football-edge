@@ -1,10 +1,11 @@
-"""Faz 3'ün TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R128, R130, R135).
+"""Bir fazın TEK, kayıtlı holdout açılışı (Faz 3 tasarımı §8; R128, R130, R135).
 
 `open_holdout`ın anılabildiği TEK modül (`tests/test_holdout_access_rule.py`). Anahtar yalnız
 `load_matches`e verilir ve hemen bırakılır: değerlendirme anahtarı değil SEÇİLMİŞ SATIRLARI alır
-(DEFERRED 12i). Açılıştan önce ön kayıt denetimi (`preflight`) ve açılış sayımı: Faz 3 için önceki
-bir açılış varsa açılmaz — yalnız çöküş sonrası, rapor üretilmemişse ve git SHA'sı aynıysa tek bir
-kayıtlı yeniden koşu (`faz3-rerun`). Veritabanında `0010`un tekil indeksi ikinci katmandır.
+(DEFERRED 12i). Açılıştan önce ön kayıt denetimi (`preflight`) ve açılış sayımı: aynı faz için
+önceki bir açılış varsa açılmaz — yalnız çöküş sonrası, rapor üretilmemişse ve git SHA'sı aynıysa
+tek bir kayıtlı yeniden koşu (`<faz>-rerun`). Veritabanında `0010`un tekil indeksi ikinci
+katmandır. Faz ön kaydın `phase` alanından gelir (16d).
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import psycopg
 from football_edge.backtest.evaluate import clv_values
 from football_edge.backtest.harness import replay
 from football_edge.backtest.model_config import ModelConfig
-from football_edge.backtest.preregistration import PHASE, RERUN, Preregistration
+from football_edge.backtest.preregistration import Preregistration
 from football_edge.backtest.strategies import EloPointInTime, Placebo
 from football_edge.backtest.walkforward import (
     ELO_SCAFFOLD,
@@ -41,11 +42,16 @@ from football_edge.history.types import HistMatch
 from football_edge.market.devig import devig
 from football_edge.market.metrics import Interval, bootstrap_mean
 
-_OPENINGS = "SELECT purpose, git_sha FROM holdout_access_log WHERE purpose LIKE %s ORDER BY id"
+# 0010'un tekil indeksiyle aynı ifade: `purpose`un ilk alanı fazın ya da yeniden koşusunun TAM adı.
+# `LIKE 'faz3%'` `faz30`u da sayardı (16d).
+_OPENINGS = (
+    "SELECT purpose, git_sha FROM holdout_access_log "
+    "WHERE split_part(purpose, ':', 1) IN (%s, %s) ORDER BY id"
+)
 
 
 class AlreadyOpened(RuntimeError):
-    """Faz 3 holdout'u zaten açıldı; yeniden koşu kuralı karşılanmadı."""
+    """Fazın holdout'u zaten açıldı; yeniden koşu kuralı karşılanmadı."""
 
 
 class OpenedButFailed(RuntimeError):
@@ -67,31 +73,36 @@ class FinalReport:
     predictions_sha256: str
 
 
-def previous_openings(conn: psycopg.Connection[Any]) -> tuple[tuple[str, str], ...]:
+def rerun_of(phase: str) -> str:
+    return f"{phase}-rerun"
+
+
+def previous_openings(conn: psycopg.Connection[Any], *, phase: str) -> tuple[tuple[str, str], ...]:
     with conn.cursor() as cur:
-        cur.execute(_OPENINGS, (f"{PHASE}%",))
+        cur.execute(_OPENINGS, (phase, rerun_of(phase)))
         return tuple((str(row[0]), str(row[1])) for row in cur.fetchall())
 
 
 def purpose_for(
     previous: Sequence[tuple[str, str]],
     *,
+    phase: str,
     prereg_sha256: str,
     git_sha: str,
     report_exists: bool,
     rerun_reason: str | None,
 ) -> str:
-    """İlk açılış `faz3:<sha>`; yeniden koşu YALNIZ tek ilk açılıştan sonra, rapor yokken, aynı
-    SHA ile ve adıyla (`faz3-rerun:<neden>:<sha>`)."""
+    """İlk açılış `<faz>:<sha>`; yeniden koşu YALNIZ tek ilk açılıştan sonra, rapor yokken, aynı
+    SHA ile ve adıyla (`<faz>-rerun:<neden>:<sha>`)."""
     if not previous:
         if rerun_reason is not None:
             raise AlreadyOpened("yeniden koşu istendi ama önceki açılış yok")
-        return f"{PHASE}:{prereg_sha256}"
+        return f"{phase}:{prereg_sha256}"
     if rerun_reason is None or not rerun_reason.strip():
-        raise AlreadyOpened(f"Faz 3 holdout'u zaten açıldı ({len(previous)} kayıt)")
+        raise AlreadyOpened(f"{phase} holdout'u zaten açıldı ({len(previous)} kayıt)")
     if len(previous) != 1 or report_exists or previous[0][1] != git_sha:
         raise AlreadyOpened("yeniden koşu kuralı: tek açılış, rapor yok ve aynı git SHA'sı")
-    return f"{RERUN}:{rerun_reason.strip()}:{prereg_sha256}"
+    return f"{rerun_of(phase)}:{rerun_reason.strip()}:{prereg_sha256}"
 
 
 def check_holdout_count(lock: HistoryLock, leagues: Mapping[str, Sequence[HistMatch]]) -> int:
@@ -217,7 +228,8 @@ def run_final(
         # Kilit ve yineleme (C1) holdout dahil AÇILIŞTAN ÖNCE: ihlal açılış harcamaz.
         load_matches(conn, catalog, lock=lock)
         purpose = purpose_for(
-            previous_openings(conn),
+            previous_openings(conn, phase=prereg.phase),
+            phase=prereg.phase,
             prereg_sha256=prereg_sha256,
             git_sha=git_sha,
             report_exists=report_path.exists(),

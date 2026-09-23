@@ -2,7 +2,8 @@
 
 `selftest`: bilinen sonuçlar. `select`: S bölgesinde hiperparametre seçimi →
 `config/model_faz3.yaml` (controller commit'ler). `walkforward`: dondurulmuş yapılandırmayla E
-bölgesi raporu. `final-eval`: Faz 3'ün TEK holdout açılışı (`backtest/final_eval.py`, R135).
+bölgesi raporu. `final-eval --phase <faz>`: fazın TEK holdout açılışı (`backtest/final_eval.py`,
+R135); gerçek açılış yalnız kanonik yollarla (16b).
 
 Önce kilit: kilit dosyası bozuksa ya da önbellek kilitli dönemlerin özetinden farklıysa hiçbir
 ölçüm koşmaz (exit 9). Sonra her denetim adıyla loglanır; kapı denetimlerinden biri kırmızıysa
@@ -36,7 +37,8 @@ from football_edge.backtest.model_config import (
 )
 from football_edge.backtest.model_selftest import model_checks, model_rows
 from football_edge.backtest.preregistration import (
-    PREREGISTRATION_PATH,
+    PHASES,
+    CanonicalPaths,
     PreflightError,
     preflight,
     real_git,
@@ -71,7 +73,7 @@ EXIT_LOCK_VIOLATION = 9
 # 10 köprünün (`market bridge`) "eşleşme yok"u; 11: model yapılandırması okunamadı ya da
 # katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
 EXIT_CONFIG_MISMATCH = 11
-# final-eval: 12 ön kayıt denetimi tutmadı (AÇILMADI); 13 Faz 3 açılışı zaten var (AÇILMADI);
+# final-eval: 12 ön kayıt denetimi tutmadı (AÇILMADI); 13 fazın açılışı zaten var (AÇILMADI);
 # 14 AÇILDI ama değerlendirme tamamlanmadı (rapor yok) — HANDOFF'a adıyla, R135 yeniden koşusu.
 EXIT_PREFLIGHT = 12
 EXIT_ALREADY_OPENED = 13
@@ -107,9 +109,11 @@ def _parser() -> argparse.ArgumentParser:
     model.add_argument("--lock", type=Path, default=LOCK_PATH)
     model.add_argument("--catalog", type=Path, default=CATALOG_PATH)
     model.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
-    final = commands.add_parser("final-eval", help="Faz 3'ün tek, kayıtlı holdout açılışı")
-    final.add_argument("--prereg", type=Path, default=PREREGISTRATION_PATH)
-    final.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
+    final = commands.add_parser("final-eval", help="bir fazın tek, kayıtlı holdout açılışı")
+    final.add_argument("--phase", choices=sorted(PHASES), required=True)
+    # Varsayılanlar fazın kanonik yollarıdır (`canonical_paths`); başka yol yalnız provada geçer.
+    final.add_argument("--prereg", type=Path, default=None)
+    final.add_argument("--config", type=Path, default=None)
     final.add_argument("--lock", type=Path, default=LOCK_PATH)
     final.add_argument("--catalog", type=Path, default=CATALOG_PATH)
     final.add_argument("--out", type=Path, required=True)
@@ -120,6 +124,16 @@ def _parser() -> argparse.ArgumentParser:
         help="prova: E'nin son sezonu sahte holdout, anahtarsız, AÇILIŞ YOK",
     )
     return parser
+
+
+def canonical_paths(phase: str) -> CanonicalPaths:
+    """Fazın gerçek açılışının tek kabul ettiği yollar (16b); `faz3` için bugünkü varsayılanlar."""
+    return CanonicalPaths(
+        prereg=Path(f"config/{phase}_preregistration.yaml"),
+        model=Path(f"config/model_{phase}.yaml"),
+        lock=LOCK_PATH,
+        catalog=CATALOG_PATH,
+    )
 
 
 def rating_groups(catalog: Catalog) -> Mapping[str, str]:
@@ -280,15 +294,20 @@ def _model_selftest(args: argparse.Namespace) -> int:
 
 def _final_eval(args: argparse.Namespace) -> int:
     git = real_git()
+    canonical = canonical_paths(args.phase)
+    prereg_path: Path = args.prereg or canonical.prereg
+    model_path: Path = args.config or canonical.model
     try:
         prereg = preflight(
-            prereg_path=args.prereg,
-            model_path=args.config,
+            prereg_path=prereg_path,
+            model_path=model_path,
             lock_path=args.lock,
             catalog_path=args.catalog,
             git=git,
+            phase=args.phase,
+            canonical=None if args.rehearse else canonical,
         )
-        config = load_model_config(args.config)
+        config = load_model_config(model_path)
         if args.rehearse:
             report = run_rehearsal(
                 connect,
@@ -310,7 +329,7 @@ def _final_eval(args: argparse.Namespace) -> int:
             lock=load_lock(args.lock),
             config=config,
             prereg=prereg,
-            prereg_sha256=file_sha256(args.prereg),
+            prereg_sha256=file_sha256(prereg_path),
             git_sha=git.head(),
             now=datetime.now(UTC),
             report_path=args.out,
