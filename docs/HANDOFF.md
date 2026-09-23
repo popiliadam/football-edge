@@ -1,6 +1,6 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-23 (oturum 7, Faz 4 Plan 1 bitti) · **Durum:** **Faz 4 tasarımı + Plan 1 (dalga 0–1,
+**Son güncelleme:** 2026-09-23 (oturum 8: robots #3 kapandı, küçük borç temizliği) · **Durum:** **Faz 4 tasarımı + Plan 1 (dalga 0–1,
 11 görev) `main`de** (`4a629c2`) · Plan 2 ön koşulları bekleniyor (§0.2) · holdout Faz 3 için bir kez açıldı, Faz 4'te
 henüz açılmadı · `0012` canlı, `news_items` dolu, `collect-news` her turda senkronlar · **Dal:** `main` = `origin/main` ·
 kapı **10 adım yeşil + `zincir` adıyla SKIP** (DATABASE_URL bağlıyken 11/11) · `EXPECTED_MIN_LEAKAGE` 418
@@ -73,8 +73,15 @@ açılış öncesi (T10), 17h kırmızı takım. Plan metnindeki Task 9 Step 8 k
 
 ### 0.4 Plan 2'ye kadar ara iş seçenekleri (kullanıcıya sorulur; hiçbiri Plan 2'yi bloklamaz)
 1. **İz B** (Faz 6 iskeleti, Netlify + alan adı) — kullanıcının Netlify sitesi ve alan adı kararı gerekir.
-2. **Küçük borç temizliği** (K2/K3): DEFERRED 16j/17i kod tekrarları, 16g DC memo anahtarı, 16k yapılandırma okuyucusu,
-   17m küçükleri — her biri kısa TDD görevi, kapı ve inceleme kuralları aynen.
+2. ~~**Küçük borç temizliği**~~ — **yapıldı 2026-09-23** (oturum 8, plan
+   `docs/superpowers/plans/2026-09-23-kucuk-borc-temizligi.md`, 7 görev, satır içi yürütme + bütün-dal incelemesi):
+   16j ve 17i kapandı, 16k-c ve 17m'nin iki doğrulama açığı kapandı; 16g, 16k-a/b ve 17m kalanları gerekçesiyle
+   DEFERRED'da. Bütün-dal incelemesi (24 mutasyon, `git archive` kopyasında): dört aralık çağıranından yalnız
+   `selftest` etiketi sabitti — dördü de artık birebir metinle sabit (`model_selftest` 5 basamak, `selftest` 4
+   basamak + `%95`, `wf_run.format_interval`, `efficiency._interval`); bütçe bekçisi yalnız `jev_budget`tan takma
+   adsız import edilen ve yerelde yeniden tanımlanmayan sarmalayıcı adına güvenir. **Kapının ölçmediği:** kilit
+   ihlali satırlarının çağrı yeri başına `what` metni (CLI testleri yalnız çıkış kodunu sınar; bayt eşliği incelemede
+   git-grep ile doğrulandı).
 3. **Takma ad hijyeni** (Faz 3 §3.3/8, DEFERRED 16e): 09-26 gölge turunun `eşlenemeyen U` satırından sonra
    `config/history_aliases.yaml` (aynı gün/lig/konum kuralı, tahmin yok).
 4. Hiçbiri — 2026-10-07'ye kadar yalnız izleme.

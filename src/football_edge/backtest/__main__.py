@@ -58,9 +58,14 @@ from football_edge.backtest.wf_run import (
 from football_edge.collect import configure_logging
 from football_edge.collector import ContractViolation
 from football_edge.db import connect
-from football_edge.history.catalog import MAIN, Catalog, load_catalog
+from football_edge.history.catalog import MAIN, Catalog, kinds_of, load_catalog, rating_groups
 from football_edge.history.holdout import DEV_END
-from football_edge.history.lock import LockViolation, load_lock
+from football_edge.history.lock import (
+    EXIT_LOCK_VIOLATION,
+    LockViolation,
+    load_lock,
+    refuse_on_violation,
+)
 from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
 from football_edge.market.devig import DEFAULT_METHOD, METHODS
@@ -70,8 +75,6 @@ LOCK_PATH = Path("config/history_lock.yaml")
 CATALOG_PATH = Path("config/history_leagues.yaml")
 # 1: bir kapı denetimi kırmızı. Python'ın beklenmedik arızası da 1 verir; ayrım logdadır.
 EXIT_GATE_FAILED = 1
-# collect.EXIT_* (2–8) ile çakışmaz; history.yml'deki selftest adımı bu kodu adıyla karşılar.
-EXIT_LOCK_VIOLATION = 9
 # 10 köprünün (`market bridge`) "eşleşme yok"u; 11: model yapılandırması okunamadı ya da
 # katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
 EXIT_CONFIG_MISMATCH = 11
@@ -138,12 +141,6 @@ def canonical_paths(phase: str) -> CanonicalPaths:
     )
 
 
-def rating_groups(catalog: Catalog) -> Mapping[str, str]:
-    """Elo'nun reyting grubu (R94): lig kodu → ülke. Elo'yu kuran her yol grupları buradan alır;
-    selftest Elo kurmaz (K1–K4 fiyat ve Placebo ile ölçülür)."""
-    return MappingProxyType({league.code: league.country for league in catalog.leagues})
-
-
 def _log(check: Check) -> None:
     kind = "kapı" if check.gate else "rapor"
     verdict = "GEÇTİ" if check.passed else "KALDI"
@@ -159,8 +156,7 @@ def _selftest(args: argparse.Namespace) -> int:
             # yalnız geliştirme ve sonrası dönemidir — holdout history/'den anahtarsız çıkmaz.
             matches = load_matches(conn, catalog, lock=lock)
     except LockViolation as error:
-        LOGGER.error("kilit ihlali — bilinen sonuçlar koşulmadı: %s", "; ".join(error.differences))
-        return EXIT_LOCK_VIOLATION
+        return refuse_on_violation(LOGGER, error, "bilinen sonuçlar koşulmadı")
     main_codes = frozenset(league.code for league in catalog.leagues if league.kind == MAIN)
     checks = run_selftest(
         matches, method=args.method, main_codes=main_codes, resamples=args.resamples
@@ -173,10 +169,6 @@ def _selftest(args: argparse.Namespace) -> int:
         return EXIT_GATE_FAILED
     LOGGER.info("bilinen sonuçlar: kapı denetimlerinin hepsi geçti")
     return 0
-
-
-def kinds_of(catalog: Catalog) -> Mapping[str, str]:
-    return MappingProxyType({league.code: league.kind for league in catalog.leagues})
 
 
 def _locked_matches(

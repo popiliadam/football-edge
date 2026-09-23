@@ -25,12 +25,9 @@ from football_edge.calibration import language_config_violations, run_calibratio
 from football_edge.db import chain_head, connect
 from football_edge.jev import EXIT_NO_JEV_KEY, JevClient, MissingJevKey, TypeSafeJev
 from football_edge.jev_budget import (
-    ESTIMATE_USD_UNMEASURED,
     EXIT_BUDGET,
-    MONTHLY_CAP_USD,
-    BudgetedJev,
     BudgetExceeded,
-    PostgresSpendLedger,
+    budgeted_jev,
 )
 from football_edge.leagues import active_leagues, load_leagues
 from football_edge.ledger import (
@@ -366,19 +363,6 @@ def _exit_code(result: CollectResult) -> int:
 DEFAULT_MAPPING_SOURCE = "footystats"
 
 
-def _budgeted(jev: JevClient, spend_conn: psycopg.Connection[Any]) -> JevClient:
-    """`features tier1` ile AYNI tavan (spec §9, R159): her çağrı `jev_spend`e ayrı, autocommit
-    bağlantıda yazılır — komutun işlemi geri alınsa da faturalanan çağrının kaydı kalır."""
-    spend_conn.autocommit = True
-    return BudgetedJev(
-        jev,
-        PostgresSpendLedger(spend_conn),
-        cap_usd=MONTHLY_CAP_USD,
-        estimate_usd=ESTIMATE_USD_UNMEASURED,
-        clock=lambda: datetime.now(UTC),
-    )
-
-
 def _map_entities_main(source_id: str, league_id: str, now: datetime) -> int:
     """Anahtar veritabanından ÖNCE sorulur: anahtarsız komut bağlanmadan adıyla çıkar (tier1)."""
     try:
@@ -387,7 +371,13 @@ def _map_entities_main(source_id: str, league_id: str, now: datetime) -> int:
         sys.stdout.write(f"map-entities koşulmadı: {error}\n")
         return EXIT_NO_JEV_KEY
     with connect() as conn, connect() as spend_conn:
-        return _map_entities_command(conn, _budgeted(jev, spend_conn), source_id, league_id, now)
+        return _map_entities_command(
+            conn,
+            budgeted_jev(jev, spend_conn, clock=lambda: datetime.now(UTC)),
+            source_id,
+            league_id,
+            now,
+        )
 
 
 def _map_entities_command(
@@ -470,7 +460,11 @@ def _calibrate_command(language: str, *, calibration_dir: Path = CALIBRATION_DIR
         return EXIT_NO_JEV_KEY
     try:
         with connect() as spend_conn:
-            path, reason = run_calibration(language, calibration_dir, _budgeted(jev, spend_conn))
+            path, reason = run_calibration(
+                language,
+                calibration_dir,
+                budgeted_jev(jev, spend_conn, clock=lambda: datetime.now(UTC)),
+            )
     except BudgetExceeded as error:
         sys.stdout.write(f"calibrate: {language} durdu, rapor yazılmadı — {error}\n")
         return EXIT_BUDGET

@@ -26,6 +26,7 @@ from tests.fake_spend_db import FakeSpendConn
 SRC = Path(__file__).resolve().parent.parent / "src" / "football_edge"
 # Sarmalayıcının kendisi ve sarılan istemci: kural bu ikisinin DIŞINDAKİ her modüle uygulanır.
 EXEMPT = frozenset({SRC / "jev.py", SRC / "jev_budget.py"})
+BUDGET_MODULE = SRC / "jev_budget.py"
 LABELS = "".join(
     f'{{"title":"{title}","url":"u{n}","language":"tr","team":"Galatasaray","relevant":true}}\n'
     for n, title in enumerate(("a", "b"))
@@ -232,26 +233,47 @@ def _bound_and_wrapped(
     return bool(uses) and all(_wrapped(use, parents, wrappers) for use in uses)
 
 
-def _call_sites() -> Iterator[tuple[str, bool]]:
+def _imported_budget_wrappers(tree: ast.Module) -> frozenset[str]:
+    """Bütçe modülünün sarmalayıcıları (`budgeted_jev`), yalnız oradan takma adsız import edilip
+    dosyada aynı adla YENİDEN TANIMLANMADIYSA. `_wrappers` o modülde yalnız `BudgetedJev(ilk_param,
+    …)` kuranları sayar: modülün SARMAYAN fonksiyonu da, aynı adı taşıyan yerel bir taklit de
+    tanınmaz (son inceleme M-1)."""
+    offered = _wrappers(ast.parse(BUDGET_MODULE.read_text(encoding="utf-8")))
+    imported = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "football_edge.jev_budget"
+        for alias in node.names
+        if alias.asname is None
+    }
+    local = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    return frozenset((offered & imported) - local)
+
+
+def _sites_in(tree: ast.Module, name: str) -> Iterator[tuple[str, bool]]:
     """(yer, sarılı mı) — `TypeSafeJev`e her başvuru; çağrı olmayan (fabrika) sarılı sayılmaz."""
+    parents = _parents(tree)
+    wrappers = _wrappers(tree) | _imported_budget_wrappers(tree)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name | ast.Attribute) and _name(node) == "TypeSafeJev"):
+            continue
+        where = f"{name}:{node.lineno}"
+        call = parents.get(node)
+        if isinstance(call, ast.Call) and call.func is node:
+            yield (
+                where,
+                _wrapped(call, parents, wrappers) or _bound_and_wrapped(call, parents, wrappers),
+            )
+        else:
+            yield where, False  # fabrika olarak geçirilen sınıf: kim, nerede kurar bilinmez
+
+
+def _call_sites() -> Iterator[tuple[str, bool]]:
     for path in sorted(SRC.rglob("*.py")):
         if path in EXEMPT:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        parents, wrappers = _parents(tree), _wrappers(tree)
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Name | ast.Attribute) and _name(node) == "TypeSafeJev"):
-                continue
-            where = f"{path.relative_to(SRC)}:{node.lineno}"
-            call = parents.get(node)
-            if isinstance(call, ast.Call) and call.func is node:
-                yield (
-                    where,
-                    _wrapped(call, parents, wrappers)
-                    or _bound_and_wrapped(call, parents, wrappers),
-                )
-            else:
-                yield where, False  # fabrika olarak geçirilen sınıf: kim, nerede kurar bilinmez
+        yield from _sites_in(tree, str(path.relative_to(SRC)))
 
 
 def test_every_type_safe_jev_outside_the_budget_module_is_wrapped_in_budgeted_jev() -> None:
@@ -259,3 +281,30 @@ def test_every_type_safe_jev_outside_the_budget_module_is_wrapped_in_budgeted_je
 
     assert {where.split(":")[0] for where, _ in sites} >= {"collect.py", "features/__main__.py"}
     assert [where for where, wrapped in sites if not wrapped] == []
+
+
+_LOCAL_IMPOSTOR = """
+from football_edge.jev import TypeSafeJev
+
+def budgeted_jev(jev, spend_conn, *, clock):
+    return jev
+
+def main(conn):
+    return budgeted_jev(TypeSafeJev(), conn, clock=None)
+"""
+_IMPORTED = """
+from football_edge.jev import TypeSafeJev
+from football_edge.jev_budget import budgeted_jev
+
+def main(conn):
+    return budgeted_jev(TypeSafeJev(), conn, clock=None)
+"""
+
+
+@pytest.mark.parametrize(("source", "wrapped"), [(_LOCAL_IMPOSTOR, False), (_IMPORTED, True)])
+def test_a_budget_wrapper_name_counts_only_when_imported_from_the_budget_module(
+    source: str, wrapped: bool
+) -> None:
+    """Bütçe modülünün sarmalayıcı ADI yalnız oradan import edildiğinde güvenilir: aynı adla
+    yerelde tanımlanmış, SARMAYAN bir fonksiyon tavanı atlatırdı (son inceleme M-1)."""
+    assert [ok for _, ok in _sites_in(ast.parse(source), "m.py")] == [wrapped]

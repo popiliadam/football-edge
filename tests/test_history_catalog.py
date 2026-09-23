@@ -12,7 +12,9 @@ from football_edge.history.catalog import (
     HistoryLeague,
     declared_paths,
     file_paths,
+    kinds_of,
     load_catalog,
+    rating_groups,
     season_codes,
     season_of_path,
 )
@@ -231,3 +233,15 @@ def test_a_catalog_with_an_unknown_top_level_key_is_refused(tmp_path: Path) -> N
     """Yanlış yazılmış bir anahtar (ör. `curent_season`) sessizce yok sayılmasın."""
     with pytest.raises(ValueError, match="kökte tam olarak"):
         load_catalog(write(tmp_path, VALID.replace("leagues:\n", "notes: x\nleagues:\n", 1)))
+
+
+def test_kinds_and_rating_groups_map_every_league_code_read_only() -> None:
+    """Elo grubu (R94) ülke, tür katalogdaki tür; eşlemler paylaşıldığı için yazılamaz."""
+    catalog = load_catalog(CATALOG)
+    codes = {league.code for league in catalog.leagues}
+
+    assert set(kinds_of(catalog)) == codes == set(rating_groups(catalog))
+    assert all(rating_groups(catalog)[lg.code] == lg.country for lg in catalog.leagues)
+    assert all(kinds_of(catalog)[lg.code] == lg.kind for lg in catalog.leagues)
+    with pytest.raises(TypeError):
+        kinds_of(catalog)["XX"] = "main"  # type: ignore[index]

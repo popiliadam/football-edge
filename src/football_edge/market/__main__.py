@@ -19,7 +19,7 @@ from football_edge.collector import ContractViolation
 from football_edge.db import connect
 from football_edge.history.catalog import Catalog, HistoryLeague, load_catalog
 from football_edge.history.holdout import HOLDOUT_END
-from football_edge.history.lock import LockViolation, load_lock
+from football_edge.history.lock import EXIT_LOCK_VIOLATION, LockViolation, load_lock
 from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
 from football_edge.market.bridge import (
@@ -46,9 +46,6 @@ LOGGER = logging.getLogger("football_edge.market")
 LOCK_PATH = Path("config/history_lock.yaml")
 CATALOG_PATH = Path("config/history_leagues.yaml")
 ALIASES_PATH = Path("config/history_aliases.yaml")
-# Kilitli dönemin bir satırı değişti ya da kayboldu: `history` CLI'ıyla aynı kod; `collect`in 2–8'i
-# ve 0/1 dışında.
-EXIT_LOCK_VIOLATION = 9
 # Köprü: karşılaştırılabilir tek eşleşme yok (N = 0 → aralık tanımsız). Rapor yazılmaz; çoğu kez
 # takma ad eksiktir (Task 8 Step 12).
 EXIT_NO_PAIRS = 10

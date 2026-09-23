@@ -18,6 +18,7 @@ yüzden `HoldoutKey` kullanmaz ve `holdout_access_log`a yazmaz — holdout'u OKU
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -29,13 +30,12 @@ from typing import Any
 import yaml
 
 from football_edge.history.holdout import DEV, DEV_END, HOLDOUT, HOLDOUT_END, period_of
-from football_edge.history.types import CLOSING, H2H, HistMatch
+from football_edge.history.types import CLOSING, H2H, REFERENCE_BOOK, HistMatch
 
 CANONICAL_VERSION = 1
 # Kilitlenen dönemler, dosyadaki sırasıyla.
 _LOCKED_PERIODS = (DEV, HOLDOUT)
 # Kapsam bilgisi referans kapanıştan (D3): lig önerisi holdout doluluğunu açmadan buradan okur.
-_REFERENCE_BOOK = "Avg"
 _SEPARATORS = ("\t", "\n", "\r")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _ROOT_KEYS = frozenset({"canonical_version", "locked_at", "dev_end", "holdout_end", "leagues"})
@@ -55,6 +55,18 @@ class LockViolation(RuntimeError):
     def __init__(self, *differences: str) -> None:
         self.differences = differences
         super().__init__(f"kilit ihlali — {len(differences)} fark:\n" + "\n".join(differences))
+
+
+# Kilitli dönemin bir satırı değişti ya da kayboldu (tasarım §5.2; R99): karar insanındır. Kilidi
+# okuyan her CLI (`history`, `market`, `backtest`, `live`) bu TEK kodu verir; `collect`in EXIT_*
+# kodlarından (2–8) ve 0/1'den ayrı — `history.yml`deki selftest adımı onu adıyla karşılar.
+EXIT_LOCK_VIOLATION = 9
+
+
+def refuse_on_violation(logger: logging.Logger, error: LockViolation, what: str) -> int:
+    """`kilit ihlali — <ne yapılmadı>: <farklar>` yazar ve kilit çıkış kodunu döner."""
+    logger.error("kilit ihlali — %s: %s", what, "; ".join(error.differences))
+    return EXIT_LOCK_VIOLATION
 
 
 @dataclass(frozen=True)
@@ -105,9 +117,7 @@ def canonical_line(match: HistMatch) -> str:
 def digest(matches: Sequence[HistMatch]) -> Digest:
     """Sıradan bağımsız özet: kanonik satırlar SIRALANIP `\\n` ile birleştirilir."""
     lines = sorted(canonical_line(match) for match in matches)
-    complete = sum(
-        1 for match in matches if match.prices(_REFERENCE_BOOK, H2H, CLOSING) is not None
-    )
+    complete = sum(1 for match in matches if match.prices(REFERENCE_BOOK, H2H, CLOSING) is not None)
     return Digest(
         rows=len(lines),
         sha256=hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest(),

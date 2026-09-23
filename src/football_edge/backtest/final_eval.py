@@ -42,6 +42,7 @@ from football_edge.backtest.wf_run import (
     model_strategies,
     score_table,
 )
+from football_edge.history import catalog as history_catalog
 from football_edge.history.catalog import Catalog
 from football_edge.history.holdout import HOLDOUT, POST, open_holdout, period_of
 from football_edge.history.lock import HistoryLock
@@ -283,8 +284,8 @@ def run_final(
         check_holdout_count(lock, leagues)
         return evaluate_selected(
             leagues,
-            kinds={league.code: league.kind for league in catalog.leagues},
-            rating_groups={league.code: league.country for league in catalog.leagues},
+            kinds=history_catalog.kinds_of(catalog),
+            rating_groups=history_catalog.rating_groups(catalog),
             config=config,
             prereg=prereg,
             purpose=purpose,
@@ -357,8 +358,8 @@ def run_rehearsal(
         leagues = load_matches(conn, catalog, lock=lock)
     return evaluate_selected(
         leagues,
-        kinds={league.code: league.kind for league in catalog.leagues},
-        rating_groups={league.code: league.country for league in catalog.leagues},
+        kinds=history_catalog.kinds_of(catalog),
+        rating_groups=history_catalog.rating_groups(catalog),
         config=config,
         prereg=prereg,
         purpose="prova",

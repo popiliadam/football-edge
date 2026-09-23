@@ -26,11 +26,10 @@ from football_edge.backtest.walkforward import (
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.market.metrics import (
     Calibration,
-    CalibrationUnfit,
     Interval,
     bootstrap_mean,
     brier,
-    calibration,
+    calibration_or_none,
     clv,
     per_match_log_loss,
     rps,
@@ -173,16 +172,6 @@ def bet_clv(
     return clv(pre[pick], closing[pick])
 
 
-def _calibration(probs: Sequence[Sequence[float]], outcomes: Sequence[int]) -> Calibration | None:
-    """Yalnız ölçülemeyen fit (`CalibrationUnfit`) None'dır; biçim/değer hatası yükselir.
-
-    Bileşen hatası "ölçülemedi" diye basılsaydı açılış kalibrasyonsuz harcanırdı (R135)."""
-    try:
-        return calibration(probs, outcomes)
-    except CalibrationUnfit:
-        return None
-
-
 def score(
     name: str,
     probs: Sequence[Sequence[float]],
@@ -197,7 +186,7 @@ def score(
         log_loss=bootstrap_mean(per_match_log_loss(probs, outcomes), resamples=resamples),
         brier=brier(probs, outcomes),
         rps=rps(probs, outcomes) if len(probs[0]) == 3 else None,
-        calibration=_calibration(probs, outcomes),
+        calibration=calibration_or_none(probs, outcomes),
         clv=bootstrap_mean(clvs, resamples=resamples) if clvs else None,
         bets=len(clvs),
     )
@@ -208,7 +197,7 @@ def _clvs(pairs: Sequence[tuple[Row, Sequence[float]]], tau: float) -> list[floa
     return [value for value in found if value is not None]
 
 
-def _gap(
+def log_loss_gap(
     first: Sequence[Sequence[float]],
     second: Sequence[Sequence[float]],
     outcomes: Sequence[int],
@@ -229,7 +218,7 @@ def _component_gaps(
     market = [row.components[MARKET] for row, _ in pairs]
     names = sorted(set.intersection(*(set(row.components) for row, _ in pairs)) - {MARKET})
     return {
-        name: _gap([row.components[name] for row, _ in pairs], market, outcomes, resamples)
+        name: log_loss_gap([row.components[name] for row, _ in pairs], market, outcomes, resamples)
         for name in names
     }
 
@@ -239,7 +228,7 @@ def _totals_gap(rows: Sequence[Row], resamples: int) -> Interval | None:
     usable = [row for row in rows if MARKET in row.totals and DC in row.totals]
     if not usable:
         return None
-    return _gap(
+    return log_loss_gap(
         [row.totals[DC] for row in usable],
         [row.totals[MARKET] for row in usable],
         [row.totals_outcome for row in usable],
@@ -320,11 +309,13 @@ def summarise(
     leagues = sorted({row.key.league for row, _ in pairs})
     return Summary(
         main=MappingProxyType(_main_scores(pairs, tau, resamples) if pairs else {}),
-        blend_gap=_gap([p for _, p in pairs], market, outcomes, resamples) if pairs else None,
+        blend_gap=log_loss_gap([p for _, p in pairs], market, outcomes, resamples)
+        if pairs
+        else None,
         component_gaps=MappingProxyType(_component_gaps(pairs, resamples)),
         league_gaps=MappingProxyType(
             {
-                league: _gap(
+                league: log_loss_gap(
                     [p for row, p in pairs if row.key.league == league],
                     [row.components[MARKET] for row, _ in pairs if row.key.league == league],
                     [row.outcome for row, _ in pairs if row.key.league == league],

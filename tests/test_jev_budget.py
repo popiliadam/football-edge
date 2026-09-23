@@ -24,9 +24,11 @@ from football_edge.jev_budget import (
     MemorySpendLedger,
     PostgresSpendLedger,
     SpendEntry,
+    budgeted_jev,
     month_bounds,
 )
 from tests.fake_jev import FakeBatteryJev, FakeJev
+from tests.fake_spend_db import FakeSpendConn
 
 NOW = datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
 QUESTIONS = (
@@ -327,3 +329,17 @@ def test_review_focus_a_non_finite_month_total_fails_closed(total: Decimal) -> N
         budgeted.ask_battery({}, QUESTIONS)
 
     assert client.seen == []
+
+
+def test_budgeted_jev_opens_an_autocommit_ledger_and_enforces_the_monthly_cap() -> None:
+    """Her Jev yolunun ortak sarmalayıcısı (DEFERRED 17i): defter autocommit, tavan dolu ayda
+    çağrı YAPILMAZ."""
+    conn = FakeSpendConn(total=Decimal(str(MONTHLY_CAP_USD)))
+    jev = FakeJev(ChoiceAnswer(choice="a", confidence=0.9, probabilities={}))
+
+    client = budgeted_jev(jev, conn, clock=lambda: datetime(2026, 9, 23, tzinfo=UTC))  # type: ignore[arg-type]
+
+    assert conn.autocommit is True
+    with pytest.raises(BudgetExceeded):
+        client.ask_choice({"x": 1}, "hangisi?", {"a": "a"})
+    assert jev.seen == []

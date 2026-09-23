@@ -21,6 +21,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from football_edge.backtest.harness import DecisionContext, Prediction, ResultRecord
 from football_edge.elo import EloConfig, expected_home
+from football_edge.market.metrics import LOG_FLOOR
 
 NO_MARGIN = "none"
 LINEAR_MARGIN = "linear"
@@ -33,7 +34,6 @@ DRAW_FORMS = frozenset({QUADRATIC, ORDERED})
 _SCALE_BOUNDS = (0.05, 5.0)
 _CUT_BOUNDS = (1e-3, 3.0)
 _LOGIT_CLIP = 1e-9
-_LOG_FLOOR = 1e-15
 
 Key = tuple[str, str]
 
@@ -65,6 +65,16 @@ class EloModelConfig:
             raise ValueError(
                 f"sıralı lojit s ve c pozitif olmalı: {self.ordered_scale}, {self.ordered_cut}"
             )
+        # K = 0 reytingi dondurur (meşru uç: ortalamaya dönüş tek başına ölçülür); negatif K
+        # öğrenmeyi tersine çevirir, NaN her reytingi NaN yapar.
+        if not (math.isfinite(self.k) and self.k >= 0.0):
+            raise ValueError(f"K sonlu ve ≥ 0 olmalı: {self.k}")
+        if not math.isfinite(self.home_advantage):
+            raise ValueError(f"ev avantajı sonlu olmalı: {self.home_advantage}")
+        if not (math.isfinite(self.initial) and self.initial > 0.0):
+            raise ValueError(f"başlangıç reytingi pozitif ve sonlu olmalı: {self.initial}")
+        if type(self.season_gap_days) is not int or self.season_gap_days < 1:
+            raise ValueError(f"sezon arası ≥ 1 tam gün olmalı: {self.season_gap_days!r}")
 
 
 def margin_multiplier(home_goals: int, away_goals: int, form: str) -> float:
@@ -116,7 +126,7 @@ def fit_draw(expectations: Sequence[float], outcomes: Sequence[int]) -> float:
 
     def loss(draw: float) -> float:
         return -math.fsum(
-            math.log(max(elo_probs(e, draw)[o], _LOG_FLOOR))
+            math.log(max(elo_probs(e, draw)[o], LOG_FLOOR))
             for e, o in zip(expectations, outcomes, strict=True)
         ) / len(outcomes)
 
@@ -132,7 +142,7 @@ def fit_ordered(expectations: Sequence[float], outcomes: Sequence[int]) -> tuple
     def loss(params: Any) -> float:
         scale, cut = float(params[0]), float(params[1])
         return -math.fsum(
-            math.log(max(ordered_probs(e, scale, cut)[o], _LOG_FLOOR))
+            math.log(max(ordered_probs(e, scale, cut)[o], LOG_FLOOR))
             for e, o in zip(expectations, outcomes, strict=True)
         ) / len(outcomes)
 

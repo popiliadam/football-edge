@@ -87,7 +87,8 @@ def load_model_config(path: Path) -> ModelConfig:
         raise ModelConfigError(f"{path}: okunamadı: {error}") from error
     if not isinstance(raw, dict) or set(raw) != _TOP:
         raise ModelConfigError(f"{path}: üst alanlar {sorted(_TOP)} olmalı")
-    if raw["version"] != VERSION:
+    # YAML `true` Python'da `== 1`dir: bool `int`in alt sınıfı, tip ayrıca denetlenir.
+    if type(raw["version"]) is not int or raw["version"] != VERSION:
         raise ModelConfigError(f"{path}: sürüm {raw['version']!r}, beklenen {VERSION}")
     if raw["method"] not in METHODS:
         raise ModelConfigError(f"{path}: bilinmeyen vig yöntemi {raw['method']!r}")

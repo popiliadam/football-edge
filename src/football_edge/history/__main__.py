@@ -32,7 +32,13 @@ from football_edge.collector import ContractViolation
 from football_edge.db import connect
 from football_edge.history.catalog import Catalog, declared_paths, load_catalog
 from football_edge.history.holdout import DEV, HOLDOUT
-from football_edge.history.lock import LockViolation, build_lock, dump_lock, load_lock
+from football_edge.history.lock import (
+    EXIT_LOCK_VIOLATION,
+    LockViolation,
+    build_lock,
+    dump_lock,
+    load_lock,
+)
 from football_edge.history.sync import (
     SOURCE_ID,
     SyncReport,
@@ -46,9 +52,6 @@ from football_edge.sources import Source, enabled_sources, load_sources, robots_
 LOGGER = logging.getLogger("football_edge.history")
 
 CATALOG_PATH = Path("config/history_leagues.yaml")
-# Kilit ihlali: kilitli dönemin bir satırı değişti ya da kayboldu (tasarım §5.2). Karar insanındır;
-# `collect`in EXIT_* kodlarından (2–8) ve 0/1'den ayrı.
-EXIT_LOCK_VIOLATION = 9
 
 
 def _source() -> Source:

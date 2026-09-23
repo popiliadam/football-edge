@@ -164,7 +164,8 @@ def load_blend_weights(path: Path) -> BlendWeights:
         raise BlendWeightsError(f"{path}: okunamadı: {error}") from error
     if not isinstance(raw, dict) or set(raw) != _TOP:
         raise BlendWeightsError(f"{path}: üst alanlar {sorted(_TOP)} olmalı")
-    if raw["version"] != VERSION:
+    # YAML `true` Python'da `== 1`dir: bool `int`in alt sınıfı, tip ayrıca denetlenir.
+    if type(raw["version"]) is not int or raw["version"] != VERSION:
         raise BlendWeightsError(f"{path}: sürüm {raw['version']!r}, beklenen {VERSION}")
     if raw["components"] != list(BLEND_COMPONENTS):
         raise BlendWeightsError(f"{path}: bileşenler {list(BLEND_COMPONENTS)} olmalı")

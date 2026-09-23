@@ -156,6 +156,26 @@ def calibration(
     return Calibration(slope=slope, intercept=intercept, ece=_ece(p, y, bins), n=int(p.size))
 
 
+def calibration_or_none(
+    probs: Sequence[Sequence[float]], outcomes: Sequence[int]
+) -> Calibration | None:
+    """Yalnız ölçülemeyen fit (`CalibrationUnfit`) None'dır; biçim/değer hatası yükselir.
+
+    Bileşen hatası "ölçülemedi" diye basılsaydı açılış kalibrasyonsuz harcanırdı (R135)."""
+    try:
+        return calibration(probs, outcomes)
+    except CalibrationUnfit:
+        return None
+
+
+def interval_text(interval: Interval, *, digits: int = 4, label: str = "") -> str:
+    """`tahmin [etiket alt, üst]` — raporların ve denetimlerin tek aralık biçimi (DEFERRED 16j)."""
+    return (
+        f"{interval.estimate:.{digits}f} "
+        f"[{label}{interval.low:.{digits}f}, {interval.high:.{digits}f}]"
+    )
+
+
 def clv(price: float, fair_probability: float) -> float:
     """Kapanışa göre değer: price · p − 1 (p vig'i temizlenmiş kapanış olasılığı)."""
     if not math.isfinite(price) or price <= 1.0:

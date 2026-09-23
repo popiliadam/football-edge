@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from types import MappingProxyType
 
 import numpy as np
@@ -274,3 +275,29 @@ def test_an_unknown_draw_form_or_non_positive_ordered_parameters_are_refused() -
         EloModelConfig(draw_form="probit")
     with pytest.raises(ValueError, match="pozitif"):
         EloModelConfig(ordered_cut=0.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("k", -1.0, "K sonlu"),
+        ("k", float("nan"), "K sonlu"),
+        ("home_advantage", float("inf"), "ev avantajı"),
+        ("initial", float("nan"), "başlangıç"),
+        ("initial", 0.0, "başlangıç"),
+        ("season_gap_days", 0, "sezon arası"),
+        ("season_gap_days", 60.5, "sezon arası"),
+        ("season_gap_days", True, "sezon arası"),
+    ],
+)
+def test_an_invalid_elo_config_is_refused_by_name(field: str, value: object, message: str) -> None:
+    """NaN K ya da sıfır başlangıç sessizce NaN reyting üretirdi (DEFERRED 16k)."""
+    with pytest.raises(ValueError, match=message):
+        EloModelConfig(**{field: value})  # type: ignore[arg-type]
+
+
+def test_the_sealed_faz3_elo_config_still_loads() -> None:
+    from football_edge.backtest.model_config import load_model_config
+
+    config = load_model_config(Path("config/model_faz3.yaml"))
+    assert config.elo.k == 10.0

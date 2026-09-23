@@ -16,7 +16,7 @@ import pytest
 from football_edge.backtest.model_config import ModelConfig, file_sha256
 from football_edge.backtest.timeline import decision_at
 from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
-from football_edge.history.lock import LockViolation
+from football_edge.history.lock import EXIT_LOCK_VIOLATION, LockViolation
 from football_edge.history.types import H2H, PRE_CLOSING, HistMatch
 from football_edge.live import __main__ as live_cli
 from football_edge.live.context import LiveMatch, Quote
@@ -162,7 +162,7 @@ def test_shadow_stops_on_a_lock_violation_without_writing(
     db = _Db()
     files = _patch(monkeypatch, tmp_path, db, lock_error=True)
 
-    assert live_cli.main(["shadow", *files]) == live_cli.EXIT_LOCK_VIOLATION == 9
+    assert live_cli.main(["shadow", *files]) == EXIT_LOCK_VIOLATION == 9
     assert db.inserts == [] and db.commits == 0
 
 
@@ -191,4 +191,4 @@ def test_parity_exits_fifteen_on_a_shifted_kickoff_and_zero_otherwise(
 def test_parity_stops_on_a_lock_violation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     files = _patch(monkeypatch, tmp_path, _Db(), lock_error=True)
 
-    assert live_cli.main(["parity", *files]) == live_cli.EXIT_LOCK_VIOLATION
+    assert live_cli.main(["parity", *files]) == EXIT_LOCK_VIOLATION

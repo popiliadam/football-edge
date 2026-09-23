@@ -677,3 +677,11 @@ def test_a_failed_totals_fit_blanks_only_the_totals_and_keeps_the_league(
         (enough,), rank((enough,)), lock=_lock({"M1": (100, 100)}), leagues=(MAIN_LEAGUE,)
     )
     assert chosen == ("M1",)
+
+
+def test_the_efficiency_table_interval_text_is_pinned() -> None:
+    """Verimlilik tablosunun aralık biçimi (DEFERRED 16j birleştirmesi; son inceleme I-1)."""
+    assert efficiency._interval(Interval(estimate=0.123456, low=-0.000049, high=1.5)) == (
+        "0.1235 [-0.0000, 1.5000]"
+    )
+    assert efficiency._interval(None) == "—"

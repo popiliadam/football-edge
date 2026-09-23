@@ -27,7 +27,14 @@ from football_edge.history.holdout import (
     select_periods,
 )
 from football_edge.history.lock import HistoryLock
-from football_edge.history.types import CLOSING, H2H, PRE_CLOSING, TOTALS_25, HistMatch
+from football_edge.history.types import (
+    CLOSING,
+    H2H,
+    PRE_CLOSING,
+    REFERENCE_BOOK,
+    TOTALS_25,
+    HistMatch,
+)
 from football_edge.market.devig import DEFAULT_METHOD, METHODS, match_probs, overround
 from football_edge.market.metrics import (
     Calibration,
@@ -35,6 +42,7 @@ from football_edge.market.metrics import (
     bootstrap_mean,
     brier,
     calibration,
+    interval_text,
     log_loss,
     outcome_index,
     per_match_log_loss,
@@ -43,7 +51,6 @@ from football_edge.market.metrics import (
 
 LOGGER = logging.getLogger("football_edge.market.efficiency")
 
-AVERAGE = "Avg"  # (Avg, CLOSING) = AvgC, referans kapanış (D3); (Avg, PRE_CLOSING) = Avg
 BEST = "Max"  # (Max, PRE_CLOSING): kapanış öncesi en iyi fiyat
 SHARP = "PS"  # (PS, CLOSING) = PSC: keskin kitabın kapanışı
 EXCHANGE = "BFE"  # (BFE, CLOSING) = BFEC: Betfair borsası kapanışı (D3 "varsa raporlanır", R97)
@@ -175,7 +182,11 @@ def _late_info(close: _Sample, *, method: str, resamples: int) -> Interval | Non
     rows = [
         (early, late, outcome)
         for match, late, outcome in zip(close.matches, close.probs, close.outcomes, strict=True)
-        if (early := match_probs(match, book=AVERAGE, market=H2H, phase=PRE_CLOSING, method=method))
+        if (
+            early := match_probs(
+                match, book=REFERENCE_BOOK, market=H2H, phase=PRE_CLOSING, method=method
+            )
+        )
         is not None
     ]
     if not rows:
@@ -207,7 +218,7 @@ def _book_gap(
         both = [
             (average, other, outcome_index(match, H2H))
             for match in members
-            if (average := _closing(match, AVERAGE, method)) is not None
+            if (average := _closing(match, REFERENCE_BOOK, method)) is not None
             and (other := _closing(match, book, method)) is not None
         ]
         if len(both) / len(members) < SHARP_COVERAGE:
@@ -227,7 +238,7 @@ def _totals(
     Tam satır yoksa ya da Ü/A fiti ayrışırsa üçü de None ("—"): lig 1X2 ölçütleri ve adaylığıyla
     kalır (R116; adaylar 1X2'den seçilir, R92 bu alanları Optional tanımlar).
     """
-    sample = _sample(rows, book=AVERAGE, market=TOTALS_25, phase=CLOSING, method=method)
+    sample = _sample(rows, book=REFERENCE_BOOK, market=TOTALS_25, phase=CLOSING, method=method)
     if not sample.matches:
         return None, None, None
     # Girdiyi doğrulayan ölçütler yakalamanın dışında (R115): bozuk girdi düz hata olarak yükselir.
@@ -250,7 +261,7 @@ def league_efficiency(
 ) -> LeagueEfficiency:
     """Tasarım §8.2'nin ölçütleri; N = geliştirme penceresinde AvgC 1X2'si tam maçlar."""
     rows = _development_rows(league, matches)
-    close = _sample(rows, book=AVERAGE, market=H2H, phase=CLOSING, method=method)
+    close = _sample(rows, book=REFERENCE_BOOK, market=H2H, phase=CLOSING, method=method)
     if not close.matches:
         raise NoClosingPrices(f"{league.code}: geliştirme penceresinde AvgC 1X2'si tam maç yok")
     return _measured(league, rows, close, method=method, resamples=resamples)
@@ -301,7 +312,7 @@ def _measured(
 def _every_method(match: HistMatch) -> tuple[tuple[float, ...], ...] | None:
     found: list[tuple[float, ...]] = []
     for method in METHODS:
-        probs = _closing(match, AVERAGE, method)
+        probs = _closing(match, REFERENCE_BOOK, method)
         if probs is None:
             return None
         found.append(probs)
@@ -430,9 +441,7 @@ def _number(value: float | None) -> str:
 
 
 def _interval(interval: Interval | None) -> str:
-    if interval is None:
-        return "—"
-    return f"{interval.estimate:.4f} [{interval.low:.4f}, {interval.high:.4f}]"
+    return "—" if interval is None else interval_text(interval)
 
 
 def _window_text(window: Window) -> str:
