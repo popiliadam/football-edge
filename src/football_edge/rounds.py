@@ -245,6 +245,10 @@ def _leagues_with_fixtures(
             times = fetch_event_times(
                 client, api_key, league.odds_api_key, commence_time_to=horizon
             )
+            # Ayrıştırma da bekçinin işidir: bozuk saat turu çökertmez (son inceleme M-1).
+            upcoming = sum(
+                1 for time in times if datetime.fromisoformat(canonical_timestamp(time)) <= limit
+            )
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
             LOGGER.warning(
                 "lig=%s fikstür kontrolü yapılamadı (%s) — boş tur doğrulanamadı, "
@@ -253,9 +257,6 @@ def _leagues_with_fixtures(
                 _describe(error),
             )
             continue
-        upcoming = sum(
-            1 for time in times if datetime.fromisoformat(canonical_timestamp(time)) <= limit
-        )
         LOGGER.info("lig=%s oran yok, ufuktaki fikstür=%d", league.id, upcoming)
         if upcoming:
             flagged = (*flagged, league.id)

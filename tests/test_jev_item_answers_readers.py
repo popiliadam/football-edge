@@ -34,6 +34,13 @@ READERS = frozenset(
 # adı metinde YALNIZ INSERT hedefi olarak geçer (aşağıdaki test bunu da sınar).
 NOT_READERS = frozenset({("features/tier1.py", "INSERT_ITEM_ANSWERS")})
 MARKER_FILTER = "starts_with(question_id, %s)"
+# Süzgecin YÖNÜ okuyucuya göre sabittir (son inceleme I-1): `_ASKED` cevapları okur, işareti
+# DIŞLAR; `_ATTEMPTS` yalnız işaretleri sayar. `NOT` düşerse `_ASKED` cevaplanmış haberi
+# sorulmamış sayar ve her koşuda yeniden satın alır — alt dize denetimi bunu göremiyordu.
+DIRECTION = {
+    ("features/tier1.py", "_ASKED"): re.compile(r"\bAND\s+NOT\s+starts_with\(question_id, %s\)"),
+    ("features/tier1.py", "_ATTEMPTS"): re.compile(r"\bAND\s+starts_with\(question_id, %s\)"),
+}
 
 
 @dataclass(frozen=True)
@@ -107,6 +114,9 @@ def test_the_allowlisted_readers_filter_markers_and_still_exist() -> None:
 
     assert set(found) == READERS | NOT_READERS
     assert all(MARKER_FILTER in found[reader] for reader in READERS)
+    assert set(DIRECTION) == READERS, "her okuyucunun süzgeç yönü adıyla yazılı olmalı"
+    wrong = [name for (_, name), rule in DIRECTION.items() if not rule.search(found[(_, name)])]
+    assert wrong == [], f"süzgeç yönü yanlış: {wrong}"
     assert all(
         found[other].count(TABLE) == 1 and f"INSERT INTO {TABLE}" in found[other]
         for other in NOT_READERS

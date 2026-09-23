@@ -27,6 +27,7 @@ from football_edge.features.tier1 import (
     HORIZON,
     MAX_ATTEMPTS,
     MAX_FIXTURES,
+    OUTAGE_STREAK,
     ItemAnswerRow,
     asked_item_ids,
     candidate_fixtures,
@@ -370,13 +371,59 @@ TWO = (
 )
 
 
-def test_a_run_where_every_asked_item_hits_a_jev_error_is_an_outage_without_markers() -> None:
-    """Jev çökükse düşüş haberin değil kesintinin sonucudur: işaret üç koşuda kapsamı yakardı."""
-    result = run(TWO, FakeBatteryJev(error=ConnectionError("jev kapalı")))
+FIVE = (
+    *TWO,
+    news(3, "Beşiktaş'ta sakatlık şoku", T0 + timedelta(minutes=2)),
+    news(4, "Fenerbahçe'nin kadrosu belli oldu", T0 + timedelta(minutes=3)),
+    news(5, "Galatasaraylı yıldız derbide yok", T0 + timedelta(minutes=4)),
+)
+
+
+def test_consecutive_jev_errors_stop_the_run_as_an_outage_without_markers() -> None:
+    """Jev çökükse düşüş haberin değil kesintinin sonucudur: art arda `OUTAGE_STREAK` hatada koşu
+    durur (kesinti koşusu en çok o kadar çağrıya mal olur), serinin işaretleri yazılmaz."""
+    client = FakeBatteryJev(error=ConnectionError("jev kapalı"))
+
+    result = run(FIVE, client)
 
     assert result.outage is True
     assert (result.rows, result.failures) == ((), ())
-    assert (result.asked, result.failed, result.budget_hit) == (4, 4, False)
+    assert len(client.seen) == OUTAGE_STREAK == 3
+
+
+def test_answers_before_the_error_streak_are_kept_and_later_items_are_not_asked() -> None:
+    client = FailsFor(failing=frozenset(n.title for n in FIVE[1:4]), raises=TimeoutError("t"))
+
+    result = run(FIVE, client)
+
+    assert result.outage is True
+    assert {r.item_id for r in result.rows} == {1}, "ödenmiş cevap kaybolmamalı"
+    assert result.failures == ()
+    assert len(client.seen) == 4, "seriden sonraki haber sorulmamalı"
+
+
+def test_fewer_errors_than_the_streak_are_marked_as_before() -> None:
+    """Tek başına hep düşen haber kesinti değildir: işaretlenir ve `MAX_ATTEMPTS`te bırakılır —
+    yoksa her koşuda yeniden sorulup tavandan yerdi (son inceleme I-2)."""
+    result = run(TWO, FakeBatteryJev(error=ConnectionError("jev kapalı")))
+
+    assert result.outage is False
+    assert [(m.item_id, m.choice) for m in result.failures] == [
+        (1, "jev_error:ConnectionError"),
+        (2, "jev_error:ConnectionError"),
+    ]
+
+
+def test_an_answer_breaks_the_error_streak() -> None:
+    failing = frozenset(n.title for n in (FIVE[0], FIVE[1], FIVE[3], FIVE[4]))
+    client = FailsFor(failing=failing, raises=TimeoutError("t"))
+
+    result = run(FIVE, client)
+
+    assert result.outage is False
+    assert {r.item_id for r in result.rows} == {3}
+    assert [m.item_id for m in result.failures] == [1, 2, 4, 5]
+    assert len(client.seen) == 5
 
 
 def test_a_mixed_run_marks_the_errored_item_as_before() -> None:
@@ -767,7 +814,7 @@ def test_tier1_command_on_an_outage_writes_no_markers_and_exits_by_name(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Kesinti koşusu işaret yazmaz: `MAX_ATTEMPTS`i aşan kesintiden sonra da haberler sorulur."""
-    db = _db_with(*TWO)
+    db = _db_with(*FIVE)
     client = FakeBatteryJev(error=ConnectionError("jev kapalı"))
     _cli(monkeypatch, db, client)
 
@@ -776,9 +823,10 @@ def test_tier1_command_on_an_outage_writes_no_markers_and_exits_by_name(
     assert codes == [cli.EXIT_SOURCE_FAILED] * (MAX_ATTEMPTS + 1)
     assert cli.EXIT_SOURCE_FAILED == 7
     assert db.answers == [], "kesinti işareti yazılmamalı"
-    assert len(client.seen) == 2 * (MAX_ATTEMPTS + 1), "kesinti haberi vazgeçilmiş yapmamalı"
+    # Koşu başına en çok OUTAGE_STREAK çağrı (tavan korunur), haber vazgeçilmiş olmaz.
+    assert len(client.seen) == OUTAGE_STREAK * (MAX_ATTEMPTS + 1)
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert any("kesinti" in m and "2 haber" in m for m in errors), errors
+    assert any("kesinti" in m and f"art arda {OUTAGE_STREAK}" in m for m in errors), errors
 
 
 # ── Review Focus: Türkçe ekler ve modelin liste dışı olasılıkları ─────────────────────────────

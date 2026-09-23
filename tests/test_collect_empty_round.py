@@ -264,3 +264,18 @@ def test_a_seal_round_never_asks_for_fixtures(
     capsys.readouterr()
     assert code == 0
     assert _events_calls(seen) == []
+
+
+def test_a_malformed_fixture_time_warns_like_a_failed_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Bozuk `commence_time` bekçinin kendi arızasıdır: tur çökmemeli (exit 1), uyarıyla sürmeli
+    (son inceleme M-1)."""
+    seen: list[httpx.Request] = []
+    handler = _api(seen, fixtures={"soccer_epl": [_fixture("soccer_epl", "yarın akşam")]})
+
+    code = _run(monkeypatch, tmp_path, handler)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert code == 0
+    assert any("fikstür kontrolü yapılamadı" in m and "eng.1" in m for m in warnings), warnings
