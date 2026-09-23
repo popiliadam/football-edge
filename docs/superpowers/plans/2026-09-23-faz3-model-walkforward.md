@@ -266,7 +266,7 @@ bağımlılık VERİdedir: yeni liglerin ilk canlı maçlarından sonra takma ad
 lig; `aut.1` kapalı olduğu için defterde AUT maçı yoktur — gölge ve E3 onu görmez; lig kredi onayıyla açılırsa
 kod değişmeden kapsar.
 
-## Plan yazımında verilen kararlar (P1–P25; R141–R147)
+## Plan yazımında verilen kararlar (P1–P25; R141–R148)
 
 Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen noktalar. Biçim: karar — *yanlışsa bedeli*.
 
@@ -338,15 +338,18 @@ Tasarımın açık bıraktığı ya da planın kodu yazılırken netleşen nokta
 
 26. **R141** (controller kararı, inceleme I1) — bayat durum koruması modelin BÜTÜN grup liglerine genişletildi:
     defterde fikstürü olmayan ligler (E1–E3, D2, I2, SP2, F2 …) için football-data'nın kendi tarihleri
-    (`league_lagging`: son sonuç, geçen yılın olağan maç günü aralığının %95'liği + 1 günden eskiyse lig geride;
-    21 günü aşan ara yargılanmaz). P26'ya gerek kalmadı — *sezgiseldir: bir ligin olağan aralığı içinde kalan
-    (ör. tek maçlık) gecikme görünmez; milli ara başında yanlış "bayat" tahmin kaybettirir (güvenli yön).*
+    (`league_lagging`: son sonuç, geçen yılın DÜZENLİ maç aralığının — ≤ 10 günlük aralıklar, milli ara ve sezon
+    arası dışarıda — %90'lığı + 1 günden eskiyse lig geride; `lagging_leagues` ayrıca grubun BAŞKA bir liginin bu
+    arada oynamış olmasını ister, yoksa ara milli aradır; 21 günü aşan ara yargılanmaz). Yeniden inceleme n2'den
+    sonra: %95'lik ve milli araları içeren eşik haftada iki maç oynayan ligin kaçan hafta sonunu görmüyordu. P26'ya
+    gerek kalmadı — *sezgiseldir: düzenli aralık içinde kalan bir gecikme görünmez; grubunun tek ligi olan bir lig
+    (ör. T1) bu katmanla yargılanmaz (defter katmanı kapsar).*
 
 **Plan incelemesinin onay listesi — KAPANDI (2026-09-23):** kullanıcı P1/P9/P11/P25'i controller'a bıraktı;
 controller kararları R144 (P1 kabul), R143 (P9 → daha kötü olmama), R142 (P11 → iki biçim, S seçer), R145 (P25
 kabul); R141 düzeltildi, P26 yok. P4 ve P8 bilgi içindir.
 
-27. **R146** (plan yazımında, R142'nin uygulanması) — sıralı lojit KÜRESEL ve SİMETRİKTİR: tek ölçek `s` ve tek
+27. **R146 → R148** (plan yazımında, R142'nin uygulanması; controller R148 olarak onayladı, kullanıcı onayı gerekmez) — sıralı lojit KÜRESEL ve SİMETRİKTİR: tek ölçek `s` ve tek
     kesim `c`, bütün ligler için S'de birlikte fit edilir; tasarım M5'teki lig başına kesişimler yoktur — *ligler
     arası beraberlik oranı farkı yakalanmaz (quadratic'te de yok); iki biçimin kıyası adil kalır.*
 28. **R147** (plan yazımında) — Elo adayları S'de hep `quadratic` biçimle oynatılır ve E tahminden geri okunur;
@@ -371,12 +374,17 @@ kabul); R141 düzeltildi, P26 yok. P4 ve P8 bilgi içindir.
 | m8 walk-forward özet yok; scipy toleransı | `rows_digest` raporda; Task 5'te iki koşunun özeti karşılaştırılır | T7 · `test_the_rows_digest_is_stable_and_sees_a_changed_probability`; T5 |
 | m9 P17 çelişkisi | 90 dk eşiği, alt küme yedeği reddedildi | P17 |
 | m10 kredi güvenliği yalnız gözle | `shadow.yml` ve `history.yml` `ODDS_API_KEY` almaz testi | T11 · `test_the_credit_free_workflows_never_receive_the_odds_api_key` |
-| m2, m3, m4, m5 | ERTELENDİ — aşağıdaki "ölçmedikleri" 24–27 | — |
+| m2, m3, m5 | ERTELENDİ — aşağıdaki "ölçmedikleri" 25–27 | — |
+| m4 | HANDOFF notu | Task 13 Step 10 |
+| **Yeniden inceleme N1** R142/R147 seçim bağlantısı testsiz | ORDERED adayın kaybı bağımsız hesapla aynı (quadratic oynatma → E → sıralı lojit fit → puan); üretim ızgarası iki biçimi de sunar | T7 · `test_an_ordered_candidate_is_scored_on_the_quadratic_replays_expectations`, `test_the_production_selection_grid_offers_both_draw_forms` |
+| **Yeniden inceleme n2** R141 eşiği milli araları sayıyordu | düzenli aralık (≤ 10 gün) %90'lık + 1; grup etkinliği koşulu | T8 · `test_a_twice_weekly_league_that_misses_a_weekend_lags`, `test_a_league_lags_only_if_the_rest_of_its_group_played_meanwhile` |
+| **Yeniden inceleme n3** Step 5 ağacı yeniden kirletiyordu | açılışın SHA'sı Step 9'un commit'ine | T13 |
+| **Yeniden inceleme n4** spec §14.2'de eski P9/P11 | "yerini aldı" işaretlendi | spec |
 
 ## Plan-zamanı ölçümler
 
 Bu plan yazılırken veritabanına bağlanılmadı; gerçek veride hiçbir şey ölçülmedi. Aşağıdakiler SENTETİK veride
-ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.777 passed / 3 skipped (taban `a398c31`: 1.553 passed / 2 skipped; üçüncü SKIP `test_holdout_phase_db`, `DATABASE_URL yok`); `leakage`
+ölçüldü ve yalnız kodun davranışını anlatır: bütün testler 1.781 passed / 3 skipped (taban `a398c31`: 1.553 passed / 2 skipped; üçüncü SKIP `test_holdout_phase_db`, `DATABASE_URL yok`); `leakage`
 işaretli 334 (taban 265); DC fiti 6 takım × 180 maçta ~0,6 ms (gerçek bir ülke grubunda
 takım ve maç sayısı onlarca kat büyük — süre Task 5'te ölçülür, tahmin edilmez). Gerçek veri ölçümleri (saatsiz satır,
 yineleme, DC ve Elo süresi/RSS, seçim ve walk-forward süresi) Task 0, 5 ve 9'da, ölçüm belgesi
@@ -3833,6 +3841,7 @@ Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: 
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -3850,7 +3859,7 @@ from football_edge.backtest.model_config import (
     load_model_config,
 )
 from football_edge.backtest.selection import coordinate_descent, dc_loss, elo_loss, select
-from football_edge.backtest.walkforward import DC, ELO
+from football_edge.backtest.walkforward import DC, ELO, SELECTION, group_rows
 from football_edge.backtest.wf_eval import summarise
 from football_edge.backtest.wf_run import (
     development_groups,
@@ -3863,7 +3872,15 @@ from football_edge.history.catalog import MAIN, Catalog, HistoryLeague
 from football_edge.history.lock import build_lock, dump_lock
 from football_edge.market.devig import POWER
 from football_edge.model.dixon_coles import DCConfig
-from football_edge.model.elo_model import ORDERED, QUADRATIC, EloModelConfig
+from football_edge.model.elo_model import (
+    ORDERED,
+    QUADRATIC,
+    EloModel,
+    EloModelConfig,
+    expectation,
+    fit_ordered,
+    ordered_probs,
+)
 from tests.model_builders import TEAMS, main_history
 
 KINDS = MappingProxyType({"E0": MAIN})
@@ -4175,6 +4192,44 @@ def test_the_rows_digest_is_stable_and_sees_a_changed_probability(tmp_path: Path
 
     assert rows_digest(rows) == rows_digest(tuple(reversed(rows)))
     assert rows_digest((*rows[:-1], changed)) != rows_digest(rows)
+
+
+def test_an_ordered_candidate_is_scored_on_the_quadratic_replays_expectations() -> None:
+    """R147 (yeniden inceleme N1a): `elo_loss` ORDERED adayı için bağımsız hesapla aynı —
+    quadratic oynatma → E'yi geri oku → sıralı lojiti fit et → puanla. Aday kendi biçimiyle
+    oynatılsaydı `expectation` yanlış E okurdu."""
+    groups = development_groups(HISTORY, GROUPS)
+    candidate = EloModelConfig(draw_form=ORDERED, k=25.0)
+    rows = [
+        row
+        for matches in groups.values()
+        for row in group_rows(
+            matches,
+            KINDS,
+            {ELO: EloModel(config=replace(candidate, draw_form=QUADRATIC), groups=GROUPS)},
+            method=POWER,
+        )
+        if row.zone == SELECTION and ELO in row.components
+    ]
+    expectations = [expectation(row.components[ELO]) for row in rows]
+    outcomes = [row.outcome for row in rows]
+    scale, cut = fit_ordered(expectations, outcomes)
+    independent = -sum(
+        math.log(ordered_probs(e, scale, cut)[o])
+        for e, o in zip(expectations, outcomes, strict=True)
+    ) / len(rows)
+
+    loss, fitted = elo_loss(groups, KINDS, GROUPS, candidate, method=POWER)
+
+    assert loss == pytest.approx(independent, rel=1e-9)
+    assert (fitted.ordered_scale, fitted.ordered_cut) == pytest.approx((scale, cut))
+
+
+def test_the_production_selection_grid_offers_both_draw_forms() -> None:
+    """R142 (yeniden inceleme N1b): üretim ızgarası iki biçimi de sunar; biri düşerse S seçemez."""
+    from football_edge.backtest.selection import ELO_GRID
+
+    assert set(ELO_GRID["draw_form"]) == {QUADRATIC, ORDERED}
 ```
 
 - [ ] **Step 2: Kırmızı olduğunu gör**
@@ -4944,7 +4999,7 @@ def render_walkforward(
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_model_selection.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — 19 passed; `tests/test_backtest_cli.py` (Faz 2) değişmeden yeşil
+Expected: PASS — 21 passed; `tests/test_backtest_cli.py` (Faz 2) değişmeden yeşil
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
@@ -4956,6 +5011,8 @@ hepsi KIRMIZI görüldü)
 | 3 | `gap_penalty`: atlanan sezon girdiden çıkarılmaz (`tuple(ms)`) | `tests/test_model_selection.py::test_the_gap_penalty_rescores_the_same_matches_without_the_skipped_season` |
 | 4 | `rows_digest`: olasılıklar özete girmez (inceleme m8) | `tests/test_model_selection.py::test_the_rows_digest_is_stable_and_sees_a_changed_probability` |
 | 5 | `select`: kazanan fit edilmemiş hâliyle döner (`return elo, …`) | `tests/test_model_selection.py::test_the_draw_form_is_chosen_on_s_and_only_the_winner_is_returned_fitted` |
+| 6 | `elo_loss`: aday kendi biçimiyle oynatılır (`replayed = config`; R147) | `tests/test_model_selection.py::test_an_ordered_candidate_is_scored_on_the_quadratic_replays_expectations` |
+| 7 | `ELO_GRID`: `draw_form` yalnız `(QUADRATIC,)` (R142) | `tests/test_model_selection.py::test_the_production_selection_grid_offers_both_draw_forms` |
 
 - [ ] **Step 6: Commit ve kapı**
 
@@ -4980,7 +5037,7 @@ Expected: `KAPI YEŞİL` — 10 PASS + `SKIP: zincir (DATABASE_URL yok)` adıyla
 
 > **İz A'ya bağlı (canlı kapsam):** İz A birleşti (`a398c31`): 8 aktif lig (ned.1, bel.1 dahil; aut.1 kapalı). Katalogda ned.1 → N1, bel.1 → B1 eşlemesi hazır; yeni liglerin takma adları (`config/history_aliases.yaml`) ilk canlı kapanışlardan sonra İz A'nın 5. adımıyla girer. Testler SENTETİK lig kimliği (`t.1`) kullanır ve `config/leagues.yaml`a bağlı değildir; gerçek eşleşme dalga 4 sonundaki E3 raporunda ölçülür.
 
-Tasarım §7.2–7.4, R132, R133. Defterin maç ve snapshot satırları `MatchRecord`a çevrilir: lig `history_leagues.yaml`'ın `league_id`sinden, tarih Londra tarihi, adlar takma ad → normalize eşitliği, fiyat karar anında ya da önce gözlenen SON snapshot turunun tam kitap ortalaması. `observe` akışı harness'ın olay düzeniyle (bilinme anı, gruptaki sıra) aynı fonksiyondan; gerçek varış anı kullanılmaz. Bayat durum koruması iki katmanlı: (a) grubun defterde fikstürü olan ligleri için son 10 günde bitmiş sayılan bir canlı maç tabanda yoksa tahmin YOK; (b) R141 (inceleme I1): defterde fikstürü OLMAYAN grup ligleri (E1–E3, D2, I2, SP2, F2 …) için football-data'nın kendi tarihleri — ligin son sonucu geçen yılın olağan maç günü aralığından (%95'lik + 1 gün) eskiyse lig geride, karar bayattır; 21 günü aşan ara yargılanmaz. E1 bir sezonun BÜTÜN maçlarında (2026-10-25 yaz saati geçişi ve gece yarısı maçı dahil) bağlamın `match_index` dışındaki bütün alanlarını ve akışı birebir karşılaştırır; E2 aynı stratejinin iki kurucudan aynı tahmini verdiğini.
+Tasarım §7.2–7.4, R132, R133. Defterin maç ve snapshot satırları `MatchRecord`a çevrilir: lig `history_leagues.yaml`'ın `league_id`sinden, tarih Londra tarihi, adlar takma ad → normalize eşitliği, fiyat karar anında ya da önce gözlenen SON snapshot turunun tam kitap ortalaması. `observe` akışı harness'ın olay düzeniyle (bilinme anı, gruptaki sıra) aynı fonksiyondan; gerçek varış anı kullanılmaz. Bayat durum koruması iki katmanlı: (a) grubun defterde fikstürü olan ligleri için son 10 günde bitmiş sayılan bir canlı maç tabanda yoksa tahmin YOK; (b) R141 (inceleme I1): defterde fikstürü OLMAYAN grup ligleri (E1–E3, D2, I2, SP2, F2 …) için football-data'nın kendi tarihleri — ligin son sonucu geçen yılın DÜZENLİ maç aralığının (≤ 10 gün; milli ara dışarıda) %90'lığı + 1 günden eskiyse VE grubun başka bir ligi bu arada oynadıysa lig geride, karar bayattır; 21 günü aşan ara yargılanmaz (yeniden inceleme n2). E1 bir sezonun BÜTÜN maçlarında (2026-10-25 yaz saati geçişi ve gece yarısı maçı dahil) bağlamın `match_index` dışındaki bütün alanlarını ve akışı birebir karşılaştırır; E2 aynı stratejinin iki kurucudan aynı tahmini verdiğini.
 
 **Files:**
 - Create: `src/football_edge/live/context.py`
@@ -4989,7 +5046,7 @@ Tasarım §7.2–7.4, R132, R133. Defterin maç ve snapshot satırları `MatchRe
 
 **Interfaces:**
 - Consumes: Task 4 (`MatchRecord`, `context_of`, `record_of`, `result_of`), Task 6 (`group_matches`, `tests/model_builders.py`, `DixonColesStrategy`), Task 2, Faz 2 (`timeline`, `normalise_team`).
-- Produces: `LiveMatch`, `Quote`, `Naming`, `LiveDecision`, `LiveBatch`, `naming_from`, `canonical`, `live_key`, `season_of`, `pre_prices`, `observe_stream`, `is_stale`, `league_lagging`, `lagging_leagues`, `build_batch`, `LIVE_H2H`, `REFERENCE_BOOK`, `IN_SEASON_GAP`; `load_live_matches`, `load_quotes`.
+- Produces: `LiveMatch`, `Quote`, `Naming`, `LiveDecision`, `LiveBatch`, `naming_from`, `canonical`, `live_key`, `season_of`, `pre_prices`, `observe_stream`, `is_stale`, `league_lagging`, `lagging_leagues`, `build_batch`, `LIVE_H2H`, `REFERENCE_BOOK`, `IN_SEASON_GAP`, `REGULAR_GAP`; `load_live_matches`, `load_quotes`.
 
 Yamalar tabandaki (`main`, o dalganın başı) dosyaya karşı yazılmıştır: `git apply --check` önce, sonra
 `git apply`. Yeni dosyalar bloktaki içerikle AYNEN yazılır.
@@ -5024,6 +5081,7 @@ from football_edge.live.context import (
     Quote,
     build_batch,
     canonical,
+    lagging_leagues,
     league_lagging,
     naming_from,
     observe_stream,
@@ -5380,6 +5438,46 @@ def test_a_weekly_league_lags_after_its_usual_gap_plus_one_day(gap: int, lagging
     weekly = [last - timedelta(weeks=week) for week in range(20)]
 
     assert league_lagging(weekly, last + timedelta(days=gap)) is lagging
+
+
+def _twice_weekly(last: date, weeks: int = 40) -> list[date]:
+    """Cumartesi + çarşamba; her dört haftada bir iki haftalık milli ara — çarşambadan cumartesiye
+    17 günlük aralık, bütün aralıkların ~%11'i: %90'lık bir eşiği aralar belirlerdi."""
+    found: list[date] = []
+    day = last
+    for week in range(weeks):
+        found += [day, day - timedelta(days=4)]  # çarşamba, önceki cumartesi
+        day -= timedelta(days=7 + (14 if week % 4 == 3 else 0))
+    return sorted(found)
+
+
+def test_a_twice_weekly_league_that_misses_a_weekend_lags() -> None:
+    """Yeniden inceleme n2: %95'lik eşik milli araları (14 gün) sayardı ve kaçan bir hafta sonunu
+    (çarşambadan salıya 6 gün) görmezdi; düzenli aralık (≤ 10 gün) eşiği 4 + 1 gündür."""
+    wednesday = date(2026, 9, 9)
+    dates = _twice_weekly(wednesday)
+
+    assert league_lagging(dates, wednesday + timedelta(days=3)) is False  # cumartesi kararı: olağan
+    assert league_lagging(dates, wednesday + timedelta(days=6)) is True  # salı: hafta sonu yok
+
+
+def test_a_league_lags_only_if_the_rest_of_its_group_played_meanwhile() -> None:
+    """Milli arada grup bütünüyle durur (gecikme değil ara); başka ligi oynadıysa gecikmedir."""
+    wednesday = date(2026, 9, 9)
+    decided = datetime.combine(wednesday + timedelta(days=6), time(11), tzinfo=UTC)
+
+    def league(code: str, days: list[date]) -> list[HistMatch]:
+        return [
+            hist_match(day=day, league=code, home=f"{code} {i}", away=f"{code} k{i}", line=i)
+            for i, day in enumerate(days)
+        ]
+
+    lower = league("E1", _twice_weekly(wednesday))
+    paused = league("E0", _twice_weekly(wednesday))
+    played = league("E0", [*_twice_weekly(wednesday), wednesday + timedelta(days=3)])
+
+    assert lagging_leagues([*lower, *paused], decided) == ()
+    assert lagging_leagues([*lower, *played], decided) == ("E1",)
 ```
 
 - [ ] **Step 2: Kırmızı olduğunu gör**
@@ -5424,11 +5522,13 @@ LIVE_DRAW = "Draw"
 REFERENCE_BOOK = "Avg"  # canlı kitap ortalaması, football-data'nın `Avg`'sinin yapısal karşılığı
 STALE_LOOKBACK = timedelta(days=10)
 # R141: defterde fikstürü olmayan grup ligleri (E1–E3, D2, I2, SP2, F2 …) için bayatlık
-# football-data'nın KENDİ tarihlerinden okunur: ligin son sonucu, geçen yılın olağan maç günü
-# aralığından (%95'lik) daha eskiyse lig geride sayılır. 21 günden uzun ara yargılanmaz.
+# football-data'nın KENDİ tarihlerinden okunur. Eşik ligin DÜZENLİ maç aralığıdır (≤ 10 gün;
+# milli ara ve sezon arası dışarıda) — %90'lık + 1 gün. Ara boyunca grubun başka bir ligi oynadıysa
+# lig geride sayılır; grup bütünüyle durduysa (milli ara) yargılanmaz. 21 günü aşan ara yargılanmaz.
 IN_SEASON_GAP = 21
+REGULAR_GAP = 10
 MIN_HISTORY_DATES = 10
-LAG_QUANTILE = 0.95
+LAG_QUANTILE = 0.9
 
 
 @dataclass(frozen=True)
@@ -5571,7 +5671,11 @@ def is_stale(
 
 
 def league_lagging(dates: Sequence[date], decided_on: date) -> bool:
-    """Bir ligin son sonuç tarihi, geçen yılki olağan aralığa göre fazla eski mi (R141)."""
+    """Ligin son sonucu, geçen yılın DÜZENLİ maç aralığına (%90'lık + 1 gün) göre fazla eski mi.
+
+    Düzenli aralık ≤ `REGULAR_GAP`: milli aralar (~13–14 gün) eşiğe girmez — girseydi haftada iki
+    maç oynayan bir ligin kaçan hafta sonu görünmezdi (yeniden inceleme n2).
+    """
     past = sorted({day for day in dates if day < decided_on})
     if len(past) < MIN_HISTORY_DATES:
         return False
@@ -5581,7 +5685,7 @@ def league_lagging(dates: Sequence[date], decided_on: date) -> bool:
     usual = sorted(
         (later - earlier).days
         for earlier, later in zip(past, past[1:], strict=False)
-        if (decided_on - later).days <= 365 and (later - earlier).days <= IN_SEASON_GAP
+        if (decided_on - later).days <= 365 and (later - earlier).days <= REGULAR_GAP
     )
     if not usual:
         return False
@@ -5594,7 +5698,20 @@ def lagging_leagues(group: Sequence[HistMatch], decided: datetime) -> tuple[str,
     dates: dict[str, list[date]] = {}
     for match in group:
         dates.setdefault(match.league, []).append(match.date)
-    return tuple(code for code in sorted(dates) if league_lagging(dates[code], decided_on))
+    return tuple(
+        code
+        for code in sorted(dates)
+        if league_lagging(dates[code], decided_on) and _group_played_since(dates, code, decided_on)
+    )
+
+
+def _group_played_since(dates: Mapping[str, Sequence[date]], code: str, decided_on: date) -> bool:
+    """Grubun BAŞKA bir ligi bu ligin son maçından sonra (karar gününden önce) oynadı mı — milli ara
+    ayrımı: grup bütünüyle durduysa gecikme değil aradır."""
+    last = max(day for day in dates[code] if day < decided_on)
+    return any(
+        last < day < decided_on for other, days in dates.items() if other != code for day in days
+    )
 
 
 def build_batch(
@@ -5709,7 +5826,7 @@ def load_quotes(
 - [ ] **Step 4: Yeşil olduğunu gör**
 
 Run: `uv run pytest tests/test_context_parity.py -q && uv run ruff check src tests && uv run ruff format --check src tests && uv run mypy src scripts`
-Expected: PASS — 18 passed
+Expected: PASS — 20 passed
 
 - [ ] **Step 5: Mutasyon kanıtı** (`PYTHONDONTWRITEBYTECODE=1`, her biri geri alınır; plan yazımında
 hepsi KIRMIZI görüldü)
@@ -5724,6 +5841,8 @@ hepsi KIRMIZI görüldü)
 | 6 | `pre_prices`: `<= decided` → `< decided` (karar anındaki tur düşer; inceleme I3) | `tests/test_context_parity.py` |
 | 7 | `observe_stream`: `< decided` → `<= decided` (karar anında bilinen sonuç sızar; inceleme m1) | `tests/test_context_parity.py::test_the_live_builder_reproduces_the_historical_context_and_stream` |
 | 8 | `build_batch`: `or lagging_leagues(group, decided)` silinir (R141) | `tests/test_context_parity.py::test_a_group_league_without_ledger_fixtures_that_falls_behind_makes_the_state_stale` |
+| 9 | `league_lagging`: `<= REGULAR_GAP` → `<= IN_SEASON_GAP` (milli aralar eşiğe girer; n2) | `tests/test_context_parity.py::test_a_twice_weekly_league_that_misses_a_weekend_lags` |
+| 10 | `lagging_leagues`: grup etkinliği koşulu silinir | `tests/test_context_parity.py::test_a_league_lags_only_if_the_rest_of_its_group_played_meanwhile` |
 
 - [ ] **Step 6: Commit ve kapı**
 
@@ -9030,7 +9149,7 @@ git commit -m "docs: Faz 3 prova raporu, kırmızı takım denetimi ve ölçüml
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git push origin main               # kapı + CI yeşil olduktan sonra
 git status --porcelain            # boş olmalı
-git log -1 --format=%H             # açılışın SHA'sı: ölçüm belgesine
+git log -1 --format=%H             # açılışın SHA'sı — AĞACA YAZILMAZ; Step 9'un commit'inde ölçüm belgesine girer
 ```
 ```sql
 select count(*) from holdout_access_log;   -- 0
@@ -9066,6 +9185,7 @@ select id, opened_at, recorded_at, git_sha, purpose from holdout_access_log orde
   DEV simülasyonu ve C6'nın tam durum sayısı yan yana; canlı ayağı (C6 − gölge) P25 ile ertelendi.
 
 ```bash
+# ölçüm belgesine şimdi eklenir: açılışın SHA'sı (Step 5) ve açılış sonrası ölçümler (yeniden inceleme n3)
 git add docs/reports/<tarih>-faz3-holdout.md docs/superpowers/specs/2026-09-23-faz3-olcumler.md
 git commit -m "docs: Faz 3 holdout raporu — tek kayıtlı açılış
 
@@ -9074,7 +9194,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 10: Faz 3 HANDOFF** — `docs/phases/03-baz-model/HANDOFF.md`: ne bitti; kapı ne ölçtü (adım adım, log
   dosyasından; `SKIP` adıyla); **kapının ölçmedikleri** (aşağıdaki liste + yürütmenin eklediği); verilen kararlar
-  (R128–R139, P1–P25, R141–R147, defterin `Ruling:` satırları); inceleme m4 notu: `report_exists` denetimi farklı bir
+  (R128–R139, P1–P25, R141–R148, defterin `Ruling:` satırları); inceleme m4 notu: `report_exists` denetimi farklı bir
   `--out` ile atlanabilir — aynı SHA + temiz ağaç aynı kodu, yapılandırmayı ve ön kaydı garanti ettiği için
   zararsız, 0010 yeniden koşuyu yine bire sınırlar; **holdout açılış sayısı** (`holdout_access_log`tan; 1 ya da
   yeniden koşuyla 2, adıyla); ertelenenler (`docs/DEFERRED.md` yeni bölüm — gölge CLV raporu P25 dahil); Faz 4 ön koşulları (dil kalibrasyonu,
@@ -9094,7 +9214,7 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 16. **Seçim yerel optimumdur** (P10): tek tur koordinat inişi, sabit ızgaralar; ızgara ucunda duran bir değer
     bulgu olarak yazılır ama genişletilmez.
 17. **W1'in δ'sı (0.001) keyfîdir** (R143 üst uç ölçütüyle); P8'in 1.000 eşiği sentetik ölçümden türetildi,
-    gerçek veride ölçülmedi. Sıralı lojit küresel ve simetriktir (R146): lig başına beraberlik farkı yakalanmaz.
+    gerçek veride ölçülmedi. Sıralı lojit küresel ve simetriktir (R146/R148): lig başına beraberlik farkı yakalanmaz.
 18. **Dixon-Coles görülmemiş takımı tahmin etmez**: o maçlar ortak kümeden düşer (sayılır); E sayıları terfi eden
     takımların ilk maçlarını içermez.
 19. **Gölge harmanı, bahsi ve CLV'si bu fazda hesaplanmaz** (P19, P25): tablo bileşenleri ve karar anı fiyatını
@@ -9105,8 +9225,11 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
     arasındaki fark ölçülmedi (belirlenimcilik testi aynı platformda).
 23. **Açılış öncesi kilit ikinci kez yüklenir** (P13): iki yükleme arasında önbellek değişirse ikinci doğrulama
     açılıştan SONRA kırmızı verir (exit 14) — haftalık senkron salı/cuma 09:50 UTC; açılış bu saatlerden uzakta yapılır.
-24. **R141 bayat koruması sezgiseldir**: defterde fikstürü olmayan grup liglerinde (E1–E3 …) olağan aralık
-    içinde kalan tek maçlık bir gecikme görünmez; o zaman canlı `observe` akışı tarihsel akıştan ayrışabilir.
+24. **R141 bayat koruması sezgiseldir**: defterde fikstürü olmayan grup liglerinde (E1–E3 …) eşik, ligin DÜZENLİ
+    maç aralığının (≤ 10 gün) %90'lığı + 1 gündür ve grubun başka bir ligi o arada oynamış olmalıdır (yeniden
+    inceleme n2 sonrası). Görünmeyenler: eşiğin içinde kalan bir gecikme (haftalık ligde ≤ 8 gün); grup bütünüyle
+    geride kalırsa (bütün dosyalar gecikirse) — defter katmanı üst ligi yakalar, alt ligleri değil; grubunun tek
+    ligi olan bir lig bu katmanla yargılanmaz. O zaman canlı `observe` akışı tarihsel akıştan ayrışabilir.
 25. **(inceleme m2, ERTELENDİ)** Ek liglerde `season_of` tabandaki son maçın sezonunu alır: takvim yılı dönümünde
     (ocak maçı, football-data yeni dosyayı yayımlamadan) önceki sezonu verir ve E3 sezon farkı raporlar. AUT
     kapalıyken (bugün) etkisiz; bir ek lig açılırsa önce bu düzeltilir.
@@ -9135,10 +9258,10 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
   karşılaştırıldı.
 - **Kodun kendisi:** planın METNİNDEN (`<!-- plan: yeni|yama … -->` işaretli bloklar, sırayla) `a398c31`'e (İz A birleşmiş) kurulan
   ağaç, kodun yazıldığı ağaçla bayt bayt aynı (`uv.lock` dahil, `uv lock` ile üretilince); tam `verify.sh` 10 PASS
-  + `SKIP: zincir`; 1.777 passed / 3 skipped (üçüncü SKIP `test_holdout_phase_db`: `DATABASE_URL yok`); `leakage` 334. Her dalga sonunda ve paralel görev tek başına tam `verify.sh`
-  koşuldu (hepsi 10 PASS + `zincir` SKIP). Dalga sonu test sayıları: 1.553 · 1.613 · 1.648 · 1.685 · 1.759 ·
-  1.777; paralel görevler tek başına: T1 1.568 · T2 1.584 · T3 1.563 · T4 1.557 · T7 1.667 · T8 1.666 ·
-  T10 1.740 · T11 1.704. Görev tablolarındaki 51 mutasyonun (plan incelemesinin sağ kalan üç mutantı — I2, I3,
+  + `SKIP: zincir`; 1.781 passed / 3 skipped (üçüncü SKIP `test_holdout_phase_db`: `DATABASE_URL yok`); `leakage` 334. Her dalga sonunda ve paralel görev tek başına tam `verify.sh`
+  koşuldu (hepsi 10 PASS + `zincir` SKIP). Dalga sonu test sayıları: 1.553 · 1.613 · 1.648 · 1.689 · 1.763 ·
+  1.781; paralel görevler tek başına: T1 1.568 · T2 1.584 · T3 1.563 · T4 1.557 · T7 1.669 · T8 1.668 ·
+  T10 1.744 · T11 1.708. Görev tablolarındaki 55 mutasyonun (plan incelemesinin sağ kalan üç mutantı — I2, I3,
   m1 — dahil) her biri uygulandı, KIRMIZI görüldü,
   geri alındı.
 - **Bilinen boşluk:** hiçbir sayı gerçek veride ölçülmedi (bağlantı yok); Task 0/5/9'un ölçümleri kararları
@@ -9157,7 +9280,7 @@ Tasarım §12'nin on üç maddesi aynen geçerlidir. Plan yazılırken eklenenle
 - **Her dispatch'e:** "HİÇBİR ŞEY SİLME" (kendi scratch'i dahil); paralel ajanlara scratchpad'de AYRI alt dizin;
   rapor son mesajda (bazı implementer'lar dosya yazamıyor, controller kaydeder); holdout'u AÇMA.
 - **Model:** varsayılan opus; K1 incelemeleri, Task 13'ün kırmızı takımı ve bütün-dal incelemesi fable; haiku hiçbir yerde.
-- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R148'den (R140–R145 controller'ın, R122–R127 İz A'nın, R146–R147 bu planın).
+- **Defter:** `.superpowers/sdd/2026-09-23-faz3-model-walkforward/progress.md` (gitignored); Ruling numaraları R149'dan (R140–R145 ve R148 controller'ın, R122–R127 İz A'nın, R146–R147 bu planın).
 - **Çalışma zamanı değerleri:** `<tarih>` komutun koşulduğu gün (`YYYY-MM-DD`); `<Task 5 kararı>` Task 5 Step 3'ün
   kuralının çıktısı (1 ya da 7); `leakage` alt sınırları ölçülerek yazılır (plan yazımında 269 · 282 · 287 · 334).
 - **Onay kapıları:** (1) bu plan kullanıcı onayından önce uygulanmaz (İz A'nın birleşmesi koşulu `a398c31` ile sağlandı); (2) Task 13

@@ -499,8 +499,9 @@ ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştir
 - **P1** — §7.1–7.4: bağlam yalnız `Avg` 1X2 kapanış öncesi fiyatını taşır; canlı defter yalnız 1X2 toplar, başka
   kitap/market bağlamda kalsaydı E1 eşitliği sözde kalırdı. Faz 2'nin bir testi buna göre güncellenir.
 - **P7** — §5.1: ek liglerde S `2013-01-01`den başlar (2012 ısınma).
-- **P8, P9** — §6.3, §9 G4: lig kendi eğitim satırı < 1.000 ise havuzlanmış ağırlık; W1 = ortalama ΔLL ≤ δ = 0.001.
-- **P11** — §6.1: Elo'nun 1X2 eşlemesi sıralı lojit değil `P(D) = δ·4E(1−E)` (tek parametre, kapalı biçim fit).
+- **P8** — §6.3: lig kendi eğitim satırı < 1.000 ise havuzlanmış ağırlık.
+- ~~**P9** — §9 G4: W1 = ortalama ΔLL ≤ δ = 0.001.~~ *(yerini aldı: §14.3 — R143, bootstrap üst ucu ≤ 0.001)*
+- ~~**P11** — §6.1: Elo'nun 1X2 eşlemesi sıralı lojit değil `P(D) = δ·4E(1−E)` (tek parametre, kapalı biçim fit).~~ *(yerini aldı: §14.3 — R142)*
 - **P20** — §11: görev numaraları — gölge Task 11, modelin bilinen sonuçları Task 12.
 - **R141** (controller, plan incelemesi I1) — §7.3: bayat durum koruması modelin BÜTÜN grup liglerine genişler;
   defterde fikstürü olmayan ligler (E1–E3, D2, I2, SP2, F2 …) için football-data'nın kendi tarihlerinden
@@ -521,7 +522,9 @@ ya da onu netleştiren kararlar planda P1–P25'tir. Tasarım metnini değiştir
 
 Plan yazımında R142'nin uygulanması: **R146** sıralı lojit küresel ve simetrik (tek `s`, tek `c`; M5'teki lig başına
 kesişimler yok) · **R147** Elo adayları S'de `quadratic` biçimle oynatılır, E geri okunur, adayın biçimi o E'de
-fit edilir (reyting yolu biçimden bağımsız). R141 düzeltildiği için P26 yoktur.
+fit edilir (reyting yolu biçimden bağımsız). R141 düzeltildiği için P26 yoktur. **R148** (controller): R146
+onaylandı, kullanıcı onayı gerekmez. Yeniden inceleme n2'den sonra R141'in eşiği ligin DÜZENLİ maç aralığıdır
+(≤ 10 gün, %90'lık + 1) ve grubun başka bir liginin o arada oynamış olmasını ister.
 
 ## 15. Karar kaydı
 
