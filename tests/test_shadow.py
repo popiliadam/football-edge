@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from football_edge.backtest.context import record_of
 from football_edge.backtest.harness import replay
 from football_edge.backtest.model_config import ModelConfig
 from football_edge.backtest.timeline import decision_at
@@ -17,7 +18,14 @@ from football_edge.backtest.walkforward import DC, ELO, MARKET, group_matches
 from football_edge.history.catalog import MAIN
 from football_edge.history.types import H2H, PRE_CLOSING
 from football_edge.live import __main__ as live_cli
-from football_edge.live.context import LiveMatch, Quote, build_batch, naming_from
+from football_edge.live.context import (
+    LiveMatch,
+    Quote,
+    build_batch,
+    match_key_text,
+    naming_from,
+)
+from football_edge.live.report import outcomes_of
 from football_edge.live.shadow import ShadowRow, shadow_rows, write_shadow
 from football_edge.market.devig import POWER, devig
 from football_edge.model.dixon_coles import DCConfig
@@ -194,3 +202,52 @@ def test_parity_pairs_live_matches_and_flags_a_shifted_kickoff() -> None:
         0,
     )
     assert bad.kickoff_mismatch == 1
+
+
+class _Session(_Connection):
+    """`with connect() as conn` biçimi: `_shadow` bağlantıyı bağlam yöneticisi olarak açar."""
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.mark.leakage
+def test_the_shadow_ledger_loads_a_day_beyond_the_staleness_lookback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """16f (B2): bayat koruması karara göre `LOOKBACK` geriye bakar; defter bir gün daha
+    geriden yüklenmezse elle geç koşuda korumanın görmesi gereken maç yüklenmez."""
+    windows: list[tuple[datetime, datetime]] = []
+
+    def live_matches(conn: object, *, since: datetime, until: datetime) -> tuple[LiveMatch, ...]:
+        windows.append((since, until))
+        return ()
+
+    monkeypatch.setattr(live_cli, "connect", _Session)
+    monkeypatch.setattr(live_cli, "load_matches", lambda conn, catalog, **kwargs: {})
+    monkeypatch.setattr(live_cli, "load_live_matches", live_matches)
+    monkeypatch.setattr(live_cli, "load_quotes", lambda conn, ids, **kwargs: ())
+    monkeypatch.setattr(live_cli, "head_sha", lambda: GIT)
+    before = datetime.now(UTC)
+
+    assert live_cli.main(["shadow"]) == 0
+
+    ((since, until),) = windows
+    assert until - since == live_cli.HORIZON + live_cli.LOOKBACK + timedelta(days=1)
+    assert since <= before - live_cli.LOOKBACK - timedelta(days=1) + timedelta(minutes=1)
+
+
+def test_the_shadow_match_key_joins_the_historical_result_of_the_same_match() -> None:
+    """Gölge raporu sonucu tarihsel tabandan `match_key` ile bulur: `shadow_rows`un yazdığı anahtar
+    ile `outcomes_of`un anahtarı aynı maç için AYNI yardımcıdan gelir (biçim iki yerde yazılmaz)."""
+    (index, *_) = _slot_matches(datetime(2026, 10, 3))
+    rows = shadow_rows(
+        _batch([index]), config=CONFIG, rating_groups=GROUPS, config_sha256=SHA256, git_sha=GIT
+    )
+
+    keys = {row.match_key for row in rows}
+    assert keys == {match_key_text(record_of(GROUP[index]).key)}
+    assert keys <= set(outcomes_of({"E0": (GROUP[index],)}))
