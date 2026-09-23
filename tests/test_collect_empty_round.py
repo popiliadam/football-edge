@@ -8,6 +8,7 @@ ucu ayırır: ufukta fikstür yoksa ara, varsa arıza.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -279,3 +280,65 @@ def test_a_malformed_fixture_time_warns_like_a_failed_check(
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert code == 0
     assert any("fikstür kontrolü yapılamadı" in m and "eng.1" in m for m in warnings), warnings
+
+
+def _events_answer(base: Handler, sport_key: str, answer: Callable[[str], object]) -> Handler:
+    """`sport_key`in `/events` cevabı `answer(commenceTimeTo)`dur; öteki her istek `base`e gider."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == f"/v4/sports/{sport_key}/events":
+            horizon = parse_qs(request.url.query.decode())["commenceTimeTo"][0]
+            # `json=None` boş gövde yazar; `null` yükü için metin elle kurulur.
+            body = json.dumps(answer(horizon)).encode()
+            return httpx.Response(200, content=body, headers=FREE_HEADERS)
+        return base(request)
+
+    return handler
+
+
+def test_a_fixture_exactly_at_the_horizon_is_in_the_horizon(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """17n: ufuk kapalıdır (`<=`) — `/odds`un `commenceTimeTo`su da o anı kapsar. Fikstür TAM
+    ufuk anında döner; `<` olsaydı bekçi o maçı görmez, tur yeşil kalırdı."""
+    seen: list[httpx.Request] = []
+    handler = _events_answer(
+        _api(seen), "soccer_epl", lambda horizon: [_fixture("soccer_epl", horizon)]
+    )
+
+    code = _run(monkeypatch, tmp_path, handler)
+
+    assert code == collect.EXIT_EMPTY_ROUND
+    assert f"{EMPTY_ROUND_LINE}: eng.1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ([{"id": "soccer_epl-1", "home_team": "A", "away_team": "B"}], "KeyError"),
+        ({"message": "beklenmedik gövde"}, "TypeError"),
+        (None, "TypeError"),
+    ],
+    ids=["commence_time-yok", "liste-değil", "null"],
+)
+def test_a_malformed_events_payload_warns_like_a_failed_check(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    payload: object,
+    error: str,
+) -> None:
+    """17n: eksik alanlı ya da liste olmayan `/events` yükü (KeyError/TypeError dalı) bozuk saat
+    gibi bekçinin kendi arızasıdır: tur çökmez, kırmızıya da dönmez; lig ve hata türü logda."""
+    seen: list[httpx.Request] = []
+    handler = _events_answer(_api(seen), "soccer_epl", lambda horizon: payload)
+
+    code = _run(monkeypatch, tmp_path, handler)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert code == 0
+    assert EMPTY_ROUND_LINE not in capsys.readouterr().out
+    assert any(
+        "fikstür kontrolü yapılamadı" in m and "eng.1" in m and f"({error})" in m for m in warnings
+    ), warnings

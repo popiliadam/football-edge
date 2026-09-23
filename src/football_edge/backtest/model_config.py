@@ -16,7 +16,7 @@ import yaml
 
 from football_edge.market.devig import METHODS
 from football_edge.model.dixon_coles import DCConfig
-from football_edge.model.elo_model import EloModelConfig
+from football_edge.model.elo_model import ORDERED, EloModelConfig
 
 VERSION = 1
 MODEL_CONFIG_PATH = Path("config/model_faz3.yaml")
@@ -73,11 +73,23 @@ def dump_model_config(config: ModelConfig) -> str:
     return yaml.safe_dump(payload, sort_keys=True, allow_unicode=True)
 
 
-def _section(raw: dict[str, Any], name: str, fields: frozenset[str]) -> dict[str, Any]:
+def _section(
+    raw: dict[str, Any], name: str, fields: frozenset[str], optional: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     section = raw.get(name)
-    if not isinstance(section, dict) or set(section) != fields:
+    if not isinstance(section, dict) or not fields - optional <= set(section) <= fields:
         raise ModelConfigError(f"{name}: alanlar {sorted(fields)} olmalı")
     return section
+
+
+def _elo_optional(raw: dict[str, Any]) -> frozenset[str]:
+    """16k-b: δ (`draw`) yalnız `quadratic` biçimde okunur; `ordered` dosya onu taşımayabilir
+    (eksikse sınıfın varsayılanı dolar, olasılığa girmez). Mühürlü `model_faz3.yaml` alanı taşır
+    ve aynen okunur; `quadratic`te ve `draw_form`u yazmayan dosyada alan zorunlu kalır."""
+    section = raw.get("elo")
+    if isinstance(section, dict) and section.get("draw_form") == ORDERED:
+        return frozenset({"draw"})
+    return frozenset()
 
 
 def load_model_config(path: Path) -> ModelConfig:
@@ -93,7 +105,8 @@ def load_model_config(path: Path) -> ModelConfig:
     if raw["method"] not in METHODS:
         raise ModelConfigError(f"{path}: bilinmeyen vig yöntemi {raw['method']!r}")
     try:
-        elo = EloModelConfig(**_section(raw, "elo", frozenset(asdict(EloModelConfig()))))
+        elo_fields = frozenset(asdict(EloModelConfig()))
+        elo = EloModelConfig(**_section(raw, "elo", elo_fields, _elo_optional(raw)))
         dc = DCConfig(**_section(raw, "dixon_coles", frozenset(asdict(DCConfig()))))
         return ModelConfig(
             selected_at=str(raw["selected_at"]),

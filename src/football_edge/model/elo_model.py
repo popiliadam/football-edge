@@ -45,7 +45,7 @@ class EloModelConfig:
     margin: str = LINEAR_MARGIN
     regress: float = 0.0  # sezon arasında ortalamaya dönüş payı, [0, 1]
     newcomer_offset: float = 0.0  # görülmemiş takım: grup ortalaması − offset
-    draw: float = 0.26  # δ, [0, MAX_DRAW] — yalnız `quadratic`
+    draw: float = 0.26  # δ, [0, MAX_DRAW] — yalnız `quadratic`; `ordered` dosyada yazılmayabilir
     draw_form: str = QUADRATIC
     ordered_scale: float = 1.0  # s — yalnız `ordered`
     ordered_cut: float = 0.53  # c; E = 0.5'te P(D) = tanh(c/2) ≈ 0.26
