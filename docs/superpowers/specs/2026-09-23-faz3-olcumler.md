@@ -148,3 +148,19 @@ eşleşmesi ilk maç haftasından sonra ölçülür; AUT kapalı (§3/38 AUT iç
 | Prova (`final-eval --rehearse`) | exit 0 · 77 sn · tepe RSS ~877 MB · "holdout AÇILMADI"; sahte holdout 2024/25 (12.252 satır); C1 ΔLL −0,0001 [−0,0008, 0,0006]; Placebo CLV −0,0749; C6 boş (beklenen, plan "ölçmedikleri" 27) |
 | `holdout_access_log` prova sonrası | 0 |
 | Kırmızı takım (`docs/reports/2026-09-23-faz3-sizinti-denetimi.md`) | 33 deney; sızıntı kanıtlanamadı; 5 Minor (B1–B5), Critical/Important yok |
+
+## Task 13 — açılış ve sonrası (2026-09-23)
+
+| Ölçüm | Sonuç |
+|---|---|
+| Kullanıcı onayı (P14) | açık "evet", 2026-09-23 |
+| Açılışın git SHA'sı | `485134b86314a0f9877f8df77ed58a4f8a063615` (temiz ağaç) |
+| `final-eval` | exit 0 · 100 sn · tepe RSS ~855 MB |
+| `holdout_access_log` | **tam 1 satır**: id 13, `opened_at` 2026-09-23 08:48:20 UTC, amaç `faz3:4d88d944…` (= ön kayıt dosyasının sha256'sı) |
+| Kilit sayımı (`check_holdout_count`) | geçti (holdout satırı kilitle eşit: 7.646 + 4.446) |
+| Rapordaki "holdout satırı" | 11.981 — walk-forward satırı üreten holdout maçları; 12.092 − 11.981 = 111 maç satır üretmedi (ölçülmedi; HANDOFF'ta açık) |
+| Rapordaki takım adı | `[]` |
+| C1 ΔLL harman − piyasa | 0,0001 [−0,0005, 0,0007] |
+| C3 Placebo CLV | −0,0868 [−0,0887, −0,0848]; harman bahis CLV −0,0497 [−0,0687, −0,0318] (54 bahis) |
+| C6 (sonrası, tam durum) ΔLL harman − piyasa | 0,0002 [−0,0013, 0,0018] (n = 1.266) |
+| Boşluk cezası yan yana (R128) | DEV simülasyonu Elo 0,0034 / DC 0,0064 (Task 9); canlı ayağı (C6 − gölge) P25 ile ertelendi |
