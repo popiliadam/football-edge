@@ -5,10 +5,16 @@ tarihsel yolu (`history.sync`), holdout açılışını (`backtest.final_eval`) 
 okuyucusunu (`live.store`) import edemez: özellik karar anında bilinemeyecek bir şeye yol
 bulamamalı. İki katman: (1) AST taraması doğrudan anmayı yakalar — `import`, `from … import`
 (göreli dâhil), `from paket import modül`, öznitelik zinciri ve modül adını TAM taşıyan dize
-(`importlib.import_module("…")`); (2) ayrı bir süreçte paketin her modülü import edilir ve
-yasaklı modüllerin `sys.modules`e dolaylı yoldan da girmediği ölçülür.
+(`importlib.import_module("…")`), ayrıca yasaklı bir modülün ÜST paketini bağlayan import
+(`import football_edge`, `from football_edge import live`, `import football_edge.live as fl`,
+`from football_edge.live import *`): bağlanan paketten yasaklı modüle öznitelikle
+(`live.store.x`) ulaşılır ve bu erişim import satırında adı hiç geçirmez; (2) ayrı bir süreçte
+paketin her modülü import edilir ve yasaklı modüllerin `sys.modules`e dolaylı yoldan da girmediği
+ölçülür. Yasaklı modülün kardeşine tam adıyla ulaşmak (`from football_edge.live import context`)
+serbesttir.
 Bilinen sınır: hesaplanmış dize (`"football_edge.live." + "store"`) (1)'de görünmez; (2) onu
-yalnız import anında çalışan kodda yakalar.
+yalnız import anında çalışan kodda yakalar — fonksiyon içindeki hesaplanmış dize iki katmanda da
+görünmez.
 """
 
 from __future__ import annotations
@@ -41,6 +47,14 @@ def _hit(dotted: str) -> str | None:
     return None
 
 
+def _parent(dotted: str) -> str | None:
+    """`dotted` yasaklı bir modülün uygun öneki (üst paketi) ise o modül."""
+    for module in FORBIDDEN:
+        if module.startswith(dotted + "."):
+            return module
+    return None
+
+
 def _base(node: ast.ImportFrom, module: str) -> str:
     if node.level == 0:
         return node.module or ""
@@ -63,14 +77,20 @@ def _findings(tree: ast.AST, module: str) -> Iterator[tuple[int, str]]:
             for alias in node.names:
                 if (hit := _hit(alias.name)) is not None:
                     yield node.lineno, f"import {alias.name} → {hit}"
+                elif (hit := _parent(alias.name)) is not None:
+                    yield node.lineno, f"import {alias.name} → {hit} üst paketi bağlanıyor"
         elif isinstance(node, ast.ImportFrom):
             base = _base(node, module)
             if (hit := _hit(base)) is not None:
                 yield node.lineno, f"from {base} import … → {hit}"
                 continue
             for alias in node.names:
-                if (hit := _hit(f"{base}.{alias.name}")) is not None:
+                bound = base if alias.name == "*" else f"{base}.{alias.name}"
+                if (hit := _hit(bound)) is not None:
                     yield node.lineno, f"from {base} import {alias.name} → {hit}"
+                elif (hit := _parent(bound)) is not None:
+                    form = f"from {base} import {alias.name}"
+                    yield node.lineno, f"{form} → {hit} üst paketi bağlanıyor"
         elif isinstance(node, ast.Attribute) and _dotted(node) in FORBIDDEN:
             yield node.lineno, f"{_dotted(node)} erişimi"
         elif isinstance(node, ast.Constant) and node.value in FORBIDDEN:
@@ -112,11 +132,23 @@ REFERENCES = [
     "from ..live.store import load_live_matches",
     "from ..live import store",
     "from ..history import sync",
-    "import football_edge.live\nrows = football_edge.live.store.load_quotes(c, (), until=t)",
+    # `import a.b.c` `a`yı bağlar; öznitelik zinciri tek ihlaldir, bağlanan üst paket izinlidir.
+    "import football_edge.features.types\nrows = football_edge.live.store.load_quotes(c)",
     'importlib.import_module("football_edge.live.store")',
     '__import__("football_edge.history.holdout")',
+    # Üst paket bağlanırsa yasaklı modüle öznitelikle, import satırında adı geçmeden ulaşılır.
+    "from football_edge import live\n\ndef f():\n    return live.store.load_quotes",
+    "import football_edge.live as fl\nfl.store.load_quotes",
+    "from football_edge import history\nhistory.sync.load_matches",
+    "import football_edge",
+    "import football_edge.backtest",
+    "from .. import live",
+    "from football_edge.live import *",
 ]
 MENTIONS = [
+    "from football_edge import features",
+    "from .. import features",
+    "from . import types",
     "from football_edge.live.context import LiveMatch",
     "from football_edge.history.types import HistMatch",
     "import football_edge.live.context",

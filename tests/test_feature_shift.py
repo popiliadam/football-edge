@@ -82,3 +82,19 @@ def test_non_finite_or_overflowing_inputs_are_refused(
 ) -> None:
     with pytest.raises(ValueError):
         shift(P, beta, f)
+
+
+@pytest.mark.parametrize(
+    ("probs", "beta", "f"),
+    [
+        ((math.nan, 0.28, 0.27), (1.0,), (0.2,)),
+        ((math.inf, 0.28, 0.27), (1.0,), (0.2,)),
+        ((0.45, -math.inf, 0.27), (1.0,), (0.2,)),
+        ((math.nan, 0.28, 0.27), (1.0,), (0.0,)),  # sıfır kaydırma girdiyi aynen döndürürdü
+    ],
+)
+def test_non_finite_probabilities_are_refused(
+    probs: tuple[float, float, float], beta: tuple[float, ...], f: tuple[float, ...]
+) -> None:
+    with pytest.raises(ValueError, match="sonlu olmayan"):
+        shift(probs, beta, f)
