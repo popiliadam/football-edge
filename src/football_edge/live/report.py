@@ -44,7 +44,8 @@ class LeagueCoverage:
 class ShadowReport:
     model_config_sha256: str
     decided: int  # gölge satırı olan maç
-    incomplete: int  # bileşeni eksik: harmana girmez
+    incomplete: int  # bileşeni eksik: harmana girmez (fiyatı reddedilenler hariç)
+    rejected_price: int  # yalnız piyasası yok, çünkü saklı `pre`yi donmuş yöntem reddeder (17g)
     settled: int  # tam ve sonuçlu
     unsettled: int  # tam ama tarihsel tabanda sonucu yok (henüz oynanmadı/senkronlanmadı, ad farkı)
     closed: int  # tam ve kapanışı çözülen
@@ -83,6 +84,20 @@ def _matches(predictions: Sequence[PredictionRow]) -> dict[str, _Match]:
         )
         for match_id, rows in grouped.items()
     }
+
+
+def _rejected_price(match: _Match, method: str) -> bool:
+    """17g: harmana YALNIZ piyasa bileşeni eksik diye girmeyen maçın eksiği fiyat reddi mi. Gölge
+    piyasa satırını yalnız karar anı fiyatını devig reddedince yazmaz (`shadow.rejected_prices`);
+    o fiyat öteki bileşenlerin satırında `pre` olarak saklıdır — yargı onunla yeniden kurulur."""
+    missing = tuple(name for name in BLEND_COMPONENTS if name not in match.components)
+    if missing != (MARKET,):
+        return False
+    try:
+        devig(match.pre, method)
+    except InvalidPrices:
+        return True
+    return False
 
 
 def outcomes_of(history: Mapping[str, Sequence[HistMatch]]) -> Mapping[str, int]:
@@ -151,6 +166,7 @@ def build_report(
         for match_id, match in matches.items()
         if all(name in match.components for name in BLEND_COMPONENTS)
     }
+    rejected = sum(1 for match in matches.values() if _rejected_price(match, method))
     closings: dict[str, tuple[float, ...]] = {}
     for match_id in blends:
         if match_id in closing:
@@ -173,7 +189,8 @@ def build_report(
     return ShadowReport(
         model_config_sha256=weights.model_config_sha256,
         decided=len(matches),
-        incomplete=len(matches) - len(blends),
+        incomplete=len(matches) - len(blends) - rejected,
+        rejected_price=rejected,
         settled=len(settled),
         unsettled=len(blends) - len(settled),
         closed=len(closings),
@@ -205,6 +222,7 @@ def render_report(report: ShadowReport, *, generated_at: datetime) -> str:
             "Kapanış: mühürlü defter; sonuç: football-data tarihsel tabanı (haftalık senkron).",
             "",
             f"Karar verilen maç {report.decided} · bileşeni eksik {report.incomplete} · "
+            f"fiyatı reddedilen {report.rejected_price} · "
             f"sonuçlu {report.settled} · sonuçsuz {report.unsettled} · "
             f"kapanışlı {report.closed} · "
             f"vig'i temizlenemeyen kapanış {report.bad_closing}",

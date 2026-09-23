@@ -53,6 +53,7 @@ SOURCES_PATH = Path("config/sources.yaml")
 ROBOTS_DIR = Path("config/robots")
 LANGUAGES_PATH = Path("config/languages.yaml")
 CALIBRATION_DIR = Path("data/calibration")
+LOGGER = logging.getLogger("football_edge.collect")
 
 # ── ÇIKIŞ KODLARI ───────────────────────────────────────────────────────────
 # Her kodun `.github/workflows/*.yml` içinde ADLANDIRILMIŞ bir `case` arm'ı vardır;
@@ -102,6 +103,13 @@ EXIT_SOURCE_FAILED = 7
 # `tests/test_collect_main.py::test_every_exit_code_constant_is_unique_and_outside_the_
 # reserved_range` zorluyor.
 EXIT_LANGUAGE_UNCALIBRATED = 8
+# Boş tur bekçisi (2026-09-23): snapshot turunda HİÇBİR lig satır yazmadı, hiçbir lig düşmedi,
+# kredi bitmedi — ama ücretsiz `/events` ucu ufukta fikstür görüyor. Milli arada aynı tur
+# fikstür görmez ve 0 kalır; sessiz arıza (anahtar adı değişti, API boş dönüyor, bölge
+# değişti) ise bayt bayt aynı görünüyordu ve günlerce yeşil kalırdı. 9–18 başka CLI'ların
+# (backtest, market, live, jev) — `tests/test_jev_budget.py` çakışmayı kapıda tutar; ilk boş
+# sayı 19. `snapshot.yml` 19'u ADIYLA karşılar (bkz. `tests/test_workflows.py`).
+EXIT_EMPTY_ROUND = 19
 
 _LEDGER_COLUMNS = """
     SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
@@ -325,6 +333,11 @@ def _report(result: CollectResult) -> int:
     if result.failed_leagues:
         # Diğer ligler toplandı ama bu sessizce geçilmemeli: CI kırmızı olmalı.
         sys.stdout.write("başarısız ligler: " + ", ".join(result.failed_leagues) + "\n")
+    if result.fixtures_without_odds:
+        # Milli aradan ayıran tek satır: oran boş, ama bu ligler ufukta oynuyor.
+        line = "oran boş ama ufukta fikstür var: " + ", ".join(result.fixtures_without_odds)
+        LOGGER.error(line)
+        sys.stdout.write(line + "\n")
     return _exit_code(result)
 
 
@@ -349,6 +362,9 @@ def _exit_code(result: CollectResult) -> int:
         return EXIT_MIRROR_FAILED
     if result.missed_seals:
         return EXIT_MISSED_SEAL
+    # Yalnız yukarıdakilerin HİÇBİRİ yokken dolar (`rounds._silently_empty`): sıra yük taşımaz.
+    if result.fixtures_without_odds:
+        return EXIT_EMPTY_ROUND
     return 0
 
 

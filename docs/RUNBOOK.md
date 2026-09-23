@@ -486,3 +486,44 @@ uv run python -c 'from pathlib import Path; from football_edge.history.catalog i
 ```
 `tests/test_history_registry.py`nin eşitlik testi eksik ya da fazla satırı adıyla söyler. Dosya
 yayımlanmadan ilerletmek turu 404 ile kırmızı yapar.
+
+### 3.11 Snapshot çıkış kodları ve boş tur bekçisi (exit 19)
+`snapshot.yml`in "Oranları çek" adımı her kodu adıyla `::error::` satırına çevirir ve kırmızı
+tur `🔴 snapshot kırmızı` alarmını açar (§3.6):
+
+| Kod | Anlamı | İlk bakılacak yer |
+|---|---|---|
+| 0 | tur tamam — milli arada her lig boş dönüp ufukta fikstür görülmediyse de 0 | — |
+| 2 | kredi tükendi, tur erken kapandı; o ana kadar toplanan yazıldı | bekçinin kredi ölçümü (§3.6) |
+| 3 | en az bir lig toplanamadı, diğerleri yazıldı | logda `lig=… toplanamadı` |
+| 4 | lig aynası tazelenemedi, tur hiç başlamadı, kredi harcanmadı | logda `lig aynası tazelenemedi` |
+| 19 | **boş tur:** hiçbir lig satır yazmadı, hiçbir lig düşmedi, kredi bitmedi — ama ufukta fikstür var | aşağıdaki yordam |
+
+**Neden var.** 2026-09-23'te FIFA arasında 8 ligin hepsi `yazılacak satır yok` dedi, kredi
+değişmedi, tur yeşildi. Ara için doğru; ama sessiz bir arıza (sport key yeniden adlandırıldı,
+API boş dönüyor, bölge değişti) bayt bayt aynı görünür ve canlı gölge günlerce karar almaz.
+Bekçi yalnız HER lig boşken, oran çağrısıyla AYNI `commenceTimeTo` ufkuyla ücretsiz
+`/v4/sports/{sport}/events` ucunu sorar (`x-requests-last: 0`, ölçüldü). Ufukta fikstür yoksa
+ara, tur 0; varsa log `oran boş ama ufukta fikstür var: <lig id'leri>` der ve exit 19.
+
+**Yordam (exit 19):**
+1. Logda adlandırılan ligler için `config/leagues.yaml`deki `odds_api_key`in hâlâ geçerli olduğunu
+   ücretsiz `/v4/sports` listesinden doğrula (kredi harcamaz; anahtar hiçbir çıktıya yazılmaz):
+   ```bash
+   curl -s "https://api.the-odds-api.com/v4/sports?apiKey=$ODDS_API_KEY" | jq -r '.[].key' | grep soccer_
+   ```
+2. Aynı lig için ufuktaki fikstürlere bak (ücretsiz): `…/v4/sports/<odds_api_key>/events?apiKey=…`.
+   Fikstür var ama `/odds` boşsa sorun oran tarafında: The Odds API durum sayfası/duyuruları,
+   `regions=eu`de o ligin bahisçisi kalıp kalmadığı.
+3. Sport key değiştiyse `config/leagues.yaml` düzeltilir (ayrı commit, gerekçeli); API geçici
+   boşsa sonraki tur kendiliğinden yeşile döner ve alarm kapanır.
+
+**Bekçinin kendi arızası turu kırmızıya ÇEVİRMEZ:** `/events` HTTP hatası verirse log
+`lig=… fikstür kontrolü yapılamadı (HTTP <kod>) — boş tur doğrulanamadı, tur bu yüzden
+kırmızıya çevrilmiyor` der ve tur bugünkü gibi 0 döner. Bu uyarı arka arkaya görülüyorsa bekçi
+kördür; elle yukarıdaki 1–2. adımlar koşulur.
+
+**Bilinen sınır (kasıtlı):** yalnız TÜM ligler boşken sorulur. Bir lig satır yazdıysa diğer bir
+ligin boş dönmesi işaretlenmez: bazı liglerin eu-bölge oranı fikstürden günler sonra açılır ve
+kısmi boşluk her gün yanlış alarm verirdi. Tek bir ligin sessizce kaybolması (ör. yalnız onun
+sport key'i değişti) bu bekçiye görünmez. Mühür turu (`seal`) bekçiyi hiç koşmaz.

@@ -10,6 +10,8 @@ on:
   # dönmeyen çağrı 0 kredi — ölçüldü, milli maç arasında snapshot bedava):
   #   config/leagues.yaml → 8 aktif lig × 1 kredi = 8 kredi/tur (R125: +N1, +B1; AUT kapalı)
   #   1 tur/gün × 30 gün                          = 240 kredi/ay (31 günde 248)
+  #   boş tur bekçisi: YALNIZ her lig boş dönünce lig başına 1 `/events` çağrısı = 0 kredi
+  #     (`x-requests-last: 0`, ölçüldü 2026-09-23) — aritmetiği değiştirmez
   #   mühür: ligin AYRI başlama saati başına 1 kredi. 8 lig ≈ 75 maç/hafta × 4,3 ≈ 323 maç/ay
   #     üst sınır (her maç ayrı saatte)           ≈ 323 → toplam ≈ 563 kredi/ay — BÜTÇEYİ AŞAR
   #     beklenen (canlı DB, 09-19/20 haftası: 51 maç / 34 ayrı başlama = 0,67) ≈ 215
@@ -66,9 +68,12 @@ jobs:
             2) echo "::error::kredi tükendi (exit 2) — aylık bütçe bitti, tur erken kapandı" ;;
             3) echo "::error::en az bir lig toplanamadı (exit 3) — diğer ligler yazıldı" ;;
             4) echo "::error::lig aynası tazelenemedi (exit 4) — tur hiç başlatılmadı, kredi harcanmadı" ;;
+            19) echo "::error::oran boş ama ufukta fikstür var (exit 19) — hiçbir lig satır yazmadı; sport key / The Odds API durumunu kontrol et (RUNBOOK §3.11)" ;;
             *) echo "::error::snapshot beklenmedik kodla düştü (exit $code)" ;;
           esac
           # Hiçbir kod yutulmaz: 2 de 3 de işi kırmızıya düşürür, yalnız adıyla.
+          # 19 (boş tur bekçisi) da: milli arada ufukta fikstür yoktur ve tur 0 kalır; ücretsiz
+          # `/events` fikstür görürken her ligin boş dönmesi sessiz arızadır.
           exit "$code"
       - name: Alarm aç
         # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
