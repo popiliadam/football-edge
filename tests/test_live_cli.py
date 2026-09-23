@@ -5,6 +5,7 @@ Veritabanı yok: bağlantı, okuyucular ve saat yamalanır; `build_batch`, `shad
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import date, datetime, timedelta, tzinfo
 from pathlib import Path
@@ -103,6 +104,7 @@ def _patch(
     db: _Db,
     *,
     live: tuple[LiveMatch, ...] = LIVE,
+    quotes: tuple[Quote, ...] = QUOTES,
     lock_error: bool = False,
 ) -> list[str]:
     """Yamalar; dönen liste yapılandırma dosyalarının CLI argümanlarıdır."""
@@ -133,7 +135,7 @@ def _patch(
     monkeypatch.setattr(live_cli, "load_aliases", lambda path: MappingProxyType({}))
     monkeypatch.setattr(live_cli, "load_matches", load_matches)
     monkeypatch.setattr(live_cli, "load_live_matches", lambda conn, **window: list(live))
-    monkeypatch.setattr(live_cli, "load_quotes", lambda conn, ids, **window: list(QUOTES))
+    monkeypatch.setattr(live_cli, "load_quotes", lambda conn, ids, **window: list(quotes))
     monkeypatch.setattr(live_cli, "head_sha", lambda: "f" * 40)
     return [
         *("--config", str(tmp / "config.yaml")),
@@ -154,6 +156,38 @@ def test_shadow_writes_every_decided_match_through_one_connection(
     assert code == 0 and db.connects == 1 and db.commits == 1
     assert len(SLOT) == 4 and len(db.inserts) == 4 * 3  # piyasa, Elo, DC
     assert {params[0] for params in db.inserts} == {live.match_id for live in LIVE}
+
+
+# Σ 1/o ≈ 0,889 < 1: karar anı fiyatını hiçbir vig yöntemi temizlemez (16i).
+REJECTED = tuple(
+    replace(quote, price=3.0 if quote.outcome == LIVE[0].home else 3.6)
+    if quote.match_id == LIVE[0].match_id
+    else quote
+    for quote in QUOTES
+)
+
+
+@pytest.mark.parametrize(
+    ("quotes", "written", "rejected"), [(QUOTES, 12, 0), (REJECTED, 11, 1)], ids=["temiz", "red"]
+)
+def test_the_shadow_line_counts_a_rejected_decision_price_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    quotes: tuple[Quote, ...],
+    written: int,
+    rejected: int,
+) -> None:
+    """17g: devig'in reddettiği karar anı fiyatı piyasa satırı yazdırmaz; gölge satırı onu adıyla
+    sayar ve öteki sayıları değiştirmez."""
+    caplog.set_level(logging.INFO, logger="football_edge.live")
+    files = _patch(monkeypatch, tmp_path, _Db(), quotes=quotes)
+
+    assert live_cli.main(["shadow", *files]) == 0
+    assert (
+        f"gölge: karar 4 · yazılan satır {written} · eşlenemeyen 0 · bayat durum 0 · fiyatsız 0 · "
+        f"reddedilen fiyat {rejected}"
+    ) in caplog.messages
 
 
 def test_shadow_stops_on_a_lock_violation_without_writing(
