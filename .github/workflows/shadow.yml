@@ -49,6 +49,26 @@ jobs:
             *) echo "::error::live shadow beklenmedik kodla düştü (exit $code)" ;;
           esac
           exit "$code"
+      - name: Haftalık gölge raporu
+        # Faz 4 T0a (16o): yalnız salı turunda, baz serisinin CLV raporu iş özetine (spec §5/5:
+        # Jev'li strateji okunmaz). Exit 11: harman ağırlığı ya da model yapılandırması uyuşmuyor.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ "$(date -u +%u)" != "2" ]; then
+            echo "gölge raporu: salı turu değil, atlandı"
+            exit 0
+          fi
+          set +e
+          uv run python -m football_edge.live report --out "$GITHUB_STEP_SUMMARY"
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            11) echo "::error::live report: harman ağırlığı ya da yapılandırma uyuşmuyor (exit 11)" ;;
+            *) echo "::error::live report beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
       - name: Alarm aç
         if: ${{ failure() || cancelled() }}
         env:

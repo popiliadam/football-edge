@@ -194,3 +194,39 @@ def test_parity_pairs_live_matches_and_flags_a_shifted_kickoff() -> None:
         0,
     )
     assert bad.kickoff_mismatch == 1
+
+
+class _Session(_Connection):
+    """`with connect() as conn` biçimi: `_shadow` bağlantıyı bağlam yöneticisi olarak açar."""
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.mark.leakage
+def test_the_shadow_ledger_loads_a_day_beyond_the_staleness_lookback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """16f (B2): bayat koruması karara göre `LOOKBACK` geriye bakar; defter bir gün daha
+    geriden yüklenmezse elle geç koşuda korumanın görmesi gereken maç yüklenmez."""
+    windows: list[tuple[datetime, datetime]] = []
+
+    def live_matches(conn: object, *, since: datetime, until: datetime) -> tuple[LiveMatch, ...]:
+        windows.append((since, until))
+        return ()
+
+    monkeypatch.setattr(live_cli, "connect", _Session)
+    monkeypatch.setattr(live_cli, "load_matches", lambda conn, catalog, **kwargs: {})
+    monkeypatch.setattr(live_cli, "load_live_matches", live_matches)
+    monkeypatch.setattr(live_cli, "load_quotes", lambda conn, ids, **kwargs: ())
+    monkeypatch.setattr(live_cli, "head_sha", lambda: GIT)
+    before = datetime.now(UTC)
+
+    assert live_cli.main(["shadow"]) == 0
+
+    ((since, until),) = windows
+    assert until - since == live_cli.HORIZON + live_cli.LOOKBACK + timedelta(days=1)
+    assert since <= before - live_cli.LOOKBACK - timedelta(days=1) + timedelta(minutes=1)
