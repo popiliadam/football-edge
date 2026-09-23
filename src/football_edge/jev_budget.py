@@ -199,6 +199,9 @@ class BudgetedJev:
     def _guard(self) -> datetime:
         at = self._clock()
         spent = self._ledger.month_total(at)
+        # Kapalı başarısız: NaN toplamda `toplam + tahmin > tavan` hep False olur, tavan kalkar.
+        if not math.isfinite(spent):
+            raise BudgetExceeded(f"jev_spend ay toplamı sonlu değil: {spent} — çağrı yapılmadı")
         if spent + self._estimate > self._cap:
             raise BudgetExceeded(
                 f"jev: ay toplamı ${spent:.4f} + tahmin ${self._estimate:.4f} > "

@@ -314,3 +314,16 @@ def test_review_focus_nan_cost_never_reaches_the_ledger() -> None:
             ledger.record(at=NOW, kind="battery", cost_usd=bad)
 
     assert ledger.entries == ()
+
+
+@pytest.mark.parametrize("total", [Decimal("NaN"), Decimal("Infinity")])
+def test_review_focus_a_non_finite_month_total_fails_closed(total: Decimal) -> None:
+    """Postgres `numeric` 'NaN' kabul eder: `nan + tahmin > tavan` False olur, tavan kalkar."""
+    client = FakeBatteryJev()
+    ledger = PostgresSpendLedger(_Conn(total=total))  # type: ignore[arg-type]
+    budgeted = BudgetedJev(client, ledger, cap_usd=1.0, estimate_usd=0.02, clock=lambda: NOW)
+
+    with pytest.raises(BudgetExceeded, match="sonlu değil"):
+        budgeted.ask_battery({}, QUESTIONS)
+
+    assert client.seen == []
