@@ -191,10 +191,23 @@ def test_a_lock_mismatch_found_by_load_matches_exits_nine_before_any_check_runs(
 
     assert cli.main(["selftest", "--lock", str(_lock_file(tmp_path))]) == 9
     assert calls.selftest == []
-    assert any(
-        message.startswith("kilit ihlali") and "E0/dev: beklenen 10 satır" in message
-        for message in caplog.messages
+    assert (
+        "kilit ihlali — bilinen sonuçlar koşulmadı: E0/dev: beklenen 10 satır, gerçek 9"
+        in caplog.messages
     )
+
+
+@pytest.mark.leakage
+def test_a_lock_mismatch_stops_model_selection_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`select`/`walkforward`/`model-selftest` aynı kilit yolundan (`_locked_matches`) geçer."""
+    _patch(monkeypatch, mismatch=True)
+    out = tmp_path / "model.yaml"
+
+    assert cli.main(["select", "--lock", str(_lock_file(tmp_path)), "--out", str(out)]) == 9
+    assert not out.exists()
+    assert "kilit ihlali — koşulmadı: E0/dev: beklenen 10 satır, gerçek 9" in caplog.messages
 
 
 @pytest.mark.leakage

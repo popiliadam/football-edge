@@ -157,13 +157,14 @@ def test_shadow_writes_every_decided_match_through_one_connection(
 
 
 def test_shadow_stops_on_a_lock_violation_without_writing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     db = _Db()
     files = _patch(monkeypatch, tmp_path, db, lock_error=True)
 
     assert live_cli.main(["shadow", *files]) == EXIT_LOCK_VIOLATION == 9
     assert db.inserts == [] and db.commits == 0
+    assert "kilit ihlali — gölge tahmin koşulmadı: E0/holdout: fark" in caplog.messages
 
 
 def test_shadow_refuses_a_changed_lock_before_connecting(
@@ -188,7 +189,23 @@ def test_parity_exits_fifteen_on_a_shifted_kickoff_and_zero_otherwise(
     assert live_cli.main(["parity", *broken]) == live_cli.EXIT_PARITY == 15
 
 
-def test_parity_stops_on_a_lock_violation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_parity_stops_on_a_lock_violation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     files = _patch(monkeypatch, tmp_path, _Db(), lock_error=True)
 
     assert live_cli.main(["parity", *files]) == EXIT_LOCK_VIOLATION
+    assert "kilit ihlali — eşitlik raporu koşulmadı: E0/holdout: fark" in caplog.messages
+
+
+def test_freeze_weights_stops_on_a_lock_violation_without_writing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Kilit ihlali satırı çağrı yeri başına birebir (son inceleme M-3)."""
+    files = _patch(monkeypatch, tmp_path, _Db(), lock_error=True)
+    out = tmp_path / "weights.yaml"
+    frozen = [*files[:6], "--out", str(out)]  # `--aliases` bu komutta yok
+
+    assert live_cli.main(["freeze-weights", *frozen]) == EXIT_LOCK_VIOLATION
+    assert not out.exists()
+    assert "kilit ihlali — ağırlık dondurulmadı: E0/holdout: fark" in caplog.messages

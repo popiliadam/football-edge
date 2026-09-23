@@ -466,7 +466,7 @@ def test_the_report_command_reads_only_the_base_series_of_the_frozen_config(
 
 
 def test_the_report_stops_on_a_lock_violation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     def violated(conn: object, catalog: object, **kwargs: Any) -> None:
         raise LockViolation("E0/dev: beklenen 10 satır, gerçek 9")
@@ -479,6 +479,10 @@ def test_the_report_stops_on_a_lock_violation(
 
     assert code == EXIT_LOCK_VIOLATION
     assert not out.exists()
+    assert (
+        "kilit ihlali — gölge raporu koşulmadı: E0/dev: beklenen 10 satır, gerçek 9"
+        in caplog.messages
+    )
 
 
 @pytest.mark.parametrize(
