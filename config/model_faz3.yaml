@@ -1,0 +1,29 @@
+cadence_days: 1
+catalog_sha256: 6b513c87e35bcac4b5d4d2fe15a581bc4ac03fe9f2a49179a81454e6f345d080
+dixon_coles:
+  max_goals: 10
+  min_matches: 30
+  rho_bound: 0.2
+  ridge: 0.003
+  window_days: 1095
+  xi: 0.003
+elo:
+  draw: 0.26
+  draw_form: ordered
+  home_advantage: 65.0
+  initial: 1500.0
+  k: 10.0
+  margin: linear
+  newcomer_offset: 75.0
+  ordered_cut: 0.5951694468298543
+  ordered_scale: 1.0671996777428987
+  regress: 0.2
+  season_gap_days: 60
+lock_sha256: 39967912271315e179f11ef3bca63698d8ae2e76569eb36bf2c42e6b7d0d5fc6
+method: power
+selected_at: '2026-09-23'
+sensitivity:
+- 0.0
+- 0.05
+tau: 0.02
+version: 1

@@ -64,3 +64,56 @@ geri alındı.
 
 Komut (plan Task 5 Step 3, aynen), ayrıca yakınsama denetimi için aynı dört günde `fit(...)` dönüşünün takım
 sayısı, ev ve ρ değerleri yazdırıldı.
+
+## Task 9 (dalga 3 sonu) — 2026-09-23, yerel (macOS), dalga 3 birleşmiş `main`
+
+| Ölçüm | Sonuç |
+|---|---|
+| `leakage` etiketli test | **287** → `EXPECTED_MIN_LEAKAGE=287` |
+| `select --cadence-days 1` (yalnız S) | exit 0 · **200 sn** · tepe RSS ~608 MB · 19 aday (Elo 14, DC 5) |
+| `walkforward --gap` | exit 0 · **205 sn** · tepe RSS ~1.108 MB |
+| `walkforward` (`--gap`siz, belirlenimcilik için ikinci koşu) | exit 0; satır özeti iki koşuda aynı: `b346641b…e98a2` |
+| Rapordaki takım adı | `[]` |
+
+P17: `walkforward` 90 dk'nın çok altında → Task 12 başlayabilir.
+
+**Seçilen yapılandırma** (`config/model_faz3.yaml`): Elo k = 10, ev avantajı 65, marj doğrusal, dönüş 0,2,
+yeni takım farkı 75, beraberlik biçimi **ordered** (s = 1,0672, c = 0,5952); Dixon-Coles ξ = 0,003, sırt = 0,003,
+pencere 1095 gün.
+
+**Bulgu — ızgara ucu (plan Task 9 Step 2):** Elo `k = 10` (alt uç), DC `ξ = 0.003` (üst uç) ve DC
+`sırt = 0.003` (alt uç) seçildi. Izgara bu fazda GENİŞLETİLMEDİ (genişletmek S'de ikinci bir aramadır, yeni bir
+seçimdir); karar kullanıcıya bırakılır (Faz 3 HANDOFF).
+
+**Seçimin izi** (yalnız parametreler ve S log loss'ları):
+
+```
+aday elo {'k': 20.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.030316
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.026611
+aday elo {'k': 15.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.027632
+aday elo {'k': 25.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.033895
+aday elo {'k': 30.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.038041
+aday elo {'k': 10.0, 'home_advantage': 40.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.028091
+aday elo {'k': 10.0, 'home_advantage': 90.0, 'margin': 'linear', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.031997
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'none', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.028094
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'log', 'regress': 0.0, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.026738
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.2, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.026492
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.4, 'newcomer_offset': 0.0, 'draw_form': 'quadratic'} → S log loss 1.029325
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.2, 'newcomer_offset': 75.0, 'draw_form': 'quadratic'} → S log loss 1.025651
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.2, 'newcomer_offset': 150.0, 'draw_form': 'quadratic'} → S log loss 1.029532
+aday elo {'k': 10.0, 'home_advantage': 65.0, 'margin': 'linear', 'regress': 0.2, 'newcomer_offset': 75.0, 'draw_form': 'ordered'} → S log loss 1.025586
+aday dixon_coles {'xi': 0.0019, 'ridge': 0.01} → S log loss 1.027380
+aday dixon_coles {'xi': 0.001, 'ridge': 0.01} → S log loss 1.029152
+aday dixon_coles {'xi': 0.003, 'ridge': 0.01} → S log loss 1.026342
+aday dixon_coles {'xi': 0.003, 'ridge': 0.003} → S log loss 1.024430
+aday dixon_coles {'xi': 0.003, 'ridge': 0.03} → S log loss 1.032715
+```
+
+**E raporunun okunması (Step 5):** W1'in ham hâli ΔLL(harman − piyasa) = 0,0002 [0,0000, 0,0005]; üst uç
+δ = 0,001'in altında → revizyon yok, E örneklem dışı kalır. Diğer gözlemler (bulgu, kapı değil):
+- Ü/A 2.5'te piyasa satırı **1 bahis**, CLV 0,7493 — kendi fiyatına karşı bahis yapmaması gereken bir strateji;
+  tek bir satırda tutarsız (toplamı 1'in altında) Ü/A fiyatı olduğunu gösterir. Toplu sayı; maç satırı
+  raporlanmaz. Veri kusuru olarak ölçmedikleri listesine.
+- Dixon-Coles'un Ü/A kalibrasyonu zayıf: eğim b = 0,633, ECE 0,0247 (aşırı özgüvenli).
+- Boşluk cezası (R128, DEV simülasyonu): Elo 0,0034 [0,0013, 0,0055], DC 0,0064 [0,0034, 0,0094] — bir sezon
+  eksik girdinin maliyeti; holdout yılının canlı maliyeti için alt sınır tahmini.
