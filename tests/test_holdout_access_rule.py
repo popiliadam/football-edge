@@ -52,6 +52,12 @@ GUARDED: dict[str, tuple[frozenset[str], str]] = {
         frozenset({HOLDOUT_MODULE}),
         "mühürle elle kurulan anahtar açılışı kayda yazmaz",
     ),
+    # 12i (Faz 3): anahtar yalnız tanımlandığı, tüketildiği ve açıldığı üç modülde anılır;
+    # işçiler anahtar değil seçilmiş satır alır.
+    "HoldoutKey": (
+        frozenset({HOLDOUT_MODULE, SYNC_MODULE, FINAL_EVAL}),
+        "anahtar yalnız final_eval'de açılır ve load_matches'e verilir (12i)",
+    ),
     "_load_all": (
         frozenset({SYNC_MODULE, HISTORY_CLI}),
         "bütün dönemleri döner; holdout satırları history/'den anahtarsız çıkmaz (R96)",
@@ -144,7 +150,9 @@ REFERENCES = [
     '__import__("football_edge.history.holdout", fromlist=["open_holdout"])',
     "from football_edge.history.holdout import *",
     "from football_edge.history.holdout import _HOLDOUT_SEAL",
-    "HoldoutKey(opened_at=t, purpose='x', git_sha=s, _seal=holdout._HOLDOUT_SEAL)",
+    "make(opened_at=t, purpose='x', git_sha=s, _seal=holdout._HOLDOUT_SEAL)",
+    "from football_edge.history.holdout import HoldoutKey",
+    "def f(key: holdout.HoldoutKey) -> None: ...",
     'select_periods.__globals__["_HOLDOUT_SEAL"]',
     'vars(holdout)["_HOLDOUT_SEAL"]',
     "from football_edge.history.sync import _load_all",
@@ -167,7 +175,7 @@ MENTIONS = [
     'def f() -> None:\n    """open_holdout burada çağrılmaz."""\n',
     "# open_holdout(conn)",
     'LOGGER.info("open_holdout çağrılmadı")',
-    "from football_edge.history.holdout import HoldoutKey, select_periods",
+    "from football_edge.history.holdout import HOLDOUT, select_periods",
     "open_holdout_count = 0",
     "log_fetch(conn, rows_parsed=len(result.matches))",
     '"""parse_file dönem süzmez; load_files önbellek baytını döner."""',
@@ -303,3 +311,166 @@ def test_holdout_is_opened_only_where_allowed() -> None:
     violations = _scan(REPO)
 
     assert not violations, "holdout izinsiz açılabiliyor:\n" + "\n".join(violations)
+
+
+# ── Faz 3: anahtarın akışı (12i) ve ayrıştırıcının özel yardımcıları (14h) ──────────────────
+
+
+def key_misuses(source: str) -> list[str]:
+    """`open_holdout`un döndürdüğü adın `load_matches(..., key=ad)` ve `del ad` DIŞINDA her
+    kullanımı: anahtar döndürülemez, saklanamaz, başka bir fonksiyona verilemez."""
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    keys = {
+        target.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and _calls(node.value, "open_holdout")
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    return [
+        f"{node.lineno}: {node.id}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
+        and node.id in keys
+        and isinstance(node.ctx, ast.Load)
+        and not _is_load_matches_key(node, parents)
+    ]
+
+
+def _calls(node: ast.AST, name: str) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    return (isinstance(func, ast.Name) and func.id == name) or (
+        isinstance(func, ast.Attribute) and func.attr == name
+    )
+
+
+def _is_load_matches_key(node: ast.Name, parents: dict[ast.AST, ast.AST]) -> bool:
+    keyword = parents.get(node)
+    if not isinstance(keyword, ast.keyword) or keyword.arg != "key":
+        return False
+    call = parents.get(keyword)
+    return call is not None and _calls(call, "load_matches")
+
+
+PROTECTED_MODULES = ("football_edge.history.football_data", "football_edge.history.store")
+HISTORY_PACKAGE = "src/football_edge/history/"
+
+
+def private_accesses(source: str, path: str) -> list[str]:
+    """14h: `history/` dışından ayrıştırıcının ve önbelleğin `_`-önekli adlarına erişim."""
+    if path.startswith(HISTORY_PACKAGE):
+        return []
+    tree = ast.parse(source)
+    aliases: set[str] = set()
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            aliases |= {
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name in PROTECTED_MODULES
+            }
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                full = f"{node.module}.{alias.name}"
+                if full in PROTECTED_MODULES:
+                    aliases.add(alias.asname or alias.name)
+                elif node.module in PROTECTED_MODULES and alias.name.startswith("_"):
+                    found.append(f"{path}:{node.lineno}: from {node.module} import {alias.name}")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr.startswith("_")
+            and not node.attr.startswith("__")
+            and _root(node.value) in aliases
+        ):
+            found.append(f"{path}:{node.lineno}: .{node.attr} erişimi")
+    return found
+
+
+def _root(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        dotted = _root(node.value)
+        return None if dotted is None else f"{dotted}.{node.attr}"
+    return None
+
+
+@pytest.mark.leakage
+def test_the_real_final_eval_hands_the_key_only_to_load_matches() -> None:
+    source = (REPO / FINAL_EVAL).read_text(encoding="utf-8")
+
+    assert "open_holdout(" in source, "kural boşa yeşil kalmasın: final_eval anahtarı açıyor"
+    assert key_misuses(source) == []
+
+
+KEY_MISUSES = [
+    "key = open_holdout(c, purpose=p, git_sha=s, now=n)\nreturn key",
+    "key = open_holdout(c, purpose=p, git_sha=s, now=n)\nself.key = key",
+    "key = holdout.open_holdout(c, purpose=p, git_sha=s, now=n)\nevaluate(rows, key)",
+    "key = open_holdout(c, purpose=p, git_sha=s, now=n)\nkeys = [key]",
+    "key = open_holdout(c, purpose=p, git_sha=s, now=n)\nselect_periods(m, periods=x, key=key)",
+    "key = open_holdout(c, purpose=p, git_sha=s, now=n)\nload_matches(c, catalog, None, key)",
+]
+
+
+@pytest.mark.leakage
+@pytest.mark.parametrize("snippet", KEY_MISUSES)
+def test_every_other_use_of_the_key_is_a_misuse(snippet: str) -> None:
+    assert len(key_misuses(snippet)) == 1
+
+
+@pytest.mark.leakage
+def test_handing_the_key_to_load_matches_and_deleting_it_is_allowed() -> None:
+    snippet = (
+        "key = open_holdout(c, purpose=p, git_sha=s, now=n)\n"
+        "rows = load_matches(c, catalog, lock=lock, key=key)\n"
+        "del key\n"
+    )
+
+    assert key_misuses(snippet) == []
+
+
+PRIVATE_ACCESSES = [
+    "from football_edge.history.football_data import _records",
+    "from football_edge.history.store import _LOAD_FILES",
+    "from football_edge.history import football_data\nfootball_data._decode(b'x')",
+    "from football_edge.history import store as s\ns._LOAD_FILES",
+    "import football_edge.history.football_data as fd\nfd._row(ctx, rec)",
+    "import football_edge.history.football_data\nfootball_edge.history.football_data._context(r)",
+]
+
+
+@pytest.mark.leakage
+@pytest.mark.parametrize("snippet", PRIVATE_ACCESSES)
+def test_private_parser_helpers_are_closed_outside_history(snippet: str) -> None:
+    assert len(private_accesses(snippet, ELSEWHERE)) == 1
+
+
+@pytest.mark.leakage
+@pytest.mark.parametrize(
+    ("snippet", "path"),
+    [
+        ("from football_edge.history.football_data import parse", ELSEWHERE),
+        ("from football_edge.history import football_data\nfootball_data.__name__", ELSEWHERE),
+        ("from football_edge.history.football_data import _records", SYNC_MODULE),
+        ("from football_edge.backtest import harness\nharness._context(0, m, t)", ELSEWHERE),
+    ],
+)
+def test_public_names_dunders_and_the_history_package_stay_clean(snippet: str, path: str) -> None:
+    assert private_accesses(snippet, path) == []
+
+
+@pytest.mark.leakage
+def test_no_module_outside_history_reaches_the_private_parser_helpers() -> None:
+    violations = [
+        found
+        for path in _python_files(REPO)
+        for found in private_accesses(path.read_text(encoding="utf-8"), _rel(path, REPO))
+    ]
+
+    assert not violations, "ayrıştırıcının özel yardımcılarına erişim:\n" + "\n".join(violations)

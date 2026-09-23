@@ -2,7 +2,7 @@
 
 `selftest`: bilinen sonuçlar. `select`: S bölgesinde hiperparametre seçimi →
 `config/model_faz3.yaml` (controller commit'ler). `walkforward`: dondurulmuş yapılandırmayla E
-bölgesi raporu.
+bölgesi raporu. `final-eval`: Faz 3'ün TEK holdout açılışı (`backtest/final_eval.py`, R135).
 
 Önce kilit: kilit dosyası bozuksa ya da önbellek kilitli dönemlerin özetinden farklıysa hiçbir
 ölçüm koşmaz (exit 9). Sonra her denetim adıyla loglanır; kapı denetimlerinden biri kırmızıysa
@@ -14,11 +14,18 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from types import MappingProxyType
 
 from football_edge.backtest.evaluate import DEFAULT_RESAMPLES
+from football_edge.backtest.final_eval import (
+    AlreadyOpened,
+    OpenedButFailed,
+    render_final,
+    run_final,
+    run_rehearsal,
+)
 from football_edge.backtest.model_config import (
     MODEL_CONFIG_PATH,
     ModelConfig,
@@ -26,6 +33,12 @@ from football_edge.backtest.model_config import (
     dump_model_config,
     file_sha256,
     load_model_config,
+)
+from football_edge.backtest.preregistration import (
+    PREREGISTRATION_PATH,
+    PreflightError,
+    preflight,
+    real_git,
 )
 from football_edge.backtest.selection import select
 from football_edge.backtest.selftest import Check, run_selftest
@@ -38,8 +51,10 @@ from football_edge.backtest.wf_run import (
     run_rows,
 )
 from football_edge.collect import configure_logging
+from football_edge.collector import ContractViolation
 from football_edge.db import connect
 from football_edge.history.catalog import MAIN, Catalog, load_catalog
+from football_edge.history.holdout import DEV_END
 from football_edge.history.lock import LockViolation, load_lock
 from football_edge.history.sync import load_matches
 from football_edge.history.types import HistMatch
@@ -55,7 +70,13 @@ EXIT_LOCK_VIOLATION = 9
 # 10 köprünün (`market bridge`) "eşleşme yok"u; 11: model yapılandırması okunamadı ya da
 # katalog/kilit yapılandırmadaki özetle uyuşmuyor — walk-forward koşmaz.
 EXIT_CONFIG_MISMATCH = 11
+# final-eval: 12 ön kayıt denetimi tutmadı (AÇILMADI); 13 Faz 3 açılışı zaten var (AÇILMADI);
+# 14 AÇILDI ama değerlendirme tamamlanmadı (rapor yok) — HANDOFF'a adıyla, R135 yeniden koşusu.
+EXIT_PREFLIGHT = 12
+EXIT_ALREADY_OPENED = 13
+EXIT_OPENED_FAILED = 14
 DEFAULT_TAU = 0.02  # R139
+REHEARSAL_START = date(2024, 7, 1)  # prova: E'nin son sezonu (R135)
 DEFAULT_SENSITIVITY = (0.0, 0.05)
 
 
@@ -80,6 +101,18 @@ def _parser() -> argparse.ArgumentParser:
     walk.add_argument("--out", type=Path, required=True)
     walk.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
     walk.add_argument("--gap", action="store_true", help="R128 boşluk cezası (iki ek koşu)")
+    final = commands.add_parser("final-eval", help="Faz 3'ün tek, kayıtlı holdout açılışı")
+    final.add_argument("--prereg", type=Path, default=PREREGISTRATION_PATH)
+    final.add_argument("--config", type=Path, default=MODEL_CONFIG_PATH)
+    final.add_argument("--lock", type=Path, default=LOCK_PATH)
+    final.add_argument("--catalog", type=Path, default=CATALOG_PATH)
+    final.add_argument("--out", type=Path, required=True)
+    final.add_argument("--rerun-reason", default=None)
+    final.add_argument(
+        "--rehearse",
+        action="store_true",
+        help="prova: E'nin son sezonu sahte holdout, anahtarsız, AÇILIŞ YOK",
+    )
     return parser
 
 
@@ -218,8 +251,69 @@ def _walkforward(args: argparse.Namespace) -> int:
     return 0
 
 
+def _final_eval(args: argparse.Namespace) -> int:
+    git = real_git()
+    try:
+        prereg = preflight(
+            prereg_path=args.prereg,
+            model_path=args.config,
+            lock_path=args.lock,
+            catalog_path=args.catalog,
+            git=git,
+        )
+        config = load_model_config(args.config)
+        if args.rehearse:
+            report = run_rehearsal(
+                connect,
+                catalog=load_catalog(args.catalog),
+                lock=load_lock(args.lock),
+                config=config,
+                prereg=prereg,
+                start=REHEARSAL_START,
+                end=DEV_END,
+            )
+            args.out.write_text(
+                render_final(report, generated_at=datetime.now(UTC)), encoding="utf-8"
+            )
+            LOGGER.info("prova raporu yazıldı: %s — holdout AÇILMADI", args.out)
+            return 0
+        report = run_final(
+            connect,
+            catalog=load_catalog(args.catalog),
+            lock=load_lock(args.lock),
+            config=config,
+            prereg=prereg,
+            prereg_sha256=file_sha256(args.prereg),
+            git_sha=git.head(),
+            now=datetime.now(UTC),
+            report_path=args.out,
+            rerun_reason=args.rerun_reason,
+        )
+    except (PreflightError, ModelConfigError, LockViolation, ContractViolation) as error:
+        LOGGER.error("holdout AÇILMADI — ön denetim: %s", error)
+        return EXIT_PREFLIGHT
+    except AlreadyOpened as error:
+        LOGGER.error("holdout AÇILMADI — %s", error)
+        return EXIT_ALREADY_OPENED
+    except OpenedButFailed as error:
+        LOGGER.error("holdout AÇILDI ama rapor yazılmadı: %s", error)
+        return EXIT_OPENED_FAILED
+    try:
+        args.out.write_text(render_final(report, generated_at=datetime.now(UTC)), encoding="utf-8")
+    except Exception as error:
+        LOGGER.error("holdout AÇILDI ama rapor yazılamadı: %s", error)
+        return EXIT_OPENED_FAILED
+    LOGGER.info("holdout raporu yazıldı: %s (amaç %s)", args.out, report.purpose)
+    return 0
+
+
 COMMANDS: Mapping[str, Callable[[argparse.Namespace], int]] = MappingProxyType(
-    {"selftest": _selftest, "select": _select, "walkforward": _walkforward}
+    {
+        "selftest": _selftest,
+        "select": _select,
+        "walkforward": _walkforward,
+        "final-eval": _final_eval,
+    }
 )
 
 
