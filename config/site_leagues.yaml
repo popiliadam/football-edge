@@ -1,0 +1,16 @@
+# Sitenin lig URL bölütleri (Faz 6 İz B §8.1–§8.2, AK20 b). ELLE yazılır ve KALICIDIR: yayımlandıktan
+# sonra bir değeri değiştirmek o ligin bütün URL'lerini değiştirmektir (kaybolan-slug kontrolü
+# kırmızı). Addan türetilmez: `ger.1` ve `aut.1`in ikisi de "Bundesliga". `config/leagues.yaml`daki
+# HER lig (pasif dâhil) burada olur — yoksa kapı kırmızı (`tests/test_site_slugs.py`). Ayrılmış:
+# track-record, legal, data, _next.
+version: 1
+league_slugs:
+  eng.1: premier-league
+  esp.1: la-liga
+  ita.1: serie-a
+  ger.1: bundesliga
+  fra.1: ligue-1
+  tur.1: super-lig
+  ned.1: eredivisie
+  bel.1: first-division-a
+  aut.1: austrian-bundesliga
