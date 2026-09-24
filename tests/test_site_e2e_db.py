@@ -3,7 +3,11 @@
 Beklenen değerler ELLE hesaplandı; türetme kodu çağrılmaz (adil kitaplar, `site_builders`).
 Kurcalama iki varyant: çıpa ÖNCESİ ve SONRASI bir satırın fiyatı INSERT'ten ÖNCE değiştirilir,
 saklanan hash'ler eski kalır — UPDATE ve tetikleyici kapatma yoktur. Her varyant kendi kopyasında.
-Kimliklerde BOŞLUK vardır (canlı defter gibi): satır sayısı son kimliğe eşit değildir.
+Kimliklerde BOŞLUK vardır (canlı defter gibi): satır sayısı son kimliğe eşit değildir. Bu yüzden
+plan ve brief'teki "çıpa `id=40`" burada 40. SATIRDIR, kimliği 44'tür (`ANCHOR_ROWS`, `IDS`).
+Tohum üretim gibi maç İÇİ satır da taşır (snapshot turu canlı maçları yazar) ve başlama ANINDA
+kapanış satırı: maç öncesi süzgeci (`pre_kickoff`) ve onun kapsayıcı mühür sınırı uçtan uca sınanır.
+Tabanın iki yanı: tam tabandaki maç görünür, bir mikrosaniye öncesindeki görünmez.
 Sınır: `site.record` Faz 5'e kadar `where false`; sicil yalnız BOŞ hâliyle koşar (§12.4/12).
 Başarılı koşu anlık görüntüyü `SITE_E2E_DIR`e (verify.sh `site-db` adımı) bu koşunun kimliğiyle
 bırakır; B-2'nin `next build` adımı onu okur.
@@ -48,6 +52,7 @@ SCHEMA: dict[str, Any] = json.loads(
 )
 M1, M2, M3 = ("01" + "ef" * 15), ("02" + "ef" * 15), ("03" + "ef" * 15)
 EDGE, HOLDOUT, ASLEEP = ("04" + "ef" * 15), ("05" + "ef" * 15), ("06" + "ef" * 15)
+FLOOR = "07" + "ef" * 15
 MATCHES = [
     (M1, "e2e.1", "2026-09-22T14:00:00Z", "Alfa Spor", "Beta FK"),
     (M2, "e2e.1", "2026-09-23T15:00:00Z", "Gamma United", "Alfa Spor"),
@@ -55,6 +60,7 @@ MATCHES = [
     (EDGE, "e2e.1", "2026-07-01T23:59:59.999999Z", "Kenar A", "Kenar B"),
     (HOLDOUT, "e2e.1", "2026-01-15T12:00:00Z", "Eski A", "Eski B"),
     (ASLEEP, "e2e.9", "2026-09-21T18:00:00Z", "Uyku A", "Uyku B"),
+    (FLOOR, "e2e.1", "2026-07-02T00:00:00Z", "Taban A", "Taban B"),
 ]
 ROUNDS = [
     Round(HOLDOUT, "2026-01-14T10:00:00Z", "Eski A", "Eski B", [EVEN] * 3),  # satır 1–9
@@ -65,21 +71,47 @@ ROUNDS = [
     Round(M1, "2026-09-21T10:00:00Z", "Alfa Spor", "Beta FK", [EVEN] * 3, drop_away_for=0),  # 46–53
     Round(M2, "2026-09-21T11:00:00Z", "Gamma United", "Alfa Spor", [DRAWISH] * 3),  # 54–62
     Round(M3, "2026-09-21T12:00:00Z", "Delta Şehir", "Beta FK", [HOME_HEAVY] * 2),  # 63–68
-    Round(M1, "2026-09-22T13:00:00Z", "Alfa Spor", "Beta FK", SYMMETRIC, is_closing=True),  # 69–77
+    # Mühür turu tam başlama anında (seal_window'un kapsayıcı sınırı): kapanış olarak kalır.
+    Round(M1, "2026-09-22T14:00:00Z", "Alfa Spor", "Beta FK", SYMMETRIC, is_closing=True),  # 69–77
+    # Maç İÇİ tur (başlamadan 1 saat sonra): hiçbir sayıya girmez; sızsa M1 `latest` 80/10/10.
+    Round(M1, "2026-09-22T15:00:00Z", "Alfa Spor", "Beta FK", [HOME_HEAVY] * 3),  # 78–86
+    # Tam tabanda başlayan maç: tabandan eski gözlem H1e'ye takılır (verify her tarih dizesini
+    # tabanla kıyaslar), bu yüzden tek turu başlama ANINDAKİ mühür turudur. Satır 87–95.
+    Round(FLOOR, "2026-07-02T00:00:00Z", "Taban A", "Taban B", [EVEN] * 3, is_closing=True),
 ]
 ROWS = ledger(payloads(ROUNDS))
 # Canlı defterin kimliklerinde boşluk var (5763 satır, last_id 6165): geri alınan bir yazım sıra
 # değerlerini geri vermez. Tohum aynısını yapar — satır sırası → önünde geri alınan toplu yazımın
-# yaktığı kimlik sayısı. Kimlikler ELLE: 1–10, (11–14 yandı) 15–54, (55–57 yandı) 58–84.
+# yaktığı kimlik sayısı. Kimlikler ELLE: 1–10, (11–14 yandı) 15–54, (55–57 yandı) 58–102.
 BURNED = {10: 4, 50: 3}
-IDS = (*range(1, 11), *range(15, 55), *range(58, 85))
+IDS = (*range(1, 11), *range(15, 55), *range(58, 103))
 ANCHOR_ROWS = 40  # kesimin ortası: öncesi ve sonrası satır var; çıpanın last_id'si 44
 CLOSE = {
-    "observed_at": "2026-09-22T13:00:00Z",
+    "observed_at": "2026-09-22T14:00:00Z",
     "books": 3,
     "p": {"home": 33.3, "draw": 33.3, "away": 33.3},
 }
+AT_FLOOR = {
+    "observed_at": "2026-07-02T00:00:00Z",
+    "books": 3,
+    "p": {"home": 50.0, "draw": 25.0, "away": 25.0},
+}
 EXPECTED_MATCHES = [
+    {
+        "id": FLOOR,
+        "league_id": "e2e.1",
+        "path_id": FLOOR[:12],
+        "slug": "taban-a-vs-taban-b",
+        "date": "2026-07-02",
+        "commence_time": "2026-07-02T00:00:00Z",
+        "home": "Taban A",
+        "away": "Taban B",
+        "sealed": True,
+        "rounds": 1,
+        "h2h": {"opening": AT_FLOOR, "latest": AT_FLOOR, "closing": AT_FLOOR},
+        "move": {"home": 0.0, "draw": 0.0, "away": 0.0},  # tek tur: açılış = kapanış (§5.2)
+        "indexable": False,
+    },
     {
         "id": M1,
         "league_id": "e2e.1",
@@ -252,7 +284,7 @@ def test_the_real_views_export_the_hand_computed_snapshot(
     assert (out / "snapshot.sha256").read_text(encoding="utf-8") == (
         f"{hashlib.sha256(payload).hexdigest()}  snapshot.json\n"
     )
-    assert snapshot["matches"] == EXPECTED_MATCHES, "taban komşusu, holdout ya da pasif lig sızdı"
+    assert snapshot["matches"] == EXPECTED_MATCHES, "görünen maçlar elle beklenenden farklı"
     assert snapshot["ledger"] == {
         "rows": len(ROWS),
         "last_id": IDS[-1],
@@ -270,7 +302,7 @@ def test_the_real_views_export_the_hand_computed_snapshot(
             "slug": "deneme-ligi",
             "name": "Deneme Ligi",
             "country": "Testland",
-            "matches": 3,
+            "matches": 4,
             "move_distribution": None,
         }
     ]
@@ -279,6 +311,8 @@ def test_the_real_views_export_the_hand_computed_snapshot(
         ("beta-fk", 2, False),
         ("delta-sehir", 1, False),
         ("gamma-united", 1, False),
+        ("taban-a", 1, False),
+        ("taban-b", 1, False),
     ]
     assert snapshot["record"] == {"published": 0, "entries": [], "summary": None}
     assert (snapshot["value_badge"], snapshot["analysis"]) == (None, None)
