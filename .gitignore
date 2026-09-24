@@ -8,3 +8,9 @@ __pycache__/
 .env.*
 !.env.example
 .worktrees/
+
+# Faz 6 İz B (§5.2, §13): derleme çıktıları ve gerçek anlık görüntü depoya girmez.
+web/node_modules/
+web/.next/
+web/out/
+web/.snapshot/
