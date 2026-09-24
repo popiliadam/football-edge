@@ -3,10 +3,13 @@
 Faz 6 İz B tasarımı §2 H1f. Bekçi YASAK LİSTEYLE kodlanır (izin listesiyle değil): boş
 `football_edge.history` paket `__init__`i kapanışta meşru olarak durur; `history.types`
 `market.devig` ve `market.consensus` üzerinden bilinçli olarak kapanıştadır. İki katman: (1) AST ile
-her modülün `import`larını — fonksiyon içindekiler dâhil — izleyerek kapanışı kurar; (2) ayrı bir
-süreçte paketin her modülünü import edip `sys.modules`i okur. Bilinen sınır: hesaplanmış dizeyle
-(`importlib.import_module("football_edge." + ad)`) yapılan import (1)'de görünmez; (2) onu yalnız
-import anında çalışan kodda yakalar.
+her modülün `import`larını — fonksiyon içindekiler dâhil — ve dize LİTERALİYLE yapılan dinamik
+importları (`importlib.import_module("…")`, `import_module(name="…")`, `__import__("…")`;
+göreli literal `import_module("..x", __package__)` da) izleyerek kapanışı kurar; (2) ayrı bir
+süreçte paketin her modülünü import edip `sys.modules`i okur. Bilinen sınır: adı ya da paketi
+HESAPLANMIŞ (literal olmayan) dizeyle yapılan import
+(`importlib.import_module("football_edge." + ad)`) (1)'de görünmez; (2) onu yalnız import anında
+çalışan kodda yakalar.
 """
 
 from __future__ import annotations
@@ -50,6 +53,38 @@ def _with_parents(module: str) -> set[str]:
     return {".".join(parts[:end]) for end in range(1, len(parts) + 1)}
 
 
+_DYNAMIC_IMPORTS = frozenset({"import_module", "__import__"})
+
+
+def _argument(node: ast.Call, position: int, keyword: str) -> ast.expr | None:
+    if len(node.args) > position:
+        return node.args[position]
+    return next((kw.value for kw in node.keywords if kw.arg == keyword), None)
+
+
+def _literal_import(node: ast.Call, package: str) -> str | None:
+    """Dize literaliyle yapılan dinamik importun mutlak adı; literal değilse `None` (sınır)."""
+    func = node.func
+    called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    name = _argument(node, 0, "name")
+    if called not in _DYNAMIC_IMPORTS or not isinstance(name, ast.Constant):
+        return None
+    if not isinstance(name.value, str):
+        return None
+    relative = name.value[: len(name.value) - len(name.value.lstrip("."))]
+    if not relative:
+        return name.value
+    anchor_arg = _argument(node, 1, "package")
+    if isinstance(anchor_arg, ast.Constant) and isinstance(anchor_arg.value, str):
+        anchor = anchor_arg.value
+    elif isinstance(anchor_arg, ast.Name) and anchor_arg.id == "__package__":
+        anchor = package
+    else:
+        return None
+    parts = anchor.split(".")[: len(anchor.split(".")) - len(relative) + 1]
+    return ".".join([*parts, name.value[len(relative) :]])
+
+
 def _imports(module: str, src: Path = SRC) -> set[str]:
     """`module`ün doğrudan yüklediği `football_edge` modülleri (üst paketler dâhil)."""
     path = _path_of(module, src)
@@ -72,6 +107,10 @@ def _imports(module: str, src: Path = SRC) -> set[str]:
                 for alias in node.names
                 if _path_of(f"{base}.{alias.name}", src) is not None
             }
+        elif isinstance(node, ast.Call):
+            target = _literal_import(node, package)
+            if target is not None:
+                found.add(target)
     return {
         name
         for module_name in found
@@ -133,6 +172,38 @@ def test_the_static_walker_follows_imports_transitively(tmp_path: Path) -> None:
         (package / name).write_text(body, encoding="utf-8")
 
     reached = closure({"football_edge.site.a"}, src=tmp_path)
+
+    assert forbidden_in(reached) == ["football_edge.history.holdout"]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'importlib.import_module("football_edge.history.holdout")',
+        'importlib.import_module(name="football_edge.history.holdout")',
+        'import_module("football_edge.history.holdout")',
+        '__import__("football_edge.history.holdout")',
+        'importlib.import_module("..history.holdout", __package__)',
+        'importlib.import_module(".holdout", package="football_edge.history")',
+    ],
+)
+def test_the_static_walker_sees_literal_dynamic_imports(tmp_path: Path, call: str) -> None:
+    """Pozitif kontrol: dize literaliyle, fonksiyon içinde yapılan import da kapanıştadır."""
+    package = tmp_path / "football_edge"
+    for name, body in {
+        "__init__.py": "",
+        "site/__init__.py": "",
+        "site/c.py": (
+            "import importlib\nfrom importlib import import_module\n\n\n"
+            f"def f():\n    return {call}\n"
+        ),
+        "history/__init__.py": "",
+        "history/holdout.py": "",
+    }.items():
+        (package / name).parent.mkdir(parents=True, exist_ok=True)
+        (package / name).write_text(body, encoding="utf-8")
+
+    reached = closure({"football_edge.site.c"}, src=tmp_path)
 
     assert forbidden_in(reached) == ["football_edge.history.holdout"]
 

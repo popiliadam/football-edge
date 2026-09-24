@@ -77,7 +77,12 @@ OUTSIDE_CONTENT = ("generated_at", "git_sha", "content_sha256")
 
 
 def iso_z(moment: datetime) -> str:
-    """`2026-09-20T14:00:00Z` — anlık görüntünün tek zaman biçimi (mikrosaniye taşınmaz)."""
+    """`2026-09-20T14:00:00Z` — anlık görüntünün tek zaman biçimi (mikrosaniye taşınmaz).
+
+    Saat dilimi taşımayan an reddedilir: `astimezone` onu ana makinenin saat dilimiyle yorumlardı.
+    """
+    if moment.utcoffset() is None:
+        raise ValueError("iso_z saat dilimi taşımayan datetime kabul etmez")
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

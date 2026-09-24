@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,7 @@ from football_edge.history.holdout import HOLDOUT_END
 from football_edge.site.contract import (
     FORBIDDEN_KEYS,
     PUBLIC_FLOOR,
+    RECORD_COLUMNS,
     SCHEMA_VERSION,
     SITE_MIN_BOOKS,
     content_sha256,
@@ -91,6 +92,15 @@ def test_the_schema_constants_are_the_python_constants() -> None:
     assert schema["$defs"]["round"]["properties"]["books"]["minimum"] == SITE_MIN_BOOKS
 
 
+def test_the_record_entry_keys_are_the_record_columns_in_order() -> None:
+    """B5: `record.entries` `site.record` kolonlarını taşır — ne eksik, ne fazla, aynı sırayla."""
+    entries = _load(SCHEMA)["properties"]["record"]["properties"]["entries"]["items"]
+    names = [name for name, _ in RECORD_COLUMNS]
+
+    assert entries["required"] == names
+    assert list(entries["properties"]) == names
+
+
 def test_no_forbidden_key_is_declared_by_the_schema() -> None:
     """§4.3: yasak küme şemanın bildirdiği anahtarları dışlar — kesişim boş olmalı."""
     assert FORBIDDEN_KEYS & property_names(_load(SCHEMA)) == frozenset()
@@ -111,6 +121,29 @@ def test_the_content_hash_ignores_only_build_time_and_source_version() -> None:
 
     assert content_sha256(moved) == content_sha256(snapshot)
     assert content_sha256(touched) != content_sha256(snapshot)
+
+
+def _reversed_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    return dict(reversed(pairs))
+
+
+def test_the_content_hash_does_not_depend_on_key_order() -> None:
+    """Fixture'lar sıralı yazılmış; hash'in sıralamaya dayanmadığı ters sıralı kopyayla sınanır."""
+    snapshot = _load(BASE)
+    shuffled = json.loads(BASE.read_text(encoding="utf-8"), object_pairs_hook=_reversed_pairs)
+
+    assert list(shuffled) == list(reversed(list(snapshot)))
+    assert content_sha256(shuffled) == content_sha256(snapshot) == snapshot["content_sha256"]
+
+
+def test_iso_z_writes_utc_and_refuses_a_naive_moment() -> None:
+    """Saat dilimi taşımayan an, ana makinenin saat dilimiyle SESSİZCE yorumlanırdı."""
+    plus_three = timezone(timedelta(hours=3))
+
+    assert iso_z(datetime(2026, 9, 20, 14, tzinfo=UTC)) == "2026-09-20T14:00:00Z"
+    assert iso_z(datetime(2026, 9, 20, 17, 0, 0, 999, tzinfo=plus_three)) == "2026-09-20T14:00:00Z"
+    with pytest.raises(ValueError, match="saat dilimi"):
+        iso_z(datetime(2026, 9, 20, 14))
 
 
 @pytest.mark.parametrize(
