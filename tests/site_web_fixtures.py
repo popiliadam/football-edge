@@ -5,9 +5,15 @@ Uydurma lig/takım adları, gerçek satır yok (spec §5.2). Dosyalar elle düze
 depodaki dosyaların bu çıktıya bayt bayt eşit olduğunu sınar (sürüklenme bekçisi).
 
 Kapsanan durumlar (spec §6.4/1): dolu ve boş sicil · eşik altı açılış turu (`null`) ·
-mühürsüz maç (`closing: null`) · tek turlu maç · tam sayı değerli ondalık (`40.0`) ·
-negatif hareket · HTML'de kaçış isteyen adlar (`&`, `'`) · Türkçe harfler · çıpa geride
-(dolu) ve çıpa eşit (boş) · dışa aktarım anından önce ve sonra başlayan maçlar.
+mühürsüz maç (`closing: null`) · tek turlu maç (sıfır hareket, `0.0`) · tam sayı değerli
+ondalık (`40.0`) · negatif hareket · HTML'de kaçış isteyen adlar (`&`, `'`) · Türkçe harfler ·
+çıpa geride (dolu) ve çıpa eşit (boş) · dışa aktarım anından önce ve sonra başlayan maçlar ·
+dolu (`xla.1`, 5 hareketli mühürlü maç) ve boş (`xlb.1`) hareket dağılımı.
+
+Türetilmiş alanlar dışa aktarıcının (B-1 `derive`) kurallarıyla tutarlıdır: hareket = uç −
+açılış, iki uç görünürse (tek turda açılış = son → sıfır üçlü); dağılım = mühürlü, ≥ 2 turlu,
+hareketli maçlarda en büyük |bileşen|in numpy doğrusal yüzdelikleri, maç ≥ `MOVE_MIN_MATCHES`
+ise. `test_site_web_contract.py` bunu yeniden hesaplayarak sınar.
 """
 
 from __future__ import annotations
@@ -18,16 +24,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from football_edge.ledger import _canonical
+# Sözleşme sabitleri ve içerik hash'i B-1'den gelir (tek kaynak); `content_sha256` bu modülün
+# arayüzünün de parçasıdır (testler `site_web_fixtures.content_sha256` çağırır).
+from football_edge.site.contract import PATH_ID_LENGTH, SITE_MIN_TEAM_MATCHES, content_sha256
 
 REPO = Path(__file__).resolve().parent.parent
 FIXTURES = REPO / "web/fixtures"
 FULL = FIXTURES / "snapshot.fixture.web-full.json"
 EMPTY = FIXTURES / "snapshot.fixture.web-empty.json"
-# The Odds API olay kimliğinin sabit uzunluklu öneki (spec §8.1). Uzunluk B-1'in
-# `site/slugs.py` sabitidir; T10 `verify-snapshot` ile uzlaştırır.
-PATH_ID_LENGTH = 12
-HASHED_OUT = ("generated_at", "git_sha", "content_sha256")
+__all__ = ["EMPTY", "FULL", "PATH_ID_LENGTH", "build", "content_sha256", "expected_files"]
 
 Json = dict[str, Any]
 
@@ -38,12 +43,6 @@ def _hex(label: str) -> str:
 
 def _event_id(number: int) -> str:
     return hashlib.md5(f"fixture-match-{number}".encode()).hexdigest()
-
-
-def content_sha256(document: Json) -> str:
-    """Spec §5.2: `generated_at`, `git_sha` ve kendisi hariç gövdenin kanonik sha256'sı."""
-    body = {key: value for key, value in document.items() if key not in HASHED_OUT}
-    return hashlib.sha256(_canonical(body).encode("utf-8")).hexdigest()
 
 
 def _round(observed_at: str, books: int, home: float, draw: float, away: float) -> Json:
@@ -91,6 +90,9 @@ def _matches() -> list[Json]:
     close4 = _round("2026-09-22T19:30:00Z", 6, 28.9, 28.0, 43.1)
     only3 = _round("2026-09-23T06:00:00Z", 4, 36.1, 30.0, 33.9)
     close6 = _round("2026-09-23T16:45:00Z", 4, 42.5, 29.0, 28.5)
+    close7 = _round("2026-09-20T12:45:00Z", 6, 40.3, 28.6, 31.1)
+    close8 = _round("2026-09-21T16:45:00Z", 7, 52.2, 25.5, 22.3)
+    close9 = _round("2026-09-23T18:45:00Z", 5, 29.6, 29.4, 41.0)
     matches = [
         _match(
             1,
@@ -121,7 +123,8 @@ def _matches() -> list[Json]:
             move=None,
             indexable=True,
         ),
-        # Tek tur, mühürsüz, dışa aktarım anından SONRA başlıyor.
+        # Tek tur, mühürsüz, dışa aktarım anından SONRA başlıyor. Açılış = son, iki uç görünür:
+        # dışa aktarıcı sıfır üçlü basar (B-1 `_move`), `null` DEĞİL.
         _match(
             3,
             "xla.1",
@@ -133,7 +136,7 @@ def _matches() -> list[Json]:
             opening=only3,
             latest=only3,
             closing=None,
-            move=None,
+            move=_triple(0.0, 0.0, 0.0),
             indexable=False,
         ),
         _match(
@@ -180,6 +183,50 @@ def _matches() -> list[Json]:
             move=_triple(2.5, -1.0, -1.5),
             indexable=True,
         ),
+        # 7–9: `xla.1`in dağılımı yayımlanabilsin diye (≥ 5 mühürlü hareketli maç). En büyük
+        # |bileşen|ler 0.9 / 1.8 / 3.4; 1 ve 4'ün 2.6 / 1.7'siyle p10/p50/p90 = 1.2 / 1.8 / 3.1.
+        _match(
+            7,
+            "xla.1",
+            "2026-09-20T13:00:00Z",
+            "ob",
+            "db",
+            sealed=True,
+            rounds=8,
+            opening=_round("2026-09-17T06:00:00Z", 5, 41.2, 28.3, 30.5),
+            latest=close7,
+            closing=close7,
+            move=_triple(-0.9, 0.3, 0.6),
+            indexable=True,
+        ),
+        _match(
+            8,
+            "xla.1",
+            "2026-09-21T17:00:00Z",
+            "kz",
+            "ob",
+            sealed=True,
+            rounds=10,
+            opening=_round("2026-09-18T06:00:00Z", 6, 50.4, 26.1, 23.5),
+            latest=close8,
+            closing=close8,
+            move=_triple(1.8, -0.6, -1.2),
+            indexable=True,
+        ),
+        _match(
+            9,
+            "xla.1",
+            "2026-09-23T19:00:00Z",
+            "db",
+            "kz",
+            sealed=True,
+            rounds=11,
+            opening=_round("2026-09-20T06:00:00Z", 4, 33.0, 29.2, 37.8),
+            latest=close9,
+            closing=close9,
+            move=_triple(-3.4, 0.2, 3.2),
+            indexable=True,
+        ),
     ]
     return sorted(matches, key=lambda match: (match["commence_time"], match["id"]))
 
@@ -191,8 +238,8 @@ def _leagues() -> list[Json]:
             "slug": "synthetic-league-alpha",
             "name": "Synthetic League Alpha",
             "country": "Testland",
-            "matches": 5,
-            "move_distribution": {"p10": 0.4, "p50": 1.8, "p90": 4.1},
+            "matches": 8,
+            "move_distribution": {"p10": 1.2, "p50": 1.8, "p90": 3.1},
         },
         {
             "id": "xlb.1",
@@ -207,10 +254,10 @@ def _leagues() -> list[Json]:
 
 def _teams() -> list[Json]:
     counts = (
-        ("xla.1", "kz", 3),
+        ("xla.1", "kz", 5),
         ("xla.1", "gn", 2),
-        ("xla.1", "db", 3),
-        ("xla.1", "ob", 2),
+        ("xla.1", "db", 5),
+        ("xla.1", "ob", 4),
         ("xlb.1", "dc", 1),
         ("xlb.1", "et", 1),
     )
@@ -220,7 +267,7 @@ def _teams() -> list[Json]:
             "slug": TEAMS[key][1],
             "name": TEAMS[key][0],
             "matches": count,
-            "indexable": count >= 3,
+            "indexable": count >= SITE_MIN_TEAM_MATCHES,
         }
         for league, key, count in counts
     ]

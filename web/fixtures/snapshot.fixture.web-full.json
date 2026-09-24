@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_at": "2026-09-24T06:00:00Z",
   "git_sha": "25b512eecb97580981907c7a574434c66321f5bb",
-  "content_sha256": "9fac82327d8956076cd2bf51784be6a877790bef29fca284d4b1d482f88be215",
+  "content_sha256": "2a19bbbce934d321c9d7857e57640e42ba37a00c78b214a15ee018c23285803d",
   "ledger": {
     "rows": 1834,
     "last_id": 1840,
@@ -21,11 +21,11 @@
       "slug": "synthetic-league-alpha",
       "name": "Synthetic League Alpha",
       "country": "Testland",
-      "matches": 5,
+      "matches": 8,
       "move_distribution": {
-        "p10": 0.4,
+        "p10": 1.2,
         "p50": 1.8,
-        "p90": 4.1
+        "p90": 3.1
       }
     },
     {
@@ -42,7 +42,7 @@
       "league_id": "xla.1",
       "slug": "dogu-bati-fk",
       "name": "Doğu & Batı FK",
-      "matches": 3,
+      "matches": 5,
       "indexable": true
     },
     {
@@ -56,15 +56,15 @@
       "league_id": "xla.1",
       "slug": "kuzeyspor",
       "name": "Kuzeyspor",
-      "matches": 3,
+      "matches": 5,
       "indexable": true
     },
     {
       "league_id": "xla.1",
       "slug": "obrien-rovers",
       "name": "O'Brien Rovers",
-      "matches": 2,
-      "indexable": false
+      "matches": 4,
+      "indexable": true
     },
     {
       "league_id": "xlb.1",
@@ -130,6 +130,53 @@
       "indexable": true
     },
     {
+      "id": "057c7e5514ecc2f689a8904b8742abbe",
+      "league_id": "xla.1",
+      "path_id": "057c7e5514ec",
+      "slug": "obrien-rovers-vs-dogu-bati-fk",
+      "date": "2026-09-20",
+      "commence_time": "2026-09-20T13:00:00Z",
+      "home": "O'Brien Rovers",
+      "away": "Doğu & Batı FK",
+      "sealed": true,
+      "rounds": 8,
+      "h2h": {
+        "opening": {
+          "observed_at": "2026-09-17T06:00:00Z",
+          "books": 5,
+          "p": {
+            "home": 41.2,
+            "draw": 28.3,
+            "away": 30.5
+          }
+        },
+        "latest": {
+          "observed_at": "2026-09-20T12:45:00Z",
+          "books": 6,
+          "p": {
+            "home": 40.3,
+            "draw": 28.6,
+            "away": 31.1
+          }
+        },
+        "closing": {
+          "observed_at": "2026-09-20T12:45:00Z",
+          "books": 6,
+          "p": {
+            "home": 40.3,
+            "draw": 28.6,
+            "away": 31.1
+          }
+        }
+      },
+      "move": {
+        "home": -0.9,
+        "draw": 0.3,
+        "away": 0.6
+      },
+      "indexable": true
+    },
+    {
       "id": "34e5be017510d1e27d6773ffd0954e1e",
       "league_id": "xla.1",
       "path_id": "34e5be017510",
@@ -162,6 +209,53 @@
         }
       },
       "move": null,
+      "indexable": true
+    },
+    {
+      "id": "031bcb4343b0b50b5b5775533c599452",
+      "league_id": "xla.1",
+      "path_id": "031bcb4343b0",
+      "slug": "kuzeyspor-vs-obrien-rovers",
+      "date": "2026-09-21",
+      "commence_time": "2026-09-21T17:00:00Z",
+      "home": "Kuzeyspor",
+      "away": "O'Brien Rovers",
+      "sealed": true,
+      "rounds": 10,
+      "h2h": {
+        "opening": {
+          "observed_at": "2026-09-18T06:00:00Z",
+          "books": 6,
+          "p": {
+            "home": 50.4,
+            "draw": 26.1,
+            "away": 23.5
+          }
+        },
+        "latest": {
+          "observed_at": "2026-09-21T16:45:00Z",
+          "books": 7,
+          "p": {
+            "home": 52.2,
+            "draw": 25.5,
+            "away": 22.3
+          }
+        },
+        "closing": {
+          "observed_at": "2026-09-21T16:45:00Z",
+          "books": 7,
+          "p": {
+            "home": 52.2,
+            "draw": 25.5,
+            "away": 22.3
+          }
+        }
+      },
+      "move": {
+        "home": 1.8,
+        "draw": -0.6,
+        "away": -1.2
+      },
       "indexable": true
     },
     {
@@ -259,6 +353,53 @@
       "indexable": true
     },
     {
+      "id": "f49e077bd12b635889df431f7c2e0870",
+      "league_id": "xla.1",
+      "path_id": "f49e077bd12b",
+      "slug": "dogu-bati-fk-vs-kuzeyspor",
+      "date": "2026-09-23",
+      "commence_time": "2026-09-23T19:00:00Z",
+      "home": "Doğu & Batı FK",
+      "away": "Kuzeyspor",
+      "sealed": true,
+      "rounds": 11,
+      "h2h": {
+        "opening": {
+          "observed_at": "2026-09-20T06:00:00Z",
+          "books": 4,
+          "p": {
+            "home": 33.0,
+            "draw": 29.2,
+            "away": 37.8
+          }
+        },
+        "latest": {
+          "observed_at": "2026-09-23T18:45:00Z",
+          "books": 5,
+          "p": {
+            "home": 29.6,
+            "draw": 29.4,
+            "away": 41.0
+          }
+        },
+        "closing": {
+          "observed_at": "2026-09-23T18:45:00Z",
+          "books": 5,
+          "p": {
+            "home": 29.6,
+            "draw": 29.4,
+            "away": 41.0
+          }
+        }
+      },
+      "move": {
+        "home": -3.4,
+        "draw": 0.2,
+        "away": 3.2
+      },
+      "indexable": true
+    },
+    {
       "id": "cdc63e7b45d98699e36131f0ed98ed41",
       "league_id": "xla.1",
       "path_id": "cdc63e7b45d9",
@@ -290,7 +431,11 @@
         },
         "closing": null
       },
-      "move": null,
+      "move": {
+        "home": 0.0,
+        "draw": 0.0,
+        "away": 0.0
+      },
       "indexable": false
     },
     {

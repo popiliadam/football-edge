@@ -77,7 +77,7 @@ export type Match = {
 export type RecordEntry = {
   publication_id: number;
   match_id: string;
-  market: string;
+  market: "h2h";
   outcome: "home" | "draw" | "away";
   published_at: string;
   published_price: number;
