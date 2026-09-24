@@ -6,8 +6,9 @@ havuzunda on kez ölçüldü. `verify.sh` canlı `DATABASE_URL` ile koşunca ayn
 kapı loguna yazardı.
 `--tb=short|line|no` yerel değişken basmaz. Bu dosya, test KOŞTURAN her pytest çağrısının bunu
 taşıdığını sabitler; `--collect-only` test koşturmaz ve kapsam dışıdır. `-l`/`--showlocals`
-(`-ql` gibi kümeler dâhil) `--tb=short` ile de yerel değişken basar, `--tb=long|auto` sonra gelirse
-kısayı ezer: ikisi de reddedilir. Satır sonu yorumu koşu sayılmaz (DEFERRED 18g a). Ölçmediği:
+(`-ql`, `-lrs` gibi kümeler dâhil) `--tb=short` ile de yerel değişken basar, `--tb=long|auto` sonra
+gelirse kısayı ezer, `--full-trace` kısaltmayı kapatır: hepsi reddedilir (B-1 son düzeltme yeniden
+incelemesi (c)). Satır sonu yorumu koşu sayılmaz (DEFERRED 18g a). Ölçmediği:
 `PYTEST_ADDOPTS` ve `pyproject` `addopts` (çağıranın ortamı).
 """
 
@@ -20,7 +21,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 SAFE_TRACEBACK = re.compile(r"--tb[= ](short|line|no)\b")
-LOCALS = re.compile(r"(?:^|\s)(?:-[qvxs]*l[qvxsl]*|--showlocals|--tb[= ](?:long|auto))(?=\s|$)")
+LOCALS = re.compile(
+    r"(?:^|\s)(?:-[qvxs]*l\S*|--showlocals|--full-trace|--tb[= ](?:long|auto))(?=\s|$)"
+)
 COMMENT = re.compile(r"(?:^|\s)#.*$")
 
 
@@ -54,6 +57,9 @@ def test_every_pytest_run_prints_no_local_variables(script: str, expected_runs: 
         "uv run pytest --tb=short --showlocals",
         "uv run pytest --tb=short --tb=long",
         "uv run pytest --tb=short --tb auto",
+        "uv run pytest -lrs --tb=short",
+        "uv run pytest -qlrs --tb=short",
+        "uv run pytest --tb=short --full-trace",
     ],
 )
 def test_the_locals_guard_names_each_unsafe_flag(line: str) -> None:

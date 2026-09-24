@@ -16,6 +16,12 @@ name: site
 # yeşiline bağlı.
 on:
   workflow_dispatch:
+    inputs:
+      first_publish:
+        # AK20 b: önceki yayının /data/slugs.json'ı yokken YALNIZ ilk yayında açılır.
+        description: "İlk yayın — önceki /data/slugs.json yok (kaybolan-slug karşılaştırması yapılmaz)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -65,9 +71,17 @@ jobs:
         run: pnpm -C web run build
       - name: Çıktı tarayıcısı
         run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
-      # B-2 T10 → kaybolan-slug: `scripts/site_publish.py slugs` adımı BURAYA — tarayıcıdan sonra,
-      # yayın paketinden ÖNCE (AK20 b). Secret'sızdır (`FIRST_PUBLISH` girdisi), Python bu işte kurulu;
-      # kırmızıysa paket yüklenmez ve `needs` yayını durdurur (controller kararı, T8 düzeltme turu 2).
+      # B-2 T10 → kaybolan-slug: `scripts/site_publish.py slugs` tarayıcıdan sonra, yayın paketinden
+      # ÖNCE (AK20 b). Secret'sızdır (`FIRST_PUBLISH` girdisi), Python bu işte kurulu; kırmızıysa paket
+      # yüklenmez ve `needs` yayını durdurur (controller kararı, T8 düzeltme turu 2). Önceki yayının
+      # `/data/slugs.json`ı `web/site.config.ts` `SITE_URL`inden okunur; yer tutucu (`.invalid`) iken
+      # ağa çıkmadan kırmızıdır (AK4 kararı yok).
+      - name: Kaybolan slug kontrolü (AK20 b — kırmızıysa yayın yok)
+        env:
+          FIRST_PUBLISH: ${{ inputs.first_publish }}
+        run: |
+          if [ "$FIRST_PUBLISH" = "true" ]; then set -- --first-publish; fi
+          uv run python scripts/site_publish.py slugs "$@"
       # Yalnız yayına gidecek olan: denetlenmiş site ve dışa aktarımın özeti (B-2'nin yayın sonrası
       # kontrolü "yayımlanan = doğrulanan"ı onunla sınar). Kitap bazında veri taşıyan hiçbir şey ve
       # snapshot.json yüklenmez. `.snapshot` gizli dizin: `include-hidden-files` olmadan düşerdi.
@@ -107,13 +121,16 @@ jobs:
         run: npm install --global netlify-cli@27.8.1
       # Bu iş BEŞ adımdır ve testle sabittir: Python/Node kurulumu, `uv sync`, `pip`, `NODE_OPTIONS`
       # ya da başka bir adım girmez (tokenlı süreçten önce kilitsiz kod koşardı). B-2 T10 buraya YALNIZ
-      # yayın komutuna `--no-build`ı ekler; kaybolan-slug `build` işinde, yayın sonrası kontrol `live`
+      # yayın komutuna `--no-build`ı ekledi; kaybolan-slug `build` işinde, yayın sonrası kontrol `live`
       # işindedir (işaretli yerler; controller kararı, T8 düzeltme turu 2).
+      # `--no-build`: netlify-cli v21'den beri `deploy` yapılandırmadaki derleme komutunu KENDİSİ
+      # koşar; `netlify.toml`unki bilerek `exit 1` verir (AK16) — bayraksız hiçbir yayın olamazdı.
+      # `--dir web/out` `publish = "out"`u geçersiz kılar; `--config` yalnız dosyayı bulmak içindir.
       - name: Yayın
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: netlify deploy --prod --dir web/out --config web/netlify.toml
+        run: netlify deploy --prod --dir web/out --no-build --config web/netlify.toml
 
   # Yayından sonra secret'sız denetim işi (§6.4/3f): Netlify kimliği ve DB adresi burada YOK; Python
   # kurulumu serbesttir. Artifact "yayımlanan = doğrulanan" karşılaştırmasının derleme tarafıdır.
@@ -134,4 +151,9 @@ jobs:
         with:
           name: site
           path: web
-      # B-2 T10 → yayın sonrası kontrol: `scripts/site_publish.py live` adımı BURAYA (işin sonu).
+      # B-2 T10 → yayın sonrası kontrol (§6.4/3f): yayımlanan = doğrulanan. Canlı
+      # `/data/snapshot.sha256` derlenmiş ve dışa aktarılmış özetle, örnek sayfaların CSP'si ve
+      # `X-Robots-Tag`i derlenmiş `_headers`le aynı olmalı. Kırmızıysa koşu kırmızıdır (yayın geri
+      # alınmaz; alarm). Yer tutucu `SITE_URL` iken ağa çıkmadan kırmızıdır.
+      - name: Yayın sonrası kontrol (§6.4/3f)
+        run: uv run python scripts/site_publish.py live

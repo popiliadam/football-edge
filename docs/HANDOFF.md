@@ -320,8 +320,11 @@ Bunlar plansız kalırsa bir sonraki tek açılış riske girer.
 
 - **Süreç:** tasarım → kullanıcı onayı → plan (`writing-plans`; planın kodu plan metninden tek ağaca kurulup kapıdan
   geçirilir) → bağımsız plan incelemesi → `subagent-driven-development`. Faz 3 bu düzende 1 günde bitti.
-- **Kapı:** `TMPDIR=$(mktemp -d) ./verify.sh > <log> 2>&1`, sonuç LOG DOSYASINDAN; 10 PASS + `SKIP: zincir` adıyla
-  (DB bağlıyken 11/11). Her commit'ten sonra tam kapı; `main`e `--no-ff`; push öncesi `git fetch && git merge --no-ff
+- **Kapı:** önkoşul Node 24 — önce `source ~/.nvm/nvm.sh && nvm use 24.21.0` (Faz 6 B-2 T10'dan beri; PATH'teki
+  Node 22 ile `FAIL: site-kurulum` — `HATA: Node 22, .nvmrc 24 istiyor`), sonra `TMPDIR=$(mktemp -d) ./verify.sh >
+  <log> 2>&1`, sonuç LOG DOSYASINDAN. Yerelde DB'siz 16 PASS + `SKIP: site-db`, `SKIP: site-derleme/e2e`,
+  `SKIP: zincir`; kum havuzu kabıyla (`SITE_TEST_DATABASE_URL`) 17 PASS + `SKIP: zincir`; `zincir` yalnız
+  `DATABASE_URL` bağlıyken koşar (kipler: `docs/phases/06-site/HANDOFF.md` "B-2 T10"). Her commit'ten sonra tam kapı; `main`e `--no-ff`; push öncesi `git fetch && git merge --no-ff
   origin/main`; taze klon kapısı; CI yeşil. Force/rebase yok (bot çıpaları).
 - **Worktree:** `git worktree add .worktrees/wt-<görev> -b feat/<faz>-<görev> main` (Agent'ın `isolation: worktree`ü
   bu makinede çalışmıyor). Dalga başına ≤ 4 paralel implementer, ayrık dosya kümeleri.
