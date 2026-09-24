@@ -62,6 +62,39 @@ def test_pre_prices_is_the_latest_round_consensus_under_the_reference_key() -> N
     assert pre_prices(QUOTES, MATCH, T0 - timedelta(seconds=1)) is None
 
 
+def test_the_round_mean_is_the_exact_fsum_float_in_both_callers() -> None:
+    """Mühürlü kapanış (`load_closing` → `pre_prices`) bu float'ı taşır: toplama biçimi sabittir.
+
+    Ev fiyatları 1.1, 1.2, 3.4 (bu sırayla üç tam kitap): `math.fsum` → 1.9000000000000001,
+    Python 3.11'in düz `sum`ı → 1.8999999999999997 (T2 M3; CI 3.11 koşar). `approx` değil `==`.
+    """
+    quotes = [
+        *_book("a", T0, (1.1, 5.0, 9.0)),
+        *_book("b", T0, (1.2, 5.0, 9.0)),
+        *_book("c", T0, (3.4, 5.0, 9.0)),
+    ]
+
+    found = round_consensus(quotes, T0, "Ev", "Dep")
+    prices = pre_prices(quotes, MATCH, T0)
+
+    assert found is not None and prices is not None
+    assert found.means[0] == 1.9000000000000001
+    assert (
+        prices[OddsKey(context.REFERENCE_BOOK, H2H, RESULTS[0], PRE_CLOSING)] == 1.9000000000000001
+    )
+
+
+def test_a_later_round_of_another_market_does_not_move_pre_prices() -> None:
+    """`pre_prices` en son turu yalnız 1X2 satırları arasında seçer: sonraki bir `totals` turu
+    kararı None'a düşürmez ve fiyatı değiştirmez."""
+    later_totals = Quote("m1", T1 + timedelta(minutes=5), "a", "totals", "Over", 1.9)
+
+    with_totals = pre_prices([*QUOTES, later_totals], MATCH, T1 + timedelta(minutes=10))
+
+    assert with_totals is not None
+    assert with_totals == pre_prices(QUOTES, MATCH, T1)
+
+
 def test_live_context_re_exports_the_moved_names() -> None:
     """`live/store.py` ve testler importlarını değiştirmez."""
     assert context.Quote is Quote

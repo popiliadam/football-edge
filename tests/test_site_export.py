@@ -444,11 +444,16 @@ def test_an_unreadable_older_anchor_is_red_not_dropped(
     _refused(_db(), tmp_path, EXIT_SITE_CHAIN, needle, anchor_dir=anchors)
 
 
-def test_an_inconsistent_empty_ledger_anchor_is_red(tmp_path: Path) -> None:
-    """`last_id=0` çıpası `_first_anchor_break`te atlanır; satır sayan ya da GENESIS dışı baş
-    taşıyorsa boş defterin çıpası değildir."""
+@pytest.mark.parametrize(
+    ("rows", "head"),
+    [(10, "e" * 64), (10, GENESIS), (0, "e" * 64)],
+    ids=["both", "rows-only", "head-only"],
+)
+def test_an_inconsistent_empty_ledger_anchor_is_red(tmp_path: Path, rows: int, head: str) -> None:
+    """`last_id=0` çıpası `_first_anchor_break`te atlanır; satır sayan YA DA GENESIS dışı baş
+    taşıyorsa boş defterin çıpası değildir — iki koşul ayrı ayrı yeter (T6 N2)."""
     anchors = _anchors(tmp_path)
-    _commit_anchor(anchors, OLDER, _anchor_text(rows=10, last_id=0, head="e" * 64))
+    _commit_anchor(anchors, OLDER, _anchor_text(rows=rows, last_id=0, head=head))
 
     _refused(
         _db(), tmp_path, EXIT_SITE_CHAIN, f"boş defter çıpası tutarsız: {OLDER}", anchor_dir=anchors

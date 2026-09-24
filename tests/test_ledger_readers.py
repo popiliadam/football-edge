@@ -24,6 +24,7 @@ from football_edge.collect import (
     LEDGER_RELATIONS,
     LEDGER_TABLE,
     _anchor_break,
+    _first_anchor_break,
     _ledger_row,
     _ledger_rows,
 )
@@ -34,18 +35,24 @@ WRITE = re.compile(r"\b(?:insert\s+into|copy)\s+(?:public\.)?odds_snapshots\b", 
 
 
 class _Recording:
-    """`FakeChainDb`in gönderilen SQL'i kaydeden sargısı."""
+    """`FakeChainDb`in gönderilen SQL'i kaydeden sargısı. `served` verilince yalnız o ilişki
+    vardır: başka ilişkiye giden sorgu, 0014'ün uygulanmadığı üretimdeki gibi hata verir."""
 
-    def __init__(self) -> None:
+    def __init__(self, served: str | None = None) -> None:
         self.db = FakeChainDb(chained_rows(3))
         self.seen: list[str] = []
+        self.served = served
 
     def cursor(self) -> Any:
         cursor = self.db.cursor()
         original = cursor.execute
 
         def execute(sql: str, params: Any = None) -> None:
-            self.seen.append(" ".join(sql.split()))
+            text = " ".join(sql.split())
+            self.seen.append(text)
+            relation = text.split(" FROM ")[1].split()[0]
+            if self.served is not None and relation != self.served:
+                raise AssertionError(f"ilişki yok: {relation}")
             original(sql, params)
 
         cursor.execute = execute  # type: ignore[method-assign]
@@ -64,6 +71,18 @@ def test_every_reader_reads_the_relation_it_is_given(relation: str) -> None:
     _anchor_break(db, Anchor(Path("x"), 3, 3, str(rows[-1]["row_hash"])), relation=relation)  # type: ignore[arg-type]
 
     assert db.seen and all(text.split(" FROM ")[1].split()[0] == relation for text in db.seen)
+
+
+def test_readers_without_a_relation_read_the_ledger_table() -> None:
+    """Varsayılan ilişki `odds_snapshots`tır (T2 M1): `seal.yml`in `verify-chain`/`publish-head`i
+    `relation=` vermez ve 0014'ün uygulanmadığı üretimde `site_audit` yoktur."""
+    db = _Recording(served=LEDGER_TABLE)
+    rows = _ledger_rows(db, None)  # type: ignore[arg-type]
+    anchor = Anchor(Path("head-x.txt"), 3, 3, str(rows[-1]["row_hash"]))
+
+    assert _first_anchor_break(db, (anchor,)) is None  # type: ignore[arg-type]
+    assert len(rows) == 3
+    assert {text.split(" FROM ")[1].split()[0] for text in db.seen} == {LEDGER_TABLE}
 
 
 def test_a_relation_outside_the_closed_set_is_refused() -> None:
