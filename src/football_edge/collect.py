@@ -111,14 +111,35 @@ EXIT_LANGUAGE_UNCALIBRATED = 8
 # sayı 19. `snapshot.yml` 19'u ADIYLA karşılar (bkz. `tests/test_workflows.py`).
 EXIT_EMPTY_ROUND = 19
 
-_LEDGER_COLUMNS = """
-    SELECT match_id, observed_at, bookmaker, market, outcome, point, price,
-           bookmaker_last_update, is_closing, prev_hash, row_hash
-    FROM odds_snapshots
-"""
-_LEDGER_ALL = _LEDGER_COLUMNS + " ORDER BY id"
-_LEDGER_AFTER = _LEDGER_COLUMNS + " WHERE id > %s ORDER BY id"
-_LEDGER_AT = _LEDGER_COLUMNS + " WHERE id = %s"
+# Zincirin hash'lediği kolonlar, `ORDER BY id` sırasıyla okunur. Tek okuyucu iki ilişkiden okur:
+# boru hattı tablonun kendisinden, site `site_audit.ledger_rows` görünümünden (Faz 6 İz B §6.4/3a).
+# İlişki adı SQL'e gömülür; bu yüzden yalnız aşağıdaki kapalı kümeden gelebilir.
+LEDGER_TABLE = "odds_snapshots"
+LEDGER_AUDIT_VIEW = "site_audit.ledger_rows"
+LEDGER_RELATIONS = frozenset({LEDGER_TABLE, LEDGER_AUDIT_VIEW})
+_LEDGER_COLUMNS: tuple[str, ...] = (
+    "match_id",
+    "observed_at",
+    "bookmaker",
+    "market",
+    "outcome",
+    "point",
+    "price",
+    "bookmaker_last_update",
+    "is_closing",
+    "prev_hash",
+    "row_hash",
+)
+
+
+def _known(relation: str) -> str:
+    if relation not in LEDGER_RELATIONS:
+        raise ValueError(f"bilinmeyen defter ilişkisi: {relation!r}")
+    return relation
+
+
+def _ledger_select(relation: str, where: str = "") -> str:
+    return f"SELECT {', '.join(_LEDGER_COLUMNS)} FROM {_known(relation)}{where}"
 
 
 def _require_env(name: str) -> str:
@@ -152,28 +173,34 @@ def _normalised(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ledger_rows(conn: psycopg.Connection[Any], after_id: int | None) -> tuple[dict[str, Any], ...]:
+def _ledger_rows(
+    conn: psycopg.Connection[Any], after_id: int | None, *, relation: str = LEDGER_TABLE
+) -> tuple[dict[str, Any], ...]:
     """Defteri okur. `after_id` verilince yalnız çıpadan SONRAKİ kuyruk çekilir."""
     with conn.cursor() as cur:
         if after_id is None:
-            cur.execute(_LEDGER_ALL)
+            cur.execute(_ledger_select(relation, " ORDER BY id"))
         else:
-            cur.execute(_LEDGER_AFTER, (after_id,))
+            cur.execute(_ledger_select(relation, " WHERE id > %s ORDER BY id"), (after_id,))
         columns = [desc[0] for desc in cur.description or ()]
         records = tuple(dict(zip(columns, record, strict=True)) for record in cur.fetchall())
     return tuple(_normalised(record) for record in records)
 
 
-def _ledger_row(conn: psycopg.Connection[Any], row_id: int) -> dict[str, Any] | None:
+def _ledger_row(
+    conn: psycopg.Connection[Any], row_id: int, *, relation: str = LEDGER_TABLE
+) -> dict[str, Any] | None:
     """Tek satırı yükü ve prev_hash'iyle birlikte okur — hash yeniden hesaplanabilsin diye."""
     with conn.cursor() as cur:
-        cur.execute(_LEDGER_AT, (row_id,))
+        cur.execute(_ledger_select(relation, " WHERE id = %s"), (row_id,))
         columns = [desc[0] for desc in cur.description or ()]
         found = cur.fetchone()
     return None if found is None else _normalised(dict(zip(columns, found, strict=True)))
 
 
-def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
+def _anchor_break(
+    conn: psycopg.Connection[Any], anchor: Anchor, *, relation: str = LEDGER_TABLE
+) -> str | None:
     """Çıpanın işaret ettiği satırın İÇERİĞİ hâlâ çıpadaki hash'i üretiyor mu?
 
     TRUNCATE satır-seviyesi append-only tetikleyicisini ATEŞLEMEZ. Kuyruk kesilip aynı
@@ -187,9 +214,9 @@ def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
     değerinden YENİDEN HESAPLANIR; hücrenin kendisine bakılmaz.
     """
     with conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM odds_snapshots")
+        cur.execute(f"SELECT count(*) FROM {_known(relation)}")
         total = int((cur.fetchone() or (0,))[0])
-    row = _ledger_row(conn, anchor.last_id)
+    row = _ledger_row(conn, anchor.last_id, relation=relation)
     if row is None:
         return f"çıpanın işaret ettiği satır (id={anchor.last_id}) defterde yok"
     if row_hash(str(row["prev_hash"]), payload_of(row)) != anchor.head:
@@ -199,7 +226,9 @@ def _anchor_break(conn: psycopg.Connection[Any], anchor: Anchor) -> str | None:
     return None
 
 
-def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ...]) -> str | None:
+def _first_anchor_break(
+    conn: psycopg.Connection[Any], anchors: tuple[Anchor, ...], *, relation: str = LEDGER_TABLE
+) -> str | None:
     """Verilen çıpaları SIRAYLA sorar, ilk uyuşmazlığı dosya adıyla döner.
 
     Hangi çıpaların sorulacağına KENDİSİ karar vermez — çağıran (`_verify_chain_command`)
@@ -208,7 +237,7 @@ def _first_anchor_break(conn: psycopg.Connection[Any], anchors: tuple[Anchor, ..
     for anchor in anchors:
         if anchor.last_id <= 0:
             continue  # Boş defterin çıpası: kesilecek kuyruk yok.
-        breakage = _anchor_break(conn, anchor)
+        breakage = _anchor_break(conn, anchor, relation=relation)
         if breakage is not None:
             return f"{breakage} ({anchor.path.name})"
     return None
