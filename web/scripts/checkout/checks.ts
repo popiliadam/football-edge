@@ -18,7 +18,7 @@ import {
   visibleText,
 } from "../lib/html.ts";
 import { type ExpectedPage, expectedLabel, fieldKind, resolveField } from "./expect.ts";
-import { surfaceTexts } from "./surface.ts";
+import { nextPushes, surfaceTexts } from "./surface.ts";
 import { squash } from "./text.ts";
 import { fold, LICENSE_PATTERNS } from "./words.ts";
 
@@ -279,16 +279,18 @@ export const SECRET_PATTERNS = [
   "postgres://",
   "postgresql://",
   "service_role",
-  "eyJ",
   "SUPABASE_",
   "NETLIFY_AUTH",
 ];
+// JWT biçimi (T9 yeniden inceleme FP2): `eyJ` + base64url başlık `.` base64url yük `.` imza. Çıplak `eyJ`
+// alt dizesi base64 CSP hash'lerinde ve Next'in rastgele dosya adlarında rastlantıyla geçer (≈1,6·10⁻⁴/hash).
+export const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/;
 
 // H5: anahtar kalıpları hiçbir çıktı dosyasında yok.
 export function secretFindings(where: string, text: string): string[] {
-  return SECRET_PATTERNS.filter((pattern) => text.includes(pattern)).map(
-    (pattern) => `${where}: gizli anahtar kalıbı "${pattern}" (H5)`,
-  );
+  const found = SECRET_PATTERNS.filter((pattern) => text.includes(pattern));
+  if (JWT.test(text)) found.push("JWT");
+  return found.map((pattern) => `${where}: gizli anahtar kalıbı "${pattern}" (H5)`);
 }
 
 // H1 (§12.4/4 sınırı: yalnız tarih kalıbı): tabandan eski ISO ya da GG.AA.YYYY tarih yok;
@@ -352,23 +354,16 @@ export function checkCsp(page: ExpectedPage, html: string, headers: Headers): st
   return findings;
 }
 
-// Next'in satır içi betikleri sabittir (T9 inceleme M9): tam iki yürütülebilir betik — önyükleme ve
-// RSC verisi. Hash'i `_headers`'a da eklenmiş fazladan bir betik küme denetiminden geçerdi.
-const BOOT = "(self.__next_f=self.__next_f||[]).push([0])";
-
+// Next'in satır içi betikleri sabit biçimlidir (T9 inceleme M9; yeniden inceleme FP1, N2): birebir
+// önyükleme + bir ya da daha çok TAM ayrışan veri itişi. Hash'i `_headers`'a da eklenmiş fazladan bir
+// betik ya da itişin sonuna eklenmiş JS küme denetiminden geçerdi; biçim denetiminden geçemez.
 export function inlineScriptFindings(where: string, html: string): string[] {
-  const bodies = scripts(html)
-    .filter(isExecutableInline)
-    .map((script) => script.body);
-  const data = bodies[1] ?? "";
-  const shaped =
-    bodies.length === 2 &&
-    bodies[0] === BOOT &&
-    data.startsWith('self.__next_f.push([1,"') &&
-    data.endsWith('"])');
-  return shaped
+  const { boot, malformed, pushes } = nextPushes(html);
+  return boot && pushes >= 1 && malformed === 0
     ? []
-    : [`${where}: satır içi betikler beklenen iki biçimde değil (${bodies.length})`];
+    : [
+        `${where}: satır içi betikler beklenen biçimde değil (önyükleme ${boot}, itiş ${pushes}, ayrışmayan ${malformed})`,
+      ];
 }
 
 // Beklenen `/*` güvenlik başlıkları (emit.ts'ten bağımsız yazılır).

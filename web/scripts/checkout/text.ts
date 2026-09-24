@@ -3,7 +3,7 @@
 // değildir; yorumlar atlanır. Kapanmayan etiket (ör. `<p>` örtük kapanışı) yığında kalır: bağlam
 // fazla geniş okunur, dar değil — gizli sayılan bir düğüm yanlışlıkla görünür sayılmaz.
 import { type Attrs, decodeEntities, parseAttrs, stripScripts } from "../lib/html.ts";
-import { decodeNamed } from "./words.ts";
+import { decodeNamed } from "./entities.ts";
 
 export type Ancestor = { tag: string; attrs: Attrs };
 export type TextNode = { text: string; ancestors: readonly Ancestor[] };

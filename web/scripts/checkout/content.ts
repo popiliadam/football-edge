@@ -6,6 +6,7 @@ import { DICTIONARIES, type DictKey, t } from "../../src/i18n/dict.ts";
 import type { Snapshot } from "../../src/lib/snapshot-types.ts";
 import { decodeEntities, stripScripts, tags, visibleText } from "../lib/html.ts";
 import { ALLOW_MARKER, countMarkers } from "./checks.ts";
+import { decodeNamed } from "./entities.ts";
 import type { ExpectedPage } from "./expect.ts";
 import { utcText } from "./numbers.ts";
 import { ldStrings, surfaceTexts } from "./surface.ts";
@@ -14,6 +15,7 @@ import {
   ALLOWED_SENTENCE_KEYS,
   ALLOWED_SENTENCES,
   BOOKMAKERS,
+  escapeRegExp,
   fold,
   SUGGESTION_WORDS,
   wordPattern,
@@ -38,10 +40,12 @@ const EVENT_SCHEDULED = `${SCHEMA}/EventScheduled`;
 const ANY_TAG = "[a-z][a-z0-9-]*";
 
 // Tarayıcının URL ayrıştırıcısı `\`i `/`ye çevirir, sekme/satır sonunu siler: `/\host` ve `/<TAB>/host`
-// dış hosta gider. Ters eğik çizgi, boşluk ya da kontrol karakteri taşıyan URL iç sayılmaz (M1).
-function internal(url: string): boolean {
-  const unsafe = [...url].some((char) => char === "\\" || (char.codePointAt(0) ?? 0) <= 0x20);
-  if (unsafe || url.includes("\u007f")) return false;
+// dış hosta gider. Ters eğik çizgi, herhangi bir boşluk (NBSP dahil), kontrol ya da biçim karakteri
+// taşıyan URL iç sayılmaz (M1; yeniden inceleme N4a). Adlı varlıklar önce çözülür (`/&sol;host`, N1).
+export function internal(raw: string): boolean {
+  const url = decodeNamed(raw);
+  const unsafe = /[\\\s\p{Cc}\p{Cf}]/u.test(url);
+  if (unsafe) return false;
   if (url.startsWith("#")) return true;
   if (url.startsWith("/")) return !url.startsWith("//");
   return url === SITE_URL || url.startsWith(`${SITE_URL}/`);
@@ -60,7 +64,7 @@ function ldUrlFindings(where: string, html: string): string[] {
 function refreshTargets(html: string): string[] {
   return tags(html, "meta")
     .filter((meta) => (meta["http-equiv"] ?? "").toLowerCase() === "refresh")
-    .map((meta) => /url\s*=\s*['"]?([^'"]*)/i.exec(meta.content ?? "")?.[1] ?? "");
+    .map((meta) => /url\s*=\s*['"]?([^'"]*)/i.exec(decodeNamed(meta.content ?? ""))?.[1] ?? "");
 }
 
 export function linkFindings(where: string, html: string): string[] {
@@ -80,25 +84,50 @@ export function linkFindings(where: string, html: string): string[] {
   for (const url of refreshTargets(html).filter((each) => !internal(each))) {
     findings.push(`${where}: dış bağlantı meta refresh url="${url}"`);
   }
-  findings.push(...ldUrlFindings(where, html));
-  // Ham metin (Next'in veri betikleri dahil): izinli iki host dışında mutlak URL yok.
-  const allowedHosts = [new URL(SITE_URL).host, new URL(SCHEMA).host];
-  for (const match of html.matchAll(/(?:https?:)?\/\/([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) {
-    if (!allowedHosts.includes(match[1] ?? "")) findings.push(`${where}: izinsiz host ${match[1]}`);
-  }
+  findings.push(...ldUrlFindings(where, html), ...hostFindings(where, html));
   return [...new Set(findings)];
+}
+
+// Ham metin (HTML, Next veri betikleri, RSC `.txt`): izinli iki host dışında mutlak URL yok.
+export function hostFindings(where: string, text: string): string[] {
+  const allowedHosts = [new URL(SITE_URL).host, new URL(SCHEMA).host];
+  const hosts = [...decodeNamed(text).matchAll(/(?:https?:)?\/\/([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)]
+    .map((match) => match[1] ?? "")
+    .filter((host) => !allowedHosts.includes(host));
+  return [...new Set(hosts)].map((host) => `${where}: izinsiz host ${host}`);
 }
 
 // (T5 2) Yasak sözcükler: bahis şirketi adı, value/öneri/tavsiye dağarcığı (tr dahil). İzinli cümleler
 // TAM cümle olarak çıkarılır (sözlük + yasal taslaktaki adıyla yazılmış cümleler). Metin kümesi: düğümler,
 // satır içi birleşik düğümler, `alt`/`title`/`placeholder`/`value`/`aria-*`/`<meta content>`, JSON-LD.
+// İzinli cümle yalnız KENDİ BAŞINA duruyorsa çıkarılır (yeniden inceleme N6): metnin başında ya da
+// `.!?` + boşluk sonrasında başlar, metnin sonunda ya da boşlukta biter. "Bu sayfa dışında, bu sitedeki
+// hiçbir içerik … değildir." cümlenin önüne ek yaptığı için izinli sayılmaz.
+function withoutAllowed(text: string, allowed: readonly string[]): string {
+  return allowed.reduce(
+    (rest, sentence) =>
+      rest.replace(new RegExp(`(^|[.!?] )${escapeRegExp(sentence)}(?= |$)`, "gu"), "$1 "),
+    text,
+  );
+}
+
+// Yazım bozmaya karşı iki ek okuma (N7): ayraçlar boşluğa (`William-Hill`), aralıklı tek harfler
+// birleşik (`t a v s i y e`).
+function variants(text: string): string[] {
+  const separated = text.replace(/[-_.·/|]+/g, " ");
+  const joinedLetters = text.replace(/(?<!\p{L})\p{L}(?: \p{L}(?!\p{L})){2,}/gu, (run) =>
+    run.replace(/ /g, ""),
+  );
+  return [text, separated, joinedLetters];
+}
+
 export function scanWords(where: string, texts: readonly string[]): string[] {
   const allowed = [
     ...ALLOWED_SENTENCE_KEYS.flatMap((key) => Object.values(DICTIONARIES).map((dict) => dict[key])),
     ...ALLOWED_SENTENCES,
-  ].map((sentence) => fold(squash(sentence)));
-  const folded = texts.map((text) =>
-    allowed.reduce((rest, sentence) => rest.split(sentence).join(" "), fold(squash(text))),
+  ].map((sentence) => fold(squash(sentence)).trim());
+  const folded = texts.flatMap((text) =>
+    variants(withoutAllowed(fold(squash(text)).trim(), allowed)),
   );
   const findings: string[] = [];
   for (const [list, stem, label] of [
@@ -111,6 +140,13 @@ export function scanWords(where: string, texts: readonly string[]): string[] {
     }
   }
   return findings;
+}
+
+// Bağlı CSS'teki `content: "…"` metni ekranda görünür (N7).
+export function cssContentTexts(css: string): string[] {
+  return [...css.matchAll(/content\s*:\s*(["'])((?:(?!\1)[^\\]|\\.)*)\1/g)].map(
+    (match) => match[2] ?? "",
+  );
 }
 
 export function wordFindings(where: string, html: string): string[] {

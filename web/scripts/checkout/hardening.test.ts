@@ -15,7 +15,7 @@ import {
 import { draftFindings, linkFindings, stateFindings, utcText, wordFindings } from "./content.ts";
 import { type ExpectedPage, expectedPages } from "./expect.ts";
 import { frameworkNumberFindings, numberFindings } from "./numbers.ts";
-import { inlineRscStrings, rscStrings } from "./surface.ts";
+import { nextPushes, rscLinks, rscStrings } from "./surface.ts";
 
 const snapshot = fullFixture();
 const pages = expectedPages(snapshot);
@@ -240,23 +240,31 @@ describe("M8 eventStatus sabit", () => {
   });
 });
 
-describe("M9 satır içi betikler ve RSC", () => {
+describe("M9 satır içi betikler ve RSC (yeniden inceleme FP1, N2, N3)", () => {
   const boot = "<script>(self.__next_f=self.__next_f||[]).push([0])</script>";
   const data = (text: string) =>
     `<script>self.__next_f.push(${JSON.stringify([1, text])})</script>`;
 
-  it("tam iki betik, iki biçimde; fazlası ya da başka biçim kırmızı", () => {
+  it("önyükleme + bir ya da daha çok TAM ayrışan itiş; başka betik ya da ekli JS kırmızı", () => {
     expect(inlineScriptFindings("p", boot + data('1:"x"\n'))).toEqual([]);
+    expect(inlineScriptFindings("p", boot + data('1:"x') + data('y"\n') + data("2:[]\n"))).toEqual(
+      [],
+    );
     expect(inlineScriptFindings("p", `${boot + data('1:"x"\n')}<script>a()</script>`)).toHaveLength(
       1,
     );
     expect(inlineScriptFindings("p", `${boot}<script>a()</script>`)).toHaveLength(1);
+    expect(inlineScriptFindings("p", data('1:"x"\n'))).toHaveLength(1);
+    const injected = `<script>self.__next_f.push([1,"a"]);location.replace("/\\\\bet365.com");self.__next_f.push([1,""])</script>`;
+    expect(inlineScriptFindings("p", boot + injected)).toHaveLength(1);
   });
 
-  it("RSC dizeleri: nesne anahtarları, başvurular ve yollar değil, metin değerleri", () => {
+  it("RSC dizeleri: yalnız TAM başvuru/yol/URL atlanır; itişler birleşik okunur", () => {
     const rsc =
-      '0:["$","p",null,{"data-fe-value":"x","children":"Best value at Bet365"}]\n1:"$Sreact"\n2:"/_next/a.js"\n';
-    expect(rscStrings(rsc)).toEqual(["p", "x", "Best value at Bet365"]);
-    expect(inlineRscStrings(boot + data(rsc))).toContain("Best value at Bet365");
+      '0:["$","p",null,{"data-fe-value":"x","children":"Best value at Bet365"}]\n1:"$Sreact"\n2:"/_next/a.js"\n3:"/ Pinnacle value"\n';
+    expect(rscStrings(rsc)).toEqual(["p", "x", "Best value at Bet365", "/ Pinnacle value"]);
+    expect(rscLinks(rsc)).toEqual(["/_next/a.js"]);
+    const split = boot + data('0:"Best val') + data('ue at Bet365"\n');
+    expect(rscStrings(nextPushes(split).payload)).toContain("Best value at Bet365");
   });
 });

@@ -256,7 +256,7 @@ describe("(6) kalıplar", () => {
   });
 
   it("H5: JWT öneki ve bağlantı dizesi", () => {
-    expect(secretFindings("f", "x eyJhbGciOi y")).toHaveLength(1);
+    expect(secretFindings("f", "x eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln y")).toHaveLength(1);
     expect(secretFindings("f", "postgresql://u@h/db")).toHaveLength(1);
   });
 

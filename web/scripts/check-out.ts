@@ -31,8 +31,11 @@ import {
 } from "./checkout/checks.ts";
 import {
   ageGateFindings,
+  cssContentTexts,
   draftFindings,
   honestyFindings,
+  hostFindings,
+  internal,
   linkFindings,
   markerFindings,
   recordCellFindings,
@@ -40,9 +43,10 @@ import {
   stateFindings,
   wordFindings,
 } from "./checkout/content.ts";
+import { entityFindings } from "./checkout/entities.ts";
 import { type ExpectedPage, expectedPages } from "./checkout/expect.ts";
 import { frameworkNumberFindings, numberFindings } from "./checkout/numbers.ts";
-import { inlineRscStrings, rscStrings } from "./checkout/surface.ts";
+import { nextPushes, rscLinks, rscStrings } from "./checkout/surface.ts";
 import { squash } from "./checkout/text.ts";
 import { stripScripts, tags } from "./lib/html.ts";
 import { pageFiles, readText, walk } from "./lib/outdir.ts";
@@ -93,13 +97,22 @@ type Site = {
   negations: readonly string[];
 };
 
-// RSC verisi (satır içi `self.__next_f` ya da istemci gezinmesinin `.txt` dosyası): sözcük ve lisans
-// taraması. İşaretli olumsuzlama öğesinin cümlesi (HTML'de sayılı) burada işaretsiz dize olarak geçer.
-function rscFindings(where: string, strings: readonly string[], negations: readonly string[]) {
-  const texts = strings.map((text) =>
+// RSC verisi (satır içi `self.__next_f` itişlerinin birleşimi ya da istemci gezinmesinin `.txt` dosyası):
+// sözcük ve lisans taraması, tam yol/URL dizelerinin bağlantı denetimi, ham host taraması. İşaretli
+// olumsuzlama öğesinin cümlesi (HTML'de sayılı) burada işaretsiz dize olarak geçer ve çıkarılır.
+function rscFindings(where: string, raw: string, negations: readonly string[]) {
+  const label = `${where} (RSC)`;
+  const texts = rscStrings(raw).map((text) =>
     negations.reduce((rest, negation) => rest.split(negation).join(" "), squash(text)),
   );
-  return [...scanWords(`${where} (RSC)`, texts), ...scanLicense(`${where} (RSC)`, texts)];
+  return [
+    ...scanWords(label, texts),
+    ...scanLicense(label, texts),
+    ...rscLinks(raw)
+      .filter((link) => !internal(link))
+      .map((link) => `${label}: dış bağlantı "${link}"`),
+    ...hostFindings(label, raw),
+  ];
 }
 
 // Yayımlanan HER HTML için ortak metin denetimleri (içerik sayfaları ve Next'in 404 sayfaları).
@@ -110,7 +123,8 @@ function textFindings(where: string, html: string, site: Site): string[] {
     ...contentFindings(where, html, site.snapshot.floor),
     ...linkFindings(where, html),
     ...wordFindings(where, html),
-    ...rscFindings(where, inlineRscStrings(html), site.negations),
+    ...entityFindings(where, html),
+    ...rscFindings(where, nextPushes(html).payload, site.negations),
   ];
 }
 
@@ -145,7 +159,7 @@ function pageFindings(site: Site, page: ExpectedPage, html: string): string[] {
   ];
 }
 
-// Yayın dizininin kendisi: robots.txt, fazladan XML, RSC `.txt` dosyaları.
+// Yayın dizininin kendisi: robots.txt, fazladan XML, RSC `.txt` dosyaları, CSS `content` metni.
 function outputFindings(out: string, negations: readonly string[]): string[] {
   const files = walk(out).map((file) => relative(out, file).split(sep).join("/"));
   return [
@@ -155,7 +169,16 @@ function outputFindings(out: string, negations: readonly string[]): string[] {
       .map((file) => `${file}: beklenmeyen XML dosyası (ikinci site haritası?)`),
     ...files
       .filter((file) => file.endsWith(".txt") && file !== "robots.txt")
-      .flatMap((file) => rscFindings(file, rscStrings(readText(join(out, file))), negations)),
+      .flatMap((file) => rscFindings(file, readText(join(out, file)), negations)),
+    ...files
+      .filter((file) => file.endsWith(".css"))
+      .flatMap((file) => {
+        const texts = cssContentTexts(readText(join(out, file)));
+        return [
+          ...scanWords(`${file} (CSS content)`, texts),
+          ...scanLicense(`${file} (CSS content)`, texts),
+        ];
+      }),
   ];
 }
 
