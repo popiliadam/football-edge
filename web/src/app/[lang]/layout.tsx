@@ -2,7 +2,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { SITE_LANGS, SITE_NAME } from "../../../site.config.ts";
+import { AgeGate } from "../../components/AgeGate.tsx";
 import { SiteFooter, SiteHeader } from "../../components/SiteChrome.tsx";
+import { t } from "../../i18n/dict.ts";
 import { langOf } from "../../lib/params.ts";
 import styles from "../../styles/site.module.css";
 
@@ -19,9 +21,17 @@ export default async function LangLayout(props: {
   params: Promise<{ lang: string }>;
 }) {
   const lang = langOf((await props.params).lang);
+  const labels = {
+    title: t(lang, "age.title"),
+    body: t(lang, "age.body"),
+    confirm: t(lang, "age.confirm"),
+    leave: t(lang, "age.leave"),
+    strip: t(lang, "age.strip"),
+  };
   return (
     <html lang={lang}>
       <body className={styles.body}>
+        <AgeGate labels={labels} />
         <SiteHeader lang={lang} />
         {props.children}
         <SiteFooter lang={lang} />
