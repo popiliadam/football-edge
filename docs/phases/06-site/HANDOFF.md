@@ -195,3 +195,73 @@ listesidir, güncel liste burasıdır.
 19. Yinelenen JSON anahtarı: `verify-snapshot` sonuncu değeri alır ve exit 0 verir (T4 M4). B-2'nin `JSON.parse`ı da
     sonuncuyu aldığından iki taraf aynı nesneyi görür; gizli yük yalnız dosya baytlarında kalır. Ham `snapshot.json`
     yayımlanmadığı sürece etkisizdir; bir gün `out/`a girerse H1/H3/§4.3 denetimi o baytları görmez.
+
+## Kapının ÖLÇMEDİKLERİ (B-2)
+
+Tam liste bu bölümdür. 1–10 planın "Kapının ölçmedikleri (bu plan)" (a)–(j) maddeleridir (plan metni değiştirilmedi);
+11–17 görev incelemelerinin "sınır" diye bıraktıkları ve bütün-dal son incelemesinin eklediğidir. T10'un yerel maddeleri
+yukarıda "Ölçmedikleri (B-2 T10)" satırındadır. Ertelenen küçük düzeltmeler `docs/DEFERRED.md` §20'dedir.
+
+1. (a) CSP'nin tarayıcıda gerçekten uygulandığı ve istemci betiklerinin (18+, yerel saat) CSP altında çalıştığı —
+   yalnız hash eşleşmesi ölçülür (§12.4/8).
+2. (b) Netlify'ın `_headers`/`_redirects`i gerçekten uyguladığı, `*.netlify.app` alt alanının `noindex`i (§18.5/4) ve
+   pasif lig için 404/410 (§18.5/6) — Netlify hesabı olmadan ölçülemez. Aynı yol için iki `_headers` kuralının
+   Netlify'da nasıl birleştiği ve sondaki eğik çizginin (`/en` ↔ `/en/`) hangi bloğa eşlendiği de ölçülmedi (T8 M4/M5);
+   `check-out` iki kuralı birleştirerek okur, `live` kapısı yalnız üç örnek sayfayı okur.
+3. (c) Next'in `404.html`/`_not-found` sayfaları `_headers`te CSP almaz ve Next'in satır içi `<style>`ını taşır
+   (Netlify 404 yanıtında yalnız `/*` başlıkları uygulanır; `/*`e CSP konamaz — sayfa CSP'leriyle kesişir).
+4. (d) `config/site_redirects.yaml`de KABUL edilen takım yeniden adlandırmaları `_redirects`e yazılmaz — eski URL 404
+   verir (plan açık küçük nokta 1).
+5. (e) H4 kalıp listesidir, listede olmayan ifadeyi yakalamaz — Türkçe çekimli biçim de kaçabilir; H1 yalnız tarih
+   kalıbı tarar (§12.4/4–5).
+6. (f) `_headers` boyutu sayfa sayısıyla doğrusal büyür. **AK19 ölçümü** (son inceleme, bu dalgada yeniden ölçüldü):
+   fixture 17 593 B (≈17,6 KB, 46 sayfa; `fixture-full-indexable` 17 569 B), uçtan uca anlık görüntü 12 471 B
+   (≈12,5 KB, 34 sayfa); T8'in ölçtüğü eğim ≈ 176 + 379 × sayfa bayt. Eşik aşılırsa AK19 (b) kullanıcı kararıdır.
+7. (g) Görsel düzen, duyarlı tasarım, tam erişilebilirlik (axe), çeviri kalitesi, yasal metinlerin doğruluğu
+   (§12.4/6–8, /10).
+8. (h) TS'in sayı hesaplamadığı yalnız dolaylı ölçülür: basılan her sayı anlık görüntüde birebir karşılık bulmalıdır
+   (H6c); `data-fe`siz basılan sayı tarayıcıdan kaçar (sayfa kodu incelemesi, T5/T6).
+9. (i) Sicil tablosundaki sonuç ETİKETİ (takım adı / "Beraberlik") tarayıcıda ölçülmez — tarayıcı yalnız ham
+   `outcome` özniteliğini sınar; eşlemenin doğruluğu `outcome.test.ts` birim testindedir.
+10. (j) Çıpa geçmişi bağlantısı yer tutucudur (`LEDGER_HISTORY_URL` deponun `ledger/` dizininin geçmişine işaret
+    etmeli; sayfa ona çıplak `head-YYYY-MM-DD.txt` ekler) — bağlantının çözüldüğü ölçülmez.
+11. TASLAK işaretinin CSS ile gizlenmesi (T7): `check-out` yalnız işaretin ve atalarının SINIF seçicilerinde, bağlı
+    stil dosyalarındaki `display:none`/`visibility:hidden`ı görür. Başka gizleme biçimi (`opacity:0`, `clip`/
+    `clip-path`, ekran dışı konum, `font-size:0`, zeminle aynı renk) ve öğe/öznitelik/kimlik seçicisiyle gizleme
+    ölçülmez. Satır içi gizleme (`hidden`, `style`, `aria-hidden`, `<template>`) HTML'de yakalanır.
+12. 18+ penceresinin tarayıcı davranışı (T7): açılma, onay kaydı, odak, Esc'in pencereyi kapatmaması, 375 px'de
+    `box-sizing: border-box` ile taşmama, `openGateIfNeeded(null, …)` ve `onCancel` bağlantısı. `border-box` silme,
+    null pencere ve `onCancel` silme mutasyonları yeşil geçer (DOM test ortamı yok, spec §13); davranış T7 yeniden
+    incelemesinde bir kez gerçek Chromium'da ölçüldü, kalıcı değil. `check-out` yalnız durağan işaretlemeyi sınar.
+13. JSON dizesinde kaçışlı eğik çizgili URL (`https:\/\/tracker.example\/x`) bir cümlenin içindeyse (satır içi itiş,
+    `.txt`, JSON-LD `description`) ham host taraması görmez (T9 B3). Tam bir URL dizesi olarak `rscLinks`/JSON-LD
+    bağlantı denetimi yakalar.
+14. CSS `content` okuması üç biçimi kaçırır (T9 B5): onaltılık CSS kaçışları (`\6e`), birden çok dize
+    (`"Pinn" "acle"`) ve `attr(data-x)` (`data-*` öznitelikleri metin yüzeyinde değil). Site `attr()` kullanmıyor.
+15. JWT kalıbı yalnız bitişik biçimi arar (T9 B6, FP2 daraltmasının bedeli): satır kırılarak birleştirilmiş dize,
+    `&#46;` ile yazılmış nokta ya da satır kırmalı JWT geçer. Paketleyici ortam dizesini bitişik gömer.
+16. İzinli cümle kendi başına durduğu sürece çıkarılır; ÖNCEKİ bir cümlenin anlamı çevirmesi ("Aşağıdaki cümle
+    yalandır." + sorumluluk reddi) ölçülmez (T9 x23) — cümle düzeyi izin listesinin sınırı, mekanik çözümü yok.
+17. Node araçlarının izin listeli ortamı yalnız ortam DEĞİŞKENLERİNİ kapsar, diski kapsamaz (son inceleme m6):
+    `pnpm install` ya da `next build` sırasında koşan bağımlılık kodu, ana checkout'ta duran repo kökündeki `.env`i
+    (gitignored) diskten okuyabilir. Worktree'de ve CI'da `.env` yoktur.
+
+## Hukuk incelemesi (HANDOFF §0.7/7'ye)
+
+B-2 Task 7 incelemesinin "Content findings for lawyer review" tablosu (C1–C11; inceleme dosyası gitignored SDD
+kaydındadır). Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
+AK13 avukat paketine girer. Belgeler: `web/content/legal/<dil>/<belge>.tsx`.
+
+| # | yer | konu | soru |
+|---|---|---|---|
+| C1 | en/tr terms | Defterin "kamuya açık" olduğu olgusu | T7 düzeltme turunda metin "yalnız baş hash'lerini yayımlıyoruz" oldu (defter satırları kamuya açık değil). Avukat son hâli teyit etsin |
+| C2 | en/tr privacy | "Kişisel veri toplamıyoruz" | T7 düzeltme turunda ziyaretçiyle sınırlandı ve iki `[AVUKAT SORUSU]` eklendi: barındırıcının erişim kayıtlarındaki IP'ler bizim işlediğimiz veri mi; operatörün haber hattı (sakatlık = sağlık verisi mi, §0.7/7) |
+| C3 | tr privacy başlığı (`legal.privacy`) | "KVKK aydınlatma metni ve gizlilik" | Başlık KVKK md. 10 aydınlatma metni vaat ediyor; metinde veri sorumlusunun kimliği/iletişimi, amaç ve hukuki sebep, md. 11 hakları ve başvuru yolu yok (marka ve tüzel kişi AK3'e bağlı). Bu başlıkla hangi unsurlar zorunlu? |
+| C4 | en/tr cookies | "Zorunlu yerel depolama" nitelendirmesi | Hukuki bir nitelendirme (ePrivacy 5(3) istisnası ya da muadili; spec §10.1). 18+ penceresi çerez/gizlilik metnine bağlantı vermiyor, tam ekran örtü onaydan önce metinleri okumayı engelliyor. Depolamadan önce bilgilendirme gerekir mi? |
+| C5 | en/tr sorumlu oyun · `footer.responsible` | "Sınır koyun…" ve "sorumlu oynayın" dili | Metin okurun bahis oynadığını varsayıyor ve bahsi eğlence olarak çerçeveliyor. Türkiye'de yalnız devlet lisanslı bahis yasal (7258). Bu dil normalleştirme sayılır mı? (spec §10.3) |
+| C6 | en sorumlu oyun | "Ülkenizde yardım var" genel iddiası | Doğrulanmamış; liste yalnız UK ve TR. Koşullu ifade ya da `[DOĞRULANACAK]` mı? |
+| C7 | en/tr sorumlu oyun | Yeşilay ve YEDAM `[DOĞRULANACAK]` | Kurum adları da birincil kaynaktan doğrulanmalı; UK için hangi kuruluş anılacak (GambleAware / National Gambling Helpline)? |
+| C8 | en cookies · en privacy | "Çerez yok, analitik yok" | Bugün derlenmiş sitede doğru; barındırıcının çerezi, log saklama süresi, analitik ya da form özelliği açılırsa yanlış olur. Deploy sonrası yeniden doğrulanmalı (§12.4/9) |
+| C9 | en terms | "Bahis sitesi fiyatlarından türetilmiş" | Veri kaynağının (The Odds API) koşullarının türetilmiş olasılığın yayınına izin verip vermediği açık (AK17, §12.4/11) |
+| C10 | en/tr privacy | Yurt dışından sunmak sınır ötesi aktarım mı | Barındırmanın yurt dışında olacağını varsayıyor; barındırıcı kararına bağlı. Soru olarak işaretli |
+| C11 | en/tr terms | "18 yaş ve üzeri yetişkinler için" | 18 eşiği ve yaş doğrulaması olmaması (§12.4/6) hedef ülkeler için yeterli mi? Her yeni dil ayrı çerçeve (§10.3) |
