@@ -1,7 +1,27 @@
 // Görünen metin sözcük listeleri (T5 carry-in 2, T7 carry-in 9). Katlama Türkçe büyük/küçük harfe
-// duyarlıdır: `toLocaleLowerCase("tr")` (İ→i, I→ı), aksanlar düşer, ı→i, boşluklar teke iner.
+// duyarlıdır: `toLocaleLowerCase("tr")` (İ→i, I→ı), aksanlar düşer, ı→i, boşluklar teke iner. Biçim
+// karakterleri (sıfır genişlikli boşluk, yumuşak tire: `\p{Cf}`) önce silinir: `Pin\u200bnacle` = `pinnacle`.
+// Tarayıcının çözdüğü, React'in basmadığı adlı varlıklar (elle kurcalanmış çıktıda görünür).
+const NAMED: Record<string, string> = {
+  shy: "\u00ad",
+  nbsp: "\u00a0",
+  zwsp: "\u200b",
+  zwnj: "\u200c",
+  zwj: "\u200d",
+  lrm: "\u200e",
+  rlm: "\u200f",
+  ensp: "\u2002",
+  emsp: "\u2003",
+  thinsp: "\u2009",
+};
+
+export function decodeNamed(text: string): string {
+  return text.replace(/&([a-z]+);/gi, (whole, name: string) => NAMED[name.toLowerCase()] ?? whole);
+}
+
 export function fold(text: string): string {
-  return text
+  return decodeNamed(text)
+    .replace(/\p{Cf}/gu, "")
     .toLocaleLowerCase("tr")
     .normalize("NFKD")
     .replace(/\p{M}/gu, "")
@@ -62,14 +82,34 @@ export const BOOKMAKERS: readonly string[] = unique([
   ...BOOK_TITLES,
 ]).map(fold);
 
-// Öneri yüzeyi sözcükleri (kök; sağa ek alabilir: values, önerisi). Sol sınır zorunlu.
-export const SUGGESTION_WORDS: readonly string[] = ["value", "edge", "öneri"].map(fold);
+// Öneri yüzeyi sözcükleri (kök; sağa ek alabilir: values, önerisi, valörü, bankoyu, tavsiyesi).
+// Sol sınır zorunlu. Türkçe value/tavsiye dağarcığı controller kararıyla (T9 inceleme I4).
+export const SUGGESTION_WORDS: readonly string[] = [
+  "value",
+  "edge",
+  "öneri",
+  "değer bahis",
+  "değer bahs",
+  "değerli bahis",
+  "valör",
+  "banko",
+  "tavsiye",
+  "kupon",
+  "iddaa",
+].map(fold);
 
-// İzinli cümleler SÖZLÜKTEN okunur: sorumluluk reddi ve "value önerisi yayımlamıyoruz".
-export const ALLOWED_SENTENCE_KEYS = ["home.intro", "footer.notAdvice"] as const;
-// İzinli terim: CLV'nin açılımı (boş sicil açıklaması) bir öneri değil, ölçütün adıdır. Cümlenin
-// tamamı değil yalnız terim muaftır — aynı cümleye eklenen "value picks" yine kırmızıdır.
-export const ALLOWED_TERMS: readonly string[] = ["closing line value"].map(fold);
+// İzinli cümleler TAM cümle olarak SÖZLÜKTEN okunur: sorumluluk reddi, "value önerisi
+// yayımlamıyoruz" ve boş sicilin CLV açıklaması. Terim ya da kelime düzeyinde muafiyet YOK.
+export const ALLOWED_SENTENCE_KEYS = [
+  "home.intro",
+  "footer.notAdvice",
+  "record.emptyExplain",
+] as const;
+// Sözlük dışındaki izinli cümleler (yasal taslaklar): birebir, TAM cümle. Kaynağı adıyla yazılır.
+export const ALLOWED_SENTENCES: readonly string[] = [
+  // content/legal/tr/terms.tsx — "Garanti yoktur" (sorumluluk reddi)
+  "Bu sitedeki hiçbir içerik bahis, finans ya da yatırım tavsiyesi değildir.",
+];
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

@@ -13,10 +13,13 @@ import {
   isJsonLd,
   scriptOpenings,
   scripts,
+  stripScripts,
   tags,
   visibleText,
 } from "../lib/html.ts";
 import { type ExpectedPage, expectedLabel, fieldKind, resolveField } from "./expect.ts";
+import { surfaceTexts } from "./surface.ts";
+import { squash } from "./text.ts";
 import { fold, LICENSE_PATTERNS } from "./words.ts";
 
 export type Built = { path: string; html: string };
@@ -158,15 +161,17 @@ export function checkHreflang(
 
 const effective = (page: ExpectedPage, flag: boolean) => flag && page.recordIndexable;
 
-// Site haritası girdisi: <loc> ve (hreflang → href) çiftleri; sayfanın <head>'iyle aynı kaynak.
-function sitemapEntries(xml: string): { loc: string; links: string[] }[] {
-  return [...xml.matchAll(/<url>([\s\S]*?)<\/url>/g)].map((match) => {
+// Site haritası girdisi: <loc>(lar) ve (hreflang → href) çiftleri; sayfanın <head>'iyle aynı kaynak.
+// `<url >` yazımı ve girdi başına ikinci `<loc>` da okunur (T9 inceleme M4).
+function sitemapEntries(xml: string): { loc: string; locs: number; links: string[] }[] {
+  return [...xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/g)].map((match) => {
     const body = match[1] ?? "";
     const links = [...body.matchAll(/<xhtml:link\b[^>]*>/g)].map((link) => {
       const lang = /hreflang="([^"]*)"/.exec(link[0])?.[1] ?? "";
       return `${lang}=${/href="([^"]*)"/.exec(link[0])?.[1] ?? ""}`;
     });
-    return { loc: /<loc>([^<]*)<\/loc>/.exec(body)?.[1] ?? "", links };
+    const locs = [...body.matchAll(/<loc\b[^>]*>([^<]*)<\/loc>/g)].map((loc) => loc[1] ?? "");
+    return { loc: locs.length === 1 ? (locs[0] ?? "") : "", locs: locs.length, links };
   });
 }
 
@@ -204,6 +209,12 @@ export function checkIndexing(
   ) {
     findings.push(`sitemap.xml: ${entries.length} URL, beklenen ${want.length}`);
   }
+  const totalLocs = (sitemapXml.match(/<loc\b/g) ?? []).length;
+  if (totalLocs !== entries.length || entries.some((entry) => entry.locs !== 1)) {
+    findings.push(
+      `sitemap.xml: ${totalLocs} <loc>, ${entries.length} <url> (girdi başına tam bir)`,
+    );
+  }
   for (const entry of entries) {
     const page = indexable.find((each) => absoluteUrl(each.path) === entry.loc);
     if (page === undefined) continue;
@@ -222,17 +233,42 @@ export function checkIndexing(
   return findings;
 }
 
+// robots.txt birebir: Disallow yok ve TEK site haritası (ikinci `Sitemap:` başka bir URL kümesi
+// yayımlardı; T9 inceleme M4).
+export function checkRobots(robotsTxt: string): string[] {
+  const lines = robotsTxt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const want = ["User-Agent: *", "Allow: /", `Sitemap: ${absoluteUrl("/sitemap.xml")}`];
+  return lines.join("\n") === want.join("\n") ? [] : [`robots.txt: ${lines.join(" | ")}`];
+}
+
 export const ALLOW_MARKER = 'data-fe-allow="license-negation"';
 const ALLOWED = /<([a-z]+)\b[^>]*\bdata-fe-allow="license-negation"[^>]*>[\s\S]*?<\/\1>/g;
 
-// H4: lisans iddiası yok (işaretli olumsuz cümle hariç). Hem ham metin hem görünen metin
-// (etiketler boşluğa) katlanarak taranır: `official <b>data</b>` de yakalanır.
-export function licenseFindings(where: string, text: string): string[] {
-  const cleaned = text.replace(ALLOWED, " ");
-  const folded = `${fold(cleaned)}\n${fold(visibleText(cleaned))}`;
+// H4: lisans iddiası yok (işaretli olumsuz cümle hariç). Taranan: ham metin, görünen metin
+// (etiketler boşluğa), satır içi etiketlerle bölünmüş sözcükler, öznitelikler, `<meta content>`
+// ve JSON-LD dizeleri (T9 inceleme I3, M2). Biçim karakterleri `fold`da silinir.
+export function scanLicense(where: string, texts: readonly string[]): string[] {
+  const folded = texts.map(fold).join("\n");
   return LICENSE_PATTERNS.filter((pattern) => folded.includes(pattern)).map(
     (pattern) => `${where}: lisans iddiası kalıbı "${pattern}" (H4)`,
   );
+}
+
+export function licenseFindings(where: string, text: string): string[] {
+  const cleaned = text.replace(ALLOWED, " ");
+  return scanLicense(where, [
+    stripScripts(cleaned),
+    visibleText(cleaned),
+    ...surfaceTexts(cleaned),
+  ]);
+}
+
+// Olumsuzlama öğelerinin görünen metni: RSC verisinde aynı cümle işaretsiz dize olarak geçer.
+export function negationTexts(html: string): string[] {
+  return [...html.matchAll(ALLOWED)].map((match) => squash(visibleText(match[0])));
 }
 
 export function countMarkers(text: string): number {
@@ -316,6 +352,25 @@ export function checkCsp(page: ExpectedPage, html: string, headers: Headers): st
   return findings;
 }
 
+// Next'in satır içi betikleri sabittir (T9 inceleme M9): tam iki yürütülebilir betik — önyükleme ve
+// RSC verisi. Hash'i `_headers`'a da eklenmiş fazladan bir betik küme denetiminden geçerdi.
+const BOOT = "(self.__next_f=self.__next_f||[]).push([0])";
+
+export function inlineScriptFindings(where: string, html: string): string[] {
+  const bodies = scripts(html)
+    .filter(isExecutableInline)
+    .map((script) => script.body);
+  const data = bodies[1] ?? "";
+  const shaped =
+    bodies.length === 2 &&
+    bodies[0] === BOOT &&
+    data.startsWith('self.__next_f.push([1,"') &&
+    data.endsWith('"])');
+  return shaped
+    ? []
+    : [`${where}: satır içi betikler beklenen iki biçimde değil (${bodies.length})`];
+}
+
 // Beklenen `/*` güvenlik başlıkları (emit.ts'ten bağımsız yazılır).
 const GLOBAL_HEADERS: readonly [string, string][] = [
   ["X-Content-Type-Options", "nosniff"],
@@ -389,6 +444,11 @@ export function checkJsonLd(snapshot: Snapshot, page: ExpectedPage, html: string
       match !== undefined && Date.parse(match.commence_time) > Date.parse(snapshot.generated_at);
     if ("eventStatus" in event !== future) {
       findings.push(`${page.path}: eventStatus ${future ? "eksik" : "fazla"}`);
+    }
+    if ("eventStatus" in event && event.eventStatus !== "https://schema.org/EventScheduled") {
+      findings.push(
+        `${page.path}: eventStatus ${String(event.eventStatus)} (EventScheduled değil)`,
+      );
     }
     for (const banned of ["offers", "location", "odds"]) {
       if (banned in event) findings.push(`${page.path}: SportsEvent '${banned}' taşıyor`);

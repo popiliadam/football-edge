@@ -3,7 +3,7 @@
 // Bayrak derlemeyle AYNI ortamdan okunur (SITE_INDEXABLE). Bulgu varsa exit 1.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { DEFAULT_LANG, indexingEnabled, SITE_LANGS } from "../site.config.ts";
 import { matchPath, matchStem } from "../src/lib/routes.ts";
 import { parseSnapshot } from "../src/lib/snapshot.ts";
@@ -18,11 +18,15 @@ import {
   checkIndexing,
   checkJsonLd,
   checkPages,
+  checkRobots,
   contentFindings,
   countMarkers,
   type Headers,
+  inlineScriptFindings,
   licenseFindings,
+  negationTexts,
   parseHeaders,
+  scanLicense,
   secretFindings,
 } from "./checkout/checks.ts";
 import {
@@ -31,17 +35,22 @@ import {
   honestyFindings,
   linkFindings,
   markerFindings,
-  numberFindings,
   recordCellFindings,
+  scanWords,
   stateFindings,
   wordFindings,
 } from "./checkout/content.ts";
 import { type ExpectedPage, expectedPages } from "./checkout/expect.ts";
-import { stripScripts } from "./lib/html.ts";
+import { frameworkNumberFindings, numberFindings } from "./checkout/numbers.ts";
+import { inlineRscStrings, rscStrings } from "./checkout/surface.ts";
+import { squash } from "./checkout/text.ts";
+import { stripScripts, tags } from "./lib/html.ts";
 import { pageFiles, readText, walk } from "./lib/outdir.ts";
 
 const CONTENT = resolve(import.meta.dirname, "../content");
 const TEXT_FILE = /\.(html|txt|xml|json|js|css|sha256)$|\/_headers$|\/_redirects$/;
+// Next'in kendi 404 sayfaları: sitenin kaydı değildir ama yayımlanır ve içerik denetiminden geçer.
+const FRAMEWORK_FILES = ["404.html", "404/index.html", "_not-found/index.html"];
 
 function arg(name: string): string {
   const index = process.argv.indexOf(name);
@@ -59,8 +68,9 @@ function expectedRedirects(snapshot: Snapshot): string {
   for (const lang of SITE_LANGS) {
     for (const match of snapshot.matches) {
       const league = snapshot.leagues.find((each) => each.id === match.league_id);
-      if (league)
+      if (league) {
         lines.push(`${matchStem(lang, league, match)}* ${matchPath(lang, league, match)} 301`);
+      }
     }
   }
   return `${lines.join("\n")}\n`;
@@ -76,23 +86,55 @@ function expectedSlugs(snapshot: Snapshot): string {
   return `${JSON.stringify(index, null, 2)}\n`;
 }
 
-// Sayfa başına bütün denetimler (her biri bulgu listesi döner).
-type Site = { snapshot: Snapshot; headers: Headers; css: (href: string) => string };
+type Site = {
+  snapshot: Snapshot;
+  headers: Headers;
+  css: (href: string) => string;
+  negations: readonly string[];
+};
 
-function pageFindings(
-  { snapshot, headers, css }: Site,
-  page: ExpectedPage,
-  html: string,
-): string[] {
+// RSC verisi (satır içi `self.__next_f` ya da istemci gezinmesinin `.txt` dosyası): sözcük ve lisans
+// taraması. İşaretli olumsuzlama öğesinin cümlesi (HTML'de sayılı) burada işaretsiz dize olarak geçer.
+function rscFindings(where: string, strings: readonly string[], negations: readonly string[]) {
+  const texts = strings.map((text) =>
+    negations.reduce((rest, negation) => rest.split(negation).join(" "), squash(text)),
+  );
+  return [...scanWords(`${where} (RSC)`, texts), ...scanLicense(`${where} (RSC)`, texts)];
+}
+
+// Yayımlanan HER HTML için ortak metin denetimleri (içerik sayfaları ve Next'in 404 sayfaları).
+function textFindings(where: string, html: string, site: Site): string[] {
+  return [
+    ...inlineScriptFindings(where, html),
+    ...licenseFindings(where, html),
+    ...contentFindings(where, html, site.snapshot.floor),
+    ...linkFindings(where, html),
+    ...wordFindings(where, html),
+    ...rscFindings(where, inlineRscStrings(html), site.negations),
+  ];
+}
+
+function frameworkFindings(site: Site, out: string): string[] {
+  return FRAMEWORK_FILES.filter((file) => existsSync(join(out, file))).flatMap((file) => {
+    const html = readText(join(out, file));
+    const robots = tags(html, "meta").find((meta) => meta.name === "robots")?.content ?? "";
+    return [
+      ...(robots.split(/[\s,]+/).includes("noindex") ? [] : [`/${file}: noindex yok`]),
+      ...textFindings(`/${file}`, html, site),
+      ...frameworkNumberFindings(`/${file}`, html),
+    ];
+  });
+}
+
+// Sayfa başına bütün denetimler (her biri bulgu listesi döner).
+function pageFindings(site: Site, page: ExpectedPage, html: string): string[] {
+  const { snapshot, headers, css } = site;
   return [
     ...checkFields(snapshot, page, html),
     ...checkCsp(page, html, headers),
     ...checkA11y(page, html),
     ...checkJsonLd(snapshot, page, html),
-    ...licenseFindings(page.path, stripScripts(html)),
-    ...contentFindings(page.path, html, snapshot.floor),
-    ...linkFindings(page.path, html),
-    ...wordFindings(page.path, html),
+    ...textFindings(page.path, html, site),
     ...numberFindings(snapshot, page, html),
     ...stateFindings(snapshot, page, html),
     ...honestyFindings(snapshot, page, html),
@@ -100,6 +142,20 @@ function pageFindings(
     ...draftFindings(page, html, css),
     ...markerFindings(page, html),
     ...ageGateFindings(page, html),
+  ];
+}
+
+// Yayın dizininin kendisi: robots.txt, fazladan XML, RSC `.txt` dosyaları.
+function outputFindings(out: string, negations: readonly string[]): string[] {
+  const files = walk(out).map((file) => relative(out, file).split(sep).join("/"));
+  return [
+    ...checkRobots(optional(join(out, "robots.txt"))),
+    ...files
+      .filter((file) => file.endsWith(".xml") && file !== "sitemap.xml")
+      .map((file) => `${file}: beklenmeyen XML dosyası (ikinci site haritası?)`),
+    ...files
+      .filter((file) => file.endsWith(".txt") && file !== "robots.txt")
+      .flatMap((file) => rscFindings(file, rscStrings(readText(join(out, file))), negations)),
   ];
 }
 
@@ -113,7 +169,8 @@ function main(): number {
   const built = pageFiles(out).map((page) => ({ path: page.path, html: readText(page.file) }));
   const byPath = new Map(built.map((page) => [page.path, page.html]));
   const headers = parseHeaders(optional(join(out, "_headers")));
-  const site = { snapshot, headers, css: (href: string) => optional(join(out, href)) };
+  const negations = [...new Set(built.flatMap((page) => negationTexts(page.html)))];
+  const site = { snapshot, headers, css: (href: string) => optional(join(out, href)), negations };
 
   const findings = [
     ...checkPages(expected, built),
@@ -126,6 +183,8 @@ function main(): number {
       optional(join(out, "robots.txt")),
       flag,
     ),
+    ...outputFindings(out, negations),
+    ...frameworkFindings(site, out),
     ...checkHeaderBlocks(
       headers,
       built.map((page) => page.path),
@@ -147,9 +206,10 @@ function main(): number {
     htmlMarkers += countMarkers(stripScripts(html));
   }
   let sourceMarkers = 0;
-  for (const file of walk(CONTENT).filter(
+  const sources = walk(CONTENT).filter(
     (each) => /\.tsx?$/.test(each) && !/\.test\.tsx?$/.test(each),
-  )) {
+  );
+  for (const file of sources) {
     const text = readText(file);
     findings.push(...licenseFindings(file, text));
     sourceMarkers += countMarkers(text);

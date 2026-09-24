@@ -1,48 +1,66 @@
 // Görünen içerik denetimleri — T5–T8 incelemelerinin kalıcı hâli (task-9-carryins.md 1–10):
-// yalnız iç bağlantı, görünen metinde yasak sözcük, data-fe dışında sayı yok, durum etiketleri,
-// sicil dürüstlük metinleri ve hücreleri, TASLAK görünürlüğü, olumsuzlama işareti, 18+ işaretlemesi.
-import { type LegalDoc, SITE_NAME, SITE_URL } from "../../site.config.ts";
+// yalnız iç bağlantı, görünen metinde yasak sözcük, durum etiketleri, sicil dürüstlük metinleri ve
+// hücreleri, TASLAK görünürlüğü, olumsuzlama işareti, 18+ işaretlemesi. Sayı kuralı numbers.ts'te.
+import { SITE_URL } from "../../site.config.ts";
 import { DICTIONARIES, type DictKey, t } from "../../src/i18n/dict.ts";
 import type { Snapshot } from "../../src/lib/snapshot-types.ts";
-import { isJsonLd, scripts, stripScripts, tags, visibleText } from "../lib/html.ts";
+import { decodeEntities, stripScripts, tags, visibleText } from "../lib/html.ts";
 import { ALLOW_MARKER, countMarkers } from "./checks.ts";
 import type { ExpectedPage } from "./expect.ts";
-import { inFe, isDeferred, isHidden, joined, squash, textNodes, within } from "./text.ts";
+import { utcText } from "./numbers.ts";
+import { ldStrings, surfaceTexts } from "./surface.ts";
+import { isDeferred, isHidden, joined, squash, textNodes, within } from "./text.ts";
 import {
   ALLOWED_SENTENCE_KEYS,
-  ALLOWED_TERMS,
+  ALLOWED_SENTENCES,
   BOOKMAKERS,
   fold,
   SUGGESTION_WORDS,
   wordPattern,
 } from "./words.ts";
 
+export { utcText };
+
 // (T5 1) URL taşıyan öznitelikler: göreli iç yol ya da yer tutucu alan adı. schema.org yalnız
-// JSON-LD'de: `@context` ve `eventStatus` numaralandırma değeri olarak.
-const URL_ATTRS = ["href", "src", "action", "formaction", "poster", "srcset", "data"];
+// JSON-LD'de: `@context` ve `eventStatus` değeri `EventScheduled` (T9 inceleme M8).
+const URL_ATTRS = [
+  "href",
+  "src",
+  "action",
+  "formaction",
+  "poster",
+  "srcset",
+  "imagesrcset",
+  "data",
+];
 const SCHEMA = "https://schema.org";
-const SCHEMA_ENUM_KEYS = ["eventStatus"];
+const EVENT_SCHEDULED = `${SCHEMA}/EventScheduled`;
 const ANY_TAG = "[a-z][a-z0-9-]*";
 
+// Tarayıcının URL ayrıştırıcısı `\`i `/`ye çevirir, sekme/satır sonunu siler: `/\host` ve `/<TAB>/host`
+// dış hosta gider. Ters eğik çizgi, boşluk ya da kontrol karakteri taşıyan URL iç sayılmaz (M1).
 function internal(url: string): boolean {
+  const unsafe = [...url].some((char) => char === "\\" || (char.codePointAt(0) ?? 0) <= 0x20);
+  if (unsafe || url.includes("\u007f")) return false;
   if (url.startsWith("#")) return true;
   if (url.startsWith("/")) return !url.startsWith("//");
   return url === SITE_URL || url.startsWith(`${SITE_URL}/`);
 }
 
-function ldUrlFindings(where: string, value: unknown, key: string): string[] {
-  if (typeof value === "string") {
-    if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return [];
+function ldUrlFindings(where: string, html: string): string[] {
+  return ldStrings(html).flatMap(({ key, value }) => {
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(value) && !value.startsWith("//")) return [];
     if (key === "@context" && value === SCHEMA) return [];
-    if (SCHEMA_ENUM_KEYS.includes(key) && /^https:\/\/schema\.org\/[A-Z][A-Za-z]+$/.test(value)) {
-      return [];
-    }
+    if (key === "eventStatus" && value === EVENT_SCHEDULED) return [];
     return internal(value) ? [] : [`${where}: JSON-LD dış URL ${key}=${value}`];
-  }
-  if (value === null || typeof value !== "object") return [];
-  return Object.entries(value).flatMap(([name, inner]) =>
-    ldUrlFindings(where, inner, Array.isArray(value) ? key : name),
-  );
+  });
+}
+
+// `<meta http-equiv="refresh" content="0;url=…">`in hedefi.
+function refreshTargets(html: string): string[] {
+  return tags(html, "meta")
+    .filter((meta) => (meta["http-equiv"] ?? "").toLowerCase() === "refresh")
+    .map((meta) => /url\s*=\s*['"]?([^'"]*)/i.exec(meta.content ?? "")?.[1] ?? "");
 }
 
 export function linkFindings(where: string, html: string): string[] {
@@ -51,22 +69,18 @@ export function linkFindings(where: string, html: string): string[] {
     for (const name of URL_ATTRS) {
       const value = attrs[name];
       if (value === undefined) continue;
-      const urls =
-        name === "srcset"
-          ? value.split(",").map((part) => part.trim().split(/\s+/)[0] ?? "")
-          : [value];
+      const urls = /srcset$/.test(name)
+        ? value.split(",").map((part) => part.trim().split(/\s+/)[0] ?? "")
+        : [value];
       for (const url of urls.filter((each) => !internal(each))) {
         findings.push(`${where}: dış bağlantı ${name}="${url}"`);
       }
     }
   }
-  for (const block of scripts(html).filter(isJsonLd)) {
-    try {
-      findings.push(...ldUrlFindings(where, JSON.parse(block.body), ""));
-    } catch {
-      // Ayrışmayan JSON-LD'yi checkJsonLd raporlar.
-    }
+  for (const url of refreshTargets(html).filter((each) => !internal(each))) {
+    findings.push(`${where}: dış bağlantı meta refresh url="${url}"`);
   }
+  findings.push(...ldUrlFindings(where, html));
   // Ham metin (Next'in veri betikleri dahil): izinli iki host dışında mutlak URL yok.
   const allowedHosts = [new URL(SITE_URL).host, new URL(SCHEMA).host];
   for (const match of html.matchAll(/(?:https?:)?\/\/([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g)) {
@@ -75,22 +89,17 @@ export function linkFindings(where: string, html: string): string[] {
   return [...new Set(findings)];
 }
 
-// (T5 2) Görünen metinde bahis şirketi adı ve öneri sözcüğü yok. Sözlükteki izinli cümleler
-// (sorumluluk reddi, "value önerisi yayımlamıyoruz") önce çıkarılır. `alt`/`title`/`aria-label`
-// da görünen metindir.
-export function wordFindings(where: string, html: string): string[] {
-  const allowed = ALLOWED_SENTENCE_KEYS.flatMap((key) =>
-    Object.values(DICTIONARIES).map((dict) => squash(dict[key])),
+// (T5 2) Yasak sözcükler: bahis şirketi adı, value/öneri/tavsiye dağarcığı (tr dahil). İzinli cümleler
+// TAM cümle olarak çıkarılır (sözlük + yasal taslaktaki adıyla yazılmış cümleler). Metin kümesi: düğümler,
+// satır içi birleşik düğümler, `alt`/`title`/`placeholder`/`value`/`aria-*`/`<meta content>`, JSON-LD.
+export function scanWords(where: string, texts: readonly string[]): string[] {
+  const allowed = [
+    ...ALLOWED_SENTENCE_KEYS.flatMap((key) => Object.values(DICTIONARIES).map((dict) => dict[key])),
+    ...ALLOWED_SENTENCES,
+  ].map((sentence) => fold(squash(sentence)));
+  const folded = texts.map((text) =>
+    allowed.reduce((rest, sentence) => rest.split(sentence).join(" "), fold(squash(text))),
   );
-  const labels = tags(html, ANY_TAG)
-    .flatMap((attrs) => [attrs.alt, attrs.title, attrs["aria-label"]])
-    .filter((value): value is string => value !== undefined);
-  const texts = [...textNodes(html).map((node) => node.text), ...labels].map((text) => {
-    const rest = fold(
-      allowed.reduce((part, sentence) => part.split(sentence).join(" "), squash(text)),
-    );
-    return ALLOWED_TERMS.reduce((part, term) => part.split(term).join(" "), rest);
-  });
   const findings: string[] = [];
   for (const [list, stem, label] of [
     [BOOKMAKERS, false, "bahis şirketi adı"],
@@ -98,46 +107,14 @@ export function wordFindings(where: string, html: string): string[] {
   ] as const) {
     for (const word of list) {
       const pattern = wordPattern(word, stem);
-      if (texts.some((text) => pattern.test(text))) findings.push(`${where}: ${label} "${word}"`);
+      if (folded.some((text) => pattern.test(text))) findings.push(`${where}: ${label} "${word}"`);
     }
   }
   return findings;
 }
 
-// (T5 3) Görünen metinde `data-fe`/`<time>` dışındaki rakamlar yalnız izin listesinden: yüzdelik
-// etiketleri (10, 90), 18+, 404. Anlık görüntüden birebir gelen adlar (takım, lig, ülke) ve marka
-// önce çıkarılır — "Schalke 04" bir veri metnidir, hesap değil. Yasal taslağın kendi yasal atfı
-// belge başına adıyla izinli (KVKK md. 6).
-export const FREE_NUMBERS: readonly string[] = ["10", "90", "18", "404"];
-export const LEGAL_NUMBERS: Partial<Record<LegalDoc, readonly string[]>> = { privacy: ["6"] };
-
-function snapshotNames(snapshot: Snapshot): string[] {
-  const names = [
-    SITE_NAME,
-    ...snapshot.leagues.flatMap((league) => [league.name, league.country]),
-    ...snapshot.teams.map((team) => team.name),
-    ...snapshot.matches.flatMap((match) => [match.home, match.away]),
-  ];
-  return [...new Set(names)].sort((a, b) => b.length - a.length);
-}
-
-export function numberFindings(snapshot: Snapshot, page: ExpectedPage, html: string): string[] {
-  const doc = page.kind === "legal" ? (page.id.split(":")[1] as LegalDoc) : undefined;
-  const allowed = [...FREE_NUMBERS, ...((doc && LEGAL_NUMBERS[doc]) ?? [])];
-  const names = snapshotNames(snapshot);
-  const findings: string[] = [];
-  for (const node of textNodes(html)) {
-    if (inFe(node) || within(node, "time")) continue;
-    const text = names.reduce((rest, name) => rest.split(name).join(" "), node.text);
-    for (const [number] of text.matchAll(/\d+(?:[.,]\d+)*/g)) {
-      if (!allowed.includes(number)) {
-        findings.push(
-          `${page.path}: data-fe dışında sayı "${number}" ("${squash(node.text).slice(0, 60)}")`,
-        );
-      }
-    }
-  }
-  return findings;
+export function wordFindings(where: string, html: string): string[] {
+  return scanWords(where, surfaceTexts(html));
 }
 
 const ROUNDS = ["opening", "latest", "closing"] as const;
@@ -176,6 +153,13 @@ export function stateFindings(snapshot: Snapshot, page: ExpectedPage, html: stri
       );
     }
     presence("match.noMove", match.move === null);
+    const main = html.slice(html.indexOf("<main"), html.indexOf("</main>"));
+    const kickoff = [...main.matchAll(/<time\b([^>]*)>([^<]*)<\/time>/gi)].some(
+      ([, attrs = "", text = ""]) =>
+        tags(`<time${attrs}>`, "time")[0]?.datetime === match.commence_time &&
+        decodeEntities(text) === utcText(match.commence_time),
+    );
+    if (!kickoff) findings.push(`${page.path}: başlama anı <time> commence_time ile eşleşmiyor`);
   }
   if (page.kind === "league") {
     const league = snapshot.leagues.find((each) => `league:${each.id}` === page.id);
@@ -217,7 +201,6 @@ export function honestyFindings(snapshot: Snapshot, page: ExpectedPage, html: st
 
 // (T6 6) Dolu sicilde her girdinin satırı: yayın anı (`<time>` = published_at, sunucu metni UTC),
 // maç adı. Sonuç etiketi ve CLV hücresi data-fe'dir (checkFields).
-export const utcText = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
 export function recordCellFindings(snapshot: Snapshot, page: ExpectedPage, html: string): string[] {
   if (page.kind !== "track-record") return [];

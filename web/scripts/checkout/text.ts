@@ -3,6 +3,7 @@
 // değildir; yorumlar atlanır. Kapanmayan etiket (ör. `<p>` örtük kapanışı) yığında kalır: bağlam
 // fazla geniş okunur, dar değil — gizli sayılan bir düğüm yanlışlıkla görünür sayılmaz.
 import { type Attrs, decodeEntities, parseAttrs, stripScripts } from "../lib/html.ts";
+import { decodeNamed } from "./words.ts";
 
 export type Ancestor = { tag: string; attrs: Attrs };
 export type TextNode = { text: string; ancestors: readonly Ancestor[] };
@@ -40,7 +41,7 @@ export function textNodes(html: string): TextNode[] {
         stack = [...stack, { tag, attrs: parseAttrs(attrs ?? "") }];
       }
     } else if (text !== undefined) {
-      nodes.push({ text: decodeEntities(text), ancestors: stack });
+      nodes.push({ text: decodeEntities(decodeNamed(text)), ancestors: stack });
     }
   }
   return nodes;
@@ -48,14 +49,26 @@ export function textNodes(html: string): TextNode[] {
 
 const HIDING_STYLE = /display\s*:\s*none|visibility\s*:\s*hidden/i;
 
-// Ziyaretçiye hiç gösterilmeyen içerik: `hidden`, `<template>`, `aria-hidden`, satır içi gizleme.
+// Kapalı `<details>` içindeki içerik (özeti hariç) açılmadan görünmez (T9 inceleme M3).
+function collapsed(node: TextNode): boolean {
+  const index = node.ancestors.findIndex(
+    (each) => each.tag === "details" && each.attrs.open === undefined,
+  );
+  return index >= 0 && !node.ancestors.slice(index + 1).some((each) => each.tag === "summary");
+}
+
+// Ziyaretçiye hiç gösterilmeyen içerik: `hidden`, `<template>`, `aria-hidden`, satır içi gizleme,
+// kapalı `<details>`.
 export function isHidden(node: TextNode): boolean {
-  return node.ancestors.some(
-    (each) =>
-      each.tag === "template" ||
-      each.attrs.hidden !== undefined ||
-      each.attrs["aria-hidden"] === "true" ||
-      HIDING_STYLE.test(each.attrs.style ?? ""),
+  return (
+    collapsed(node) ||
+    node.ancestors.some(
+      (each) =>
+        each.tag === "template" ||
+        each.attrs.hidden !== undefined ||
+        each.attrs["aria-hidden"] === "true" ||
+        HIDING_STYLE.test(each.attrs.style ?? ""),
+    )
   );
 }
 
@@ -66,9 +79,6 @@ export function isDeferred(node: TextNode): boolean {
 
 export const within = (node: TextNode, tag: string): boolean =>
   node.ancestors.some((each) => each.tag === tag);
-
-export const inFe = (node: TextNode): boolean =>
-  node.ancestors.some((each) => each.attrs["data-fe"] !== undefined);
 
 // Boşlukları tek boşluğa indirir: metin karşılaştırmaları satır kırmasından etkilenmez.
 export const squash = (text: string): string => text.replace(/\s+/g, " ").trim();

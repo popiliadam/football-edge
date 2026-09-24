@@ -14,13 +14,13 @@ import {
   honestyFindings,
   linkFindings,
   markerFindings,
-  numberFindings,
   recordCellFindings,
   stateFindings,
   utcText,
   wordFindings,
 } from "./content.ts";
 import { type ExpectedPage, expectedPages } from "./expect.ts";
+import { numberFindings } from "./numbers.ts";
 import { textNodes } from "./text.ts";
 
 const snapshot = fullFixture();
@@ -121,8 +121,10 @@ describe("T5-2 görünen metinde yasak sözcükler", () => {
 describe("T5-3 data-fe dışında sayı yok", () => {
   const league = page(`league:${snapshot.leagues[0]?.id}`);
   it("yüzdelik etiketi, 18+, data-fe ve <time> geçer; başka rakam kırmızı", () => {
-    const ok =
-      '<p>10th percentile</p><p>18+ only</p><span data-fe="a:b:c">7.5</span><time dateTime="x">2026-09-20 16:30 UTC</time>';
+    const kickoff = snapshot.matches.find((each) => each.league_id === snapshot.leagues[0]?.id);
+    if (!kickoff) throw new Error("fixture ligi maçsız");
+    const time = `<time dateTime="${kickoff.commence_time}">${utcText(kickoff.commence_time)}</time>`;
+    const ok = `<p>10th percentile</p><p>18+ only</p><span data-fe="a:b:c">7.5</span>${time}`;
     expect(numberFindings(snapshot, league, ok)).toEqual([]);
     expect(numberFindings(snapshot, league, "<p>7 matches</p>")).toEqual([
       `${league.path}: data-fe dışında sayı "7" ("7 matches")`,
@@ -151,8 +153,9 @@ describe("T5-4 durum etiketleri", () => {
   const match = snapshot.matches.find((each) => each.h2h.opening === null && each.move === null);
   if (!match) throw new Error("fixture eşik altı açılış + hareketsiz maç taşımıyor");
   const matchPage = page(`match:${match.id}`);
+  const kickoff = `<time dateTime="${match.commence_time}">${utcText(match.commence_time)}</time>`;
   const row = (reason: string) =>
-    `<main><table><tr><th scope="row">Opening</th><td colSpan="4">${reason}</td></tr></table><p>No move to show.</p></main>`;
+    `<main><p>${kickoff}</p><table><tr><th scope="row">Opening</th><td colSpan="4">${reason}</td></tr></table><p>No move to show.</p></main>`;
 
   it("doğru neden geçer; kapanış bekleniyor ↔ yetersiz kitap takası kırmızı", () => {
     expect(stateFindings(snapshot, matchPage, row("Not enough bookmakers"))).toEqual([]);
