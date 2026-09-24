@@ -1,7 +1,9 @@
-"""`python -m football_edge.site verify-snapshot` (Faz 6 İz B §5.1).
+"""`python -m football_edge.site {export,verify-snapshot,derive-stdin}` (Faz 6 İz B §5.1).
 
-`verify-snapshot`: anlık görüntünün DB'siz denetimi; B-2 ve `site.yml` bu komutu çağırır. Dışa
-aktarım (`export`) ve ikinci türetimin iç komutu (`derive-stdin`) Task 6'da eklenir.
+`export`: `SITE_DATABASE_URL` (yalnız `site_reader`) ile tek salt okuma işleminde anlık görüntü
+üretir; secret'ın varlığını kendisi denetler. `verify-snapshot`: DB'siz denetim; B-2 ve `site.yml`
+bu komutu çağırır. `derive-stdin`: dışa aktarımın ikinci türetimi için İÇ komut — girdi dökümünü
+stdin'den okur, yalnız `content_sha256` basar, DB'ye bağlanmaz.
 """
 
 from __future__ import annotations
@@ -9,20 +11,113 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
+import os
+import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
+import psycopg
+
 from football_edge.collect import configure_logging
-from football_edge.site.contract import EXIT_SITE_INVALID, SCHEMA_PATH
+from football_edge.db import connect
+from football_edge.site.contract import (
+    DEVIG_CONFIG_PATH,
+    EXIT_SITE_CONFIG,
+    EXIT_SITE_CUT,
+    EXIT_SITE_INVALID,
+    SCHEMA_PATH,
+    SITE_LEAGUES_PATH,
+    content_sha256,
+)
+from football_edge.site.derive import DeriveError, derive
+from football_edge.site.export import (
+    ExportRefused,
+    devig_method,
+    dump_refusal,
+    run_export,
+    site_league_slugs,
+)
+from football_edge.site.inputs import load_inputs
 from football_edge.site.schema import check_schema
 from football_edge.site.verify import snapshot_errors
+
+LOGGER = logging.getLogger("football_edge.site")
+DSN_VAR = "SITE_DATABASE" + "_URL"
 
 
 def _schema() -> dict[str, Any]:
     schema: dict[str, Any] = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     check_schema(schema)
     return schema
+
+
+def _git_sha() -> str:
+    found = os.environ.get("GITHUB_SHA", "")
+    if not found:
+        try:
+            found = subprocess.run(
+                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=30
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            found = ""
+    if len(found) != 40:
+        raise ExportRefused(EXIT_SITE_CONFIG, "git SHA okunamadı")
+    return found
+
+
+def _export(out_dir: Path) -> int:
+    dsn = os.environ.get(DSN_VAR, "")
+    if not dsn:
+        sys.stdout.write(f"{DSN_VAR} yok — yayın yapılmadı\n")
+        return EXIT_SITE_CONFIG
+    try:
+        method = devig_method(DEVIG_CONFIG_PATH)
+        git_sha = _git_sha()
+        league_slugs = site_league_slugs(SITE_LEAGUES_PATH)
+        with connect(dsn) as conn:
+            summary = run_export(
+                conn,
+                out_dir,
+                generated_at=datetime.now(UTC),
+                git_sha=git_sha,
+                method=method,
+                schema=_schema(),
+                league_slugs=league_slugs,
+            )
+    except ExportRefused as refused:
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: {refused}\n")
+        return refused.code
+    except psycopg.Error as error:
+        # Metin basılmaz: libpq hatası adresin (parolanın) parçasını taşıyabilir. Yalnız sınıf adı.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası ({type(error).__name__})\n")
+        return EXIT_SITE_CONFIG
+    LOGGER.info(
+        "anlık görüntü yazıldı: maç=%d lig=%d takım=%d satır=%d last_id=%d "
+        "content_sha256=%s dosya_sha256=%s",
+        summary.matches,
+        summary.leagues,
+        summary.teams,
+        summary.rows,
+        summary.last_id,
+        summary.content_sha256,
+        summary.file_sha256,
+    )
+    return 0
+
+
+def _derive_stdin() -> int:
+    """Çözülemeyen ya da türetilemeyen döküm adlandırılmış çıkıştır (exit 22), traceback değil;
+    yalnız istisnanın sınıfı basılır — metni bir fiyat taşıyabilir (dışa aktarımla aynı kural)."""
+    try:
+        found = content_sha256(derive(load_inputs(sys.stdin.read())))
+    except (DeriveError, KeyError, TypeError, ValueError) as error:
+        sys.stdout.write(f"İKİNCİ TÜRETİM REDDEDİLDİ: {dump_refusal(error)}\n")
+        return EXIT_SITE_CUT
+    sys.stdout.write(found + "\n")
+    return 0
 
 
 class _NonJsonConstantError(ValueError):
@@ -99,11 +194,18 @@ def _verify(path: Path, sha256_file: Path | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m football_edge.site")
     commands = parser.add_subparsers(dest="command", required=True)
+    export = commands.add_parser("export", help="DB → snapshot.json + snapshot.sha256")
+    export.add_argument("--out", type=Path, required=True)
     verify = commands.add_parser("verify-snapshot", help="anlık görüntünün DB'siz denetimi")
     verify.add_argument("path", type=Path)
     verify.add_argument("--sha256", type=Path, default=None)
+    commands.add_parser("derive-stdin", help="İÇ: dışa aktarımın ikinci türetimi")
     args = parser.parse_args(argv)
+    if args.command == "derive-stdin":
+        return _derive_stdin()
     configure_logging()
+    if args.command == "export":
+        return _export(args.out)
     return _verify(args.path, args.sha256)
 
 

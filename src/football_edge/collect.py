@@ -541,14 +541,18 @@ class _RedactingFormatter(logging.Formatter):
 
 
 def _log_secrets() -> tuple[str, ...]:
-    """Pipeline'ın ortamdan aldığı her credential; boş olanı `redact` zaten atlar."""
-    dsn = os.getenv("DATABASE_URL", "")
+    """Pipeline'ın ortamdan aldığı her credential; boş olanı `redact` zaten atlar.
+
+    `SITE_DATABASE_URL` sitenin salt okuma rolünün adresidir (Faz 6 İz B §5.1, DEFERRED 10o):
+    `site export` aynı kök handler'dan loglar.
+    """
+    dsns = (os.getenv("DATABASE_URL", ""), os.getenv("SITE_DATABASE_URL", ""))
     # Tam DSN parolasından ÖNCE değişir: yoksa URL'nin kalanı (kullanıcı, host) açıkta kalır.
     return (
         os.getenv("ODDS_API_KEY", ""),
         os.getenv("TYPESAFE_API_KEY", ""),
-        dsn,
-        *dsn_password_forms(dsn),
+        *dsns,
+        *(form for dsn in dsns for form in dsn_password_forms(dsn)),
     )
 
 

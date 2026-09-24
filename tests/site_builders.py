@@ -44,6 +44,17 @@ HOME_LEAN = (1.6, 8.0, 4.0)  # 62.5 / 12.5 / 25.0
 # Marjlı ama simetrik: üç kitabın ortalaması 2.8/2.8/2.8 → power yöntemi 33.3 / 33.3 / 33.3.
 SYMMETRIC = ((2.7, 2.7, 2.7), (2.8, 2.8, 2.8), (2.9, 2.9, 2.9))
 BOOKS = ("kitap-a", "kitap-b", "kitap-c", "kitap-d")
+# Çözülemeyen döküm: (dökümdeki ilk eşleşme, yerine, beklenen istisna sınıfı). Dışa aktarım ve
+# `derive-stdin` bunları adlandırılmış çıkışa ve YALNIZ sınıf adına eşler — `float("4.47x")`in
+# metni fiyatı taşır. Zaman bozukluğu `DeriveError`dır (Task 5).
+DUMP_CORRUPTIONS = (
+    ('"version":1', '"version":2', "ValueError"),
+    ('"floor":', '"taban":', "KeyError"),
+    (",false,", ',"false",', "ValueError"),
+    ('"4.0"', '"4.47x"', "ValueError"),
+    ('"record":[]', '"record":[7]', "TypeError"),
+    ('"floor":"2026-07-02T00:00:00+00:00"', '"floor":"2026-07-02T00:00:00"', "DeriveError"),
+)
 
 
 @dataclass(frozen=True)
