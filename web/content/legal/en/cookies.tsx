@@ -1,9 +1,6 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function Cookies() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler (draft, pending legal review)</p>
       <h2>Cookies</h2>
       <p>This site sets no cookies and uses no analytics or advertising trackers.</p>
       <h2>Strictly necessary local storage</h2>

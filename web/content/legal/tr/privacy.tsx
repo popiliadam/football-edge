@@ -1,11 +1,15 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function Privacy() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler</p>
       <h2>Hangi verileri topluyoruz</h2>
-      <p>Kişisel veri toplamıyoruz. Sitede hesap, form, bülten, yorum ve analitik yoktur.</p>
+      <p>
+        Bu site ziyaretçilerinden kişisel veri toplamaz. Sitede hesap, form, bülten, yorum ve
+        analitik yoktur.
+      </p>
+      <p>
+        [AVUKAT SORUSU] Barındırma sağlayıcısının erişim kayıtlarındaki IP adresleri bizim
+        işlediğimiz kişisel veri sayılır mı; sayılırsa yukarıdaki cümle onları da kapsamalı mı?
+      </p>
       <h2>Barındırma</h2>
       <p>
         Site, bir barındırma sağlayıcısı tarafından statik dosyalar olarak sunulur; sağlayıcı
@@ -18,6 +22,11 @@ export default function Privacy() {
       </p>
       <h2>Sağlık verisi</h2>
       <p>Oyuncu sağlık ya da sakatlık bilgisi ve oyuncu düzeyinde hiçbir bilgi yayımlamıyoruz.</p>
+      <p>
+        [AVUKAT SORUSU] Projenin haber işleme hattı, sakatlık haberlerini de içerebilen haber
+        metinlerini saklıyor. Bu işleme bu metnin kapsamında mı; sakatlık bilgisi KVKK md. 6
+        anlamında sağlık verisi sayılır mı?
+      </p>
       <h2>Yerel depolama</h2>
       <p>
         Tarayıcınız yalnız 18 yaşından büyük olduğunuzu onayladığınızı kaydeden tek bir girdi

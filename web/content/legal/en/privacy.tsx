@@ -1,13 +1,14 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function Privacy() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler (draft, pending legal review)</p>
       <h2>What we collect</h2>
       <p>
-        We do not collect personal data. The site has no accounts, no forms, no newsletter, no
-        comments and no analytics.
+        This site does not collect personal data from its visitors. The site has no accounts, no
+        forms, no newsletter, no comments and no analytics.
+      </p>
+      <p>
+        [AVUKAT SORUSU] Do the IP addresses in the hosting provider's access logs count as personal
+        data that we process, so that the sentence above must cover them?
       </p>
       <h2>Hosting</h2>
       <p>
@@ -21,6 +22,11 @@ export default function Privacy() {
       </p>
       <h2>Health data</h2>
       <p>We do not publish player health, injury or any other player-level information.</p>
+      <p>
+        [AVUKAT SORUSU] The project's news-processing pipeline stores news texts, which may include
+        injury news. Is that processing within the scope of this notice, and is injury information
+        health data under KVKK art. 6?
+      </p>
       <h2>Local storage</h2>
       <p>
         Your browser stores a single entry recording that you confirmed you are 18 or older. It

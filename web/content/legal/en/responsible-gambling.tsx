@@ -1,9 +1,6 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function ResponsibleGambling() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler (draft, pending legal review)</p>
       <h2>18+ only</h2>
       <p>This site is for adults aged 18 or over. We do not accept bets.</p>
       <h2>Gambling can be addictive</h2>

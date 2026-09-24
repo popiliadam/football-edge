@@ -75,7 +75,7 @@
   "record.limit1": "The chain is linear: showing that a row belongs to the head requires every row after it. Today we publish the anchors' git history and the snapshot hash. A third party cannot verify the chain from genesis, because ledger rows carry bookmaker names and prices, which we do not publish.",
   "record.limit2": "Git history is not a trusted timestamp: the repository owner could rewrite it, and commit dates are the bot's own claim. A contradiction can only be caught with an independent mirror or GitHub's event log.",
   "record.limit3": "Recomputing a row's hash requires the canonical JSON recipe (float text for prices, UTC ISO timestamps, sorted keys, compact separators, non-ASCII kept).",
-  "legal.draft": "TASLAK — avukat onayı bekler",
+  "legal.draft": "TASLAK — avukat onayı bekler (draft, pending legal review)",
   "legal.terms": "Terms of use",
   "legal.privacy": "Privacy notice",
   "legal.cookies": "Cookies and local storage",

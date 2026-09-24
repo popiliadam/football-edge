@@ -1,14 +1,12 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function Terms() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler (draft, pending legal review)</p>
       <h2>What this site is</h2>
       <p>
         This site is for information only. It shows market consensus probabilities derived from
-        bookmaker prices that we record in a public, hash-chained ledger. It does not accept bets,
-        does not direct visitors to any bookmaker and contains no links to betting operators.
+        bookmaker prices that we record in a hash-chained ledger. We publish the ledger's head
+        hashes, not its rows. It does not accept bets, does not direct visitors to any bookmaker and
+        contains no links to betting operators.
       </p>
       <h2>No guarantee</h2>
       <p>

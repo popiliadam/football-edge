@@ -1,14 +1,12 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function Terms() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler</p>
       <h2>Bu site nedir</h2>
       <p>
-        Bu site yalnız bilgi amaçlıdır. Herkese açık, hash zincirli bir defterde kaydettiğimiz bahis
-        sitesi fiyatlarından türetilen piyasa konsensüs olasılıklarını gösterir. Bahis kabul etmez,
-        ziyaretçiyi hiçbir bahis sitesine yönlendirmez ve bahis işletmecilerine bağlantı içermez.
+        Bu site yalnız bilgi amaçlıdır. Hash zincirli bir defterde kaydettiğimiz bahis sitesi
+        fiyatlarından türetilen piyasa konsensüs olasılıklarını gösterir. Defterin satırlarını
+        değil, yalnız baş hash'lerini yayımlıyoruz. Bahis kabul etmez, ziyaretçiyi hiçbir bahis
+        sitesine yönlendirmez ve bahis işletmecilerine bağlantı içermez.
       </p>
       <h2>Garanti yoktur</h2>
       <p>

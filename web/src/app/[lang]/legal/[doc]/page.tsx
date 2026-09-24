@@ -1,5 +1,6 @@
 // Yasal metin TASLAKLARI (spec §10.1): düz TSX, markdown yok. Taslak oldukları sürece
-// bayraktan bağımsız olarak `noindex` ve site haritası dışıdır (AK13, AK14).
+// bayraktan bağımsız olarak `noindex` ve site haritası dışıdır (AK13, AK14). "TASLAK — avukat
+// onayı bekler" işareti tek kaynaktan (sözlük `legal.draft`) başlığın hemen altına basılır.
 
 import { notFound } from "next/navigation";
 import { LEGAL_CONTENT } from "../../../../../content/legal/index.ts";
@@ -11,6 +12,7 @@ import { breadcrumbLd, pageLd } from "../../../../lib/jsonld.ts";
 import { pageMetadata } from "../../../../lib/meta.ts";
 import { langOf } from "../../../../lib/params.ts";
 import { homePath, legalPath } from "../../../../lib/routes.ts";
+import styles from "../../../../styles/site.module.css";
 
 type Params = { params: Promise<{ lang: string; doc: string }> };
 
@@ -44,6 +46,7 @@ export default async function LegalPage({ params }: Params) {
     <main data-fe-page={`legal:${doc}`}>
       <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
       <h1>{t(lang, `legal.${doc}`)}</h1>
+      <p className={styles.draft}>{t(lang, "legal.draft")}</p>
       <Content />
       <JsonLdScript data={pageLd([breadcrumbLd(crumbs)])} />
     </main>

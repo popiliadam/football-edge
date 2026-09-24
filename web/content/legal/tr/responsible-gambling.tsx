@@ -1,9 +1,6 @@
-import styles from "../../../src/styles/site.module.css";
-
 export default function ResponsibleGambling() {
   return (
     <article>
-      <p className={styles.draft}>TASLAK — avukat onayı bekler</p>
       <h2>Yalnız 18+</h2>
       <p>Bu site 18 yaşından büyükler içindir. Bahis kabul etmiyoruz.</p>
       <h2>Bahis bağımlılık yapabilir</h2>

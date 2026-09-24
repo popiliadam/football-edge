@@ -1,7 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CONSENT_KEY, type ConsentStore, giveConsent, hasConsent } from "../lib/consent.ts";
+import {
+  CONSENT_KEY,
+  type ConsentStore,
+  confirmGate,
+  type GateDialog,
+  giveConsent,
+  hasConsent,
+  openGateIfNeeded,
+} from "../lib/consent.ts";
 import { AgeGate } from "./AgeGate.tsx";
 
 const labels = { title: "T", body: "B", confirm: "C", leave: "L", strip: "STRIP-18" };
@@ -46,4 +54,51 @@ describe("18+ kapısı (spec §10.2)", () => {
     expect(giveConsent(throwing)).toBe(false);
     expect(hasConsent(null)).toBe(false);
   });
+
+  it("onay yoksa kapı kipli açılır (showModal), varsa açılmaz", () => {
+    const fresh = fakeDialog();
+    expect(openGateIfNeeded(fresh, memoryStore())).toBe(true);
+    expect(fresh.modalCalls).toBe(1);
+    expect(fresh.open).toBe(true);
+
+    const consented = memoryStore();
+    consented.data.set(CONSENT_KEY, "1");
+    const quiet = fakeDialog();
+    expect(openGateIfNeeded(quiet, consented)).toBe(false);
+    expect(quiet.modalCalls).toBe(0);
+
+    const blocked = fakeDialog();
+    expect(openGateIfNeeded(blocked, throwing)).toBe(true);
+    expect(blocked.modalCalls).toBe(1);
+    expect(openGateIfNeeded(null, memoryStore())).toBe(false);
+  });
+
+  it("onay düğmesi onayı yazar ve kapıyı kapatır; yazamazsa da kapatır", () => {
+    const store = memoryStore();
+    const dialog = fakeDialog();
+    openGateIfNeeded(dialog, store);
+    expect(confirmGate(dialog, store)).toBe(true);
+    expect(store.data.get(CONSENT_KEY)).toBe("1");
+    expect(dialog.open).toBe(false);
+    expect(openGateIfNeeded(fakeDialog(), store)).toBe(false);
+
+    const failing = fakeDialog();
+    openGateIfNeeded(failing, throwing);
+    expect(confirmGate(failing, throwing)).toBe(false);
+    expect(failing.open).toBe(false);
+  });
 });
+
+function fakeDialog(): GateDialog & { modalCalls: number } {
+  return {
+    open: false,
+    modalCalls: 0,
+    showModal() {
+      this.open = true;
+      this.modalCalls += 1;
+    },
+    close() {
+      this.open = false;
+    },
+  };
+}
