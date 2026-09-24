@@ -18,8 +18,10 @@ if git ls-files --error-unmatch .env >/dev/null 2>&1; then
   fail=1
 fi
 
-# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç).
-git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY|TYPESAFE_API_KEY)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
+# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç). `SITE_DATABASE_URL`
+# `DATABASE_URL` alt dizesiyle yakalanır; Netlify kişisel erişim tokenı hesabın bütün sitelerine
+# yetkilidir (AK18) — adıyla listededir.
+git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY|TYPESAFE_API_KEY|NETLIFY_AUTH_TOKEN)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
   -- . ':!*.md' ':!.env.example' ':!uv.lock'
 found=$?
 

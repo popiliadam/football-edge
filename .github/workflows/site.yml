@@ -1,0 +1,69 @@
+name: site
+
+# Faz 6 İz B (B9, §11): HAZIR, BAĞLI DEĞİL. Yalnız elle tetiklenir; zamanlama ve pg_cron tetiği
+# YOK (AK15). Secret'lar (SITE_DATABASE_URL, NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID) kullanıcı
+# onayından sonra eklenir (AK18); yokken dışa aktarım "SITE_DATABASE_URL yok — yayın yapılmadı"
+# ile ADIYLA kırmızıdır — ayrı bir ön adım yoktur, secret yalnız o adıma verilir ve `if:` içinde
+# okunamaz. Secret ADIM düzeyindedir (H5d): DB adresi yalnız dışa aktarımda, Netlify kimliği yalnız
+# yayında; kurulum, derleme, tarayıcı ve B-2'nin yayın kapıları secret'sızdır. Loglar public.
+# Netlify derlemez (AK16): hazır `web/out` dizini CLI ile yüklenir.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Çıpa eksikliği kontrolü git geçmişi ister; sığ klonda "ATLANDI" dışa aktarımı durdurur.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Secret taraması
+        run: ./scripts/check_secrets.sh
+      - name: Anlık görüntü
+        env:
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
+        run: uv run python -m football_edge.site export --out web/.snapshot
+      - name: Anlık görüntü denetimi
+        run: >-
+          uv run python -m football_edge.site verify-snapshot web/.snapshot/snapshot.json
+          --sha256 web/.snapshot/snapshot.sha256
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - name: Site bağımlılıkları
+        run: pnpm -C web install --frozen-lockfile
+      # Derleme ve tarayıcı B-2'nin arayüzüyle (B-2 plan "B-1 ile arayüz"): çıplak `next build`
+      # `_headers`/`_redirects`/`data/` üretmez, `run build` üretir.
+      - name: Site derlemesi
+        env:
+          SITE_SNAPSHOT: ${{ github.workspace }}/web/.snapshot/snapshot.json
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm -C web run build
+      - name: Çıktı tarayıcısı
+        run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
+      # B-2 Task 10 buraya (tarayıcıdan sonra, yayından önce) kaybolan-slug adımını
+      # (`scripts/site_publish.py slugs`, AK20 b), işin SONUNA yayın sonrası kontrolü
+      # (`scripts/site_publish.py live`, §6.4/3f) ve `on.workflow_dispatch.inputs.first_publish`i
+      # ekler; yayın komutuna `--no-build` da onundur (controller kararı, B-1 plan düzeltme turu 1).
+      - name: Yayın
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: npx --yes netlify-cli@27.8.1 deploy --prod --dir web/out --config web/netlify.toml
