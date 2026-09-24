@@ -4,9 +4,15 @@ name: site
 # YOK (AK15). Secret'lar (SITE_DATABASE_URL, NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID) kullanıcı
 # onayından sonra eklenir (AK18); yokken dışa aktarım "SITE_DATABASE_URL yok — yayın yapılmadı"
 # ile ADIYLA kırmızıdır — ayrı bir ön adım yoktur, secret yalnız o adıma verilir ve `if:` içinde
-# okunamaz. Secret ADIM düzeyindedir (H5d): DB adresi yalnız dışa aktarımda, Netlify kimliği yalnız
-# yayında; kurulum, derleme, tarayıcı ve B-2'nin yayın kapıları secret'sızdır. Loglar public.
-# Netlify derlemez (AK16): hazır `web/out` dizini CLI ile yüklenir.
+# okunamaz. Loglar public. Netlify derlemez (AK16): hazır `web/out` dizini CLI ile yüklenir.
+#
+# İKİ İŞ (H5d): aynı işin adımları makineyi, $HOME'u, $GITHUB_PATH/$GITHUB_ENV'i ve npm önbelleğini
+# paylaşır; `pnpm install`/`next build`de koşan bağımlılık kodu sonraki bir adımın ortamını ele
+# geçirebilir. Bu yüzden Netlify kimliği derleme işine HİÇ girmez: `build` DB adresini yalnız dışa
+# aktarım adımında görür ve denetlenmiş çıktıyı artifact olarak bırakır; `deploy` taze bir runner'da
+# artifact'ı indirir, pnpm/next/npx koşmaz, sabit sürümlü netlify-cli'yi kurar ve Netlify kimliğini
+# yalnız yayın adımına verir. Kırmızı bir adımdan sonra hiçbir şey koşmaz: adımlarda `if:` ve
+# `continue-on-error` yok; `deploy` `needs: build` ile derlemenin yeşiline bağlı.
 on:
   workflow_dispatch:
 
@@ -18,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  site:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -58,12 +64,50 @@ jobs:
         run: pnpm -C web run build
       - name: Çıktı tarayıcısı
         run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
-      # B-2 Task 10 buraya (tarayıcıdan sonra, yayından önce) kaybolan-slug adımını
-      # (`scripts/site_publish.py slugs`, AK20 b), işin SONUNA yayın sonrası kontrolü
-      # (`scripts/site_publish.py live`, §6.4/3f) ve `on.workflow_dispatch.inputs.first_publish`i
-      # ekler; yayın komutuna `--no-build` da onundur (controller kararı, B-1 plan düzeltme turu 1).
+      # Yalnız yayına gidecek olan: denetlenmiş site ve dışa aktarımın özeti (B-2'nin yayın sonrası
+      # kontrolü "yayımlanan = doğrulanan"ı onunla sınar). Kitap bazında veri taşıyan hiçbir şey ve
+      # snapshot.json yüklenmez. `.snapshot` gizli dizin: `include-hidden-files` olmadan düşerdi.
+      - name: Yayın paketi
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: |
+            web/out
+            web/.snapshot/snapshot.sha256
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs: build
+    # Yalnız `main`den. Koşul durum işlevi içermez: örtük `success()` korunur (derleme kırmızıysa
+    # yayın yok). `production` ortamının dağıtım dalı kuralı ve ortam kapsamlı Netlify secret'ları
+    # GitHub ayarıdır (AK18, kullanıcı).
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Yalnız `web/netlify.toml` ve `web/.nvmrc` için; token diske yazılmaz.
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: web
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+      - name: Netlify CLI
+        run: npm install --global netlify-cli@27.8.1
+      # B-2 Task 10 bu işe ekler (controller kararı, B-1 plan düzeltme turu 1 + T8 düzeltme turu 1):
+      # `Yayın`dan hemen ÖNCE kaybolan-slug adımını (`scripts/site_publish.py slugs`, AK20 b),
+      # işin SONUNA yayın sonrası kontrolü (`scripts/site_publish.py live`, §6.4/3f),
+      # `on.workflow_dispatch.inputs.first_publish`i ve yayın komutuna `--no-build`ı. Bu iş Python
+      # kurmaz: iki adımın istediği `setup-uv` + `uv sync --frozen` da B-2'nindir.
       - name: Yayın
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: npx --yes netlify-cli@27.8.1 deploy --prod --dir web/out --config web/netlify.toml
+        run: netlify deploy --prod --dir web/out --config web/netlify.toml

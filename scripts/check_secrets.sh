@@ -40,5 +40,23 @@ case "$found" in
     ;;
 esac
 
+# Netlify kişisel erişim tokenı biçimiyle de aranır: ad=değer taraması YAML/JSON değerini,
+# `--auth` bayrağını, adsız tokenı, küçük harfli adı ve Markdown'ı görmez (T8 incelemesi I4).
+# `nfp_` + 36 alfasayısal yanlış alarm vermez (depoda 0 eşleşme ölçüldü) — `.md` DÂHİL.
+git grep -nIE 'nfp_[A-Za-z0-9]{36}' -- . ':!uv.lock'
+token=$?
+
+case "$token" in
+  0)
+    echo "HATA: izlenen dosyada Netlify erişim tokenı var"
+    fail=1
+    ;;
+  1) ;;
+  *)
+    echo "HATA: Netlify token taraması koşamadı (exit $token) — tarama yapılmadı"
+    fail=1
+    ;;
+esac
+
 [ "$fail" -eq 0 ] && echo "secret taraması temiz"
 exit "$fail"
