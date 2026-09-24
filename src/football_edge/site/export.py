@@ -8,12 +8,14 @@ Log yalnız sayı ve hash taşır; girdi dökümü (kitap bazında fiyat) ne dis
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,7 +34,7 @@ from football_edge.anchors import (
     missing_anchors,
 )
 from football_edge.collect import LEDGER_AUDIT_VIEW, _first_anchor_break, _ledger_rows
-from football_edge.ledger import _canonical, verify_chain
+from football_edge.ledger import GENESIS, _canonical, verify_chain
 from football_edge.market.devig import METHODS
 from football_edge.site.contract import (
     EXIT_SITE_CHAIN,
@@ -64,6 +66,7 @@ _ISOLATION = (
     "SELECT current_setting('transaction_isolation'), current_setting('transaction_read_only')"
 )
 _FLOOR = "SELECT site.public_floor()"
+_AUDIT_LAST_ID = f"SELECT coalesce(max(id), 0) FROM {LEDGER_AUDIT_VIEW}"
 _HEAD = "SELECT rows, last_id, head FROM site.ledger_head"
 _LEAGUES = "SELECT id, name, country FROM site.leagues ORDER BY id"
 _MATCHES = "SELECT id, league_id, commence_time, home_team, away_team FROM site.matches ORDER BY id"
@@ -176,14 +179,13 @@ def run_export(
     derive_elsewhere: Callable[[str], str] | None = None,
 ) -> ExportSummary:
     """§5.1'in altı adımı; hepsi geçerse iki dosya yazılır, biri kırmızıysa hiçbiri."""
-    if out_dir.exists() and any(out_dir.iterdir()):
-        raise ExportRefused(EXIT_SITE_CONFIG, f"{out_dir} boş değil — bayat dosyayla yayın yok")
+    _require_empty_out(out_dir)
     conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
     conn.read_only = True
     with conn.transaction():
         _require_isolation(conn)
-        anchor, head = _verified_chain(conn, anchor_dir)
-        cut = _cut(conn, anchor, head)
+        anchor, verified = _verified_chain(conn, anchor_dir)
+        cut = _cut(conn, anchor, verified)
         dump = _dump(conn, cut, anchor, method, league_slugs)
     try:
         inputs = load_inputs(dump)
@@ -223,15 +225,59 @@ def _require_isolation(conn: psycopg.Connection[Any]) -> None:
         raise ExportRefused(EXIT_SITE_CUT, "işlem REPEATABLE READ, READ ONLY değil")
 
 
-def _verified_chain(conn: psycopg.Connection[Any], anchor_dir: Path) -> tuple[Anchor, str]:
-    """HER çıpa sorulur, kesim GENESIS'ten yeniden hash'lenir (§5.1/1); indirgeme kırmızıdır."""
-    scan = _scan_anchors(anchor_dir)
+def _verified_chain(conn: psycopg.Connection[Any], anchor_dir: Path) -> tuple[Anchor, LedgerCut]:
+    """HER çıpa sorulur, kesim GENESIS'ten yeniden hash'lenir (§5.1/1); indirgeme kırmızıdır.
+
+    Dönen kesim DOĞRULANAN satırlardandır (sayı, son kimlik, yeniden hesaplanmış baş).
+    """
+    anchors = _anchors_to_ask(anchor_dir)
+    breakage = _first_anchor_break(conn, anchors, relation=LEDGER_AUDIT_VIEW)
+    if breakage is not None:
+        raise ExportRefused(EXIT_SITE_CHAIN, f"ÇIPA UYUŞMAZLIĞI: {breakage}")
+    rows = _ledger_rows(conn, None, relation=LEDGER_AUDIT_VIEW)
+    result = verify_chain(rows)
+    if not result.ok:
+        raise ExportRefused(
+            EXIT_SITE_CHAIN, f"zincir KIRIK: {result.failed_index}. satır, {result.error}"
+        )
+    if rows and anchors[-1].last_id <= 0:
+        raise ExportRefused(
+            EXIT_SITE_CHAIN, f"en yeni çıpa boş defteri gösteriyor ({anchors[-1].path.name})"
+        )
+    # Kimlik hash'e girmez (`ledger._CHAIN_KEYS`): son kimlik aynı işlemde aynı görünümden okunur.
+    with conn.cursor() as cur:
+        cur.execute(_AUDIT_LAST_ID)
+        last_id = int((cur.fetchone() or (0,))[0])
+    return anchors[-1], LedgerCut(len(rows), last_id, result.head)
+
+
+def _anchors_to_ask(anchor_dir: Path) -> tuple[Anchor, ...]:
+    """Depodaki bütün çıpalar; okunamayan, eksik ya da tutarsız boş çıpa kırmızıdır."""
+    try:
+        scan = _scan_anchors(anchor_dir)
+    except (OSError, UnicodeDecodeError) as error:
+        raise ExportRefused(
+            EXIT_SITE_CHAIN, f"çıpa dosyası okunamadı ({type(error).__name__})"
+        ) from None
     if scan.downgraded is not None:
         raise ExportRefused(
             EXIT_SITE_CHAIN, f"en yeni çıpa okunamadı ({scan.downgraded.name}) — indirgeme yok"
         )
     if not scan.readable:
         raise ExportRefused(EXIT_SITE_CHAIN, "çıpa yok ya da okunamadı — çıpasız yayın yok")
+    # `_scan_anchors` okunamayan ESKİ dosyayı sessizce düşürür; sorulmayan çıpa da indirgemedir.
+    read = {anchor.path.name for anchor in scan.readable}
+    unreadable = sorted(p.name for p in anchor_dir.glob("head-*.txt") if p.name not in read)
+    if unreadable:
+        raise ExportRefused(EXIT_SITE_CHAIN, "okunamayan çıpa: " + ", ".join(unreadable))
+    # `_first_anchor_break` `last_id <= 0`ı boş defterin çıpası sayıp atlar: öyle olduğu sınanır.
+    hollow = [
+        anchor.path.name
+        for anchor in scan.readable
+        if anchor.last_id <= 0 and (anchor.rows != 0 or anchor.head != GENESIS)
+    ]
+    if hollow:
+        raise ExportRefused(EXIT_SITE_CHAIN, "boş defter çıpası tutarsız: " + ", ".join(hollow))
     expected = expected_anchor_names(anchor_dir)
     if expected is None:
         raise ExportRefused(
@@ -243,18 +289,10 @@ def _verified_chain(conn: psycopg.Connection[Any], anchor_dir: Path) -> tuple[An
     archived = archived_anchors(anchor_dir, recorded=expected)
     if archived:
         LOGGER.warning("arşivlenmiş çıpa (kanıt kapsamı daraldı): %d", len(archived))
-    breakage = _first_anchor_break(conn, scan.readable, relation=LEDGER_AUDIT_VIEW)
-    if breakage is not None:
-        raise ExportRefused(EXIT_SITE_CHAIN, f"ÇIPA UYUŞMAZLIĞI: {breakage}")
-    result = verify_chain(_ledger_rows(conn, None, relation=LEDGER_AUDIT_VIEW))
-    if not result.ok:
-        raise ExportRefused(
-            EXIT_SITE_CHAIN, f"zincir KIRIK: {result.failed_index}. satır, {result.error}"
-        )
-    return scan.readable[-1], result.head
+    return scan.readable
 
 
-def _cut(conn: psycopg.Connection[Any], anchor: Anchor, head: str) -> LedgerCut:
+def _cut(conn: psycopg.Connection[Any], anchor: Anchor, verified: LedgerCut) -> LedgerCut:
     with conn.cursor() as cur:
         cur.execute(_FLOOR)
         floor = (cur.fetchone() or (None,))[0]
@@ -269,7 +307,10 @@ def _cut(conn: psycopg.Connection[Any], anchor: Anchor, head: str) -> LedgerCut:
         raise ExportRefused(
             EXIT_SITE_CUT, "çıpa satır diyor, görünüm 0 satır döndü (görünüm sahipliği/RLS?)"
         )
-    return LedgerCut(rows, last_id, head)
+    # İki görünüm aynı tabloya aynı RR anlık görüntüsünde bakar: fark sahiplik/süzgeç arızasıdır.
+    if (rows, last_id) != (verified.rows, verified.last_id):
+        raise ExportRefused(EXIT_SITE_CUT, "site.ledger_head doğrulanan zincirle uyuşmuyor")
+    return verified
 
 
 def _dump(
@@ -315,12 +356,39 @@ def _all(cur: psycopg.Cursor[Any], sql: str, params: tuple[Any, ...] = ()) -> li
     return [tuple(row) for row in cur.fetchall()]
 
 
+def _require_empty_out(out_dir: Path) -> None:
+    """`--out` ya yok ya boş bir dizin: bayat dosyayla yayın yok, dosya yolunun üstüne yazılmaz."""
+    try:
+        occupied = out_dir.exists() and (not out_dir.is_dir() or any(out_dir.iterdir()))
+    except OSError as error:
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"çıktı dizini okunamadı ({type(error).__name__})"
+        ) from None
+    if occupied:
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"{out_dir} boş değil ya da dizin değil — bayat dosyayla yayın yok"
+        )
+
+
 def _write(out_dir: Path, snapshot: Mapping[str, Any], cut: LedgerCut) -> ExportSummary:
+    """İki dosya bir hazırlama dizinine yazılır, dizin TEK `rename`le `--out` olur: yarım yayın yok.
+
+    POSIX'te dizin boş bir dizinin üstüne taşınabilir. Hata metni basılmaz (yol taşır), sınıf adı.
+    """
     payload = (_canonical(dict(snapshot)) + "\n").encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / SNAPSHOT_FILE).write_bytes(payload)
-    (out_dir / HASH_FILE).write_text(f"{digest}  {SNAPSHOT_FILE}\n", encoding="utf-8")
+    staging: Path | None = None
+    try:
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}-", dir=out_dir.parent))
+        (staging / SNAPSHOT_FILE).write_bytes(payload)
+        (staging / HASH_FILE).write_text(f"{digest}  {SNAPSHOT_FILE}\n", encoding="utf-8")
+        staging.rename(out_dir)
+    except OSError as error:
+        _discard(staging)
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"çıktı yazılamadı ({type(error).__name__})"
+        ) from None
     return ExportSummary(
         matches=len(snapshot["matches"]),
         leagues=len(snapshot["leagues"]),
@@ -330,3 +398,14 @@ def _write(out_dir: Path, snapshot: Mapping[str, Any], cut: LedgerCut) -> Export
         content_sha256=str(snapshot["content_sha256"]),
         file_sha256=digest,
     )
+
+
+def _discard(staging: Path | None) -> None:
+    """Başarısız yazımın KENDİ hazırlama dizini: yalnız iki bilinen dosya ve dizinin kendisi."""
+    if staging is None:
+        return
+    for name in (SNAPSHOT_FILE, HASH_FILE):
+        with contextlib.suppress(OSError):
+            (staging / name).unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        staging.rmdir()

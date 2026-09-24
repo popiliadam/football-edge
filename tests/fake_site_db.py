@@ -26,13 +26,21 @@ class FakeSiteDb:
     isolation: tuple[str, str] = ("repeatable read", "on")
     floor: datetime = PUBLIC_FLOOR
     head_rows: int | None = None  # site.ledger_head.rows'u ezmek için (sahiplik arızası)
+    head_last_id: int | None = None  # site.ledger_head.last_id'yi ezmek için
     queries: list[str] = field(default_factory=list)
     isolation_level: Any = None
     read_only: bool | None = None
+    transactions: int = 0  # açılan işlem sayısı (B12: tek işlem)
+    depth: int = 0  # açık işlem derinliği; 0'da gelen sorgu reddedilir
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        yield
+        self.transactions += 1
+        self.depth += 1
+        try:
+            yield
+        finally:
+            self.depth -= 1
 
     def cursor(self) -> _Cursor:
         return _Cursor(self)
@@ -87,6 +95,9 @@ class _Cursor:
 
     def execute(self, sql: str, params: Any = None) -> None:
         text = " ".join(sql.split())
+        if self._db.depth == 0:
+            # B12: zincir ve döküm aynı anlık görüntüden okunmalı; işlem dışı sorgu kesimi böler.
+            raise AssertionError(f"işlem dışında sorgu: {text}")
         self._db.queries.append(text)
         db, self.description = self._db, None
         rows = db.ledger
@@ -94,6 +105,8 @@ class _Cursor:
             self._result = [db.isolation]
         elif text == "SELECT count(*) FROM site_audit.ledger_rows":
             self._result = [(len(rows),)]
+        elif text == "SELECT coalesce(max(id), 0) FROM site_audit.ledger_rows":
+            self._result = [(max((row["id"] for row in rows), default=0),)]
         elif text.startswith("SELECT match_id") and "FROM site_audit.ledger_rows" in text:
             self.description = tuple((name,) for name in LEDGER_COLUMNS)
             wanted = [row for row in rows if "WHERE id = %s" not in text or row["id"] == params[0]]
@@ -103,6 +116,7 @@ class _Cursor:
         elif text == "SELECT rows, last_id, head FROM site.ledger_head":
             count = len(rows) if db.head_rows is None else db.head_rows
             last = max((row["id"] for row in rows), default=0)
+            last = last if db.head_last_id is None else db.head_last_id
             head = rows[-1]["row_hash"] if rows else "0" * 64
             self._result = [(count, last, head)]
         elif text.startswith("SELECT id, name, country FROM site.leagues"):

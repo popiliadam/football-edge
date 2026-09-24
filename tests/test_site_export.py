@@ -6,6 +6,7 @@ ADIYLA ve DOSYA YAZMADAN durduğu sınanır.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from dataclasses import replace
@@ -18,6 +19,8 @@ import psycopg
 import pytest
 
 from football_edge.backtest.model_config import MODEL_CONFIG_PATH, load_model_config
+from football_edge.ledger import GENESIS
+from football_edge.site import __main__ as site_main
 from football_edge.site import export
 from football_edge.site.contract import (
     DEVIG_CONFIG_PATH,
@@ -379,3 +382,210 @@ def test_a_dump_time_that_is_not_canonical_utc_is_a_named_derive_error(
     _corrupted(monkeypatch, old, new)
 
     _refused(_db(), tmp_path, EXIT_SITE_CUT, "kanonik UTC metni değil")
+
+
+# ── Düzeltme turu 1: tek işlem, her çıpa, atomik yazma, hash dosyası, taban, baş görünümü ────
+
+
+def test_the_chain_and_the_dump_are_read_in_one_transaction(tmp_path: Path) -> None:
+    """B12: taklit işlem dışındaki sorguyu reddeder; zincir de döküm de TEK işlemde okunur."""
+    db = _db()
+    _export(db, tmp_path)
+
+    assert db.transactions == 1
+    assert any(q.startswith("SELECT match_id") for q in db.queries)
+    assert any("FROM site_input.h2h_quotes" in q for q in db.queries)
+
+
+def _commit_anchor(anchors: Path, name: str, content: str | bytes) -> None:
+    """Çıpa deposuna ikinci (eski tarihli) bir çıpa commit'ler."""
+    target = anchors / name
+    if isinstance(content, bytes):
+        target.write_bytes(content)
+    else:
+        target.write_text(content, encoding="utf-8")
+    subprocess.run(["git", "-C", str(anchors), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(anchors), "-c", "user.email=t@example.com", "-c", "user.name=t"]
+        + ["commit", "-q", "-m", "eski çıpa"],
+        check=True,
+    )
+
+
+def _anchor_text(*, rows: int, last_id: int, head: str) -> str:
+    return f"2026-09-20T12:00:00+00:00\nrows={rows}\nlast_id={last_id}\nhead={head}\n"
+
+
+OLDER = "head-2026-09-20.txt"
+
+
+def test_every_anchor_is_asked_not_only_the_newest(tmp_path: Path) -> None:
+    """§5.1/1: eski çıpanın hash'i defterle uyuşmuyorsa en yenisi tutsa da kırmızı."""
+    anchors = _anchors(tmp_path)
+    _commit_anchor(anchors, OLDER, _anchor_text(rows=5, last_id=5, head="f" * 64))
+
+    _refused(_db(), tmp_path, EXIT_SITE_CHAIN, f"ÇIPA UYUŞMAZLIĞI.*{OLDER}", anchor_dir=anchors)
+
+
+@pytest.mark.parametrize(
+    ("content", "needle"),
+    [
+        ("bozuk\n", f"okunamayan çıpa: {OLDER}"),
+        (b"\xff\xfe bozuk", r"çıpa dosyası okunamadı \(UnicodeDecodeError\)"),
+    ],
+)
+def test_an_unreadable_older_anchor_is_red_not_dropped(
+    tmp_path: Path, content: str | bytes, needle: str
+) -> None:
+    """Okunamayan ESKİ çıpa sessizce düşmez: sorulmayan çıpa da bir indirgemedir."""
+    anchors = _anchors(tmp_path)
+    _commit_anchor(anchors, OLDER, content)
+
+    _refused(_db(), tmp_path, EXIT_SITE_CHAIN, needle, anchor_dir=anchors)
+
+
+def test_an_inconsistent_empty_ledger_anchor_is_red(tmp_path: Path) -> None:
+    """`last_id=0` çıpası `_first_anchor_break`te atlanır; satır sayan ya da GENESIS dışı baş
+    taşıyorsa boş defterin çıpası değildir."""
+    anchors = _anchors(tmp_path)
+    _commit_anchor(anchors, OLDER, _anchor_text(rows=10, last_id=0, head="e" * 64))
+
+    _refused(
+        _db(), tmp_path, EXIT_SITE_CHAIN, f"boş defter çıpası tutarsız: {OLDER}", anchor_dir=anchors
+    )
+
+
+def test_a_newest_empty_ledger_anchor_under_a_nonempty_ledger_is_red(tmp_path: Path) -> None:
+    anchors = anchored_repo(tmp_path / "repo", rows=0, last_id=0, head=GENESIS, day="2026-09-21")
+
+    _refused(_db(), tmp_path, EXIT_SITE_CHAIN, "en yeni çıpa boş defteri", anchor_dir=anchors)
+
+
+def test_a_consistent_empty_ledger_anchor_from_the_past_is_accepted(tmp_path: Path) -> None:
+    """Defter boşken yazılmış çıpa gerçek bir geçmiş hâldir; çıpalar silinmez, kalıcı red olmaz."""
+    anchors = _anchors(tmp_path)
+    _commit_anchor(anchors, OLDER, _anchor_text(rows=0, last_id=0, head=GENESIS))
+
+    out = _export(_db(), tmp_path, anchor_dir=anchors)
+    assert sorted(path.name for path in out.iterdir()) == ["snapshot.json", "snapshot.sha256"]
+
+
+@pytest.mark.parametrize("override", [{"head_rows": 20}, {"head_last_id": 99}])
+def test_a_ledger_head_that_disagrees_with_the_verified_chain_is_red(
+    tmp_path: Path, override: dict[str, int]
+) -> None:
+    """`site.ledger_head` ve `site_audit.ledger_rows` aynı tabloya aynı işlemde bakar."""
+    _refused(
+        _db(**override), tmp_path, EXIT_SITE_CUT, "site.ledger_head doğrulanan zincirle uyuşmuyor"
+    )
+
+
+def test_a_failed_write_leaves_no_file_and_is_named(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """I3: ikinci dosya yazılamazsa `--out`ta yarım anlık görüntü kalmaz; çıkış adlı, sınıf adı."""
+    anchors = _anchors(tmp_path)
+    real = Path.write_text
+
+    def full_disk(self: Path, *args: Any, **kwargs: Any) -> int:
+        if self.name == "snapshot.sha256":
+            raise OSError(28, "No space left on device", str(self))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", full_disk)
+
+    with pytest.raises(ExportRefused) as refused:
+        _export(_db(), tmp_path, anchor_dir=anchors)
+
+    assert refused.value.code == EXIT_SITE_CONFIG
+    assert str(refused.value) == "çıktı yazılamadı (OSError)"
+    assert not (tmp_path / "out").exists()
+    assert [p for p in tmp_path.rglob("snapshot.*")] == [], "hazırlama dosyası kaldı"
+
+
+def test_the_files_are_staged_outside_out_until_both_are_written(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Yazım anında `--out` yoktur: iki dosya hazırlama dizinine yazılır, dizin sonra taşınır.
+
+    Sınır: yazımı `--out`a yapıp hatada temizleyen bir uygulama yukarıdaki hata testini geçer;
+    süreç öldürülürse (temizlik koşmaz) yarım yayın kalır. Bu test onu ayırır.
+    """
+    anchors = _anchors(tmp_path)
+    out = tmp_path / "out"
+    seen: list[tuple[str, bool]] = []
+    real_bytes, real_text = Path.write_bytes, Path.write_text
+
+    def spy_bytes(self: Path, data: Any) -> int:
+        seen.append((self.name, out.exists()))
+        return real_bytes(self, data)
+
+    def spy_text(self: Path, *args: Any, **kwargs: Any) -> int:
+        seen.append((self.name, out.exists()))
+        return real_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_bytes", spy_bytes)
+    monkeypatch.setattr(Path, "write_text", spy_text)
+
+    _export(_db(), tmp_path, anchor_dir=anchors)
+
+    assert seen == [("snapshot.json", False), ("snapshot.sha256", False)]
+    assert sorted(path.name for path in out.iterdir()) == ["snapshot.json", "snapshot.sha256"]
+
+
+def test_an_out_path_that_is_a_file_is_refused_by_name(tmp_path: Path) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "out").write_text("eski", encoding="utf-8")
+
+    with pytest.raises(ExportRefused, match="boş değil") as refused:
+        _export(_db(), tmp_path)
+
+    assert refused.value.code == EXIT_SITE_CONFIG
+    assert (tmp_path / "out").read_text(encoding="utf-8") == "eski"
+
+
+def test_an_existing_empty_out_dir_receives_the_two_files(tmp_path: Path) -> None:
+    """Hazırlama dizini boş `--out`un yerine geçer (POSIX rename boş dizinin üstüne izinli)."""
+    (tmp_path / "out").mkdir(parents=True)
+
+    out = _export(_db(), tmp_path)
+
+    assert sorted(path.name for path in out.iterdir()) == ["snapshot.json", "snapshot.sha256"]
+
+
+def test_the_hash_file_is_the_sha256sum_line_of_the_snapshot_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`<dosya baytlarının sha256'sı>  snapshot.json` + satır sonu: `sha256sum -c` biçimi.
+
+    Dosya baytlarının hash'i — içerik hash'i (`content_sha256`) DEĞİL.
+    """
+    out = _export(_db(), tmp_path)
+    payload = (out / "snapshot.json").read_bytes()
+
+    expected = f"{hashlib.sha256(payload).hexdigest()}  snapshot.json\n"
+    assert (out / "snapshot.sha256").read_bytes() == expected.encode("utf-8")
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+    verified = site_main.main(
+        ["verify-snapshot", str(out / "snapshot.json"), "--sha256", str(out / "snapshot.sha256")]
+    )
+    assert verified == 0
+
+
+class _FloorlessViewDb(FakeSiteDb):
+    """Tabanı süzmeyen `site.matches` (bozuk görünüm): dışa aktarıcının kendi taban bekçisi."""
+
+    def site_matches(self) -> list[tuple[str, str, datetime, str, str]]:
+        active = {league[0] for league in self.leagues if league[3]}
+        return sorted((row for row in self.matches if row[1] in active), key=lambda row: row[0])
+
+
+@pytest.mark.leakage
+def test_a_view_that_returns_a_match_below_the_floor_is_red(tmp_path: Path) -> None:
+    """H1(d): görünüm tabandan eski bir maç döndürürse dışa aktarım adıyla durur."""
+    base = _db()
+    old = ("03" + "ab" * 15, "tst.1", at("2026-06-20T18:00:00Z"), "Eski Spor", "Tarih FK")
+    db = _FloorlessViewDb(leagues=base.leagues, matches=[*base.matches, old], ledger=ROWS)
+
+    _refused(db, tmp_path, EXIT_SITE_CUT, "görünüm tabandan eski")

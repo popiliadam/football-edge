@@ -218,3 +218,46 @@ def test_a_missing_or_malformed_league_slug_file_is_a_named_exit(
     assert code == EXIT_SITE_CONFIG
     assert "DIŞA AKTARIM REDDEDİLDİ" in out and "lig slug'ları okunamadı" in out and reason in out
     assert not (tmp_path / "out").exists()
+
+
+def test_a_write_failure_is_a_named_exit_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """I3: yazma hatası exit 1 + traceback değil; exit 20 ve yalnız sınıf adı (yol basılmaz)."""
+    rounds = [Round(M1, "2026-09-20T10:00:00Z", "Alfa Spor", "Beta FK", [EVEN] * 3)]
+    rows = ledger(payloads(rounds))
+    db = FakeSiteDb(
+        leagues=[("tst.1", "Deneme Ligi", "Testland", True)],
+        matches=[(M1, "tst.1", at("2026-09-22T14:00:00Z"), "Alfa Spor", "Beta FK")],
+        ledger=rows,
+    )
+    anchors = anchored_repo(
+        tmp_path / "repo", rows=3, last_id=3, head=rows[2]["row_hash"], day="2026-09-21"
+    )
+    real_export, real_write = site_main.run_export, Path.write_bytes
+
+    def run(conn: Any, out: Path, **options: Any) -> Any:
+        chosen = {**options, "anchor_dir": anchors, "league_slugs": {"tst.1": "deneme-ligi"}}
+        return real_export(db, out, **chosen)  # type: ignore[arg-type]
+
+    def denied(self: Path, data: Any) -> int:
+        if self.name == "snapshot.json":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_write(self, data)
+
+    monkeypatch.setenv(DSN_VAR, DSN)
+    monkeypatch.setenv("PYTHONPATH", str(REPO / "src"))
+    monkeypatch.setenv("GITHUB_SHA", "1" * 40)
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "connect", lambda dsn: _Closing())
+    monkeypatch.setattr(site_main, "run_export", run)
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+    monkeypatch.setattr(Path, "write_bytes", denied)
+
+    code = site_main.main(["export", "--out", str(tmp_path / "out")])
+
+    seen = capsys.readouterr()
+    assert code == EXIT_SITE_CONFIG
+    assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: çıktı yazılamadı (PermissionError)\n"
+    assert "Traceback" not in seen.err and str(tmp_path) not in seen.out + seen.err
+    assert not (tmp_path / "out").exists()
