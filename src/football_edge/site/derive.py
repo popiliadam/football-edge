@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -205,7 +205,7 @@ def _match_json(view: MatchView, inputs: ExportInputs) -> dict[str, Any]:
         "id": row.id,
         "league_id": row.league_id,
         "path_id": row.id[:length],
-        "slug": match_slug(row.home, row.away),
+        "slug": _named_slug(row.league_id, match_slug, row.home, row.away),
         "date": row.commence_time.astimezone(UTC).date().isoformat(),
         "commence_time": iso_z(row.commence_time),
         "home": row.home,
@@ -222,6 +222,18 @@ def _match_json(view: MatchView, inputs: ExportInputs) -> dict[str, Any]:
         else {name: _shown(value, 1) for name, value in zip(OUTCOMES, move, strict=True)},
         "indexable": view.indexable,
     }
+
+
+def _named_slug(league_id: str, make: Callable[..., str], *names: str) -> str:
+    """Takım adından URL bölütü; harf ya da rakam taşımayan ad `DeriveError`dır.
+
+    `slugify` düz `ValueError` atar ve dışa aktarıcı yalnız `DeriveError`ı çıkış koduna eşler.
+    Mesaj adı taşımaz: sınıf ve lig yeter.
+    """
+    try:
+        return make(*names)
+    except ValueError:
+        raise DeriveError(f"lig {league_id}: takım adından slug üretilemedi") from None
 
 
 def _leagues(inputs: ExportInputs, views: Sequence[MatchView]) -> list[dict[str, Any]]:
@@ -270,7 +282,7 @@ def _teams(inputs: ExportInputs, views: Sequence[MatchView]) -> list[dict[str, A
             counts[key] = counts.get(key, 0) + 1
     entries: dict[tuple[str, str], dict[str, Any]] = {}
     for (league_id, name), count in counts.items():
-        key = (league_id, slugify(name))
+        key = (league_id, _named_slug(league_id, slugify, name))
         if key[1] in RESERVED_TEAM_SLUGS or key in entries:
             raise DeriveError(f"lig {league_id}: bir takım slug'ı ayrılmış ya da çakışıyor")
         entries[key] = {
@@ -284,6 +296,9 @@ def _teams(inputs: ExportInputs, views: Sequence[MatchView]) -> list[dict[str, A
 
 
 def _record(rows: Sequence[RecordRow]) -> dict[str, Any]:
+    """Girdiler ve özet `publication_id` sırasıyla: `bootstrap_mean` konumla örnekler, döküm
+    sırası özeti değiştirmesin."""
+    ordered = sorted(rows, key=lambda row: row.publication_id)
     entries = [
         {
             "publication_id": row.publication_id,
@@ -297,11 +312,11 @@ def _record(rows: Sequence[RecordRow]) -> dict[str, Any]:
             "clv": _shown(100.0 * row.clv, 2),
             "publication_hash": row.publication_hash,
         }
-        for row in sorted(rows, key=lambda row: row.publication_id)
+        for row in ordered
     ]
     summary = None
     if rows:
-        interval = bootstrap_mean([row.clv for row in rows])
+        interval = bootstrap_mean([row.clv for row in ordered])
         summary = {
             "mean_clv": _shown(100.0 * interval.estimate, 2),
             "ci_low": _shown(100.0 * interval.low, 2),

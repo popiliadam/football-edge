@@ -117,7 +117,10 @@ def test_a_thin_single_round_match_is_listed_but_not_indexable() -> None:
 def test_a_single_round_match_moves_by_exactly_zero() -> None:
     lone = Round(mid(3), "2026-09-21T12:00:00Z", "Delta Şehir", "Beta FK", [EVEN] * 3)
 
-    assert _match(_body([lone]), 3)["move"] == {"home": 0.0, "draw": 0.0, "away": 0.0}
+    match = _match(_body([lone]), 3)
+
+    assert match["move"] == {"home": 0.0, "draw": 0.0, "away": 0.0}
+    assert match["indexable"] is False, "§8.4: tek tur, üç kitaplı olsa da indekslenmez"
 
 
 def test_a_tiny_negative_move_is_shown_as_zero_not_minus_zero() -> None:
@@ -158,10 +161,13 @@ def test_teams_count_their_matches_and_cross_the_threshold_at_three() -> None:
     ]
 
 
-def test_a_league_distribution_needs_five_sealed_moving_matches() -> None:
-    """|hareket| en büyük bileşeni: 15, 25, 30, 12.5, 30 → numpy doğrusal yüzdelik 13.5/25/30."""
-    ends = [WIDE, AWAY_FAVOURED, HOME_HEAVY, HOME_LEAN, DRAWISH]
-    matches, rounds = [], []
+DISTRIBUTION_ENDS = [WIDE, AWAY_FAVOURED, HOME_HEAVY, HOME_LEAN, DRAWISH]
+
+
+def _sealed_moving(ends: list[tuple[float, float, float]]) -> tuple[list[Any], list[Round]]:
+    """`EVEN` açılış → `end` kapanış; maç 10'dan başlar, başlamalar 20., 21., … Eylül 18:00."""
+    matches: list[Any] = []
+    rounds: list[Round] = []
     for number, end in enumerate(ends, start=10):
         kickoff = f"2026-09-2{number - 10}T18:00:00Z"
         matches.append((mid(number), "tst.1", kickoff, f"Ev {number}", f"Dep {number}"))
@@ -178,6 +184,12 @@ def test_a_league_distribution_needs_five_sealed_moving_matches() -> None:
                 is_closing=True,
             )
         )
+    return matches, rounds
+
+
+def test_a_league_distribution_needs_five_sealed_moving_matches() -> None:
+    """|hareket| en büyük bileşeni: 15, 25, 30, 12.5, 30 → numpy doğrusal yüzdelik 13.5/25/30."""
+    matches, rounds = _sealed_moving(DISTRIBUTION_ENDS)
     five = derive(export_inputs(leagues=[LEAGUE], matches=matches, rounds=rounds))
     four = derive(export_inputs(leagues=[LEAGUE], matches=matches[:4], rounds=rounds[:8]))
 
@@ -428,6 +440,7 @@ def test_a_closing_row_after_kickoff_marks_the_match_sealed_but_is_not_shown() -
     assert match["sealed"] is True and match["rounds"] == 1
     assert match["h2h"]["closing"] is None
     assert match["h2h"]["latest"] == match["h2h"]["opening"]
+    assert match["move"] is None, "mühürlü maçın hareketi kapanışa gider; kapanış yoksa hareket yok"
 
 
 def test_a_match_seen_only_after_kickoff_is_not_listed() -> None:
@@ -436,3 +449,66 @@ def test_a_match_seen_only_after_kickoff_is_not_listed() -> None:
 
     assert [match["id"] for match in body["matches"]] == [mid(1)]
     assert "delta-sehir" not in {team["slug"] for team in body["teams"]}
+
+
+# ── İnceleme (düzeltme turu 1): yayımlanan kurallar tek tek sabit ──────────────────────────────
+
+
+def test_a_match_whose_rounds_all_lack_enough_books_is_not_indexable() -> None:
+    """§8.4'ün ikinci koşulu: iki tur var, ama ikisi de 2 tam kitaplı (< 3) → indekslenmez."""
+    first = Round(mid(3), "2026-09-20T10:00:00Z", "Delta Şehir", "Beta FK", [EVEN] * 2)
+    second = Round(mid(3), "2026-09-21T12:00:00Z", "Delta Şehir", "Beta FK", [WIDE] * 2)
+    match = _match(_body([first, second]), 3)
+
+    assert match["rounds"] == 2
+    assert match["h2h"] == {"opening": None, "latest": None, "closing": None}
+    assert match["move"] is None and match["indexable"] is False
+
+
+def test_a_sealed_single_round_match_stays_out_of_the_league_distribution() -> None:
+    """Dağılım yalnız en az iki turlu mühürlü maçlardan: tek turlu mühürlü maçın hareketi 0'dır ve
+    girseydi yüzdelikleri kaydırırdı ([0, 12.5, 15, 25, 30, 30] → p10 6.2). Beşin değeri kalır."""
+    matches, rounds = _sealed_moving(DISTRIBUTION_ENDS)
+    matches.append((mid(15), "tst.1", "2026-09-25T18:00:00Z", "Ev 15", "Dep 15"))
+    rounds.append(
+        Round(mid(15), "2026-09-25T17:00:00Z", "Ev 15", "Dep 15", [EVEN] * 3, is_closing=True)
+    )
+    body = derive(export_inputs(leagues=[LEAGUE], matches=matches, rounds=rounds))
+
+    assert _match(body, 15)["move"] == {"home": 0.0, "draw": 0.0, "away": 0.0}
+    assert body["leagues"][0]["move_distribution"] == {"p10": 13.5, "p50": 25.0, "p90": 30.0}
+
+
+def test_a_sealed_match_moves_to_its_closing_not_to_a_later_pre_kickoff_round() -> None:
+    """Mühür (13:00) ile başlama (14:00) arasına bir snapshot turu düşebilir (06:22 turu, 20 dk
+    mühür penceresi). `latest` o turdur (80/10/10); hareket yine açılış → kapanış (spec §5.2):
+    33.33 − 50 = −16.7, 33.33 − 25 = 8.3. Son tura gitseydi 30 / −15 / −15 olurdu."""
+    after_seal = Round(mid(1), "2026-09-22T13:30:00Z", "Alfa Spor", "Beta FK", [HOME_HEAVY] * 3)
+    match = _match(_body([SEALED, SEALED_CLOSE, after_seal]), 1)
+
+    assert match["sealed"] is True and match["rounds"] == 3
+    assert match["h2h"]["latest"]["p"] == {"home": 80.0, "draw": 10.0, "away": 10.0}
+    assert match["h2h"]["closing"]["p"] == {"home": 33.3, "draw": 33.3, "away": 33.3}
+    assert match["move"] == {"home": -16.7, "draw": 8.3, "away": 8.3}
+
+
+def test_a_team_name_without_latin_letters_or_digits_stops_the_derivation_by_name() -> None:
+    """`slugify` harf/rakamsız adda düz `ValueError` atar; dışa aktarıcı yalnız `DeriveError`ı
+    çıkış koduna eşler, bu yüzden türetim onu adıyla yeniden fırlatır."""
+    matches = [(mid(1), "tst.1", "2026-09-22T14:00:00Z", "北京国安", "Beta FK")]
+    rounds = [Round(mid(1), "2026-09-20T10:00:00Z", "北京国安", "Beta FK", [EVEN] * 3)]
+
+    with pytest.raises(DeriveError, match="lig tst.1: takım adından slug üretilemedi"):
+        derive(export_inputs(leagues=[LEAGUE], matches=matches, rounds=rounds))
+
+
+def test_the_record_summary_does_not_depend_on_the_dump_row_order() -> None:
+    """`bootstrap_mean` konumla örnekler: özet de girdiler gibi `publication_id` sırasıyla."""
+    clvs = [0.04, -0.10, 0.02, 0.15, -0.05]
+    rows = [_publication(n, "home", 3.12, value, 1 / 3) for n, value in enumerate(clvs, start=1)]
+
+    forward = _body(ROUNDS, record=rows)["record"]
+    backward = _body(ROUNDS, record=rows[::-1])["record"]
+
+    assert forward["summary"]["mean_clv"] == 1.2  # (4 − 10 + 2 + 15 − 5) / 5
+    assert backward == forward
