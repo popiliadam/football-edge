@@ -42,6 +42,7 @@ testpaths = ["tests"]
 markers = [
     "contract: kaydedilmiş fixture üzerinde tazelik/şema sözleşmesi",
     "leakage: zaman semantiği, dönem ayrımı, kilit ve bağlam/sonuç ayrımı — kapının sızıntı adımı sayar",
+    "sitedb: atılabilir yerel Postgres kabı ister (SITE_TEST_DATABASE_URL) — kapının site-db adımı koşar",
 ]
 
 [tool.ruff]
@@ -50,6 +51,11 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+# `sitedb` fixture'ları `tests/site_db.py`de yaşar (spec §4.4/4); test modülü onları import eder ve
+# parametre adıyla kullanır — pyflakes bunu kullanılmayan/yeniden tanımlanan ad sanar.
+"tests/test_site_*_db.py" = ["F401", "F811"]
 
 [tool.mypy]
 python_version = "3.11"

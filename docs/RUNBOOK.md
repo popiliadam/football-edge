@@ -554,11 +554,18 @@ boşsa bekçi bir kez kırmızı verebilir; sonraki yeşil tur alarmı kapatır 
 
 ## 4. Migration'ları yerel kapta sınamak (kum havuzu)
 
-**Neden var.** Kapı ve CI veritabanına bağlanmaz: DB testleri (`tests/test_*_db.py`) orada adıyla
-SKIP'e düşer (DEFERRED 18a). Yetki, RLS, tetikleyici ve kilit davranışının kanıtı yalnız bu yolla
+**Neden var.** Kapı canlı veritabanına bağlanmaz: `DATABASE_URL`li katalog testleri kapıda ve CI'da adıyla SKIP'e
+düşer (DEFERRED 18a); CI'ın iş içi kabı yalnız `sitedb` ve kum havuzu testlerini koşar (aşağıda). Yetki, RLS,
+tetikleyici ve kilit davranışının yerel kanıtı bu yolla
 ölçülür. Canlıya bağlanmaz; `.env` okunmaz. Docker ve `public.ecr.aws/supabase/postgres:17.6.1.143`
 imajı gerekir (canlıyla aynı ana sürüm; `anon`/`authenticated`/`service_role`, pg_cron, pg_net ve
 Vault hazır gelir).
+
+**CI'da (Faz 6 B-1 Task 9'dan beri):** `ci.yml`in "Site test veritabanı" adımı aynı imajla iş içinde bir kap kurar;
+`SITE_TEST_DATABASE_URL` ve `SANDBOX_DATABASE_URL` onu gösterir. `sitedb` testleri `verify.sh`in `site-db` adımında,
+0013'ün kum havuzu testleri `pytest` adımında koşar (ikisi de `CI=true` iken değişken yoksa atlanmaz, kırmızı
+verir). `DATABASE_URL` verilmez: katalog testleri CI'da hâlâ adıyla
+SKIP (DEFERRED 18a).
 
 ```bash
 scripts/sandbox_db.sh up      # iki kap kurar (varsa başlatır)
@@ -573,12 +580,16 @@ scripts/sandbox_db.sh stop    # kapları durdurur; `rm --yes` kaldırır
   bütün migration'ları tek işlemde uygular ve geri alır; hedefte `odds_snapshots` varsa hiçbir şey
   uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe_<özet>` veritabanını (0001+0002
   commit'li; ad iki dosyanın özetinden) yeniden kullanır.
+- **Site testleri** (`sitedb` işareti; `test` komutu `SITE_TEST_DATABASE_URL`i BOŞ kaba çevirir): `postgres`
+  veritabanında 0001→0014'ü tek işlemde uygulayıp geri alır; ayrıca `site_tpl` şablonunu (0001, 0002, 0013, 0014) ve
+  modül başına `site_t_<rastgele>` kopyalarını kurar, bitince `DROP … WITH (FORCE)` ile kaldırır (oturum başında
+  bayatları da). `site_reader` rolü ve testin ona `SET` üyeliği KÜME düzeyinde kalır — yalnız bu atılabilir kapta.
 - Kaplar `football-edge.sandbox=1` etiketini taşır; betik etiketsiz aynı adlı bir kaba dokunmaz.
   **Paralel oturumlar** (iki ajan, iki worktree) kendi `FE_SANDBOX_PREFIX` ve `FE_SANDBOX_PORT`'unu
   kullanır: önek ortaksa kaplar da ortaktır ve birinin `rm --yes`'i ötekinin kabını kaldırır.
 - `test` pytest'i `--tb=short` ile koşar: uzun traceback bağlantı dizesini (parola dâhil) basar.
   Ön ek ve port: `FE_SANDBOX_PREFIX`, `FE_SANDBOX_PORT`.
-- Elle koşu için `scripts/sandbox_db.sh env` iki `export` satırı basar (yerel parola içerir; kabın
+- Elle koşu için `scripts/sandbox_db.sh env` üç `export` satırı basar (yerel parola içerir; kabın
   kendisinde durur, depoya girmez).
 
 **Beklenen:** `tests/test_api_roles_lockdown_db.py` 21 geçer (kilit testi ~5 sn bekler); öteki DB

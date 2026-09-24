@@ -12,8 +12,9 @@
   commit'li; ad iki dosyanın sha256'sından, dosyalar değişince yeni veritabanı): iki bağlantının
   göreceği tablo commit'li olmalı.
 
-Kapı ve CI iki DB katmanını da ATLAR (DEFERRED 18a). Yerelde tek komut (docker gerekir; canlıya
-bağlanmaz, `.env` okunmaz):
+Kapı yerelde iki DB katmanını da ADIYLA atlar. CI katalog katmanını atlar (`DATABASE_URL` yok,
+DEFERRED 18a); kum havuzu katmanını iş içi kapta KOŞAR ve `CI=true` iken değişken yoksa kırmızı
+verir (Faz 6 B-1 Task 9). Yerelde tek komut (docker gerekir; canlıya bağlanmaz, `.env` okunmaz):
 
     scripts/sandbox_db.sh up      # iki kap: 0001… uygulanmış (katalog) + boş (kum havuzu)
     scripts/sandbox_db.sh test    # bu dosya + öteki DB testleri, iki adres betikten
@@ -279,7 +280,10 @@ def test_catalog_api_roles_are_refused_select(read_only_cursor: psycopg.Cursor[A
 
 # ── Kum havuzu: boş Supabase kabında 0001–0013, tek işlem, sonunda geri alınır ─
 
-needs_sandbox = pytest.mark.skipif(not os.getenv(SANDBOX_URL), reason=NO_SANDBOX)
+# `CI=true` iken atlanmaz (B10 deseni): değişken CI'a ulaşmazsa fixture adıyla kırmızı verir.
+needs_sandbox = pytest.mark.skipif(
+    not os.getenv(SANDBOX_URL) and os.getenv("CI") != "true", reason=NO_SANDBOX
+)
 
 
 def _apply(cur: psycopg.Cursor[Any], path: Path) -> None:

@@ -25,10 +25,16 @@ COLLECTORS = {
 }
 
 
-def _steps(path: Path) -> list[dict[str, Any]]:
+def _steps(path: Path, job: str | None = None) -> list[dict[str, Any]]:
+    """Adı verilen işin adımları; ad yoksa BÜTÜN işlerin adımları belge sırasıyla.
+
+    Tek işli workflow'da ikisi aynıdır. Çok işli olanda (`site.yml`: derleme + yayın) iş başına
+    iddia `job` ile kurulur; adsız çağrı her işin her adımını görür (ör. her checkout).
+    """
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    (job,) = document["jobs"].values()
-    return list(job["steps"])
+    jobs = document["jobs"]
+    selected = [jobs[job]] if job is not None else list(jobs.values())
+    return [step for each in selected for step in each["steps"]]
 
 
 def _index_of(steps: list[dict[str, Any]], needle: str, key: str = "run") -> int | None:

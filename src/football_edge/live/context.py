@@ -11,7 +11,6 @@ sezgiseldir (R141) — orada gecikme erken fark edilmezse akış tarihsel akış
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -22,10 +21,12 @@ from football_edge.backtest.records import DecisionContext, MatchKey, ResultReco
 from football_edge.backtest.timeline import LONDON, RESULT_LAG, decision_at, result_known_at
 from football_edge.history.catalog import MAIN
 from football_edge.history.types import H2H, PRE_CLOSING, RESULTS, HistMatch, OddsKey
+from football_edge.market.consensus import LIVE_DRAW as LIVE_DRAW
+from football_edge.market.consensus import LIVE_H2H as LIVE_H2H
+from football_edge.market.consensus import Quote as Quote
+from football_edge.market.consensus import round_consensus
 from football_edge.naming import normalise_team
 
-LIVE_H2H = "h2h"
-LIVE_DRAW = "Draw"
 REFERENCE_BOOK = "Avg"  # canlı kitap ortalaması, football-data'nın `Avg`'sinin yapısal karşılığı
 STALE_LOOKBACK = timedelta(days=10)
 # R141: defterde fikstürü olmayan grup ligleri (E1–E3, D2, I2, SP2, F2 …) için bayatlık
@@ -45,16 +46,6 @@ class LiveMatch:
     kickoff: datetime  # UTC, saat dilimli
     home: str  # The Odds API adı
     away: str
-
-
-@dataclass(frozen=True)
-class Quote:
-    match_id: str
-    observed_at: datetime
-    bookmaker: str
-    market: str
-    outcome: str
-    price: float
 
 
 @dataclass(frozen=True)
@@ -129,26 +120,18 @@ def pre_prices(
     quotes: Sequence[Quote], match: LiveMatch, decided: datetime
 ) -> Mapping[OddsKey, float] | None:
     """Karar anında ya da önce gözlenen SON snapshot turunun 1X2'si, üç sonucu tam kitapların
-    ortalaması; tam kitap yoksa None."""
+    ortalaması (`market.consensus.round_consensus`); tam kitap yoksa None."""
     usable = [q for q in quotes if q.market == LIVE_H2H and q.observed_at <= decided]
     if not usable:
         return None
     latest = max(q.observed_at for q in usable)
-    names = {match.home: "H", LIVE_DRAW: "D", match.away: "A"}
-    books: dict[str, dict[str, float]] = {}
-    for quote in usable:
-        if quote.observed_at == latest and quote.outcome in names:
-            books.setdefault(quote.bookmaker, {})[names[quote.outcome]] = quote.price
-    full = [book for book in books.values() if set(book) == set(RESULTS)]
-    if not full:
+    found = round_consensus(usable, latest, match.home, match.away)
+    if found is None:
         return None
     return MappingProxyType(
         {
-            OddsKey(REFERENCE_BOOK, H2H, outcome, PRE_CLOSING): math.fsum(
-                book[outcome] for book in full
-            )
-            / len(full)
-            for outcome in RESULTS
+            OddsKey(REFERENCE_BOOK, H2H, outcome, PRE_CLOSING): mean
+            for outcome, mean in zip(RESULTS, found.means, strict=True)
         }
     )
 
