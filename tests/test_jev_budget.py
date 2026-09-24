@@ -66,6 +66,7 @@ def test_every_exit_code_name_owns_exactly_one_value_across_commands() -> None:
         "football_edge.live.__main__",
         "football_edge.jev",
         "football_edge.jev_budget",
+        "football_edge.site.contract",
     )
     owners: dict[int, set[str]] = {}
     for name in modules:
@@ -77,6 +78,14 @@ def test_every_exit_code_name_owns_exactly_one_value_across_commands() -> None:
     assert {code: names for code, names in owners.items() if len(names) > 1} == {}
     assert owners[16] == {"EXIT_BUDGET"}
     assert owners[17] == {"EXIT_NO_JEV_KEY"}
+    # Faz 6 İz B: site komutu 20–24 (`site/contract.py`).
+    assert [owners[code] for code in range(20, 25)] == [
+        {"EXIT_SITE_CONFIG"},
+        {"EXIT_SITE_CHAIN"},
+        {"EXIT_SITE_CUT"},
+        {"EXIT_SITE_NONDETERMINISTIC"},
+        {"EXIT_SITE_INVALID"},
+    ]
 
 
 def test_month_bounds_is_the_utc_calendar_month_and_rolls_over_december() -> None:
