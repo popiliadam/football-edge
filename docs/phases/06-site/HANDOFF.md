@@ -74,16 +74,31 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
    sahibi, aksi hâlde RLS'li tablolar görünümden HATASIZ 0 satır döner — §4.2) → katalog testleri gerçek DB'ye karşı
    salt okuma kipinde → Supabase advisors 0014'ten SONRA da okunur (spec §4.2; üç şema API'ye açık şemalara
    eklenmemiş, `security_invoker` uyarısı yok).
-3. RUNBOOK'a `site_reader` parola/`LOGIN` adımı: parola kullanıcı tarafından istemci tarafı SCRAM ile (`\password
+3. **`site_reader`a `LOGIN` verilmeden ÖNCE — pg_net artık riski (kullanıcı kararı, bilerek verilir):**
+   - Canlıda `site_reader`ın etkin yetkileri salt okuma sorgusuyla yeniden ölçülür, pg_net'in `net` şeması dâhil
+     (şema USAGE'ı; `net.*` tablo, dizi ve fonksiyon yetkileri). Kapta ölçülen kabul listesi:
+     `tests/test_site_views_db.py` `PG_NET_RELATIONS`/`PG_NET_FUNCTIONS`; liste dışı her yetki durdurur.
+   - Kullanıcıyla teyit edilir: Supabase panelinde API'nin "Exposed schemas" listesinde `net` YOK (§0.7).
+   - Kullanıcı artık riski açıkça kabul eder: `LOGIN`li `site_reader` `net.http_post` ile veritabanı sunucusundan
+     dışa HTTP isteği atabilir, `net.http_request_queue`yu okuyup yazabilir — bu kuyruk pg_cron dispatch'lerinin
+     Bearer GitHub tokenını taşır. `postgres` `supabase_admin`in PUBLIC yetkilerini geri alamaz (Task 3'te kapta
+     ölçüldü); `default_transaction_read_only` yalnız kaza önleyicidir, sınır değildir. Kabul yoksa `LOGIN` verilmez.
+4. RUNBOOK'a `site_reader` parola/`LOGIN` adımı: parola kullanıcı tarafından istemci tarafı SCRAM ile (`\password
    site_reader`); asistan parolayı görmez ve girmez (AK18).
-4. Ölçülecek: Supavisor kullanıcı biçimi (`site_reader.<proje_ref>`) ve rol GUC'lerinin pooler üzerinden uygulandığı (§4.5).
-5. Secret'lar: `SITE_DATABASE_URL`, `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID` (ayrı Netlify hesabı/ekibi — AK18), ortam
+5. Ölçülecek: Supavisor kullanıcı biçimi (`site_reader.<proje_ref>`) ve rol GUC'lerinin pooler üzerinden uygulandığı (§4.5).
+6. Secret'lar: `SITE_DATABASE_URL`, `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID` (ayrı Netlify hesabı/ekibi — AK18), ortam
    kapsamlı; GitHub'da `production` ortamının dağıtım dalı `main`e sınırlanır (kullanıcının depo ayarı).
+   **`SITE_DATABASE_URL` ortam kapsamlı bir secret OLMALIDIR:** depo kapsamlı secret'ı her dalın workflow koşusu
+   okuyabilir ve bu kimlik bilgisinin erişimi 3. adımdaki kadardır. Bugün `site.yml`in `build` işinde `environment:`
+   YOKTUR: ortam kapsamlı secret `build`e görünmez ve dışa aktarım exit 20 ("`SITE_DATABASE_URL` yok") ile durur.
+   Bu yüzden secret eklenmeden önce `build` işine dağıtım dalı `main`e sınırlı bir `environment:` eklenir (bu dalga
+   eklemedi; değişiklik `tests/test_site_workflow.py`de mutasyon kanıtlı bir testle sabitlenir, Task 8 testleri
+   yeşil kalır).
 
 ## Kapının ÖLÇMEDİKLERİ (B-1)
 
-Tam liste bu bölümdür (16 madde). 1–13 planın "Kapının ölçmedikleri (bu plan)" bölümünün andığı on üç maddedir;
-14–16 Task 6–9 incelemelerinden sonra eklendi. Plan dosyası değiştirilmedi: oradaki "on üç" sayısı yazıldığı anın
+Tam liste bu bölümdür (19 madde). 1–13 planın "Kapının ölçmedikleri (bu plan)" bölümünün andığı on üç maddedir;
+14–16 Task 6–9 incelemelerinden, 17–19 bütün-dal son incelemesinden sonra eklendi. Plan dosyası değiştirilmedi: oradaki "on üç" sayısı yazıldığı anın
 listesidir, güncel liste burasıdır.
 
 1. Gerçek veriyle sayfa ↔ defter uyuşması: `site.yml` hiç koşmadı (secret yok) — sentetik veride her push'ta ölçülür.
@@ -127,3 +142,13 @@ listesidir, güncel liste burasıdır.
     tabandır. Kap kalkmazsa CI yalnız kabın durumunu basar (log parolayı düz taşır; maske en iyi çaba korumasıdır,
     log derinlemesine savunma olarak hiç basılmaz): nedeni için yerelde `scripts/sandbox_db.sh up` ile yeniden
     üretilir.
+17. pg_net artık riski: `site_reader`ın `net` erişimi yalnız kapta ölçülür (kabul listesi,
+    `tests/test_site_views_db.py`). Canlıdaki etkin yetkiler, panelin "Exposed schemas" ayarı ve `LOGIN`li bir
+    oturumun `net.http_post`/`net.http_request_queue` erişimi ölçülmez — Canlıya geçiş 3. adımında ölçülür ve
+    kullanıcı kararıdır.
+18. H2c bir alt dize kuralıdır (`http`, `<`, `>`, büyük/küçük harf duyarsız): `hxxp`, `www.`, şemasız `//host`,
+    Unicode benzeri harfler (tam genişlikli, Kiril), sıfır genişlikli boşluk, yüzde kodlama (`%3C`) ve HTML
+    varlıkları (`&lt;`) geçer (`site/verify.py` docstring'i, T4 M3). Kuralı genişletmek spec kararıdır.
+19. Yinelenen JSON anahtarı: `verify-snapshot` sonuncu değeri alır ve exit 0 verir (T4 M4). B-2'nin `JSON.parse`ı da
+    sonuncuyu aldığından iki taraf aynı nesneyi görür; gizli yük yalnız dosya baytlarında kalır. Ham `snapshot.json`
+    yayımlanmadığı sürece etkisizdir; bir gün `out/`a girerse H1/H3/§4.3 denetimi o baytları görmez.

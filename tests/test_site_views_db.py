@@ -40,7 +40,8 @@ SITE_VIEWS = {
 # "grantor must be current user", `alter schema net owner` "must be owner". Liste dışındaki her
 # yetki kırmızıdır; listedeki bir yetki kaybolursa da kırmızıdır (liste bayatlamaz).
 # `net` (pg_net) ERİŞİLEBİLİRDİR (şema USAGE'ı da PUBLIC'ten): LOGIN verilmiş site_reader sunucudan
-# HTTP isteği atabilir, dispatch kuyruğunu okuyup yazabilir — karar kullanıcınındır (HANDOFF, §4.5).
+# HTTP isteği atabilir, dispatch kuyruğunu okuyup yazabilir — karar kullanıcınındır
+# (docs/phases/06-site/HANDOFF.md, "Canlıya geçiş" 3. adım).
 PG_NET_RELATIONS = {"net._http_response", "net.http_request_queue", "net.http_request_queue_id_seq"}
 PG_NET_FUNCTIONS = {
     "net._await_response(bigint)",
