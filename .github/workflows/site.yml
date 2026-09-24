@@ -1,0 +1,137 @@
+name: site
+
+# Faz 6 İz B (B9, §11): HAZIR, BAĞLI DEĞİL. Yalnız elle tetiklenir; zamanlama ve pg_cron tetiği
+# YOK (AK15). Secret'lar (SITE_DATABASE_URL, NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID) kullanıcı
+# onayından sonra eklenir (AK18); yokken dışa aktarım "SITE_DATABASE_URL yok — yayın yapılmadı"
+# ile ADIYLA kırmızıdır — ayrı bir ön adım yoktur, secret yalnız o adıma verilir ve `if:` içinde
+# okunamaz. Loglar public. Netlify derlemez (AK16): hazır `web/out` dizini CLI ile yüklenir.
+#
+# İKİ İŞ (H5d): aynı işin adımları makineyi, $HOME'u, $GITHUB_PATH/$GITHUB_ENV'i ve npm önbelleğini
+# paylaşır; `pnpm install`/`next build`de koşan bağımlılık kodu sonraki bir adımın ortamını ele
+# geçirebilir. Bu yüzden Netlify kimliği derleme işine HİÇ girmez: `build` DB adresini yalnız dışa
+# aktarım adımında görür ve denetlenmiş çıktıyı artifact olarak bırakır; `deploy` taze bir runner'da
+# artifact'ı indirir, pnpm/next/npx koşmaz, sabit sürümlü netlify-cli'yi kurar ve Netlify kimliğini
+# yalnız yayın adımına verir; `live` yayından sonra secret'sız denetler. Kırmızı bir adımdan sonra
+# hiçbir şey koşmaz: adımlarda `if:`, `continue-on-error`, `shell:` yok; işler `needs` ile önceki işin
+# yeşiline bağlı.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Çıpa eksikliği kontrolü git geçmişi ister; sığ klonda "ATLANDI" dışa aktarımı durdurur.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - name: Secret taraması
+        run: ./scripts/check_secrets.sh
+      - name: Anlık görüntü
+        env:
+          SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}
+        run: uv run python -m football_edge.site export --out web/.snapshot
+      - name: Anlık görüntü denetimi
+        run: >-
+          uv run python -m football_edge.site verify-snapshot web/.snapshot/snapshot.json
+          --sha256 web/.snapshot/snapshot.sha256
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - name: Site bağımlılıkları
+        run: pnpm -C web install --frozen-lockfile
+      # Derleme ve tarayıcı B-2'nin arayüzüyle (B-2 plan "B-1 ile arayüz"): çıplak `next build`
+      # `_headers`/`_redirects`/`data/` üretmez, `run build` üretir.
+      - name: Site derlemesi
+        env:
+          SITE_SNAPSHOT: ${{ github.workspace }}/web/.snapshot/snapshot.json
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm -C web run build
+      - name: Çıktı tarayıcısı
+        run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
+      # B-2 T10 → kaybolan-slug: `scripts/site_publish.py slugs` adımı BURAYA — tarayıcıdan sonra,
+      # yayın paketinden ÖNCE (AK20 b). Secret'sızdır (`FIRST_PUBLISH` girdisi), Python bu işte kurulu;
+      # kırmızıysa paket yüklenmez ve `needs` yayını durdurur (controller kararı, T8 düzeltme turu 2).
+      # Yalnız yayına gidecek olan: denetlenmiş site ve dışa aktarımın özeti (B-2'nin yayın sonrası
+      # kontrolü "yayımlanan = doğrulanan"ı onunla sınar). Kitap bazında veri taşıyan hiçbir şey ve
+      # snapshot.json yüklenmez. `.snapshot` gizli dizin: `include-hidden-files` olmadan düşerdi.
+      - name: Yayın paketi
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: |
+            web/out
+            web/.snapshot/snapshot.sha256
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    needs: build
+    # Yalnız `main`den. Koşul durum işlevi içermez: örtük `success()` korunur (derleme kırmızıysa
+    # yayın yok). `production` ortamının dağıtım dalı kuralı ve ortam kapsamlı Netlify secret'ları
+    # GitHub ayarıdır (AK18, kullanıcı).
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Yalnız `web/netlify.toml` ve `web/.nvmrc` için; token diske yazılmaz.
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: web
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+      - name: Netlify CLI
+        run: npm install --global netlify-cli@27.8.1
+      # Bu iş BEŞ adımdır ve testle sabittir: Python/Node kurulumu, `uv sync`, `pip`, `NODE_OPTIONS`
+      # ya da başka bir adım girmez (tokenlı süreçten önce kilitsiz kod koşardı). B-2 T10 buraya YALNIZ
+      # yayın komutuna `--no-build`ı ekler; kaybolan-slug `build` işinde, yayın sonrası kontrol `live`
+      # işindedir (işaretli yerler; controller kararı, T8 düzeltme turu 2).
+      - name: Yayın
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: netlify deploy --prod --dir web/out --config web/netlify.toml
+
+  # Yayından sonra secret'sız denetim işi (§6.4/3f): Netlify kimliği ve DB adresi burada YOK; Python
+  # kurulumu serbesttir. Artifact "yayımlanan = doğrulanan" karşılaştırmasının derleme tarafıdır.
+  live:
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: web
+      # B-2 T10 → yayın sonrası kontrol: `scripts/site_publish.py live` adımı BURAYA (işin sonu).
