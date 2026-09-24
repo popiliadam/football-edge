@@ -28,9 +28,10 @@ VERIFY = "football_edge.site verify-snapshot"
 CHECK_OUT = "web/scripts/check-out.ts"
 DEPLOY = "deploy --prod --dir web/out"
 # Secret'lı iki adımın komutu TAM sabittir (inceleme m1): `set -x`, `env`, `echo "${X:0:12}"` ya da
-# base64 gibi eklemeler maskelemeyi atlatır. B-2 T10 yayına `--no-build` eklerken bunu günceller.
+# base64 gibi eklemeler maskelemeyi atlatır. B-2 T10 yayına `--no-build`ı ekledi: netlify-cli v21+
+# `deploy` yapılandırmadaki (bilerek düşen) derleme komutunu koşardı.
 EXPORT_RUN = "uv run python -m football_edge.site export --out web/.snapshot"
-DEPLOY_RUN = "netlify deploy --prod --dir web/out --config web/netlify.toml"
+DEPLOY_RUN = "netlify deploy --prod --dir web/out --no-build --config web/netlify.toml"
 # Kapı komutları da TAM sabittir (inceleme N2): `| tee` (pipefail yok) ya da `set +e; …; true`
 # kırmızıyı yutar.
 SCAN_RUN = "./scripts/check_secrets.sh"

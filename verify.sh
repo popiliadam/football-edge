@@ -184,6 +184,30 @@ else
   echo "SKIP: site-db (SITE_TEST_DATABASE_URL yok)" | tee -a "$LOG"
 fi
 
+# ── Site (Plan B-2, spec §12.1) ───────────────────────────────────────────────────────────
+# Node adımları `site-db`den SONRA koşar: uçtan uca anlık görüntüyü o adım yazar. Her koşu
+# derlemelerini KENDİ geçici dizinine kopyalar (silme yok, bayat çıktı yok). Uçtan uca
+# anlık görüntünün seçimi ve bayat dosya reddi `site_gate.sh e2e`dedir (testli).
+SITE_BUILDS="$(mktemp -d "${TMPDIR:-/tmp}/site-builds.XXXXXX")"
+export SITE_BUILDS
+SITE_E2E_SNAPSHOT=""
+e2e_decision="$(./scripts/site_gate.sh e2e)"
+case "$e2e_decision" in
+  "USE "*) SITE_E2E_SNAPSHOT="${e2e_decision#USE }" ;;
+  "SKIP "*) echo "SKIP: site-derleme/e2e (${e2e_decision#SKIP })" | tee -a "$LOG" ;;
+  *)
+    echo "$e2e_decision" | tee -a "$LOG"
+    step "site-e2e" false
+    ;;
+esac
+export SITE_E2E_SNAPSHOT
+step "site-kurulum" ./scripts/site_gate.sh install
+step "site-tip"     pnpm -C web exec tsc --noEmit
+step "site-lint"    pnpm -C web exec biome ci .
+step "site-test"    pnpm -C web exec vitest run
+step "site-derleme" ./scripts/site_gate.sh build
+step "site-uyum"    ./scripts/site_gate.sh check
+
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
 # harcamaz: yalnız `config/languages.yaml`'daki `production_enabled` bayraklarının bir
 # kalibrasyon raporuyla desteklendiğini sorar (`calibration.language_config_violations`).

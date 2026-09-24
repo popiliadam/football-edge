@@ -27,8 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     # Site test kabı (imaj çekme + hazır olma) ve `site-db` adımı eklendi (Faz 6 B-1 Task 9). Önce
     # kapı 75 sn sürüyordu (CI, 2026-09-24); kap adımı ve yeni DB testleri yerelde ölçüldü (Task 9
-    # raporu). CI'daki ilk ölçüme dek taban 20 dk: soğuk 1,8 GB imaj çekmesi ölçülmedi.
-    timeout-minutes: 20
+    # raporu). CI'daki ilk ölçüme dek taban 20 dk: soğuk 1,8 GB imaj çekmesi ölçülmedi. İlk CI koşusu
+    # (9ceb874, kap dâhil) iş toplamı ~2 dk 24 sn. Site kapısının Node adımları (Plan B-2 T10:
+    # kurulum, tip, lint, test, dört derleme, tarayıcı) yerelde sıcak önbellekle 16 sn ölçüldü; süre
+    # = 20 + max(5, ⌈2·16/60⌉) = 25 dk. İlk CI koşusu bunun %70'ini aşarsa yeniden ölçülür (HANDOFF).
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,6 +50,16 @@ jobs:
       # Kapı ekstrasız koşarsa `mypy`, `pytest` ve `paket-kurulu` (`football_edge.scrape`)
       # kırmızı verir — sessiz geçmez.
       - run: uv sync --frozen --extra scrape
+      # Site kapısının Node adımları (Plan B-2): sürümler `web/.nvmrc` ve `packageManager`dan
+      # okunur — kapının `site-kurulum` adımı yerelde de aynısını ister.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       # Faz 6 İz B §12.2/B10: sitenin katalog, davranış ve uçtan uca testleri gerçek Postgres ister.
       # Kap bu işin içinde doğar ve ölür; imaj T0'da ölçülüp sabitlendi (`docs/phases/06-site/
       # b1-t0-olcumler.md`, tek kaynak — test eşitliği sınar). Parola burada üretilir: depo secret'ı
@@ -96,9 +109,10 @@ jobs:
         #   - `ODDS_API_KEY`: her push ücretli çağrı demek olurdu (ayda 500 kredi).
         # Kapı secret'sız DOĞRU biçimde bozulur: `zincir` adımı
         # "SKIP: zincir (DATABASE_URL yok)" basar — ATLANAN KONTROL GEÇMEK DEĞİLDİR,
-        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan on bir adım koşar:
+        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan on yedi adım koşar:
         # ruff-check · ruff-format · mypy · pytest · paket-kurulu · kaynak-politikası ·
-        # veri-sözleşmesi · sızıntı · site-db · dil-kalibrasyonu · secrets.
+        # veri-sözleşmesi · sızıntı · site-db · site-kurulum · site-tip · site-lint · site-test ·
+        # site-derleme · site-uyum · dil-kalibrasyonu · secrets.
         #
         # `zincir` adımının gerçekten koştuğu tek yer `seal.yml`'dir (her 15 dakika,
         # varsayılan dalda, kendi secret'ıyla). Bu boşluk HANDOFF §3'te yazılıdır.

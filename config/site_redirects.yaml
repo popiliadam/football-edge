@@ -1,0 +1,8 @@
+# Kaybolan slug kabulleri (spec §8.1, AK20 b, AK22) — ELLE commit'lenir; `site.yml` yayından önce
+# `scripts/site_publish.py slugs` ile okur. Önceki yayında olup yeni derlemede olmayan her slug
+# burada kabul edilmiş olmalıdır; değilse yayın YAPILMAZ.
+#   gone:    pasifleşen lig slug'ları — altındaki bütün takım slug'ları da muaftır.
+#   renamed: "<lig>/<eski takım>": "<lig>/<yeni takım>" — hedef yeni derlemede bulunmalıdır.
+# Not: kabul edilen yeniden adlandırma bugün `_redirects`e YAZILMAZ (plan B-2, açık küçük nokta 1).
+gone: []
+renamed: {}
