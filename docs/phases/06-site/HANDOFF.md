@@ -73,13 +73,21 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
   adımları (`site-db`den sonra): `site-kurulum` (`scripts/site_gate.sh install`: Node ana sürümü `web/.nvmrc`,
   pnpm ana sürümü `packageManager` ile eşit değilse ya da biri yoksa FAIL — SKIP yok) · `site-tip` · `site-lint` ·
   `site-test` · `site-derleme` (her varyant önce `verify-snapshot`, sonra `pnpm -C web run build`; çıktı koşunun
-  `mktemp -d` dizinine kopyalanır) · `site-uyum` (`check-out.ts` her varyanta). Varyantlar: `fixture-full`,
-  `fixture-full-indexable`, `fixture-empty` + bu koşunun uçtan uca JSON'u (`run-id` = `FE_VERIFY_RUN_ID`; yanındaki
-  `snapshot.sha256` ile doğrulanır).
-- **Kipler (ölçüldü, B-2 T10 raporu):** (a) yerel DB'siz → 16 PASS + `SKIP: site-db`, `SKIP: site-derleme/e2e (…)`,
-  `SKIP: zincir`, `KAPI YEŞİL`; (b) `CI=true` DB'siz → `FAIL: pytest`, `FAIL: site-db`, `FAIL: site-e2e`
-  (`FAIL CI=true ve bu koşunun uçtan uca anlık görüntüsü yok ya da bayat …`), `KAPI KIRMIZI`; (c) kum havuzu kabıyla
-  → 17 PASS + `SKIP: zincir`; dört `check-out: … 0 bulgu` (fixture 46 sayfa, uçtan uca 34).
+  `mktemp -d` dizinine kopyalanır) · `site-uyum` (`check-out.ts` her varyanta). Altısı da `scripts/site_gate.sh`in
+  alt komutudur. Varyantlar: `fixture-full`, `fixture-full-indexable`, `fixture-empty` + bu koşunun uçtan uca JSON'u
+  (`run-id` = `FE_VERIFY_RUN_ID`; yanındaki `snapshot.sha256` ile doğrulanır). `CI=true` iken `build`/`check` uçtan
+  uca varyantı işlemediyse kendileri de kırmızıdır (düzeltme turu 1, I1).
+- **Node araçlarının ortamı (controller kararı, düzeltme turu 1 I4):** `pnpm`/`node` `env -i` ile yalnız `PATH`,
+  `HOME`, `TMPDIR`, `CI`, `PNPM_HOME`, `NEXT_TELEMETRY_DISABLED`, `SITE_SNAPSHOT`, `SITE_INDEXABLE` (+ sabit
+  `NO_COLOR=1`) görür; kabuğun DB adresleri, API anahtarları ve Netlify kimliği geçmez (sahte araçlarla testli).
+  Python adımları (`verify-snapshot` dâhil) ortamı olduğu gibi alır. Bağlantı `tests/test_site_web_gate.py`de sahte
+  `uv`/`pnpm`/`node` ile ve `verify.sh` bloğu baytla sabittir.
+- **Kipler (ölçüldü, B-2 T10 raporu, düzeltme turu 1):** (a) yerel DB'siz → 16 PASS + `SKIP: site-db`,
+  `SKIP: site-derleme/e2e (…)`, `SKIP: zincir`, `KAPI YEŞİL`; (b) `CI=true` DB'siz → `FAIL: pytest`, `FAIL: site-db`,
+  `FAIL: site-e2e` (`FAIL CI=true ve bu koşunun uçtan uca anlık görüntüsü yok ya da bayat …`), `FAIL: site-derleme`,
+  `FAIL: site-uyum` (`HATA: CI=true ama uçtan uca varyant işlenmedi …`), `KAPI KIRMIZI`; (c) kum havuzu kabıyla ve
+  (d) `CI=true` + kum havuzu kabı (CI'ın kipi) → 17 PASS + `SKIP: zincir`; dört `check-out: … 0 bulgu` (fixture 46
+  sayfa, uçtan uca 34).
 - **CI:** `pnpm/action-setup@v4` (`package_json_file: web/package.json`) → `actions/setup-node@v4`
   (`node-version-file: web/.nvmrc`, pnpm önbelleği) `uv sync`ın ardında. `timeout-minutes: 25` = 20 + max(5,
   ⌈2·16/60⌉): site adımları yerelde sıcak önbellekle 16 sn (dört derleme). CI tabanı (9ceb874) ~2 dk 24 sn; soğuk
@@ -92,13 +100,15 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
   `/data/snapshot.sha256` = derlenmiş = dışa aktarılmış; örnek sayfaların CSP'si ve `X-Robots-Tag: noindex`i derlenmiş
   `_headers`le aynı). İki adım secret'sız.
 - **Bilerek kırmızı:** `web/site.config.ts` `SITE_URL` yer tutucu (`https://example.invalid`) iken iki yayın kapısı da
-  ağa çıkmadan kırmızıdır (AK4 kararı yok; testli). İlk yayın `first_publish: true` ile ve YALNIZ site gerçek bir HTTP
-  yanıtıyla (200 dışı, ör. 404) önceki yayının olmadığını söylediğinde geçer; alan adı çözülmüyorsa (HTTP 0) ilk yayın
-  da kırmızıdır — alan adı önce Netlify'a bağlanıp yanıt verir hâle getirilir.
+  ağa çıkmadan kırmızıdır (AK4 kararı yok; testli). İlk yayın `first_publish: true` ile ve YALNIZ site önceki
+  `/data/slugs.json` için gerçek bir **404** döndürdüğünde geçer (controller kararı m1); bağlantısızlık (HTTP 0), 403,
+  410 ve 5xx kırmızıdır — alan adı önce Netlify'a bağlanıp yanıt verir hâle getirilir.
 - **Ölçmedikleri (B-2 T10):** `site.yml` hiç koşmadı (`slugs`/`live` yalnız sahte `get`/`head` ile sınanır;
   netlify-cli `--no-build` gerçek CLI'da koşmadı); CI'daki soğuk süre; kabul edilen `renamed:` eşlemesi `_redirects`e
-  yazılmaz (eski URL 404 — plan açık küçük nokta 1); `live` örnek olarak `_headers`teki sayfa yollarının ilk, orta ve
-  son öğesini okur, hepsini değil.
+  yazılmaz (eski URL 404 — plan açık küçük nokta 1); `live` örnek olarak `_headers`teki sayfa yollarının sözlük
+  sırasında ilk, orta ve son öğesini okur (bugün `/en/`, `/tr/`, `/tr/track-record/` — maç, lig, takım sayfası
+  örneklenmez); izin listeli ortam yalnız Node araçlarını kapsar (Python adımları ve `uv` kabuğun ortamını görür);
+  `timeout-minutes` testle sabit değildir (ölçülmüş değer, kapı değil).
 
 ## Canlıya geçiş (kullanıcı onayı, §0.7 — bu dalga YAPMADI)
 
