@@ -52,7 +52,10 @@ Spec'ten birebir (her görevin gereksinimidir):
 
 Proje süreci (kullanıcı kuralları, her görevde):
 
-- Kapı: `TMPDIR=$(mktemp -d) ./verify.sh > <log> 2>&1`; sonuç LOG DOSYASINDAN okunur. Her görev tam kapıyla biter.
+- Kapı: `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"`;
+  sonuç LOG DOSYASINDAN okunur. Her görev tam kapıyla biter. `TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/…"` biçimi
+  YASAK: yönlendirme önek atamasından ÖNCE değerlendirilir, özet dosyası dıştaki ortak `$TMPDIR`e düşer ve paralel
+  görevler birbirinin `KAPI YEŞİL`ini okur (plan incelemesi I4, ölçüldü).
 - Her yeni test en az bir mutasyonla kırmızı kanıtlanır: `PYTHONDONTWRITEBYTECODE=1`, `-p no:cacheprovider`; mutasyon
   `cp` yedeğinden geri yüklenir, `cmp` ile doğrulanır, sonda `git status --short` yalnız görevin dosyalarını gösterir.
 - HİÇBİR ŞEY SİLİNMEZ (dosya, dal, satır); mutasyon için oluşturulan geçici dosya scratch'e TAŞINIR. `git add -A` yok —
@@ -88,8 +91,10 @@ open(path, "w", encoding="utf-8").write(text.replace(old, new, 1))
 PY
 }
 ```
-Kalıp her mutasyon için: `cp <dosya> /tmp/<ad>.bak` → `mutate …` → `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider <test>`
-(beklenen kırmızı) → `cp /tmp/<ad>.bak <dosya> && cmp /tmp/<ad>.bak <dosya>` → aynı test yeşil.
+Kalıp her mutasyon için (yedek GÖREVİN scratch dizinine, `/tmp`e değil — paralel bir görevin aynı adlı yedeği
+geri yüklemeyi ve `cmp`yi sessizce yanlış içerikle "doğrulardı"): `B=.superpowers/sdd/<oturum>/b1-t<N>-scratch;
+mkdir -p "$B"; cp <dosya> "$B/<ad>.bak"` → `mutate …` → `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider
+<test>` (beklenen kırmızı) → `cp "$B/<ad>.bak" <dosya> && cmp "$B/<ad>.bak" <dosya>` → aynı test yeşil.
 
 ## Review Focus
 
@@ -106,7 +111,7 @@ birinin testi sahibi görevin "Review Focus" adımındadır:
 5. **Ertelenen maç** (`commence_time` turlar arasında UPDATE edilir) → `path_id` ve `slug` değişmez, `date` ve
    `commence_time` yeni anı gösterir (AK20 b'nin URL kalıcılığı) (Task 5).
 
-Ayrıca testli (görev adımlarında): −0.04 pp hareket `-0.0` değil `0.0` basılır (Task 5) · `book_key` tur içinde kitap
+Ayrıca testli (görev adımlarında): maç içi turlar `latest`/`rounds`/`move`a girmez, başlama anındaki kapanış turu kalır (Task 5, I1) · aynı adlı iki lig yapılandırmadaki kalıcı slug'larını taşır (Task 4–6, I3) · −0.04 pp hareket `-0.0` değil `0.0` basılır (Task 5) · `book_key` tur içinde kitap
 sırasıdır ve kitap adı sızmaz (Task 3 davranış) · bir turda eksik kitap yalnız o turun sayısını düşürür (Task 5) · aynı adın iki yazımı aynı slug'a düşerse
 yayın durur (Task 5) · `service_role`/JWT/DSN kalıbı hata metnine YANKILANMAZ (Task 4) · çöken ikinci türetimin
 traceback'i fiyat taşısa da loga girmez (Task 6) · test DB adresi yerel değilse ya da canlı adrese eşitse testler
@@ -128,18 +133,21 @@ reddedilir, hata metni adresi basmaz (Task 3).
 | Q10 | `postgres` (süper değil, CREATEROLE) yarattığı role `SET ROLE` diyebilir mi? Davranış testleri `site_reader` olarak sorgulamalı | T0 ölçer (`set_role=`); harness `pg_has_role(…,'SET')` yanlışsa YALNIZ test kümesinde `GRANT site_reader TO postgres WITH INHERIT FALSE, SET TRUE` verir; 0014 kimseye üyelik vermez (metin testi) | PG16+ `createrole_self_grant`; üretimde dışa aktarım LOGIN'li `site_reader`in kendisidir |
 | Q11 | Vig yöntemi `config/model_faz3.yaml`dan; okuyucu `backtest.model_config` (H1f yasak) | Site dosyadan yalnız `method`i okur (`devig_method`); test `load_model_config(...).method` ile eşitliği sınar | "Model kodu neyse o" + import bekçisi |
 | Q12 | `path_id` önek uzunluğu (§18.5/5) | 12 (`PATH_ID_LENGTH`); çakışma türetimi ve `verify-snapshot`ı kırmızı yapar | 48 bit; defterin boyunda çakışma olasılığı ihmal edilir, olursa yayın durur |
-| Q13 | "Maç kümesi = kesimde en az bir oran satırı olan" — hangi market? | En az bir **1X2** satırı (site yalnız `site_input.h2h_quotes`i okur) | Sayfa yalnız 1X2 gösterir |
+| Q13 | "Maç kümesi = kesimde en az bir oran satırı olan" — hangi market, hangi an? | En az bir **maç öncesi 1X2** satırı (site yalnız `site_input.h2h_quotes`i okur; yalnız başladıktan sonra görülmüş maç listelenmez — Q25) | Sayfa yalnız maç öncesi 1X2 gösterir |
 | Q14 | `move_distribution`un maç başına değeri ve yüzdelik yöntemi | Mühürlü, en az iki turlu, iki ucu görünür maçta `max(|Δev|,|Δber|,|Δdep|)`; numpy doğrusal yüzdelik | Tek sayı; elle hesaplanabilir test vektörü (13.5/25.0/30.0) |
-| Q15 | Açılış/son/kapanış tanımı | açılış = ilk tur; son = son tur (mühürlüyse kapanış turu); kapanış = son `is_closing` turu; `move` = açılış→kapanış (yoksa son); uçlardan biri `null`sa `move: null` | §5.2 |
+| Q15 | Açılış/son/kapanış tanımı | Hepsi MAÇ ÖNCESİ turlardan (Q25): açılış = ilk tur; son = son maç öncesi tur (mühürlüyse kapanış turu); kapanış = son `is_closing` turu; `move` = açılış→kapanış (yoksa son); uçlardan biri `null`sa `move: null`; `sealed` = kesimde herhangi bir `is_closing` satırı (spec §5.2). `rounds` yalnız maç öncesi turları sayar — spec §5.2'nin "kesim içindeki h2h gözlem turu" yorumundan bilinçli ayrılış (Q25) | §5.2, §1.3 |
 | Q16 | `snapshot.sha256` biçimi | `sha256sum` biçimi: `<64 hex>  snapshot.json\n` | `sha256sum -c` ile doğrulanabilir |
 | Q17 | Dışa aktarımın `--out` hedefi (`site.yml`) | `web/.snapshot/` (`.gitignore`'da); `--out` boş değilse kırmızı | Bayat dosyayla yayın yok |
-| Q18 | `site.yml`in Node adımları B-2'nin; B-1 yazar mı? | B-1 §11'in komut adlarıyla yazar ve yalnız secret sınırını/sırayı sınar; gövdeleri B-2 (B-1 birleştikten sonra) değiştirebilir | H5d testi deploy adımını ister |
+| Q18 | `site.yml`in Node adımları ve yayın kapıları kimin? | Controller kararı (inceleme I2): kaybolan-slug kontrolü, yayın sonrası kontrol, `first_publish` girdisi ve `--no-build` **B-2 Task 10**'undur. B-1 `site.yml`i yazar, Node gövdelerini B-2'nin arayüzüyle (`pnpm -C web run build`, `check-out.ts --snapshot … --out …`) kurar, B-2'nin adımlarına çakışmayan yer bırakır; B-1 testi B-2'nin düzenlenmiş `site.yml`iyle yeşil kalır (ölçüldü) | Tek sahip; spec §11 adımları iki plana dağıtıldı |
 | Q19 | `netlify-cli` sabit sürümü | T0 `npm view netlify-cli version` ölçer, `site.yml` onu yazar, test T0 kaydıyla eşitliği sınar | Tahmin edilmiş sürüm yok |
 | Q20 | "Adım başta dizini boşaltır" (§12.1) ile "hiçbir şey silme" | Dosyalar SIFIRLANIR (`: > dosya`), silinmez | Bayat dosya reddi `run-id` eşitliğiyle zaten sağlanır |
 | Q21 | `sitedb` testleri Task 3–8 arasında CI'da nerede? | Task 3 kapının `pytest` ve `sızıntı` seçicilerini `not sitedb` yapar (yoksa `CI=true` fixture'ı main'i kırmızı yapardı); CI'da koşmaları Task 9 ile başlar — pencere "ölçmedikleri"nde | Dalga sonu birleştirmesi (§12.2) |
 | Q22 | DEFERRED 18a (CI kum havuzu testlerini koşmuyor; tetik "bir sonraki DB migration'ı" = 0014) | Task 9'un CI kabı `SANDBOX_DATABASE_URL`i de verir: 0013 kum havuzu testleri `pytest` adımında koşar; `DATABASE_URL`li katalog testleri SKIP kalır; 18a notu güncellenir | Tetik bu planla ateşleniyor; kap zaten var |
 | Q23 | Şema ↔ TS tip anahtar eşitliği pytest'i (§5.2, §12.1 "pytest" satırı) TS dosyasını ister | B-2'ye devredilir (TS `Snapshot` tipini B-2 yazar); Task 9 "Produces" bunu B-2 yükümlülüğü olarak yazar | TS dosyası olmadan test anlamsız; atlanan test geçmek değildir |
 | Q24 | Dışa aktarım çıkış kodları | 20 yapılandırma · 21 zincir/çıpa · 22 kesim/görünüm/taban/sicil · 23 belirlenimcilik · 24 `verify-snapshot`; benzersizlik `tests/test_jev_budget.py`de | 9–19 dolu |
+| Q25 | Maç içi (in-play) satırlar (inceleme I1; canlıda 51 satır, 1 maç) | Türetim yalnız `observed_at < commence_time` satırlarını kullanır; **kapanış satırı tam başlama anında da kalır**, sıradan satır kalmaz. Süzgeç dökülmüş `commence_time` üzerinden türetimde | `rounds.seal_window` kapsayıcıdır (`0 <= başlama − an`), mühür başlama anında yazılabilir; spec §1.3/§3.3(3) "in-play yok"; `commence_time` UPSERT'le değişir |
+| Q26 | Lig slug'ı addan türetilemez (inceleme I3: `ger.1`/`aut.1` ikisi de "Bundesliga") | Controller kararı: her lig için açık, kalıcı slug `config/site_leagues.yaml`da (ayrı dosya, `leagues.yaml` alanı değil); dışa aktarım onu dökümle taşır; `verify-snapshot` biçim, tekillik ve ayrılmış adları (`track-record`, `legal`, `data`, `_next`) sınar | Boru hattının yükleyicisi (`football_edge.leagues`) bilinmeyen alanı reddeder ve DB aynası slug taşımaz; kalıcılık sitenin sözleşmesidir; kopukluk kapıda kırmızı (her lig, dondurulmuş değerler) |
+| Q27 | Kapı komutunun biçimi (inceleme I4) | `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1` | Yönlendirme önek atamasından önce değerlendirilir; eski biçim paralel görevlerde ortak dosyaya yazıyordu |
 
 **Spec §15 numaraları → bu plan:** T0 → Task 0 · T1 → Task 1 (+ geçişli import bekçisi, spec T5'ten) · T3 → Task 2 ·
 T2 → Task 3 (+ şablonlu yalıtım, spec T5'ten) · T4 → Task 4 (slug) + Task 5 (türetim) + Task 6 (dışa aktarıcı) ·
@@ -154,7 +162,7 @@ T5 → Task 4 (`verify-snapshot`) + Task 7 (uçtan uca) · T6 → Task 8 (`site.
 | 1 | `src/football_edge/site/{__init__,contract,schema}.py`, `web/contract/snapshot.schema.json`, `web/fixtures/snapshot.fixture.json`, `web/fixtures/snapshot.fixture-record.json`, `tests/test_site_{schema,contract,import_rule}.py` | `.gitignore`, `tests/test_jev_budget.py` | K1 |
 | 2 | `src/football_edge/market/consensus.py`, `tests/test_market_consensus.py`, `tests/test_ledger_readers.py` | `src/football_edge/live/context.py`, `src/football_edge/collect.py` (okuyucu) | K1 |
 | 3 | `db/migrations/0014_site_read.sql`, `tests/{sql_text,site_db}.py`, `tests/test_site_{migration_text,template_subset,harness_rules,views_db}.py` | `pyproject.toml`, `verify.sh` (seçiciler), `scripts/sandbox_db.sh`, `docs/RUNBOOK.md` §4 | K1 |
-| 4 | `src/football_edge/site/{slugs,verify,__main__}.py`, `tests/test_site_{slugs,verify}.py` | — | K1 |
+| 4 | `config/site_leagues.yaml`, `src/football_edge/site/{slugs,verify,__main__}.py`, `tests/test_site_{slugs,verify}.py` | — | K1 |
 | 5 | `src/football_edge/site/{inputs,derive}.py`, `tests/site_builders.py`, `tests/test_site_derive.py` | — | K1 |
 | 6 | `src/football_edge/site/export.py`, `tests/fake_site_db.py`, `tests/test_site_{export,determinism,logging}.py` | `src/football_edge/site/__main__.py`, `src/football_edge/collect.py` (`_log_secrets`) | K1 |
 | 7 | `tests/test_site_e2e_db.py` | `scripts/sandbox_db.sh` | K1 |
@@ -170,6 +178,21 @@ sonra dokunur (§12.3).
 Her görev kendi worktree'sinde; controller incelemeden sonra `--no-ff` birleştirir, push öncesi `git fetch origin &&
 git merge --no-ff origin/main` + tam kapı. K1 görev incelemeleri mutasyon koşar: DB'ye dokunan görevlerde (3, 7, 9)
 inceleyici yerel kapta migration koşabilen bir ajandır (bellek notu "Reviewer needs a shell").
+
+## Plan incelemesi (düzeltme turu 1) — bulgu eşlemesi ve açık küçük noktalar
+
+İnceleme: `.superpowers/sdd/2026-09-23-oturum9-dalga-a/b1-plan-review.md` (plan tek ağaçta T0–T9 uygulandı, 52 mutasyon
+kırmızı). Kapananlar: **I1** (Task 5, Q25) · **I2** (Task 8, Q18; B-2 T10) · **I3** (Task 4–6, Q26) · **I4** (her görevin
+kapı komutu, Q27) · **m1** (Task 0 betiği `FE_SANDBOX_PREFIX`/`FE_SITE_T0_NAME`/`FE_SITE_T0_PORT`, var olan kabı başlatır,
+hazır olmayan kapla kayıt yazmaz, tam sıra 0013'le sınırlı) · **m2** (mutasyon yedekleri görevin scratch'inde) · **m3**
+(`ci.yml` çapası `uv sync --frozen --extra scrape`) · **m4** (RUNBOOK §4'ün iki bayat satırı: Task 3 ve Task 9) · **m5**
+(`timeout-minutes` yorumu ölçümü anlatır, Step 11 doğrular) · **m6** (zaman aşımı exit 23, veritabanı hatası exit 20,
+metin basılmaz; Task 6 testleri) · **m7** (`site-db` adımı `sitedb and leakage` sayısını ayrıca tabanlar) · **m8**
+(HANDOFF: advisors 0014'ten sonra) · **m11** (mutasyon sayıları düzeltildi).
+Açık küçük noktalar (gerekçeyle): **m9** — B-2 planı B-1'i artık bu planın görev numaralarıyla anıyor (`verify-snapshot`
+Task 4, `site.yml` Task 8); B-1'de yapılacak bir şey kalmadı, eşleme tablosu yukarıda. **m10** — `npx` geçişli
+bağımlılıkları koşu anında çözer; spec'in kabulüdür, HANDOFF'ta "ölçmedikleri" maddesi; `site.yml` bağlanırken yeniden
+bakılır.
 
 ---
 
@@ -212,42 +235,69 @@ Biri eksikse DUR: 0013 dalı birleşmeden B-1 başlamaz (eskalasyon: Defer, cont
 #!/usr/bin/env bash
 # B-1 T0: CI'ın kuracağı kabın AYNISINI yerelde kurar ve B-1'in dayandığı varsayımları ölçer.
 # Kaydı depoya (docs/phases/06-site/b1-t0-olcumler.md), ham çıktıyı scratch'e yazar. Kap durdurulur,
-# SİLİNMEZ (`docker rm fe-site-t0` kullanıcının kararıdır).
+# SİLİNMEZ (`docker rm <ad>` kullanıcının kararıdır; ad `$FE_SANDBOX_PREFIX-site-t0`).
 set -uo pipefail
 SCRATCH="${1:?scratch dizini ver}"
 IMAGE=public.ecr.aws/supabase/postgres:17.6.1.143
-NAME=fe-site-t0
+# Paralel oturumlar kum havuzu gibi KENDİ önek ve portunu kullanır (RUNBOOK §4); yeniden koşu
+# durdurulmuş kabı başlatır. Her koşu yeni bir kapla ölçmek isterse FE_SITE_T0_NAME'i değiştirir.
+PREFIX="${FE_SANDBOX_PREFIX:-football-edge-sandbox}"
+NAME="${FE_SITE_T0_NAME:-$PREFIX-site-t0}"
+PORT="${FE_SITE_T0_PORT:-55490}"
+LABEL=football-edge.sandbox
 REC=docs/phases/06-site/b1-t0-olcumler.md
 RAW="$SCRATCH/t0-raw.log"
 mkdir -p "$SCRATCH" docs/phases/06-site
 : > "$RAW"
+die() { echo "site_t0_probe: $*" | tee -a "$RAW" >&2; exit 1; }
+password() {
+  docker container inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$NAME" \
+    | sed -n 's/^POSTGRES_PASSWORD=//p'
+}
 q() { docker exec -i -e PGPASSWORD="$PW" "$NAME" psql -h localhost -U postgres -At "$@"; }
 
-docker pull "$IMAGE" >>"$RAW" 2>&1
+docker pull "$IMAGE" >>"$RAW" 2>&1 || die "imaj çekilemedi: $IMAGE"
 DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE" | sed 's/^.*@//')"
-PW="$(openssl rand -hex 16)"
 START=$(date +%s)
-docker run -d --name "$NAME" --label football-edge.sandbox=1 -e POSTGRES_PASSWORD="$PW" \
-  -p 127.0.0.1:55490:5432 "$IMAGE" postgres -D /etc/postgresql >>"$RAW" 2>&1
+if docker container inspect "$NAME" >/dev/null 2>&1; then
+  [ "$(docker container inspect -f "{{index .Config.Labels \"$LABEL\"}}" "$NAME")" = "1" ] \
+    || die "$NAME adında başkasının kabı var — FE_SITE_T0_NAME ile başka ad seç"
+  docker start "$NAME" >>"$RAW" 2>&1 || die "docker start başarısız: $NAME"
+else
+  docker run -d --name "$NAME" --label "$LABEL=1" \
+    -e POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+    -p "127.0.0.1:$PORT:5432" "$IMAGE" postgres -D /etc/postgresql >>"$RAW" 2>&1 \
+    || die "docker run başarısız: $NAME (port $PORT dolu olabilir: FE_SITE_T0_PORT)"
+fi
+PW="$(password)"
 until q -d postgres -c 'select 1' >/dev/null 2>&1; do
-  [ $(( $(date +%s) - START )) -lt 300 ] || { echo "kap 300 sn'de hazır olmadı" >>"$RAW"; break; }
+  # Hazır olmayan kapla ölçülmez: kayıt dosyası YAZILMADAN çıkılır (commit'li kayıt ezilmez).
+  [ $(( $(date +%s) - START )) -lt 300 ] || die "kap 300 sn'de hazır olmadı (docker logs $NAME)"
   sleep 2
 done
 READY=$(( $(date +%s) - START ))
+# Ölçülen tam sıra 0001→0013'tür (T0 0014'ten önce koşar); sonraki bir koşuda 0014+ dışarıda kalır.
+FULL_SEQUENCE=()
+for f in db/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+  [ "$(basename "$f" | cut -c1-4)" -le 13 ] && FULL_SEQUENCE+=("$f")
+done
 VERSION="$(q -d postgres -c 'show server_version')"
 ROLE="$(q -d postgres -F, -c "select rolsuper, rolcreatedb, rolcreaterole, rolbypassrls from pg_roles where rolname = 'postgres'")"
 SELF_GRANT="$(q -d postgres -c 'show createrole_self_grant')"
 
 # (i) 0001→0013 tek işlemde, postgres veritabanında, postgres rolüyle; sonra GERİ AL.
 T=$(date +%s)
-if { echo 'begin;'; for f in db/migrations/[0-9][0-9][0-9][0-9]_*.sql; do cat "$f"; echo; done
+if { echo 'begin;'; for f in "${FULL_SEQUENCE[@]}"; do cat "$f"; echo; done
      echo "select 'jobs_in_tx=' || count(*) from cron.job;"; echo 'rollback;'; } \
    | q -d postgres -v ON_ERROR_STOP=1 >>"$RAW" 2>&1; then FULL=ok; else FULL=failed; fi
 FULL_SECONDS=$(( $(date +%s) - T ))
 CRON_GONE="$(q -d postgres -c "select to_regclass('cron.job') is null")"
 POSTGRES_EMPTY="$(q -d postgres -c "select to_regclass('public.odds_snapshots') is null")"
 
-# (ii) şablon: 0001 + 0002 + 0013 ayrı bir veritabanına; kopya; FORCE ile düşürme.
+# (ii) şablon: 0001 + 0002 + 0013 ayrı bir veritabanına; kopya; FORCE ile düşürme. Önceki koşudan
+# kalmış olabilecek ölçüm veritabanları önce düşürülür (atılabilir kap, §4.4/4 deseni).
+q -d postgres -c 'drop database if exists fe_t0_copy with (force)' >>"$RAW" 2>&1
+q -d postgres -c 'drop database if exists fe_t0_tpl with (force)' >>"$RAW" 2>&1
 q -d postgres -c 'create database fe_t0_tpl' >>"$RAW" 2>&1
 TEMPLATE=ok
 for f in 0001_init.sql 0002_sources.sql 0013_api_roles_lockdown.sql; do
@@ -286,7 +336,7 @@ docker stop "$NAME" >/dev/null
   echo "# Faz 6 İz B · B-1 T0 ölçümleri"
   echo
   echo "Üreten: plan \`docs/superpowers/plans/2026-09-24-faz6-iz-b-1-okuma-katmani.md\` Task 0; tarih $(date -u +%Y-%m-%dT%H:%MZ)."
-  echo "Kap CI'ın kuracağı biçimde kuruldu (\`postgres -D /etc/postgresql\`, parola iş içinde üretildi)."
+  echo "Kap CI'ın kuracağı biçimde kuruldu (\`postgres -D /etc/postgresql\`, parola iş içinde üretildi; kap: $NAME)."
   echo "Sonraki görevler aşağıdaki \`anahtar=değer\` satırlarını OKUR (tahmin etmez); testler eşitliği sınar."
   echo
   echo '```'
@@ -307,12 +357,16 @@ docker stop "$NAME" >/dev/null
   echo "set_role=$SET_ROLE"
   echo "netlify_cli=$NETLIFY"
   echo '```'
-} > "$REC"
+} > "$SCRATCH/b1-t0-olcumler.md"
+mv "$SCRATCH/b1-t0-olcumler.md" "$REC"   # yalnız tam bir ölçüm kaydın yerine geçer
 cat "$REC"
 ````
 
-`chmod +x scripts/site_t0_probe.sh`. Betik kabı SİLMEZ (durdurur); kaldırmak kullanıcının kararıdır
-(`docker rm fe-site-t0`).
+`chmod +x scripts/site_t0_probe.sh`. Kap adı `$FE_SANDBOX_PREFIX-site-t0` (varsayılan
+`football-edge-sandbox-site-t0`), port `FE_SITE_T0_PORT` (55490); paralel oturum kendi önek/portunu verir (RUNBOOK §4).
+Yeniden koşu durdurulmuş kabı `docker start` ile açar; etiketsiz aynı adlı kaba dokunmaz. Kap 300 sn'de hazır olmazsa
+betik KAYDI YAZMADAN çıkar (commit'li kayıt bayat/yanlış değerle ezilmez); kayıt önce scratch'e yazılır, tam ölçümde
+yerine taşınır. Kabı SİLMEZ (durdurur); kaldırmak kullanıcının kararıdır (`docker rm <ad>`).
 
 - [ ] **Step 3: Ölç**
 
@@ -333,7 +387,7 @@ spec değişikliği ister). Ham çıktı scratch'teki `t0-raw.log`dadır; hata s
 
 - [ ] **Step 4: Kapı**
 
-Run: `TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/verify.log"`
+Run: `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"`
 Expected: `10 PASS` + `SKIP: zincir (DATABASE_URL yok)` + `KAPI YEŞİL` (betik bash'tir; `secrets` adımı onu da tarar).
 
 - [ ] **Step 5: Commit**
@@ -371,9 +425,10 @@ Paket doğduğu anda geçişli import bekçisi de doğar: sonraki her site modü
   # football_edge.site.contract
   SCHEMA_VERSION = 1; SCHEMA_PATH = Path("web/contract/snapshot.schema.json")
   DEVIG_CONFIG_PATH = Path("config/model_faz3.yaml")
+  SITE_LEAGUES_PATH = Path("config/site_leagues.yaml")      # dosyayı Task 4 yazar
   PUBLIC_FLOOR = datetime(2026, 7, 2, tzinfo=UTC)
   SITE_MIN_BOOKS = 3; SITE_MIN_TEAM_MATCHES = 3; MOVE_MIN_MATCHES = 5; PATH_ID_LENGTH = 12
-  RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal"}); RESERVED_TEAM_SLUGS = frozenset({"match"})
+  RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal", "data", "_next"}); RESERVED_TEAM_SLUGS = frozenset({"match"})
   RECORD_COLUMNS: tuple[tuple[str, str], ...]   # (ad, format_type) — site.record ile aynı sıra
   FORBIDDEN_KEYS: frozenset[str]                # §4.3'ün 9 adı
   EXIT_SITE_CONFIG = 20; EXIT_SITE_CHAIN = 21; EXIT_SITE_CUT = 22
@@ -848,6 +903,8 @@ from football_edge.ledger import _canonical
 SCHEMA_VERSION = 1
 SCHEMA_PATH = Path("web/contract/snapshot.schema.json")
 DEVIG_CONFIG_PATH = Path("config/model_faz3.yaml")
+# Lig URL bölütleri: KALICI ve elle yazılır (§8.1–8.2, AK20 b); `leagues.yaml`dan ayrı dosya.
+SITE_LEAGUES_PATH = Path("config/site_leagues.yaml")
 
 # B4: holdout Londra'da 2026-07-01 00:00'da biter; bir günlük pay saat dilimini ve kaynak
 # tarihi belirsizliğini kapatır. `site.public_floor()` aynı anı döner (0014, katalog testi).
@@ -858,7 +915,9 @@ SITE_MIN_TEAM_MATCHES = 3  # §8.4: takım sayfasının indekslenebilirlik eşi�
 MOVE_MIN_MATCHES = 5  # §5.2: ligin hareket dağılımı bu kadar mühürlü maçla yayımlanır
 PATH_ID_LENGTH = 12  # §8.1: maç yolunda The Odds API olay kimliğinin öneki (çakışma kırmızı)
 
-RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal"})
+# `track-record`/`legal` sabit bölütlerdir (§8.1); `data` yayın dosyalarının, `_next` Next'in
+# derleme çıktısının dizinidir (B-2). `_next` slug biçimine zaten uymaz; liste açık yazılır.
+RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal", "data", "_next"})
 RESERVED_TEAM_SLUGS = frozenset({"match"})
 
 # `site.record` (B5): Faz 5 `publications`a AYNI ad, tip ve sırayla bağlanır. Katalog testi
@@ -1415,7 +1474,7 @@ Expected: `All checks passed!` · `… files already formatted` · `Success: no 
 
 - [ ] **Step 13: Tam kapı**
 
-Run: `TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/verify.log"`
+Run: `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"`
 Expected: `10 PASS` + `SKIP: zincir (DATABASE_URL yok)` + `KAPI YEŞİL`. Eklenen `leakage` testi: 5 (sözleşme 1, bekçi 4);
 `verify.sh`ye DOKUNULMAZ (sayı Task 9'da ölçülür).
 
@@ -1906,7 +1965,7 @@ eşitliği) ve zincir testleri değişmeden geçer.
 
 - [ ] **Step 9: Lint ve tip** — Run: `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts` → temiz.
 
-- [ ] **Step 10: Tam kapı** — `TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`.
+- [ ] **Step 10: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`.
 
 - [ ] **Step 11: Commit**
 
@@ -1938,7 +1997,7 @@ Tetikleyici ASLA kapatılmaz. `verify.sh`in `pytest` ve `sızıntı` seçicileri
 - Test: `tests/test_site_migration_text.py`, `tests/test_site_template_subset.py`, `tests/test_site_harness_rules.py`,
   `tests/test_site_views_db.py`
 - Modify: `pyproject.toml` (`sitedb` işareti, `tests/test_site_*_db.py` için ruff istisnası), `verify.sh` (iki seçici),
-  `scripts/sandbox_db.sh` (`SITE_TEST_DATABASE_URL` = boş kap), `docs/RUNBOOK.md` §4 (bir madde)
+  `scripts/sandbox_db.sh` (`SITE_TEST_DATABASE_URL` = boş kap), `docs/RUNBOOK.md` §4 (bir satır, bir madde)
 
 **Interfaces:**
 - Consumes: Task 1 `RECORD_COLUMNS`, `FORBIDDEN_KEYS`, `PUBLIC_FLOOR`, `property_names`; Task 2 `collect._LEDGER_COLUMNS`,
@@ -2622,15 +2681,17 @@ def test_the_migration_grants_no_membership_in_the_reader_role() -> None:
 
 
 def test_the_gate_runs_sitedb_tests_only_where_it_names_them() -> None:
-    """Her `uv run pytest` çağrısı `sitedb`i adıyla seçer ya da dışlar (yalnız `-m contract` hariç).
+    """Test KOŞTURAN her `uv run pytest` çağrısı `sitedb`i adıyla seçer ya da dışlar.
 
-    Aksi hâlde `CI=true` iken veritabanı kabı olmayan bir adımda `sitedb` fixture'ı FAIL verir, ya
-    da testler iki adımda iki kez koşar.
+    `-m contract` muaftır; `--collect-only` test koşturmaz. Aksi hâlde `CI=true` iken kabı olmayan
+    bir adımda `sitedb` fixture'ı FAIL verir, ya da testler iki adımda iki kez koşar.
     """
     runs = [
         line.strip()
         for line in (TESTS.parent / "verify.sh").read_text(encoding="utf-8").splitlines()
-        if "uv run pytest" in line and not line.lstrip().startswith("#")
+        if "uv run pytest" in line
+        and "--collect-only" not in line  # sayım çağrısı test koşturmaz
+        and not line.lstrip().startswith("#")
     ]
 
     assert runs, "verify.sh'de pytest çağrısı bulunamadı"
@@ -3234,7 +3295,14 @@ DEFAULT_TESTS=(tests/test_api_roles_lockdown_db.py tests/test_jev_tables_db.py t
   env "$DB_VAR=$applied_url" "$SANDBOX_VAR=$empty_url" "$SITE_VAR=$empty_url" \
 ```
 Başlık yorumunda `scripts/sandbox_db.sh env          elle kullanım için iki \`export\` satırı basar` → `… üç \`export\`
-satırı basar`. `docs/RUNBOOK.md` §4'te "`football-edge-sandbox-empty` (127.0.0.1:55481): …" maddesinin HEMEN ALTINA:
+satırı basar`. `docs/RUNBOOK.md` §4'te iki düzenleme — (1) bayatlayan satır:
+```markdown
+# ESKİ
+- Elle koşu için `scripts/sandbox_db.sh env` iki `export` satırı basar (yerel parola içerir; kabın
+# YENİ
+- Elle koşu için `scripts/sandbox_db.sh env` üç `export` satırı basar (yerel parola içerir; kabın
+```
+(2) "`football-edge-sandbox-empty` (127.0.0.1:55481): …" maddesinin HEMEN ALTINA:
 ```markdown
 - **Site testleri** (`sitedb` işareti; `test` komutu `SITE_TEST_DATABASE_URL`i BOŞ kaba çevirir): `postgres`
   veritabanında 0001→0014'ü tek işlemde uygulayıp geri alır; ayrıca `site_tpl` şablonunu (0001, 0002, 0013, 0014) ve
@@ -3262,7 +3330,7 @@ Tam sıranın ilk koşusunda T0 kaydındaki `full_sequence_seconds` mertebesinde
 
 | Dosya | Eski → yeni | Kırmızı |
 |---|---|---|
-| `db/migrations/0014_site_read.sql` | `grant execute on function site.public_floor() to site_reader;` → `` (satır boş) | DB: `test_site_reader_sees_rows_through_the_views` ve `test_the_floor_filters_holdout…` (yetki hatası — spec §4.4/2'nin mutasyon kanıtı; yalnız migration `postgres` rolüyle uygulandığı için olur) |
+| `db/migrations/0014_site_read.sql` | `grant execute on function site.public_floor() to site_reader;` → `` (satır boş) | DB: 3 test — `test_site_reader_sees_rows_through_the_views`, `test_the_floor_filters_holdout…` ve `test_book_key_is_the_book_order…` (yetki hatası — spec §4.4/2'nin mutasyon kanıtı; yalnız migration `postgres` rolüyle uygulandığı için olur) |
 | `db/migrations/0014_site_read.sql` | `create or replace view site.matches with (security_barrier) as` → `create or replace view site.matches as` | metin: `test_every_view_is_created_with_security_barrier…`; DB: `test_everything_is_owned_by_postgres…` |
 | `db/migrations/0014_site_read.sql` | `  where m.commence_time >= site.public_floor();` → `  ;` | metin: `test_each_view_carries_exactly_its_expected_filter[site.matches]`; DB: `test_the_floor_filters_holdout…` (H1b) |
 | `db/migrations/0014_site_read.sql` | `  join site.leagues l on l.id = m.league_id\n` → `` | metin: `test_each_view_carries_exactly_its_expected_filter[site.matches]`; DB: `test_the_floor_filters_holdout…` (pasif ligin maçı sızar). `test_the_views_depend_on_exactly…` YEŞİL kalır (kapanış yine üç tablo) — bu, kapanış testinin neyi ölçmediğidir |
@@ -3275,13 +3343,13 @@ Tam sıranın ilk koşusunda T0 kaydındaki `full_sequence_seconds` mertebesinde
 | `tests/site_db.py` | `    if host not in LOOPBACK:` → `    if False:` | `test_only_a_local_disposable_address_is_accepted` (uzak ve soket adresleri) |
 | `tests/site_db.py` | `        if os.environ.get("CI") == "true":` → `        if False:` | `test_a_missing_address_skips_locally_and_fails_in_ci` (CI'da SKIP'e düşer → kırmızı, "atlandı" değil) |
 
-0012'ye ekleme için: `cp db/migrations/0012_jev_features.sql /tmp/0012.bak; printf '\n%s\n' '<deyim>' >> db/migrations/0012_jev_features.sql; …; cp /tmp/0012.bak db/migrations/0012_jev_features.sql && cmp …`.
+0012'ye ekleme için (`$B` görevin scratch dizini): `cp db/migrations/0012_jev_features.sql "$B/0012.bak"; printf '\n%s\n' '<deyim>' >> db/migrations/0012_jev_features.sql; …; cp "$B/0012.bak" db/migrations/0012_jev_features.sql && cmp "$B/0012.bak" db/migrations/0012_jev_features.sql`.
 Her DB mutasyonundan sonra `scripts/sandbox_db.sh test tests/test_site_views_db.py` yeniden 18 passed vermeli (oturum
 başında şablon yeniden kurulduğu için bayat 0014 kalmaz — n2).
 
 - [ ] **Step 14: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 15: Tam kapı** — `TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/verify.log"` →
+- [ ] **Step 15: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` →
 `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`. `pytest` adımının özet satırında `deselected` sayısı = `sitedb` testleri (18).
 
 - [ ] **Step 16: Commit**
@@ -3299,7 +3367,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Slug fonksiyonu ve `verify-snapshot`
+### Task 4: Slug fonksiyonu, lig slug yapılandırması ve `verify-snapshot`
 
 **Kademe:** K1 · **Spec:** §5.1 (`verify-snapshot`), H1e, H2b–c, H3a, H5b, §4.3 (yasak anahtarlar), N3 (sıralılık),
 §5.4 (hassasiyet), §8.1–§8.2 (slug kuralları) · **Bağımlılık:** Task 1 · **Worktree:** `wt-b1-t4`
@@ -3307,11 +3375,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 `verify-snapshot` DB'sizdir; dışa aktarıcı (Task 6) aynı fonksiyonu yazmadan ÖNCE çağırır, `site.yml` ve B-2 CLI'ı
 çağırır. Metin taramaları (H1 tarih, H2, H5, yasak anahtarlar) şekilden bağımsızdır ve şema kırmızı olsa da koşar;
 şekle dayanan kontroller yalnız şema geçerse koşar. Hata metinleri JSON yolunu ve kuralı söyler, DEĞERİ basmaz (log
-public; reddedilen değer bir DSN olabilir). Slug fonksiyonu `naming.normalise_team`e dayanmaz; dondurulmuş vektörler
-fonksiyon değişikliğini kırmızı yapar.
+public; reddedilen değer bir DSN olabilir). Takım ve maç slug'ı `slugify` ile addan türer (`naming.normalise_team`e
+dayanmaz; dondurulmuş vektörler değişikliği kırmızı yapar). **Lig slug'ı addan türetilmez** (plan incelemesi I3,
+controller kararı): `config/leagues.yaml`da `ger.1` ve `aut.1`in ikisi de "Bundesliga". Her lig için açık ve kalıcı
+değer `config/site_leagues.yaml`dadır. Ayrı dosya seçildi, çünkü (1) `leagues.yaml` ücretli boru hattının
+yapılandırmasıdır ve `football_edge.leagues` bilinmeyen alanı reddeder — bir site alanı için boru hattının yükleyicisini
+ve `League` tipini değiştirmek gerekirdi; (2) değer DB aynasına (`leagues` tablosu) girmez, dışa aktarım onu depodan
+okur ve DÖKÜME koyar (iki türetim aynı değeri görür); (3) kalıcılık sitenin sözleşmesidir, dosya onun sahibidir.
+Kopukluk kapıda kırmızıdır: `leagues.yaml`daki HER lig (pasif dâhil) burada olmalı ve değerler dondurulmuştur.
+`verify-snapshot` lig slug'ında addan türetmeyi DEĞİL biçimi (şema), tekilliği ve ayrılmış adları
+(`track-record`, `legal`, `data`, `_next`) sınar.
 
 **Files:**
-- Create: `src/football_edge/site/slugs.py`, `src/football_edge/site/verify.py`, `src/football_edge/site/__main__.py`
+- Create: `config/site_leagues.yaml`, `src/football_edge/site/slugs.py`, `src/football_edge/site/verify.py`,
+  `src/football_edge/site/__main__.py`
   (bu görevde yalnız `verify-snapshot`; Task 6 `export` ve `derive-stdin`i ekler)
 - Test: `tests/test_site_slugs.py`, `tests/test_site_verify.py`
 
@@ -3324,6 +3401,7 @@ fonksiyon değişikliğini kırmızı yapar.
   # football_edge.site.slugs
   def slugify(text: str) -> str            # ASCII; harf/rakam yoksa ValueError("slug üretilemedi: …")
   def match_slug(home: str, away: str) -> str   # "{slugify(home)}-vs-{slugify(away)}"
+  def load_league_slugs(path: Path) -> Mapping[str, str]   # lig kimliği → kalıcı slug; bozuksa ValueError
   # football_edge.site.verify
   def snapshot_errors(snapshot: object, schema: Mapping[str, Any]) -> list[str]   # boş = yayımlanabilir
   ```
@@ -3340,9 +3418,27 @@ fonksiyon değişikliğini kırmızı yapar.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from football_edge.site.slugs import match_slug, slugify
+from football_edge.leagues import load_leagues
+from football_edge.site.contract import SITE_LEAGUES_PATH
+from football_edge.site.slugs import load_league_slugs, match_slug, slugify
+
+REPO = Path(__file__).resolve().parent.parent
+# Yayımlanmış lig URL'leri: bir değeri değiştirmek o ligin bütün URL'lerini değiştirir (AK20 b).
+FROZEN_LEAGUE_SLUGS = {
+    "eng.1": "premier-league",
+    "esp.1": "la-liga",
+    "ita.1": "serie-a",
+    "ger.1": "bundesliga",
+    "fra.1": "ligue-1",
+    "tur.1": "super-lig",
+    "ned.1": "eredivisie",
+    "bel.1": "first-division-a",
+    "aut.1": "austrian-bundesliga",
+}
 
 FROZEN = [
     ("Beşiktaş JK", "besiktas-jk"),
@@ -3386,6 +3482,36 @@ def test_the_match_segment_joins_the_two_team_slugs() -> None:
 def test_slugs_do_not_follow_the_matching_key() -> None:
     """`naming.normalise_team` ekleri atar; URL'ler eşleşme düzeltmesiyle sessizce değişmemeli."""
     assert slugify("Gaziantep FK") != slugify("Gaziantep")
+
+
+def test_every_configured_league_has_a_frozen_site_slug() -> None:
+    """I3: pasif dâhil HER lig (`config/leagues.yaml`) kalıcı bir slug taşır; addan türetilmez."""
+    ids = {league.id for league in load_leagues(REPO / "config/leagues.yaml")}
+    slugs = load_league_slugs(REPO / SITE_LEAGUES_PATH)
+
+    assert set(slugs) == ids
+    assert dict(slugs) == FROZEN_LEAGUE_SLUGS
+    assert slugs["ger.1"] != slugs["aut.1"], "ikisi de 'Bundesliga'"
+
+
+@pytest.mark.parametrize(
+    ("body", "needle"),
+    [
+        ("version: 1\nleague_slugs:\n  a.1: bundesliga\n  b.1: bundesliga\n", "aynı slug"),
+        ("version: 1\nleague_slugs:\n  a.1: data\n", "ayrılmış"),
+        ("version: 1\nleague_slugs:\n  a.1: track-record\n", "ayrılmış"),
+        ("version: 1\nleague_slugs:\n  a.1: Bundesliga\n", "biçim dışı"),
+        ("version: 1\nleague_slugs:\n  a.1: _next\n", "biçim dışı"),
+        ("version: 2\nleague_slugs:\n  a.1: x\n", "version: 1"),
+        ("version: 1\nleague_slugs: {}\n", "boş olmayan"),
+    ],
+)
+def test_a_bad_site_league_config_is_refused(tmp_path: Path, body: str, needle: str) -> None:
+    path = tmp_path / "site_leagues.yaml"
+    path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=needle):
+        load_league_slugs(path)
 ````
 
 - [ ] **Step 2: `verify-snapshot` testini yaz**
@@ -3567,12 +3693,19 @@ def test_a_clv_with_three_decimals_is_red() -> None:
         (_set("matches.0.slug", "x-vs-y"), "$.matches[0].slug"),
         (_set("matches.0.date", "2026-09-30"), "$.matches[0].date"),
         (_set("leagues.0.slug", "track-record"), "$.leagues[0].slug"),
+        (_set("leagues.0.slug", "data"), "$.leagues[0].slug"),
+        (_set("leagues.1.slug", "kuzey-ligi"), "$.leagues: slug tekrarı"),
         (_set("teams.0.slug", "match"), "$.teams[0].slug"),
         (_set("ledger.anchor.last_id", 10**6), "$.ledger.anchor"),
     ],
 )
 def test_internal_consistency(change: Callable[[dict[str, Any]], None], needle: str) -> None:
     assert any(needle in error for error in _broken(change)), needle
+
+
+def test_a_league_slug_need_not_follow_the_league_name() -> None:
+    """I3: lig slug'ı yapılandırmadandır (`ger.1`/`aut.1` ikisi de "Bundesliga")."""
+    assert _broken(_set("leagues.0.slug", "kuzey-bolgesi")) == []
 
 
 def test_an_unsealed_match_cannot_show_a_closing_round() -> None:
@@ -3632,7 +3765,7 @@ def test_the_cli_checks_the_file_hash_when_asked(tmp_path: Path) -> None:
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider tests/test_site_slugs.py tests/test_site_verify.py`
 Expected: toplama hatası `No module named 'football_edge.site.slugs'` / `'football_edge.site.verify'`.
 
-- [ ] **Step 4: Slug fonksiyonunu yaz**
+- [ ] **Step 4: Slug fonksiyonunu ve lig slug yapılandırmasını yaz**
 
 `src/football_edge/site/slugs.py` (tam içerik):
 
@@ -3648,6 +3781,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Mapping
+from pathlib import Path
+from types import MappingProxyType
+
+import yaml
+
+from football_edge.site.contract import RESERVED_LEAGUE_SLUGS
 
 # NFKD'nin ayrıştırmadığı harfler (birleştirici işaret taşımazlar).
 _FOLD = str.maketrans(
@@ -3670,6 +3810,7 @@ _FOLD = str.maketrans(
 )
 _APOSTROPHES = re.compile(r"['’ʼ`]")
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
+SLUG = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 
 
 def slugify(text: str) -> str:
@@ -3690,6 +3831,51 @@ def slugify(text: str) -> str:
 def match_slug(home: str, away: str) -> str:
     """Maç yolunun süs bölütü (`{home}-vs-{away}`); yolun kimliği `path_id`dir (§8.1)."""
     return f"{slugify(home)}-vs-{slugify(away)}"
+
+
+def load_league_slugs(path: Path) -> Mapping[str, str]:
+    """`config/site_leagues.yaml`: lig kimliği → kalıcı URL bölütü; biçim, tekillik, ayrılmış ad.
+
+    Lig slug'ı addan türetilemez: `ger.1` ve `aut.1`in ikisi de "Bundesliga". Değer yayımlandıktan
+    sonra değişirse URL değişir — AK20 b'nin kaybolan-slug kontrolü onu kırmızı yapar.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or set(raw) != {"version", "league_slugs"} or raw["version"] != 1:
+        raise ValueError(f"{path}: kökte yalnız `version: 1` ve `league_slugs` olmalı")
+    entries = raw["league_slugs"]
+    if not isinstance(entries, dict) or not entries:
+        raise ValueError(f"{path}: `league_slugs` boş olmayan bir eşlem olmalı")
+    seen: dict[str, str] = {}
+    for league_id, slug in entries.items():
+        if not isinstance(slug, str) or SLUG.fullmatch(slug) is None or len(slug) > 80:
+            raise ValueError(f"{path}: {league_id} slug'ı biçim dışı")
+        if slug in RESERVED_LEAGUE_SLUGS:
+            raise ValueError(f"{path}: {league_id} slug'ı ayrılmış bir bölüt")
+        if slug in seen:
+            raise ValueError(f"{path}: {league_id} ve {seen[slug]} aynı slug'ı taşıyor")
+        seen[slug] = str(league_id)
+    return MappingProxyType({str(key): str(value) for key, value in entries.items()})
+````
+
+`config/site_leagues.yaml` (tam içerik):
+
+````yaml
+# Sitenin lig URL bölütleri (Faz 6 İz B §8.1–§8.2, AK20 b). ELLE yazılır ve KALICIDIR: yayımlandıktan
+# sonra bir değeri değiştirmek o ligin bütün URL'lerini değiştirmektir (kaybolan-slug kontrolü
+# kırmızı). Addan türetilmez: `ger.1` ve `aut.1`in ikisi de "Bundesliga". `config/leagues.yaml`daki
+# HER lig (pasif dâhil) burada olur — yoksa kapı kırmızı (`tests/test_site_slugs.py`). Ayrılmış:
+# track-record, legal, data, _next.
+version: 1
+league_slugs:
+  eng.1: premier-league
+  esp.1: la-liga
+  ita.1: serie-a
+  ger.1: bundesliga
+  fra.1: ligue-1
+  tur.1: super-lig
+  ned.1: eredivisie
+  bel.1: first-division-a
+  aut.1: austrian-bundesliga
 ````
 
 - [ ] **Step 5: Denetimi yaz**
@@ -3844,8 +4030,9 @@ def _consistency_errors(snapshot: dict[str, Any]) -> Iterator[str]:
     if len(set(league_slugs)) != len(league_slugs):
         yield "$.leagues: slug tekrarı"
     for index, league in enumerate(snapshot["leagues"]):
-        if league["slug"] != slugify(league["name"]) or league["slug"] in RESERVED_LEAGUE_SLUGS:
-            yield f"$.leagues[{index}].slug: addan türemiyor ya da ayrılmış (§8.1)"
+        # Lig slug'ı yapılandırmadandır (addan türemez); biçimi şema, burası ayrılmış adı sınar.
+        if league["slug"] in RESERVED_LEAGUE_SLUGS:
+            yield f"$.leagues[{index}].slug: ayrılmış bölüt (§8.1)"
         own = sum(1 for match in matches if match["league_id"] == league["id"])
         if league["matches"] != own:
             yield f"$.leagues[{index}].matches: maç listesiyle uyuşmuyor"
@@ -3982,7 +4169,7 @@ if __name__ == "__main__":
 - [ ] **Step 7: Yeşili gör**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider tests/test_site_slugs.py tests/test_site_verify.py tests/test_site_import_rule.py`
-Expected: `68 passed` (26 + 38 + 4). Fixture'ların ikisi de BÜTÜN kurallardan geçer.
+Expected: `79 passed` (34 + 41 + 4). Fixture'ların ikisi de BÜTÜN kurallardan geçer.
 
 - [ ] **Step 8: Mutasyonla kırmızı kanıtı**
 
@@ -3993,16 +4180,19 @@ Expected: `68 passed` (26 + 38 + 4). Fixture'ların ikisi de BÜTÜN kurallardan
 | `src/football_edge/site/verify.py` | `"service_role", ` → `` | `test_credential_patterns…[service_role]` (H5b) |
 | `src/football_edge/site/verify.py` | `if key in FORBIDDEN_KEYS:` → `if False:` | `test_a_forbidden_key_is_red_at_any_depth…` (§4.3) |
 | `src/football_edge/site/slugs.py` | `"ı": "i",` → `` | `test_frozen_vectors[Kasımpaşa-kasimpasa]` |
+| `src/football_edge/site/slugs.py` | `        if slug in seen:` → `        if False:` | `test_a_bad_site_league_config_is_refused[…aynı slug]` (I3) |
+| `src/football_edge/site/contract.py` | `RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal", "data", "_next"})` → `RESERVED_LEAGUE_SLUGS = frozenset({"track-record", "legal"})` | `test_a_bad_site_league_config_is_refused[…data…]` ve `test_internal_consistency` (`data`) |
+| `config/site_leagues.yaml` | `  aut.1: austrian-bundesliga` → `  aut.1: bundesliga` | `test_every_configured_league_has_a_frozen_site_slug` (yükleyici çakışmayı adıyla reddeder) |
 
 - [ ] **Step 9: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 10: Tam kapı** — `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`. Eklenen `leakage` testi: 2.
+- [ ] **Step 10: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`. Eklenen `leakage` testi: 2.
 
 - [ ] **Step 11: Commit**
 
 ```bash
-git add src/football_edge/site/slugs.py src/football_edge/site/verify.py src/football_edge/site/__main__.py \
-  tests/test_site_slugs.py tests/test_site_verify.py
+git add config/site_leagues.yaml src/football_edge/site/slugs.py src/football_edge/site/verify.py \
+  src/football_edge/site/__main__.py tests/test_site_slugs.py tests/test_site_verify.py
 git commit -m "feat: site slug'ları ve verify-snapshot — H1/H2/H3/H5, yasak anahtarlar, sıra, hassasiyet (Faz 6 B-1)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -4023,6 +4213,26 @@ tipleriyle çalışır. Türetim saf fonksiyondur: DB, saat, rastgelelik yok; ko
 hesaplandı: adil kitaplar (Σ 1/o = 1) her yöntemde olduğu gibi döner (`2.0/4.0/4.0` → 50/25/25), simetrik marjlı
 tur power yönteminde 33.3'e iner; türetme kodu beklenen değeri üretmek için çağrılmaz.
 
+**Maç içi satırlar (plan incelemesi I1).** `run_snapshot` The Odds API'nin canlı maçlarını da yazar; controller canlıda
+salt okuma sorgusuyla ölçtü: `odds_snapshots`ta `observed_at >= matches.commence_time` olan 51 satır var, hepsi tek
+maçta (toplam 5.763 satırda). Ürün maç öncesidir (spec §1.3, §3.3/3 "in-play yok"). Türetim yalnız maç öncesi satırları
+kullanır: `observed_at < commence_time`; tek istisna kapanış satırının tam başlama anında yazılmış olmasıdır.
+- **Sınır kararı:** `rounds.seal_window` kapsayıcıdır (`timedelta(0) <= commence_time − now`): mühür turu tam başlama
+  anında yazılabilir. Eşitlik istisnasının dayanağı yalnız bu kapsayıcı sınır ve Q15/Q25'tir (spec §5.2 `closing`'i
+  yalnız alan adıyla anar, başlama anını tanımlamaz). Bu yüzden `is_closing` satırı `observed_at == commence_time`da
+  KALIR. Sıradan snapshot satırı eşitlikte ATILIR, çünkü o an maç içi fiyatı olabilir ve onu mühür kuralı üretmedi.
+  Pratikte durum kuramsaldır: tur anı (`now`) mikrosaniye taşır, eşitlik ancak tam saniyede başlayan bir turla olur.
+- **Spec §5.2'den ayrılış (adıyla):** spec `rounds`'u "kesim içindeki h2h gözlem turu sayısı" diye anar; bu plan
+  `rounds`, `opening`, `latest`, `closing`, `move` ve maç kümesini yalnız MAÇ ÖNCESİ turlardan sayar, `sealed` ise
+  kesim genelidir (spec düzenlenmez; gerekçe §1.3/§3.3(3) "in-play yok", Q25).
+- **`sealed`:** spec §5.2'nin tanımıyla kesimdeki HER satırdan hesaplanır. `commence_time` sonradan öne çekilirse mühür
+  turu başlamadan sonraya düşer. O durumda maç `sealed: true` kalır, `closing` ise `null` olur (fiyat maç içi sayılır;
+  `verify-snapshot`in "mühürsüzse kapanış yok" kuralıyla tutarlı).
+- **Nerede süzülür:** Süzgeç görünümde değil türetimde, dökülmüş `commence_time` üzerinden uygulanır. `commence_time`
+  her turda UPSERT'le değişir; karar dışa aktarım işleminin gördüğü değerle verilir ve iki türetim aynı değeri görür.
+- **Maç kümesi (Q13):** maç kümesi = kesimde en az bir MAÇ ÖNCESİ 1X2 satırı olan maçlar. Yalnız başladıktan sonra
+  görülmüş maç listelenmez.
+
 **Files:**
 - Create: `src/football_edge/site/inputs.py`, `src/football_edge/site/derive.py`
 - Create: `tests/site_builders.py` (sentetik turlar, zincirli satırlar, git'li çıpa deposu, döküm üretimi — Task 6 ve 7 de kullanır)
@@ -4039,7 +4249,7 @@ tur power yönteminde 33.3'e iner; türetme kodu beklenen değeri üretmek için
   @dataclass(frozen=True) class DumpConfig: devig_method: str; min_books: int; min_team_matches: int; move_min_matches: int; path_id_length: int
   @dataclass(frozen=True) class LedgerCut: rows: int; last_id: int; head: str
   @dataclass(frozen=True) class AnchorValue: file: str; rows: int; last_id: int; head: str
-  LeagueRow(id, name, country); MatchRow(id, league_id, commence_time, home, away)
+  LeagueRow(id, name, country, slug); MatchRow(id, league_id, commence_time, home, away)   # slug config'ten (Task 4)
   QuoteRow(ledger_id, match_id, observed_at, is_closing, outcome, price, book_key)
   RecordRow(<RECORD_COLUMNS sırasıyla>)
   @dataclass(frozen=True) class ExportInputs: config; floor; ledger; anchor; leagues; matches; quotes; record
@@ -4050,7 +4260,8 @@ tur power yönteminde 33.3'e iner; türetme kodu beklenen değeri üretmek için
   class DeriveError(ValueError)
   OUTCOMES = ("home", "draw", "away")
   def derive(inputs: ExportInputs) -> dict[str, Any]         # generated_at, git_sha, content_sha256 HARİÇ gövde
-  def match_views(inputs: ExportInputs) -> tuple[MatchView, ...]
+  def match_views(inputs: ExportInputs) -> tuple[MatchView, ...]    # yalnız maç öncesi satırlardan
+  def pre_kickoff(quote: QuoteRow, kickoff: datetime) -> bool      # observed_at < kickoff; kapanış eşitlikte de
   def record_mismatches(inputs: ExportInputs) -> list[str]   # §6.4/3d; boş = tutarlı
   # tests.site_builders
   EVEN, AWAY_FAVOURED, DRAWISH, WIDE, HOME_HEAVY, HOME_LEAN, SYMMETRIC, BOOKS
@@ -4058,7 +4269,7 @@ tur power yönteminde 33.3'e iner; türetme kodu beklenen değeri üretmek için
   def payloads(rounds) -> tuple[dict[str, Any], ...]; def ledger(rows, *, first_id=1) -> tuple[dict[str, Any], ...]
   def anchored_repo(root: Path, *, rows: int, last_id: int, head: str, day: str) -> Path   # "<root>/ledger"
   def at(text: str) -> datetime; def quote_rows(rounds) -> list[tuple]
-  def export_dump(*, leagues, matches, rounds, record=(), method="power") -> str
+  def export_dump(*, leagues, matches, rounds, record=(), method="power") -> str   # leagues: (id, ad, ülke, site slug'ı)
   def export_inputs(**parts) -> ExportInputs
   ```
 
@@ -4201,7 +4412,7 @@ def quote_rows(rounds: Sequence[Round]) -> list[tuple[Any, ...]]:
 
 def export_dump(
     *,
-    leagues: Sequence[tuple[str, str, str]],
+    leagues: Sequence[tuple[str, str, str, str]],  # id, ad, ülke, site slug'ı
     matches: Sequence[tuple[str, str, str, str, str]],
     rounds: Sequence[Round],
     record: Sequence[tuple[Any, ...]] = (),
@@ -4229,7 +4440,7 @@ def export_inputs(**parts: Any) -> ExportInputs:
     return load_inputs(export_dump(**parts))
 ````
 
-- [ ] **Step 2: Türetim testini yaz (Review Focus 2 ve 5 dâhil)**
+- [ ] **Step 2: Türetim testini yaz (Review Focus 2 ve 5, I1'in dört vektörü, I3'ün Bundesliga vektörü dâhil)**
 
 `tests/test_site_derive.py` (tam içerik):
 
@@ -4267,7 +4478,7 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEMA: dict[str, Any] = json.loads(
     (REPO / "web/contract/snapshot.schema.json").read_text(encoding="utf-8")
 )
-LEAGUE = ("tst.1", "Deneme Ligi", "Testland")
+LEAGUE = ("tst.1", "Deneme Ligi", "Testland", "deneme-ligi")
 
 
 def mid(number: int) -> str:
@@ -4422,8 +4633,9 @@ def test_a_league_distribution_needs_five_sealed_moving_matches() -> None:
 @pytest.mark.parametrize(
     ("leagues", "matches", "needle"),
     [
-        ([("tst.1", "Track Record", "X")], MATCHES, "lig tst.1: slug"),
-        ([LEAGUE, ("tst.2", "Deneme  Ligi", "Y")], MATCHES, "lig tst.2: slug"),
+        ([("tst.1", "Kayıt", "X", "track-record")], MATCHES, "lig tst.1: slug"),
+        ([("tst.1", "Veri", "X", "data")], MATCHES, "lig tst.1: slug"),
+        ([LEAGUE, ("tst.2", "Başka Lig", "Y", "deneme-ligi")], MATCHES, "lig tst.2: slug"),
         (
             [LEAGUE],
             [*MATCHES[:2], (mid(3), "tst.1", "2026-09-24T16:00:00Z", "Alfa-Spor", "Beta FK")],
@@ -4437,12 +4649,29 @@ def test_a_league_distribution_needs_five_sealed_moving_matches() -> None:
     ],
 )
 def test_slug_collisions_and_reserved_slugs_stop_the_derivation(
-    leagues: list[tuple[str, str, str]], matches: list[Any], needle: str
+    leagues: list[tuple[str, str, str, str]], matches: list[Any], needle: str
 ) -> None:
     rounds = [Round(m[0], "2026-09-21T09:00:00Z", m[3], m[4], [EVEN] * 3) for m in matches]
 
     with pytest.raises(DeriveError, match=needle):
         derive(export_inputs(leagues=leagues, matches=matches, rounds=rounds))
+
+
+def test_two_leagues_with_the_same_name_keep_their_configured_slugs() -> None:
+    """I3: `ger.1` ve `aut.1`in ikisi de "Bundesliga"; slug addan türeseydi yayın dururdu."""
+    leagues = [
+        ("ger.1", "Bundesliga", "Germany", "bundesliga"),
+        ("aut.1", "Bundesliga", "Austria", "austrian-bundesliga"),
+    ]
+    matches = [(mid(1), "ger.1", "2026-09-22T14:00:00Z", "Alfa Spor", "Beta FK")]
+    rounds = [Round(mid(1), "2026-09-20T10:00:00Z", "Alfa Spor", "Beta FK", [EVEN] * 3)]
+
+    body = derive(export_inputs(leagues=leagues, matches=matches, rounds=rounds))
+
+    assert [(league["id"], league["slug"]) for league in body["leagues"]] == [
+        ("aut.1", "austrian-bundesliga"),
+        ("ger.1", "bundesliga"),
+    ]
 
 
 def test_two_matches_sharing_a_path_prefix_stop_the_derivation() -> None:
@@ -4560,6 +4789,71 @@ def test_review_focus_a_postponed_match_keeps_its_url_and_moves_its_date() -> No
 
     assert (after["path_id"], after["slug"]) == (before["path_id"], before["slug"])
     assert (after["date"], after["commence_time"]) == ("2026-10-02", "2026-10-02T19:45:00Z")
+
+
+# ── I1: maç içi (in-play) satırlar türetime girmez (spec §1.3, §3.3/3) ─────────────────────────
+
+
+def test_a_round_after_the_seal_and_after_kickoff_is_ignored() -> None:
+    """Mühürden sonra, başlamadan sonra yazılan tur `latest`i, `rounds`u ve `move`u değiştirmez."""
+    in_play = Round(mid(1), "2026-09-22T15:00:00Z", "Alfa Spor", "Beta FK", [HOME_HEAVY] * 3)
+    match = _match(_body([SEALED, SEALED_CLOSE, in_play]), 1)
+    closing = {
+        "observed_at": "2026-09-22T13:00:00Z",
+        "books": 3,
+        "p": {"home": 33.3, "draw": 33.3, "away": 33.3},
+    }
+
+    assert match["sealed"] is True and match["rounds"] == 2
+    assert match["h2h"]["latest"] == closing and match["h2h"]["closing"] == closing
+    assert match["move"] == {"home": -16.7, "draw": 8.3, "away": 8.3}
+
+
+def test_an_unsealed_match_ignores_rounds_at_and_after_kickoff() -> None:
+    """Kaçan mühürde hareket açılış → maç içi olmaz; başlama anındaki sıradan tur da sayılmaz."""
+    at_kickoff = Round(
+        mid(2), "2026-09-23T15:00:00Z", "Gamma United", "Alfa Spor", [HOME_HEAVY] * 3
+    )
+    after = Round(mid(2), "2026-09-23T16:30:00Z", "Gamma United", "Alfa Spor", [WIDE] * 3)
+    match = _match(_body([OPEN_FIRST, OPEN_LATEST, at_kickoff, after]), 2)
+
+    assert match["sealed"] is False and match["rounds"] == 2
+    assert match["h2h"]["latest"]["p"] == {"home": 20.0, "draw": 40.0, "away": 40.0}
+    assert match["move"] == {"home": -5.0, "draw": 15.0, "away": -10.0}
+    assert match["indexable"] is True
+
+
+def test_a_closing_round_written_exactly_at_kickoff_is_kept() -> None:
+    """`rounds.seal_window` kapsayıcıdır (`0 <= başlama − an`): mühür başlama anında da yazılır."""
+    closing = Round(
+        mid(3), "2026-09-24T16:00:00Z", "Delta Şehir", "Beta FK", SYMMETRIC, is_closing=True
+    )
+    first = Round(mid(3), "2026-09-21T12:00:00Z", "Delta Şehir", "Beta FK", [EVEN] * 3)
+    match = _match(_body([first, closing]), 3)
+
+    assert match["sealed"] is True and match["rounds"] == 2
+    assert match["h2h"]["closing"]["p"] == {"home": 33.3, "draw": 33.3, "away": 33.3}
+
+
+def test_a_closing_row_after_kickoff_marks_the_match_sealed_but_is_not_shown() -> None:
+    """Başlama sonradan öne çekilirse (UPSERT) mühür turu başlamadan sonraya düşer. `sealed` spec
+    §5.2'nin tanımıdır (kesimde kapanış satırı var mı); fiyatı maç içi sayılır, gösterilmez."""
+    late_seal = Round(
+        mid(1), "2026-09-22T14:30:00Z", "Alfa Spor", "Beta FK", SYMMETRIC, is_closing=True
+    )
+    match = _match(_body([SEALED, late_seal]), 1)
+
+    assert match["sealed"] is True and match["rounds"] == 1
+    assert match["h2h"]["closing"] is None
+    assert match["h2h"]["latest"] == match["h2h"]["opening"]
+
+
+def test_a_match_seen_only_after_kickoff_is_not_listed() -> None:
+    late = Round(mid(3), "2026-09-24T17:00:00Z", "Delta Şehir", "Beta FK", [EVEN] * 3)
+    body = _body([SEALED, late])
+
+    assert [match["id"] for match in body["matches"]] == [mid(1)]
+    assert "delta-sehir" not in {team["slug"] for team in body["teams"]}
 ````
 
 - [ ] **Step 3: Kırmızıyı gör**
@@ -4625,6 +4919,7 @@ class LeagueRow:
     id: str
     name: str
     country: str
+    slug: str  # `config/site_leagues.yaml`dan (DB değil); addan türetilmez
 
 
 @dataclass(frozen=True)
@@ -4732,7 +5027,7 @@ def load_inputs(text: str) -> ExportInputs:
             int(raw["ledger"]["rows"]), int(raw["ledger"]["last_id"]), raw["ledger"]["head"]
         ),
         anchor=_anchor(raw["anchor"]),
-        leagues=tuple(LeagueRow(str(a), str(b), str(c)) for a, b, c in raw["leagues"]),
+        leagues=tuple(LeagueRow(str(a), str(b), str(c), str(d)) for a, b, c, d in raw["leagues"]),
         matches=tuple(_match(row) for row in raw["matches"]),
         quotes=tuple(_quote(row) for row in raw["quotes"]),
         record=tuple(_record(row) for row in raw["record"]),
@@ -4887,18 +5182,44 @@ def derive(inputs: ExportInputs) -> dict[str, Any]:
 
 
 def match_views(inputs: ExportInputs) -> tuple[MatchView, ...]:
-    """Kesimde en az bir 1X2 satırı olan maçlar, (başlama, kimlik) sırasıyla."""
-    by_match: dict[str, list[QuoteRow]] = {}
+    """Kesimde en az bir MAÇ ÖNCESİ 1X2 satırı olan maçlar, (başlama, kimlik) sırasıyla.
+
+    Ürün maç öncesidir (spec §1.3, §3.3/3 "in-play yok"): başlama anından sonraki satırlar —
+    snapshot turu The Odds API'nin canlı maçlarını da yazar — tura, `rounds`a, `latest`e ve
+    `move`a girmez. Süzgeç dökülmüş satır üzerinde uygulanır: `commence_time` UPSERT'le değişir,
+    görünüm değil türetim anı sayılır. Yalnız başladıktan sonra görülmüş maç listelenmez.
+    """
+    kickoffs = {row.id: row.commence_time for row in inputs.matches}
+    everything: dict[str, list[QuoteRow]] = {}
+    before: dict[str, list[QuoteRow]] = {}
     for quote in inputs.quotes:
-        by_match.setdefault(quote.match_id, []).append(quote)
+        kickoff = kickoffs.get(quote.match_id)
+        if kickoff is None:
+            continue
+        everything.setdefault(quote.match_id, []).append(quote)
+        if pre_kickoff(quote, kickoff):
+            before.setdefault(quote.match_id, []).append(quote)
     rows = sorted(
-        (row for row in inputs.matches if row.id in by_match),
+        (row for row in inputs.matches if row.id in before),
         key=lambda row: (row.commence_time, row.id),
     )
-    return tuple(_view(row, by_match[row.id], inputs) for row in rows)
+    return tuple(_view(row, before[row.id], everything[row.id], inputs) for row in rows)
 
 
-def _view(row: MatchRow, quotes: Sequence[QuoteRow], inputs: ExportInputs) -> MatchView:
+def pre_kickoff(quote: QuoteRow, kickoff: datetime) -> bool:
+    """Satır maç öncesi mi. Mühür turu `rounds.seal_window`un KAPSAYICI sınırıyla
+    (`0 <= başlama − an`) tam başlama anında da yazılabilir: kapanış satırı eşitlikte kalır,
+    sıradan snapshot satırı kalmaz."""
+    return quote.observed_at < kickoff or (quote.is_closing and quote.observed_at == kickoff)
+
+
+def _view(
+    row: MatchRow,
+    quotes: Sequence[QuoteRow],
+    everything: Sequence[QuoteRow],
+    inputs: ExportInputs,
+) -> MatchView:
+    """`quotes` maç öncesi satırlardır; `sealed` spec §5.2'nin tanımıyla kesimdeki HER satırdan."""
     times = sorted({quote.observed_at for quote in quotes})
     closing_times = sorted({quote.observed_at for quote in quotes if quote.is_closing})
     rounds = {moment: _round(row, quotes, moment, inputs) for moment in times}
@@ -4906,7 +5227,7 @@ def _view(row: MatchRow, quotes: Sequence[QuoteRow], inputs: ExportInputs) -> Ma
     return MatchView(
         row=row,
         rounds=len(times),
-        sealed=bool(closing_times),
+        sealed=any(quote.is_closing for quote in everything),
         opening=rounds[times[0]],
         latest=rounds[times[-1]],
         closing=rounds[closing_times[-1]] if closing_times else None,
@@ -5003,20 +5324,21 @@ def _match_json(view: MatchView, inputs: ExportInputs) -> dict[str, Any]:
 
 
 def _leagues(inputs: ExportInputs, views: Sequence[MatchView]) -> list[dict[str, Any]]:
+    """Lig slug'ı addan TÜRETİLMEZ (iki lig aynı adı taşır: `ger.1`/`aut.1` "Bundesliga");
+    `config/site_leagues.yaml`ın kalıcı değeri dökümle gelir. Çakışma ve ayrılmış ad yine durur."""
     seen: dict[str, str] = {}
     found: list[dict[str, Any]] = []
     for league in sorted(inputs.leagues, key=lambda league: league.id):
-        slug = slugify(league.name)
-        if slug in RESERVED_LEAGUE_SLUGS or slug in seen:
+        if league.slug in RESERVED_LEAGUE_SLUGS or league.slug in seen:
             raise DeriveError(
-                f"lig {league.id}: slug ayrılmış ya da {seen.get(slug)} ile çakışıyor"
+                f"lig {league.id}: slug ayrılmış ya da {seen.get(league.slug)} ile çakışıyor"
             )
-        seen[slug] = league.id
+        seen[league.slug] = league.id
         own = [view for view in views if view.row.league_id == league.id]
         found.append(
             {
                 "id": league.id,
-                "slug": slug,
+                "slug": league.slug,
                 "name": league.name,
                 "country": league.country,
                 "matches": len(own),
@@ -5115,7 +5437,7 @@ def record_mismatches(inputs: ExportInputs) -> list[str]:
 - [ ] **Step 6: Yeşili gör**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider tests/test_site_derive.py tests/test_site_import_rule.py tests/test_site_verify.py`
-Expected: `64 passed` (22 + 4 + 38). İmport bekçisi artık `market.consensus`, `market.devig`, `market.metrics` ve
+Expected: `74 passed` (29 + 4 + 41). İmport bekçisi artık `market.consensus`, `market.devig`, `market.metrics` ve
 `history.types`i kapanışta görür ve YEŞİL kalır.
 
 - [ ] **Step 7: Mutasyonla kırmızı kanıtı**
@@ -5127,10 +5449,15 @@ Expected: `64 passed` (22 + 4 + 38). İmport bekçisi artık `market.consensus`,
 | `src/football_edge/site/derive.py` | `view.books >= inputs.config.min_books else None` → `view.books > inputs.config.min_books else None` | 5 failed (üç kitaplı turlar görünmez olur) |
 | `src/football_edge/site/derive.py` | `    return [entries[key] for key in sorted(entries)]` → `    return [entries[key] for key in entries]` | spec §5.1/5 mutasyon (b): 3 failed (`test_a_derived_snapshot_passes_verify_and_orders_teams_by_slug_not_name`, `test_teams_count…`, Review Focus 2'nin `verify` iddiası) — kırmızı `verify-snapshot`in SIRA kuralından gelir; Task 6'nın belirlenimcilik testi bu mutasyonda YEŞİL kalır (iki türetim aynı sırayı üretir) |
 | `src/football_edge/site/derive.py` | `        raise DeriveError("iki maç aynı path_id önekini taşıyor (§8.1)")` → `        pass` | `test_two_matches_sharing_a_path_prefix_stop_the_derivation` |
+| `src/football_edge/site/derive.py` | `        if pre_kickoff(quote, kickoff):` → `        if True:` | I1: 4 failed (`…after_the_seal_and_after_kickoff…`, `…ignores_rounds_at_and_after_kickoff`, `…seen_only_after_kickoff…`, `…closing_row_after_kickoff_marks_the_match_sealed_but_is_not_shown` — geç mühür kapanış turu olur) |
+| `src/football_edge/site/derive.py` | `    return quote.observed_at < kickoff or (quote.is_closing and quote.observed_at == kickoff)` → `    return quote.observed_at <= kickoff` | `test_an_unsealed_match_ignores_rounds_at_and_after_kickoff` (başlama anındaki sıradan tur) |
+| `src/football_edge/site/derive.py` | aynı satır → `    return quote.observed_at < kickoff` | `test_a_closing_round_written_exactly_at_kickoff_is_kept` (sınır kararı) |
+| `src/football_edge/site/derive.py` | `        sealed=any(quote.is_closing for quote in everything),` → `        sealed=bool(closing_times),` | `test_a_closing_row_after_kickoff_marks_the_match_sealed_but_is_not_shown` |
+| `src/football_edge/site/derive.py` | `        if league.slug in RESERVED_LEAGUE_SLUGS or league.slug in seen:` → `        if False:` | `test_slug_collisions_and_reserved_slugs_stop_the_derivation`: 3 failed (lig vakaları) |
 
 - [ ] **Step 8: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 9: Tam kapı** — `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`.
+- [ ] **Step 9: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`.
 
 - [ ] **Step 10: Commit**
 
@@ -5154,7 +5481,12 @@ satırı ("çıpa yok", "git geçmişi okunamadı — ATLANDI", "en yeni çıpa 
 `site.public_floor()` = Python tabanı, `site.ledger_head` (çıpa satır diyor ama görünüm 0 → kırmızı) → döküm →
 yerel türetim + alt süreçte ikinci türetim (stdin, başka tohum, DB adresi ortamdan çıkarılmış, çıktısı yakalanıp
 loga AKTARILMAZ) → sicilin defterden yeniden hesabı → `verify-snapshot` → ancak şimdi iki dosya. Log yalnız sayı ve
-hash taşır. `SITE_DATABASE_URL` kök handler'da redakte edilir.
+hash taşır. `SITE_DATABASE_URL` kök handler'da redakte edilir. Lig slug'ı `config/site_leagues.yaml`dan gelir
+(Task 4): görünümün döndürdüğü etkin bir ligin slug'ı yoksa exit 20 ve lig kimliği adıyla (I3). Adlandırılmamış
+çıkış kalmaz (inceleme m6): alt sürecin zaman aşımı exit 23, veritabanı hatası exit 20 — hata METNİ basılmaz (libpq
+hatası adresin parçasını taşıyabilir), yalnız sınıf adı. Eksik ya da bozuk `config/site_leagues.yaml` da `devig_method`
+gibi `site_league_slugs` içinde exit 20'ye ve adına sarılır (yeniden inceleme N3; mesaj yol + yükleyicinin kuralı,
+secret taşımaz).
 
 **Files:**
 - Create: `src/football_edge/site/export.py`, `tests/fake_site_db.py`
@@ -5174,16 +5506,17 @@ hash taşır. `SITE_DATABASE_URL` kök handler'da redakte edilir.
   class ExportRefused(RuntimeError): code: int
   @dataclass(frozen=True) class ExportSummary: matches: int; leagues: int; teams: int; rows: int; last_id: int; content_sha256: str; file_sha256: str
   def devig_method(path: Path) -> str
+  def site_league_slugs(path: Path) -> Mapping[str, str]   # load_league_slugs; OSError/ValueError/YAMLError → ExportRefused(20)
   def derive_in_subprocess(dump: str, *, hash_seed: str) -> str
   def other_hash_seed(environ: Mapping[str, str]) -> str
   def run_export(conn, out_dir: Path, *, generated_at: datetime, git_sha: str, method: str,
-                 schema: Mapping[str, Any], anchor_dir: Path = ANCHOR_DIR,
+                 schema: Mapping[str, Any], league_slugs: Mapping[str, str], anchor_dir: Path = ANCHOR_DIR,
                  derive_elsewhere: Callable[[str], str] | None = None) -> ExportSummary
   ```
   Dosya biçimi: `snapshot.json` = `ledger._canonical(anlık görüntü) + "\n"` (UTF-8); `snapshot.sha256` =
   `"<64 hex>  snapshot.json\n"` (`sha256sum` biçimi). CLI: `uv run python -m football_edge.site export --out <dizin>`
   (`SITE_DATABASE_URL` yoksa `SITE_DATABASE_URL yok — yayın yapılmadı`, exit 20; reddedilirse
-  `DIŞA AKTARIM REDDEDİLDİ: <neden>` ve 21–24).
+  `DIŞA AKTARIM REDDEDİLDİ: <neden>` ve 20–24; veritabanı hatası `DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası (<Sınıf>)`, exit 20).
 
 - [ ] **Step 1: Görünüm taklidini yaz**
 
@@ -5369,6 +5702,7 @@ ROUNDS = [
     Round(M1, "2026-09-22T13:00:00Z", "Alfa Spor", "Beta FK", SYMMETRIC, is_closing=True),
 ]
 ROWS = ledger(payloads(ROUNDS))
+SLUGS = {"tst.1": "deneme-ligi"}
 
 
 @pytest.fixture(autouse=True)
@@ -5405,6 +5739,7 @@ def _export(db: FakeSiteDb, tmp_path: Path, **overrides: Any) -> Path:
         "git_sha": "1" * 40,
         "method": "power",
         "schema": SCHEMA,
+        "league_slugs": overrides.pop("league_slugs", SLUGS),
         "anchor_dir": overrides.pop("anchor_dir", None) or _anchors(tmp_path),
         "derive_elsewhere": overrides.pop("derive_elsewhere", None),
     }
@@ -5604,6 +5939,20 @@ def test_a_record_entry_the_ledger_cannot_reproduce_is_red(tmp_path: Path) -> No
     _refused(_db(record=[_publication(0.5)]), tmp_path, EXIT_SITE_CUT, "CLV defterden")
 
 
+def test_an_active_league_without_a_configured_slug_is_red(tmp_path: Path) -> None:
+    """I3: lig slug'ı addan türetilmez; yapılandırmada yoksa yayın yok (exit 20, lig adıyla)."""
+    _refused(_db(), tmp_path, EXIT_SITE_CONFIG, "slug'ı olmayan lig: tst.1", league_slugs={})
+
+
+def test_the_league_slug_comes_from_configuration_not_from_the_name(tmp_path: Path) -> None:
+    out = _export(_db(), tmp_path, league_slugs={"tst.1": "kuzey-bolgesi"})
+    leagues = json.loads((out / "snapshot.json").read_text(encoding="utf-8"))["leagues"]
+
+    assert [(league["name"], league["slug"]) for league in leagues] == [
+        ("Deneme Ligi", "kuzey-bolgesi")
+    ]
+
+
 # ── Review Focus ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -5668,7 +6017,7 @@ from tests.site_builders import EVEN, Round, export_dump
 
 REPO = Path(__file__).resolve().parent.parent
 TEAMS = [f"Takım {chr(0x41 + index % 26)}{index:02d}" for index in range(34)]
-LEAGUE = ("tst.1", "Deneme Ligi", "Testland")
+LEAGUE = ("tst.1", "Deneme Ligi", "Testland", "deneme-ligi")
 
 
 def _dump() -> str:
@@ -5742,6 +6091,19 @@ def test_the_child_gets_no_database_address_and_the_other_seed(
     assert export.derive_in_subprocess("{}", hash_seed="1") == "0" * 64
     assert "SITE_DATABASE" + "_URL" not in seen[0] and "DATABASE" + "_URL" not in seen[0]
     assert seen[0]["PYTHONHASHSEED"] == "1"
+
+
+def test_a_child_that_never_finishes_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    """m6: zaman aşımı traceback'le exit 1 değil, adlandırılmış belirlenimcilik kırmızısı (23)."""
+
+    def hang(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(export.subprocess, "run", hang)
+
+    with pytest.raises(ExportRefused, match="300 sn'de bitmedi") as refused:
+        export.derive_in_subprocess("{}", hash_seed="1")
+    assert refused.value.code == EXIT_SITE_NONDETERMINISTIC
 ````
 
 - [ ] **Step 4: Log testini yaz**
@@ -5767,6 +6129,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 from football_edge import collect
@@ -5855,7 +6218,8 @@ def test_a_successful_export_logs_counts_and_hashes_only(
     real_export = site_main.run_export
 
     def run(conn: Any, out: Path, **options: Any) -> Any:
-        return real_export(db, out, **{**options, "anchor_dir": anchors})  # type: ignore[arg-type]
+        chosen = {**options, "anchor_dir": anchors, "league_slugs": {"tst.1": "deneme-ligi"}}
+        return real_export(db, out, **chosen)  # type: ignore[arg-type]
 
     monkeypatch.setenv(DSN_VAR, DSN)
     monkeypatch.setenv("PYTHONPATH", str(REPO / "src"))
@@ -5899,7 +6263,7 @@ def test_a_crashing_second_derivation_relays_no_price(
     monkeypatch.setenv("PYTHONPATH", str(REPO / "src"))
     rounds = [Round(M1, "2026-09-20T10:00:00Z", "Alfa Spor", "Beta FK", [EVEN] * 3)]
     dump = export_dump(
-        leagues=[("tst.1", "Deneme Ligi", "Testland")],
+        leagues=[("tst.1", "Deneme Ligi", "Testland", "deneme-ligi")],
         matches=[(M1, "tst.1", "2026-09-22T14:00:00Z", "Alfa Spor", "Beta FK")],
         rounds=rounds,
     ).replace('"4.0"', '"4.47x"', 1)
@@ -5912,6 +6276,61 @@ def test_a_crashing_second_derivation_relays_no_price(
     seen = stream.getvalue() + "".join(capsys.readouterr())
     assert refused.value.code == EXIT_SITE_NONDETERMINISTIC
     assert "4.47" not in seen and "Traceback" not in seen
+
+
+def test_a_database_error_is_named_by_class_and_its_text_is_not_printed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """m6: libpq hatası adresin parçasını taşıyabilir; CLI yalnız sınıf adını basar, exit 20."""
+
+    def refuse(dsn: str) -> Any:
+        raise psycopg.OperationalError(f"bağlanılamadı: {PASSWORD}@db.sahte.invalid")
+
+    monkeypatch.setenv(DSN_VAR, DSN)
+    monkeypatch.setenv("GITHUB_SHA", "1" * 40)
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "connect", refuse)
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+
+    code = site_main.main(["export", "--out", str(tmp_path / "out")])
+
+    out = capsys.readouterr().out
+    assert code == EXIT_SITE_CONFIG
+    assert "DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası (OperationalError)" in out
+    assert PASSWORD not in out and "sahte.invalid" not in out
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
+    [
+        (None, "FileNotFoundError"),
+        ("version: 1\nleague_slugs:\n  a.1: ayni\n  b.1: ayni\n", "aynı slug"),
+        ("version: 1\nleague_slugs: [\n", "ParserError"),
+    ],
+)
+def test_a_missing_or_malformed_league_slug_file_is_a_named_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    content: str | None,
+    reason: str,
+) -> None:
+    """N3: bozuk ya da eksik `config/site_leagues.yaml` exit 1 + traceback değil, exit 20 + adı."""
+    slugs = tmp_path / "site_leagues.yaml"
+    if content is not None:
+        slugs.write_text(content, encoding="utf-8")
+    monkeypatch.setenv(DSN_VAR, DSN)
+    monkeypatch.setenv("GITHUB_SHA", "1" * 40)
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "SITE_LEAGUES_PATH", slugs)
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+
+    code = site_main.main(["export", "--out", str(tmp_path / "out")])
+
+    out = capsys.readouterr().out
+    assert code == EXIT_SITE_CONFIG
+    assert "DIŞA AKTARIM REDDEDİLDİ" in out and "lig slug'ları okunamadı" in out and reason in out
+    assert not (tmp_path / "out").exists()
 ````
 
 - [ ] **Step 5: Kırmızıyı gör**
@@ -5977,6 +6396,7 @@ from football_edge.site.contract import (
 )
 from football_edge.site.derive import DeriveError, derive, record_mismatches
 from football_edge.site.inputs import AnchorValue, DumpConfig, LedgerCut, dump_text, load_inputs
+from football_edge.site.slugs import load_league_slugs
 from football_edge.site.verify import snapshot_errors
 
 LOGGER = logging.getLogger("football_edge.site.export")
@@ -6030,6 +6450,20 @@ def devig_method(path: Path) -> str:
     return str(method)
 
 
+def site_league_slugs(path: Path) -> Mapping[str, str]:
+    """`config/site_leagues.yaml` (Task 4); eksik ya da kural dışıysa adlandırılmış çıkış (N3).
+
+    Mesaj yalnız yolu ve yükleyicinin kuralını taşır (lig kimliği, slug); secret taşımaz.
+    """
+    try:
+        return load_league_slugs(path)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        reason = f"{type(error).__name__}: {(str(error).splitlines() or [''])[0]}"
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"{path}: lig slug'ları okunamadı ({reason})"
+        ) from None
+
+
 def derive_in_subprocess(dump: str, *, hash_seed: str) -> str:
     """Aynı dökümden AYRI bir süreçte, verilen `PYTHONHASHSEED`le türetilen `content_sha256`.
 
@@ -6038,15 +6472,20 @@ def derive_in_subprocess(dump: str, *, hash_seed: str) -> str:
     """
     env = {key: value for key, value in os.environ.items() if key not in _CHILD_ENV_DROPPED}
     env["PYTHONHASHSEED"] = hash_seed
-    result = subprocess.run(
-        [sys.executable, "-m", "football_edge.site", "derive-stdin"],
-        input=dump,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-        timeout=300,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "football_edge.site", "derive-stdin"],
+            input=dump,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        raise ExportRefused(
+            EXIT_SITE_NONDETERMINISTIC, "ikinci türetim alt süreci 300 sn'de bitmedi"
+        ) from None
     if result.returncode != 0:
         raise ExportRefused(
             EXIT_SITE_NONDETERMINISTIC,
@@ -6071,6 +6510,7 @@ def run_export(
     git_sha: str,
     method: str,
     schema: Mapping[str, Any],
+    league_slugs: Mapping[str, str],
     anchor_dir: Path = ANCHOR_DIR,
     derive_elsewhere: Callable[[str], str] | None = None,
 ) -> ExportSummary:
@@ -6083,7 +6523,7 @@ def run_export(
         _require_isolation(conn)
         anchor, head = _verified_chain(conn, anchor_dir)
         cut = _cut(conn, anchor, head)
-        dump = _dump(conn, cut, anchor, method)
+        dump = _dump(conn, cut, anchor, method, league_slugs)
     inputs = load_inputs(dump)
     try:
         body = derive(inputs)
@@ -6169,7 +6609,13 @@ def _cut(conn: psycopg.Connection[Any], anchor: Anchor, head: str) -> LedgerCut:
     return LedgerCut(rows, last_id, head)
 
 
-def _dump(conn: psycopg.Connection[Any], cut: LedgerCut, anchor: Anchor, method: str) -> str:
+def _dump(
+    conn: psycopg.Connection[Any],
+    cut: LedgerCut,
+    anchor: Anchor,
+    method: str,
+    league_slugs: Mapping[str, str],
+) -> str:
     with conn.cursor() as cur:
         leagues = _all(cur, _LEAGUES)
         matches = _all(cur, _MATCHES)
@@ -6181,6 +6627,12 @@ def _dump(conn: psycopg.Connection[Any], cut: LedgerCut, anchor: Anchor, method:
         raise ExportRefused(EXIT_SITE_CUT, "defterde satır var ama maç kümesi boş")
     if any(row[2] < PUBLIC_FLOOR for row in matches):
         raise ExportRefused(EXIT_SITE_CUT, "görünüm tabandan eski bir maç döndürdü (H1)")
+    unslugged = sorted(str(row[0]) for row in leagues if row[0] not in league_slugs)
+    if unslugged:
+        raise ExportRefused(
+            EXIT_SITE_CONFIG,
+            "config/site_leagues.yaml'da slug'ı olmayan lig: " + ", ".join(unslugged),
+        )
     return dump_text(
         config=DumpConfig(
             method, SITE_MIN_BOOKS, SITE_MIN_TEAM_MATCHES, MOVE_MIN_MATCHES, PATH_ID_LENGTH
@@ -6188,7 +6640,7 @@ def _dump(conn: psycopg.Connection[Any], cut: LedgerCut, anchor: Anchor, method:
         floor=PUBLIC_FLOOR,
         ledger=cut,
         anchor=AnchorValue(anchor.path.name, anchor.rows, anchor.last_id, anchor.head),
-        leagues=leagues,
+        leagues=[(*row, league_slugs[str(row[0])]) for row in leagues],
         matches=matches,
         quotes=quotes,
         record=record,
@@ -6243,6 +6695,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from football_edge.collect import configure_logging
 from football_edge.db import connect
 from football_edge.site.contract import (
@@ -6250,10 +6704,11 @@ from football_edge.site.contract import (
     EXIT_SITE_CONFIG,
     EXIT_SITE_INVALID,
     SCHEMA_PATH,
+    SITE_LEAGUES_PATH,
     content_sha256,
 )
 from football_edge.site.derive import derive
-from football_edge.site.export import ExportRefused, devig_method, run_export
+from football_edge.site.export import ExportRefused, devig_method, run_export, site_league_slugs
 from football_edge.site.inputs import load_inputs
 from football_edge.site.schema import check_schema
 from football_edge.site.verify import snapshot_errors
@@ -6290,6 +6745,7 @@ def _export(out_dir: Path) -> int:
     try:
         method = devig_method(DEVIG_CONFIG_PATH)
         git_sha = _git_sha()
+        league_slugs = site_league_slugs(SITE_LEAGUES_PATH)
         with connect(dsn) as conn:
             summary = run_export(
                 conn,
@@ -6298,10 +6754,15 @@ def _export(out_dir: Path) -> int:
                 git_sha=git_sha,
                 method=method,
                 schema=_schema(),
+                league_slugs=league_slugs,
             )
     except ExportRefused as refused:
         sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: {refused}\n")
         return refused.code
+    except psycopg.Error as error:
+        # Metin basılmaz: libpq hatası adresin (parolanın) parçasını taşıyabilir. Yalnız sınıf adı.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası ({type(error).__name__})\n")
+        return EXIT_SITE_CONFIG
     LOGGER.info(
         "anlık görüntü yazıldı: maç=%d lig=%d takım=%d satır=%d last_id=%d "
         "content_sha256=%s dosya_sha256=%s",
@@ -6392,7 +6853,7 @@ def _log_secrets() -> tuple[str, ...]:
 - [ ] **Step 9: Yeşili gör**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest -q -p no:cacheprovider tests/test_site_export.py tests/test_site_determinism.py tests/test_site_logging.py tests/test_log_redaction.py tests/test_site_verify.py tests/test_site_import_rule.py tests/test_jev_budget.py`
-Expected: hepsi yeşil — yeni üç dosya `32 passed` (23 + 4 + 5); `test_log_redaction.py` değişmeden yeşil.
+Expected: hepsi yeşil — yeni üç dosya `39 passed` (25 + 5 + 9); `test_log_redaction.py` değişmeden yeşil.
 
 - [ ] **Step 10: Mutasyonla kırmızı kanıtı**
 
@@ -6401,7 +6862,7 @@ yeşil olmalı (iki sabit tohum bu fixture'da küme sırasını GERÇEKTEN ayır
 
 | Dosya | Eski → yeni | Kırmızı |
 |---|---|---|
-| `src/football_edge/site/derive.py` | `    return [entries[key] for key in sorted(entries)]` → `    return [entries[key] for key in set(entries)]` | (a) `test_two_seeds_derive_the_same_content_hash` — dışa aktarımın belirlenimcilik ADIMI kırmızı (tohum 1 ≠ tohum 2) |
+| `src/football_edge/site/derive.py` | `    return [entries[key] for key in sorted(entries)]` → `    return [entries[key] for key in set(entries)]` | (a) hedef `test_two_seeds_derive_the_same_content_hash` — dışa aktarımın belirlenimcilik ADIMI kırmızı (tohum 1 ≠ tohum 2). Takım sırası dışa aktarım testlerinin bir kısmını da kırmızı yapar; kaç tanesi `PYTHONHASHSEED`e bağlıdır, sayı öngörülmez — ölçüt: hedef test kırmızı (inceleme m11, N4) |
 | `src/football_edge/site/export.py` | `        _require_isolation(conn)\n` → `` | `test_a_transaction_that_is_not_repeatable_read_is_red` |
 | `src/football_edge/site/export.py` | `    if scan.downgraded is not None:` → `    if False:` | `test_an_unreadable_newest_anchor_is_red_not_downgraded` |
 | `src/football_edge/site/export.py` | `    if expected is None:` → `    if False:` | `test_an_unreadable_git_history_is_red_not_skipped` |
@@ -6410,10 +6871,16 @@ yeşil olmalı (iki sabit tohum bu fixture'da küme sırasını GERÇEKTEN ayır
 | `src/football_edge/site/export.py` | `    env = {key: value for key, value in os.environ.items() if key not in _CHILD_ENV_DROPPED}` → `    env = dict(os.environ)` | `test_the_child_gets_no_database_address_and_the_other_seed` |
 | `src/football_edge/site/contract.py` + `src/football_edge/site/inputs.py` (İKİ NOKTA birlikte) | `    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")` → `    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")` VE `        return canonical_timestamp(value)` → `        return value.isoformat()` | Review Focus 1: `test_review_focus_a_non_utc_session_exports_the_same_content`. Savunma iki katmanlıdır (döküm UTC'ye çevirir, `iso_z` de çevirir): tek noktalı mutasyon YEŞİL kalır — ölçüldü, beklenen budur |
 | `src/football_edge/collect.py` | `dsns = (os.getenv("DATABASE_URL", ""), os.getenv("SITE_DATABASE_URL", ""))` → `dsns = (os.getenv("DATABASE_URL", ""), "")` | `test_the_site_dsn_and_its_password_are_redacted` |
+| `src/football_edge/site/export.py` | `    if unslugged:` → `    if False:` | `test_an_active_league_without_a_configured_slug_is_red` (I3) |
+| `src/football_edge/site/export.py` | `    except subprocess.TimeoutExpired:` → `    except ValueError:` | `test_a_child_that_never_finishes_is_named` (m6) |
+| `src/football_edge/site/__main__.py` | `    except psycopg.Error as error:` → `    except ValueError as error:` | `test_a_database_error_is_named_by_class_and_its_text_is_not_printed` (m6) |
+| `src/football_edge/site/export.py` | `    except (OSError, ValueError, yaml.YAMLError) as error:` → `    except (ValueError, yaml.YAMLError) as error:` | `test_a_missing_or_malformed_league_slug_file_is_a_named_exit[None-FileNotFoundError]` (N3: 1 failed) |
+| `src/football_edge/site/export.py` | `    except (OSError, ValueError, yaml.YAMLError) as error:` → `    except OSError as error:` | aynı testin yinelenen-slug ve `ParserError` durumları (N3: 2 failed) |
+| `src/football_edge/site/__main__.py` | `        league_slugs = site_league_slugs(SITE_LEAGUES_PATH)` → `        from football_edge.site.slugs import load_league_slugs as _l; league_slugs = _l(SITE_LEAGUES_PATH)` | aynı testin üç durumu (N3: 3 failed — çağrı yeri sarmalayıcıyı atlarsa exit 1 + traceback) |
 
 - [ ] **Step 11: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 12: Tam kapı** — `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`. Eklenen `leakage` testi: 1.
+- [ ] **Step 12: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL`. Eklenen `leakage` testi: 1.
 
 - [ ] **Step 13: Commit**
 
@@ -6449,7 +6916,9 @@ Task 6'nın sahte görünümleriyle sınandı.
 
 **Interfaces:**
 - Consumes: `tests.site_db.{site_cluster, site_db_each}`, `tests.site_builders.*`, `site.export.{run_export,
-  devig_method, ExportRefused}`, `site.contract.{DEVIG_CONFIG_PATH, EXIT_SITE_CHAIN}`.
+  devig_method, ExportRefused}` (`league_slugs={"e2e.1": "deneme-ligi"}` — test ligi gerçek yapılandırmada yok),
+  `site.contract.{DEVIG_CONFIG_PATH, EXIT_SITE_CHAIN}`. Tohumdaki her tur başlama anından ÖNCEdir (I1 süzgeci bu testi
+  değiştirmez; maç içi vektörleri Task 5'tedir).
 - Produces (Task 9, B-2): `SITE_E2E_DIR` tanımlıyken `<SITE_E2E_DIR>/snapshot.json`, `snapshot.sha256`, `run-id`
   (içerik = `FE_VERIFY_RUN_ID`, satır sonu yok).
 
@@ -6660,6 +7129,7 @@ def _export(url: str, tmp_path: Path) -> Path:
             git_sha="1" * 40,
             method=devig_method(REPO / DEVIG_CONFIG_PATH),
             schema=SCHEMA,
+            league_slugs={"e2e.1": "deneme-ligi"},
             anchor_dir=anchors,
         )
     finally:
@@ -6795,7 +7265,7 @@ Son satır bir test mutasyonudur (üretim kodu değil); geri yüklenir.
 
 - [ ] **Step 6: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 7: Tam kapı** — `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL` (e2e `pytest` adımında `deselected`).
+- [ ] **Step 7: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL` (e2e `pytest` adımında `deselected`).
 
 - [ ] **Step 8: Commit**
 
@@ -6816,10 +7286,25 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 `site.yml` yalnız `workflow_dispatch`le tetiklenir; `schedule` ve pg_cron tetiği YOK. Secret'lar ADIM düzeyindedir:
 `SITE_DATABASE_URL` yalnız dışa aktarım adımında, `NETLIFY_AUTH_TOKEN`/`NETLIFY_SITE_ID` yalnız yayın adımında; kurulum,
 derleme ve tarayıcı adımları secret'sızdır; `DATABASE_URL`, `ODDS_API_KEY`, `TYPESAFE_API_KEY` hiçbir yerde yok.
-Node adımlarının GÖVDELERİ B-2'nindir (§11'in komut adlarıyla yazıldı; B-2, B-1 birleştikten sonra değiştirebilir —
-bu görevin testi yalnız secret sınırını ve sırayı sınar). Kaybolan-slug kontrolü (AK20 b) ve yayın sonrası kontrol
-(§6.4/3f) B-2'nin eklediği adımlardır. `check_secrets.sh` Netlify tokenını adıyla tanır; site DSN'i `DATABASE_URL`
-alt dizesiyle zaten yakalanır.
+Node adımlarının gövdeleri B-2'nin arayüzüyle yazılır: `pnpm -C web run build` (`SITE_SNAPSHOT`,
+`NEXT_TELEMETRY_DISABLED=1`) ve `node web/scripts/check-out.ts --snapshot … --out web/out`.
+
+**Controller kararı (plan incelemesi I2):** kaybolan-slug kontrolü (AK20 b, `--first-publish` girdisi,
+`config/site_redirects.yaml`) ve yayın sonrası kontrol (§6.4/3f) **B-2 Task 10'undur**. B-2 onları
+`scripts/site_publish.py` ve `site.yml` adımlarıyla yazar; yayın komutuna `--no-build`ı da B-2 ekler.
+- B-1 bu adımları YAZMAZ, çakışmayacak yeri bırakır: çıktı tarayıcısı ile `Yayın` arasında ve işin sonunda. Yer bir
+  yorum satırıyla işaretlidir.
+- B-1'in testi B-2'nin ekleyeceği her şeyle uyumludur:
+  - tetikleyicinin girdisi `set(_triggers)`i değiştirmez;
+  - yeni adımların `env`i secret taşımaz (`FIRST_PUBLISH: ${{ inputs.first_publish }}`);
+  - sıra testi yalnız export < verify < Node < deploy'u ister;
+  - deploy alt dizesi `deploy --prod --dir web/out` korunur.
+- B-2'nin dört düzenlemesi bu görevin `site.yml`ine uygulanarak ölçüldü: `test_site_workflow.py` ve `test_workflows.py`
+  yeşil kaldı (B-2 yazarı da 6/6 ölçtü).
+- **Sonuç:** Task 9 sonunda `site.yml` yayın kapılarından yoksundur. Bu, secret'lar (AK18) eklenmeden ve B-2 T10
+  birleşmeden koşulmamalı demektir; HANDOFF'a yazılır.
+
+`check_secrets.sh` Netlify tokenını adıyla tanır; site DSN'i `DATABASE_URL` alt dizesiyle zaten yakalanır.
 
 **Files:**
 - Create: `.github/workflows/site.yml`
@@ -6831,9 +7316,11 @@ alt dizesiyle zaten yakalanır.
 - Produces (B-2): `site.yml` adım sırası — checkout (`fetch-depth: 0`, `persist-credentials: false`) → `uv sync
   --frozen` → secret taraması → `site export --out web/.snapshot` (`SITE_DATABASE_URL`) → `verify-snapshot
   web/.snapshot/snapshot.json --sha256 web/.snapshot/snapshot.sha256` → `actions/setup-node` (`web/.nvmrc`) →
-  `pnpm/action-setup` (`web/package.json`) → `pnpm -C web install --frozen-lockfile` → `pnpm -C web exec next build` →
-  `node web/scripts/check-out.ts` → `npx --yes netlify-cli@<T0> deploy --prod --dir web/out --config web/netlify.toml`
-  (`NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`).
+  `pnpm/action-setup` (`web/package.json`) → `pnpm -C web install --frozen-lockfile` → `pnpm -C web run build`
+  (`SITE_SNAPSHOT=${{ github.workspace }}/web/.snapshot/snapshot.json`, `NEXT_TELEMETRY_DISABLED=1`) →
+  `node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out` → [B-2 T10: kaybolan-slug adımı]
+  → `npx --yes netlify-cli@<T0> deploy --prod --dir web/out --config web/netlify.toml` (`NETLIFY_AUTH_TOKEN`,
+  `NETLIFY_SITE_ID`) → [B-2 T10: yayın sonrası kontrol; `first_publish` girdisi; `--no-build`].
 
 - [ ] **Step 1: İş akışı testini yaz**
 
@@ -7026,7 +7513,7 @@ name: site
 # onayından sonra eklenir (AK18); yokken dışa aktarım "SITE_DATABASE_URL yok — yayın yapılmadı"
 # ile ADIYLA kırmızıdır — ayrı bir ön adım yoktur, secret yalnız o adıma verilir ve `if:` içinde
 # okunamaz. Secret ADIM düzeyindedir (H5d): DB adresi yalnız dışa aktarımda, Netlify kimliği yalnız
-# yayında; kurulum, derleme ve tarayıcı adımları secret'sızdır. Depo ve Actions logları public.
+# yayında; kurulum, derleme, tarayıcı ve B-2'nin yayın kapıları secret'sızdır. Loglar public.
 # Netlify derlemez (AK16): hazır `web/out` dizini CLI ile yüklenir.
 on:
   workflow_dispatch:
@@ -7070,10 +7557,19 @@ jobs:
           package_json_file: web/package.json
       - name: Site bağımlılıkları
         run: pnpm -C web install --frozen-lockfile
-      - name: Statik derleme
-        run: pnpm -C web exec next build
+      # Derleme ve tarayıcı B-2'nin arayüzüyle (B-2 plan "B-1 ile arayüz"): çıplak `next build`
+      # `_headers`/`_redirects`/`data/` üretmez, `run build` üretir.
+      - name: Site derlemesi
+        env:
+          SITE_SNAPSHOT: ${{ github.workspace }}/web/.snapshot/snapshot.json
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm -C web run build
       - name: Çıktı tarayıcısı
-        run: node web/scripts/check-out.ts
+        run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
+      # B-2 Task 10 buraya (tarayıcıdan sonra, yayından önce) kaybolan-slug adımını
+      # (`scripts/site_publish.py slugs`, AK20 b), işin SONUNA yayın sonrası kontrolü
+      # (`scripts/site_publish.py live`, §6.4/3f) ve `on.workflow_dispatch.inputs.first_publish`i
+      # ekler; yayın komutuna `--no-build` da onundur (controller kararı, B-1 plan düzeltme turu 1).
       - name: Yayın
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
@@ -7120,14 +7616,14 @@ diskte tutar" testi `site.yml`i de kapsar ve yeşildir. Ayrıca `./scripts/check
 | Dosya | Eski → yeni | Kırmızı |
 |---|---|---|
 | `.github/workflows/site.yml` | `permissions:\n  contents: read\n` → `permissions:\n  contents: read\n\nenv:\n  SITE_DATABASE_URL: ${{ secrets.SITE_DATABASE_URL }}\n` | `test_no_secret_lives_at_workflow_or_job_level` |
-| `.github/workflows/site.yml` | `          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}\n` → `` ve `run: pnpm -C web exec next build` → `run: pnpm -C web exec next build ${{ secrets.NETLIFY_SITE_ID }}` | `test_each_secret_is_given_to_exactly_one_named_step_through_env` |
+| `.github/workflows/site.yml` | `          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}\n` → `` ve `run: pnpm -C web run build` → `run: pnpm -C web run build ${{ secrets.NETLIFY_SITE_ID }}` | `test_each_secret_is_given_to_exactly_one_named_step_through_env` |
 | `.github/workflows/site.yml` | `          fetch-depth: 0\n` → `` | `test_site_reads_the_repository_and_deploys_one_at_a_time` |
 | `.github/workflows/site.yml` | `  workflow_dispatch:\n` → `  workflow_dispatch:\n  schedule:\n    - cron: "0 5 * * *"\n` | `test_site_is_dispatched_by_hand_only` |
 | `scripts/check_secrets.sh` | `\|NETLIFY_AUTH_TOKEN)` → `)` | `test_a_filled_site_or_netlify_secret_turns_the_scan_red[netlify]` |
 
 - [ ] **Step 9: Lint ve tip** — `uv run ruff check src tests scripts && uv run ruff format --check src tests scripts && uv run mypy src scripts`.
 
-- [ ] **Step 10: Tam kapı** — `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL` (`secrets` adımı genişlemiş regex'le temiz).
+- [ ] **Step 10: Tam kapı** — `T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/verify.log"` → `10 PASS` + `SKIP: zincir` + `KAPI YEŞİL` (`secrets` adımı genişlemiş regex'le temiz).
 
 - [ ] **Step 11: Commit**
 
@@ -7247,6 +7743,7 @@ def test_sitedb_tests_run_exactly_once_in_their_own_step() -> None:
     assert 'step "pytest"      uv run pytest -q -m "not sitedb" --tb=short' in text
     assert text.count('-m "leakage and not sitedb"') == 2
     assert "uv run pytest tests/ -q -m sitedb -rs --tb=short" in text
+    assert "EXPECTED_MIN_SITEDB_LEAKAGE=" in text and 'count "sitedb and leakage"' in text
 
 
 def test_site_db_is_red_in_ci_and_named_skip_locally_without_a_database() -> None:
@@ -7288,11 +7785,12 @@ Expected: `test_site_gate.py` 7 failed (adım ve bloklar yok), `test_gate_traceb
 # ESKİ
     timeout-minutes: 10
 # YENİ
-    # Site test kabı (çekme + hazır olma) ve `site-db` adımı eklendi; değer ölçülerek artırıldı
-    # (Faz 6 İz B §12.2, B-1 Task 9 raporu).
+    # Site test kabı (imaj çekme + hazır olma) ve `site-db` adımı: B-1 plan incelemesinde yerel tam
+    # kapı 48 sn ölçüldü. Değer, Task 9 Step 11'deki CI ölçümünün en az iki katıdır.
     timeout-minutes: 20
 ```
-`      - run: uv sync --frozen` satırının HEMEN ALTINA (`- name: Kapı` adımından önce):
+`      - run: uv sync --frozen --extra scrape` satırının HEMEN ALTINA (`- name: Kapı` adımından önce; main'deki satır
+birebir budur — inceleme m3):
 ```yaml
       # Faz 6 İz B §12.2/B10: sitenin katalog, davranış ve uçtan uca testleri gerçek Postgres ister.
       # Kap bu işin içinde doğar ve ölür; imaj T0'da ölçülüp sabitlendi (`docs/phases/06-site/
@@ -7389,13 +7887,19 @@ mkdir -p "$SITE_E2E_DIR"
 if [ -n "${SITE_TEST_DATABASE_URL:-}" ]; then
   step "site-db" bash -c '
     EXPECTED_MIN_SITEDB=21
+    # Hem `sitedb` hem `leakage` taşıyan H1 testleri (kapanış, taban, holdout tohumları, uçtan uca)
+    # `sızıntı` adımında sayılmaz: `leakage` işareti sessizce düşerse bu ikinci taban görür.
+    EXPECTED_MIN_SITEDB_LEAKAGE=4
 
-    collect_output=$(uv run pytest tests/ -q -m sitedb --collect-only 2>&1)
-    collected=$(printf "%s" "$collect_output" | grep -oE "^[0-9]+/" | head -1 | tr -d "/")
-    collected=${collected:-0}
-    if [ "$collected" -lt "$EXPECTED_MIN_SITEDB" ]; then
-      printf "%s\n" "$collect_output"
-      echo "HATA: sitedb etiketli test sayısı ($collected) beklenen alt sınırın ($EXPECTED_MIN_SITEDB) altında"
+    count() {
+      collect_output=$(uv run pytest tests/ -q -m "$1" --collect-only 2>&1)
+      collected=$(printf "%s" "$collect_output" | grep -oE "^[0-9]+/" | head -1 | tr -d "/")
+      echo "${collected:-0}"
+    }
+    sitedb=$(count sitedb)
+    guarded=$(count "sitedb and leakage")
+    if [ "$sitedb" -lt "$EXPECTED_MIN_SITEDB" ] || [ "$guarded" -lt "$EXPECTED_MIN_SITEDB_LEAKAGE" ]; then
+      echo "HATA: sitedb testleri ($sitedb/$EXPECTED_MIN_SITEDB) ya da sitedb+leakage ($guarded/$EXPECTED_MIN_SITEDB_LEAKAGE) alt sınırın altında"
       exit 1
     fi
 
@@ -7409,26 +7913,39 @@ else
 fi
 ```
 
-- [ ] **Step 6: Sayıları ÖLÇ ve yaz** (ölçümden büyük sayı yazılmaz; bu planın ağacında 434 ve 21 ölçüldü)
+- [ ] **Step 6: Sayıları ÖLÇ ve yaz** (ölçümden büyük sayı yazılmaz; bu planın ağacında 434, 21 ve 4 ölçüldü)
 
 ```bash
 leak="$(uv run pytest tests/ -q -m 'leakage and not sitedb' --collect-only 2>&1 | grep -oE '^[0-9]+/' | head -1 | tr -d /)"
 site="$(uv run pytest tests/ -q -m sitedb --collect-only 2>&1 | grep -oE '^[0-9]+/' | head -1 | tr -d /)"
-echo "leakage(not sitedb)=$leak sitedb=$site"
-python3 - "$leak" "$site" <<'PY'
+both="$(uv run pytest tests/ -q -m 'sitedb and leakage' --collect-only 2>&1 | grep -oE '^[0-9]+/' | head -1 | tr -d /)"
+echo "leakage(not sitedb)=$leak sitedb=$site sitedb+leakage=$both"
+python3 - "$leak" "$site" "$both" <<'PY'
 import re, sys
 path = "verify.sh"
 text = open(path, encoding="utf-8").read()
 text = re.sub(r"EXPECTED_MIN_LEAKAGE=\d+", f"EXPECTED_MIN_LEAKAGE={sys.argv[1]}", text, count=1)
 text = re.sub(r"EXPECTED_MIN_SITEDB=\d+", f"EXPECTED_MIN_SITEDB={sys.argv[2]}", text, count=1)
+text = re.sub(r"EXPECTED_MIN_SITEDB_LEAKAGE=\d+", f"EXPECTED_MIN_SITEDB_LEAKAGE={sys.argv[3]}", text, count=1)
 open(path, "w", encoding="utf-8").write(text)
 PY
 ```
-Expected: `sitedb=21` (18 görünüm + 3 uçtan uca). Farklıysa rapora nedeniyle yazılır.
+Expected: `sitedb=21` (18 görünüm + 3 uçtan uca), `sitedb+leakage=4` (kapanış, taban, holdout tohumları, uçtan uca —
+inceleme m7: bunların `leakage` işareti sessizce düşerse `sızıntı` adımı görmezdi). Farklıysa rapora nedeniyle yazılır.
 
 - [ ] **Step 7: Belgeler**
 
-`docs/RUNBOOK.md` §4'te "**Neden var.** …" paragrafının (son satırı "Vault hazır gelir).") HEMEN ALTINA:
+`docs/RUNBOOK.md` §4'te iki düzenleme (inceleme m4). (1) Bayatlayan cümle:
+```markdown
+# ESKİ
+**Neden var.** Kapı ve CI veritabanına bağlanmaz: DB testleri (`tests/test_*_db.py`) orada adıyla
+SKIP'e düşer (DEFERRED 18a). Yetki, RLS, tetikleyici ve kilit davranışının kanıtı yalnız bu yolla
+# YENİ
+**Neden var.** Kapı canlı veritabanına bağlanmaz: `DATABASE_URL`li katalog testleri kapıda ve CI'da adıyla SKIP'e
+düşer (DEFERRED 18a); CI'ın iş içi kabı yalnız `sitedb` ve kum havuzu testlerini koşar (aşağıda). Yetki, RLS,
+tetikleyici ve kilit davranışının yerel kanıtı bu yolla
+```
+(2) "**Neden var.** …" paragrafının (son satırı "Vault hazır gelir).") HEMEN ALTINA:
 ```markdown
 
 **CI'da (Faz 6 B-1 Task 9'dan beri):** `ci.yml`in "Site test veritabanı" adımı aynı imajla iş içinde bir kap kurar;
@@ -7457,14 +7974,20 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
 - `python -m football_edge.site export | verify-snapshot` — tek salt okuma işlemi, tam zincir, ikinci türetim.
 - Kapı: `verify.sh` `site-db` adımı; CI'da iş içinde doğan `supabase/postgres` kabı (aynı kap 0013 kum havuzu
   testlerini de koşar).
-- `.github/workflows/site.yml` — yalnız `workflow_dispatch`; secret'lar eklenmedi.
+- `.github/workflows/site.yml` — yalnız `workflow_dispatch`; secret'lar eklenmedi. **Yayın kapıları (kaybolan-slug,
+  yayın sonrası kontrol) B-2 Task 10'undur** (controller kararı): B-1 sonunda `site.yml` bu kapılardan yoksundur —
+  secret'lar eklenmeden ve B-2 T10 birleşmeden koşulmaz.
+- Lig URL bölütleri `config/site_leagues.yaml`da, KALICI (addan türetilmez; `ger.1`/`aut.1` ikisi de "Bundesliga").
+- Türetim yalnız maç öncesi satırları kullanır (kapanış satırı tam başlama anında da). Ölçüm (controller, canlı, salt
+  okuma): `odds_snapshots`ta `observed_at >= matches.commence_time` olan 51 satır, hepsi 1 maçta (5.763 satırda).
 
 ## Canlıya geçiş (kullanıcı onayı, §0.7 — bu dalga YAPMADI)
 
 1. 0013 canlıda + advisors temiz (controller).
 2. AK6 onayı → `0014` ROLLBACK'li prova → `apply_migration` (uygulayan rol `postgres` olmalı: görünüm sahibi = tablo
    sahibi, aksi hâlde RLS'li tablolar görünümden HATASIZ 0 satır döner — §4.2) → katalog testleri gerçek DB'ye karşı
-   salt okuma kipinde.
+   salt okuma kipinde → Supabase advisors 0014'ten SONRA da okunur (spec §4.2; üç şema API'ye açık şemalara
+   eklenmemiş, `security_invoker` uyarısı yok).
 3. RUNBOOK'a `site_reader` parola/`LOGIN` adımı: parola kullanıcı tarafından istemci tarafı SCRAM ile (`\password
    site_reader`); asistan parolayı görmez ve girmez (AK18).
 4. Ölçülecek: Supavisor kullanıcı biçimi (`site_reader.<proje_ref>`) ve rol GUC'lerinin pooler üzerinden uygulandığı (§4.5).
@@ -7490,9 +8013,17 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
 8. Tam zincir taramasının süresi defter büyüdükçe uzar; ölçülmez (AK22).
 9. `verify-snapshot`in H1 tarama kuralı `YYYY-MM-DD` kalıbıdır; başka biçimde yazılmış bir tarihi görmez.
 10. `site.yml`in Node adımları (B-2) ve `netlify-cli` sürümü koşmadı; test yalnız secret sınırını, sırayı ve sürüm
-    sabitlemesini ölçer.
+    sabitlemesini ölçer. `npx --yes netlify-cli@<sürüm>` yalnız üst paketi sabitler; geçişli bağımlılıklar koşu anında
+    çözülür ve o adımın ortamında `NETLIFY_AUTH_TOKEN` vardır (spec kabul ediyor; bağlanırken yeniden bakılır).
 11. Task 3–8 birleşmeleri arasında `sitedb` testleri CI'da koşmadı (Task 9'da başladı); o pencerede kanıt yereldir
     (görev raporları).
+12. Maç içi süzgeci `observed_at < commence_time`a dayanır; `observed_at` turun BAŞLADIĞI andır (`now`), ligin çekildiği
+    an değil. Uzun bir turda başlamadan saniyeler–dakikalar sonra çekilen bir lig başlamadan önce damgalanır ve süzgeçten
+    geçer. Defter hep böyleydi; sitenin "in-play yok" iddiası bu damgaya dayanır, çekim anını ölçmez.
+13. Başlama saati öne kayarsa (`commence_time` UPSERT'le erkene çekilir) sitenin sicil kontrolü (`record_mismatches`)
+    maç öncesi kapanışı, Faz 5'in `market/bridge.py`si ise her `is_closing` satırını seçer; ikisi farklı kapanış
+    satırı seçebilir ve o maçta bir yayın tüm dışa aktarımı exit 22 ("kapanış konsensüsü yok") ile durdurur. Bugün
+    `site.record` `where false`tur; Faz 5 sicili bağlarken bakılacak ileri nottur.
 ````
 
 - [ ] **Step 8: Yeşili gör**
@@ -7504,9 +8035,9 @@ Expected: hepsi yeşil (`test_site_gate.py` 7, `test_gate_traceback.py` 2).
 
 ```bash
 # (a) yerel, test DB'si yok → adıyla SKIP
-TMPDIR=$(mktemp -d) ./verify.sh > "$TMPDIR/a.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/a.log"
+T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/a.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/a.log"
 # (b) CI=true, test DB'si yok → site-db FAIL (B10 kanıtı; KAPI KIRMIZI beklenir)
-TMPDIR=$(mktemp -d) CI=true ./verify.sh > "$TMPDIR/b.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$TMPDIR/b.log"
+T=$(mktemp -d); TMPDIR=$T CI=true ./verify.sh > "$T/b.log" 2>&1; grep -E '^(PASS|FAIL|SKIP)|KAPI' "$T/b.log"
 # (c) kum havuzu adresleri (DATABASE_URL VERİLMEZ — zincir adımı canlıyı aramasın)
 scripts/sandbox_db.sh up
 ( eval "$(scripts/sandbox_db.sh env | grep -E '^export (SITE_TEST|SANDBOX)_DATABASE_URL=')"
@@ -7528,6 +8059,7 @@ Expected: (a) `10 PASS` + `SKIP: site-db (SITE_TEST_DATABASE_URL yok)` + `SKIP: 
 | `.github/workflows/ci.yml` | `@sha256:` → `@sha256:0` (özet bozulur) | `test_the_ci_image_is_the_t0_pinned_image_with_its_digest` |
 | `.github/workflows/ci.yml` | `-p 127.0.0.1:55432:5432` → `-p 55432:5432` | `test_the_site_database_is_local_and_its_password_is_generated_and_masked` |
 | `verify.sh` | `uv run pytest tests/ -q -m sitedb -rs --tb=short` → `uv run pytest tests/ -q -m sitedb -rs` | `test_every_pytest_run_prints_no_local_variables[verify.sh-4]` (0013'ün traceback bekçisi) |
+| `verify.sh` | `    guarded=$(count "sitedb and leakage")\n` → `` | `test_sitedb_tests_run_exactly_once_in_their_own_step` (m7) |
 
 - [ ] **Step 11: `timeout-minutes`i ölç** — Step 9(c)'nin `süre_sn`i + CI koşusunun (Step 14) `gate` süresi okunur;
 `timeout-minutes` = `max(20, ceil(2 × CI dakikası))`. 20'den farklıysa değer ve iki ölçüm commit mesajına yazılır.
@@ -7586,8 +8118,10 @@ kalkmazsa (imaj çekme, 180 sn) adımın `docker logs` kuyruğu rapora. `main`e 
 
 ## Kapının ölçmedikleri (bu plan)
 
-Task 9'un `docs/phases/06-site/HANDOFF.md`sindeki on bir madde bu planın tam listesidir (spec §12.4'ün B-1'e düşen
-kısmı + rereview4 m2'nin kara liste notu + `SET ROLE`/LOGIN farkı + Task 3–8 CI penceresi). Faz geçişi için
+Task 9'un `docs/phases/06-site/HANDOFF.md`sindeki on üç madde bu planın tam listesidir (spec §12.4'ün B-1'e düşen
+kısmı + rereview4 m2'nin kara liste notu + `SET ROLE`/LOGIN farkı + Task 3–8 CI penceresi + maç içi süzgecinin iki
+sınırı: `observed_at` turun başındaki damgadır, çekim anı değil; başlama öne kayarsa sitenin sicil kontrolüyle Faz 5
+köprüsü farklı kapanış satırı seçebilir — madde 12–13, yeniden inceleme N5). Faz geçişi için
 (qa-loop "Phase geçişi"): tüm görevler kapıdan geçti, critical/high bulgu yok ve bu liste yazıldı.
 
 ## Öz-inceleme (plan yazarı, 2026-09-24)
@@ -7614,7 +8148,22 @@ to_the_t0_version`, `test_the_ci_image_is_the_t0_pinned_image_with_its_digest`).
 `content_sha256`, `iso_z`, `round_consensus`, `LEDGER_AUDIT_VIEW`, `_ledger_rows(..., relation=)`,
 `_first_anchor_break(..., relation=)`, `site_db`/`site_db_each`/`site_cluster`/`full_sequence`, `export_dump`/
 `export_inputs`, `anchored_repo` her görevde aynı imzayla anıldı; bütün kod blokları bir prova ağacında (bu planın
-scratch dizini) ruff + mypy strict + pytest ile koşturuldu: DB'siz testler yeşil (`2445 passed`, `sitedb` 21 test
+scratch dizini) ruff + mypy strict + pytest ile koşturuldu: DB'siz testler yeşil (`2470 passed`, `sitedb` 21 test
 yerelde adıyla SKIP); DB'li testler ve SQL gerçek Postgres'te koşmadı — kanıtları Task 3, 7, 9'un kap adımlarıdır.
 
 **4. Review Focus:** beş girdi, her birinin testi sahibi görevde (Task 5: 2 ve 5; Task 6: 1, 3, 4).
+
+**5. Düzeltme turu 1 (2026-09-24):** I1–I4 ve m1–m11 yukarıdaki "Plan incelemesi" bölümünde eşlendi. Değişen bloklar
+prova ağacında yeniden koşturuldu: ruff + mypy strict temiz, DB'siz testler yeşil, yeni mutasyonların hepsi kırmızı
+(I1: dört, I3: beş, m6: iki, m7: bir) ve geri yüklendi. B-2'nin `site.yml` düzenlemeleri bu planın `site.yml`ine
+uygulanınca `test_site_workflow.py` yeşil kaldı. `site-db` adımının gövdesi sahte `uv` ile iki yönde (yeşil/kırmızı)
+koşturuldu. Değişmeyen: DB'li testler ve SQL gerçek Postgres'te bu turda da koşmadı — kanıtları Task 3, 7 ve 9'un kap
+adımlarıdır; incelemenin tek ağaç koşusu (0014 ve harness) bu turda değişmedi.
+
+**6. Düzeltme turu 2 (2026-09-24, yeniden inceleme N1–N5):** N1 — Task 5'in sınır kararı spec'e yazılmamış bir ifadeyi
+alıntılamıyor; eşitlik istisnası yalnız `rounds.seal_window`ın kapsayıcı sınırına ve Q15/Q25'e dayanır. N2 — `rounds`
+ve maç öncesi alanların spec §5.2'den ayrılışı Task 5'te ve Q15'te adıyla yazıldı (spec düzenlenmedi). N3 — Task 6
+`site_league_slugs` eksik/bozuk `config/site_leagues.yaml`ı exit 20'ye ve adına sarar; testi üç durum, mutasyonları
+kırmızı (prova ağacında koşuldu). N4 — `if True:` 4 kırmızı; `set(entries)` sayısız ("hedef test kırmızı"). N5 —
+HANDOFF "ölçmedikleri" 12–13. Nit (`--collect-only` çıktısının basılmaması) açık küçük nokta: taban kaçarsa mesaj
+sayıyı verir, nedeni için komut elle yeniden koşulur.

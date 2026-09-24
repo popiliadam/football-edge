@@ -11,7 +11,8 @@ adımlarını tek kapıya (`verify.sh` + `ci.yml`) bağlamak. Deploy YOK, Netlif
 (H5 — Node DB'ye bağlanmaz). `next build` (`output: 'export'`) → `scripts/emit-headers.ts` (CSP hash'leri, X-Robots-Tag,
 `_redirects`, `data/`) → `scripts/check-out.ts` (spec §5.3'ün sekiz ölçümü). Sayfalar sayı HESAPLAMAZ; her değer
 `data-fe` öznitelikli tek bir öğeyle basılır ve tarayıcı öznitelik ile görünen metni anlık görüntüye karşı sınar (H6).
-B-2 B-1'den YALNIZ şunları tüketir: `web/contract/snapshot.schema.json` (B-1 T1) ve `verify-snapshot` CLI'ı (B-1 T5);
+B-2 B-1'den YALNIZ şunları tüketir: `web/contract/snapshot.schema.json` ve doğrulayıcısı `football_edge.site.schema`
+(B-1 Task 1) ve `verify-snapshot` CLI'ı (B-1 Task 4);
 geliştirme ve test B-2'nin kendi sentetik fixture'larıyla yapılır.
 
 **Tech Stack:** Node 24 LTS (yerleşik TS tip ayıklaması), pnpm 10, Next.js 16 App Router (statik dışa aktarım), React 19,
@@ -81,7 +82,9 @@ Proje süreci (HANDOFF/bellek, her görevde):
   pnpm -C web exec biome ci .
   pnpm -C web exec vitest run
   ```
-  Görevin kendi derleme/tarama adımları ayrıca yazılıdır.
+  Görevin kendi derleme/tarama adımları ayrıca yazılıdır. HER görev WEB-KAPI'dan önce kendi dosyalarına
+  `pnpm -C web exec biome check --write .` uygular (biçim ve import sırası; plan kodu yazım anında Biome'dan geçmedi —
+  kalan lint hatası kural kapatılarak değil kod düzeltilerek giderilir).
 - Her yeni test bir mutasyonla KIRMIZI kanıtlanır, sonra geri alınır; geri alma `git diff --stat -- <dosya>` boş çıktısıyla
   kanıtlanır (`git checkout -- <yol>` / `git restore` KULLANILMAZ — izin katmanında onaylıdır). Python mutasyonları
   `PYTHONDONTWRITEBYTECODE=1` ile koşar (bellek: bayat `.pyc`).
@@ -117,14 +120,18 @@ testi sahibi görevin adımındadır:
 **Kapının ölçmedikleri (bu plan; faz HANDOFF'una):** (a) CSP'nin tarayıcıda gerçekten uygulandığı ve istemci
 betiklerinin (18+, yerel saat) CSP altında çalıştığı — yalnız hash eşleşmesi ölçülür (§12.4/8); (b) Netlify'ın
 `_headers`/`_redirects`i gerçekten uyguladığı, `*.netlify.app` alt alanının `noindex`i (§18.5/4) ve pasif lig için 404/410
-(§18.5/6) — Netlify hesabı olmadan ölçülemez; (c) Next'in `404.html` sayfası `_headers`te CSP almaz (Netlify 404 yanıtında
-yalnız `/*` başlıkları uygulanır; `/*`e CSP konamaz — sayfa CSP'leriyle kesişir); (d) `config/site_redirects.yaml`deki
-takım/lig yeniden adlandırma yönlendirmeleri `_redirects`e girmez (spec biçimi tanımlamıyor — Açık sorular/4); (e) H4
-kalıp listesidir, listede olmayan ifadeyi yakalamaz; H1 yalnız tarih kalıbı tarar (§12.4/4–5); (f) `_headers` boyutu sayfa
+(§18.5/6) — Netlify hesabı olmadan ölçülemez; (c) Next'in `404.html`/`_not-found` sayfaları `_headers`te CSP almaz ve Next'in satır içi
+`<style>`ını taşır (Netlify 404 yanıtında yalnız `/*` başlıkları uygulanır; `/*`e CSP konamaz — sayfa CSP'leriyle kesişir); (d) `config/site_redirects.yaml`de
+KABUL edilen takım yeniden adlandırmaları `_redirects`e yazılmaz — eski URL 404 verir (Açık küçük noktalar/1); (e) H4
+kalıp listesidir, listede olmayan ifadeyi yakalamaz — Türkçe çekimli biçim de kaçar ("resmî ortağıyız" `resmi ortak`
+kalıbına uymaz, ğ ≠ k); H1 yalnız tarih kalıbı tarar (§12.4/4–5); (f) `_headers` boyutu sayfa
 sayısıyla doğrusal büyür (ölçüm T9'da kaydedilir; eşik aşılırsa AK19 (b) kullanıcı kararıdır); (g) görsel düzen,
 duyarlı tasarım, tam erişilebilirlik (axe), çeviri kalitesi, yasal metinlerin doğruluğu (§12.4/6–8, /10); (h) TS'in sayı
 hesaplamadığı yalnız dolaylı ölçülür: basılan her sayı anlık görüntüde birebir karşılık bulmalıdır (H6c), `data-fe`siz
-basılan sayı tarayıcıdan kaçar (sayfa kodu incelemesi, T5/T6).
+basılan sayı tarayıcıdan kaçar (sayfa kodu incelemesi, T5/T6); (i) sicil tablosundaki sonuç ETİKETİ (takım adı /
+"Beraberlik") tarayıcıda ölçülmez — tarayıcı yalnız ham `outcome` özniteliğini sınar; eşlemenin doğruluğu T6'nın
+`outcome.test.ts` birim testindedir; (j) çıpa geçmişi bağlantısı yer tutucudur (`LEDGER_HISTORY_URL` deponun `ledger/`
+dizininin geçmişine işaret etmeli; sayfa ona çıplak `head-YYYY-MM-DD.txt` ekler) — bağlantının çözüldüğü ölçülmez.
 
 ---
 
@@ -134,11 +141,11 @@ basılan sayı tarayıcıdan kaçar (sayfa kodu incelemesi, T5/T6).
 
 | Ne | Nerede | İlk gerektiği görev |
 |---|---|---|
-| Anlık görüntü JSON Schema v1 | `web/contract/snapshot.schema.json` (B-1 T1) | T2 (anahtar kümesi ↔ TS tipi, fixture şekli) |
-| `verify-snapshot` CLI | `uv run python -m football_edge.site verify-snapshot <dosya>` (B-1 T5); başarıda exit 0 | T10 (her derleme varyantından önce) |
-| Uçtan uca anlık görüntü | `${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e/snapshot.json` + `run-id` = `FE_VERIFY_RUN_ID` (B-1 `site-db` adımı) | T10 |
-| `verify.sh` `site-db` adımı ve `export FE_VERIFY_RUN_ID` | B-1 dalga sonu birleştirmesi | T10 |
-| `.github/workflows/site.yml` | B-1 T6 (§15) | T10 (Node adımları B-2 komutlarıyla hizalanır) |
+| Anlık görüntü JSON Schema v1 + doğrulayıcı | `web/contract/snapshot.schema.json`, `football_edge.site.schema.validate(instance, schema) -> list[str]` (B-1 Task 1) | T2 (anahtar kümesi ↔ TS tipi; fixture DEĞERLERİ doğrulayıcıyla) |
+| `verify-snapshot` CLI | `uv run python -m football_edge.site verify-snapshot <dosya> [--sha256 <dosya>]` (B-1 Task 4); geçerliyse exit 0, değilse exit 24 | T10 (her derleme varyantından önce) |
+| Uçtan uca anlık görüntü | `$SITE_E2E_DIR` (= `${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e`) altında `snapshot.json`, `snapshot.sha256`, `run-id` = `FE_VERIFY_RUN_ID` (B-1 Task 7/9; adım başında üçü de sıfırlanır) | T10 |
+| `verify.sh` `site-db` adımı (girintili, `if/elif/else … fi` içinde) ve `export FE_VERIFY_RUN_ID` | B-1 Task 9 (dalga sonu) | T10 |
+| `.github/workflows/site.yml` | B-1 Task 8 | T10 (controller kararı: kaybolan-slug ve yayın sonrası adımları + `--no-build` B-2 T10'undur) |
 
 **Üretir (B-1 ve `site.yml` kullanır):**
 
@@ -150,8 +157,9 @@ basılan sayı tarayıcıdan kaçar (sayfa kodu incelemesi, T5/T6).
 | Yayın dosyaları | `out/_headers`, `out/_redirects`, `out/data/snapshot.sha256` (anlık görüntü dosya baytlarının sha256 hex'i + `\n`), `out/data/slugs.json` = `{"version": 1, "leagues": [<lig slug'ı>…], "teams": ["<lig slug'ı>/<takım slug'ı>"…]}` (ikisi de sıralı; AK20 b'nin kaybolan-slug kontrolünün deposu) |
 | Sentetik fixture'lar | `web/fixtures/snapshot.fixture.web-full.json`, `web/fixtures/snapshot.fixture.web-empty.json` (`tests/site_web_fixtures.py` üretir) |
 
-**Sıralama:** T0 ve T1 B-1'den bağımsızdır (hemen başlar). T2–T9 B-1 T1'in sözleşme commit'i `main`e birleştikten
-sonra başlar (spec §15 "B-1 T1 birleşince paralel"). T10 B-1'in dalga sonu birleştirmesinden SONRA (spec §12.2–§12.3).
+**Sıralama:** T0 ve T1 B-1'den bağımsızdır (hemen başlar). T2–T9 B-1 Task 1'in sözleşme commit'i `main`e birleştikten
+sonra başlar (spec §15 "B-1 T1 birleşince paralel"). T10 B-1'in dalga sonu birleştirmesinden (B-1 Task 9) SONRA
+(spec §12.2–§12.3). Görev numaraları B-1 PLANININKİDİR (spec §15'in T-numaraları değil).
 
 ---
 
@@ -163,18 +171,18 @@ sonra başlar (spec §15 "B-1 T1 birleşince paralel"). T10 B-1'in dalga sonu bi
 | 1 | `web/{package.json,pnpm-lock.yaml,.nvmrc,tsconfig.json,next.config.ts,biome.json,vitest.config.ts,site.config.ts}`, `web/src/types/next.d.ts`, `web/src/app/[lang]/{layout,page}.tsx` (geçici), `web/src/lib/site-config.test.ts`, `tests/test_site_web_deps.py` | `.gitignore` |
 | 2 | `tests/site_web_fixtures.py`, `tests/test_site_web_contract.py`, `web/fixtures/snapshot.fixture.web-{full,empty}.json`, `web/src/lib/{snapshot-types,snapshot,fixture}.ts`, `web/src/lib/snapshot.test.ts` | — |
 | 3 | `web/src/lib/{format,fe}.ts`, `web/src/lib/format.test.ts`, `web/src/i18n/{en.json,tr.json,dict.ts,dict.test.ts}` | — |
-| 4 | `web/src/lib/{routes,hreflang,jsonld,meta,params}.ts`, `web/src/lib/{routes,jsonld}.test.ts` | — |
+| 4 | `web/src/lib/{routes,hreflang,jsonld,meta,params}.ts`, `web/src/lib/{routes,jsonld,meta}.test.ts` | — |
 | 5 | `web/src/components/{Fe,Breadcrumbs,JsonLdScript,LocalTime,Slots,RoundsTable,SiteChrome}.tsx`, `web/src/components/Fe.test.tsx`, `web/src/styles/site.module.css`, `web/src/app/[lang]/[league]/page.tsx`, `…/[team]/page.tsx`, `…/match/[pathId]/[slug]/page.tsx` | `web/src/app/[lang]/{layout,page}.tsx`, `web/src/lib/site-config.test.ts` |
-| 6 | `web/src/app/[lang]/track-record/page.tsx`, `web/src/components/RecordTable.tsx` | — |
+| 6 | `web/src/app/[lang]/track-record/page.tsx`, `web/src/components/RecordTable.tsx`, `web/src/lib/{outcome,outcome.test}.ts` | — |
 | 7 | `web/src/lib/consent.ts`, `web/src/components/{AgeGate.tsx,AgeGate.test.tsx}`, `web/content/legal/{en,tr}/{terms,privacy,cookies,responsible-gambling}.tsx`, `web/content/legal/{index.ts,legal.test.ts}`, `web/src/app/[lang]/legal/[doc]/page.tsx` | `web/src/app/[lang]/layout.tsx` |
-| 8 | `web/src/app/{sitemap,robots}.ts`, `web/src/lib/pages.ts`, `web/scripts/lib/{html,outdir,emit}.ts`, `web/scripts/lib/{html,emit}.test.ts`, `web/scripts/emit-headers.ts`, `web/netlify.toml`, `tests/test_site_web_netlify.py` | `web/package.json` (`build` betiği) |
+| 8 | `web/src/app/{sitemap,robots}.ts`, `web/src/lib/{pages,pages.test}.ts`, `web/scripts/lib/{html,outdir,emit}.ts`, `web/scripts/lib/{html,emit}.test.ts`, `web/scripts/emit-headers.ts`, `web/netlify.toml`, `tests/test_site_web_netlify.py` | `web/package.json` (`build` betiği) |
 | 9 | `web/scripts/checkout/{expect,checks}.ts`, `web/scripts/checkout/checks.test.ts`, `web/scripts/check-out.ts` | — |
-| 10 | `scripts/site_gate.sh`, `tests/test_site_web_gate.py` | `verify.sh`, `.github/workflows/ci.yml`, `.github/workflows/site.yml` (yalnız Node adımları, gerekirse), `tests/site_web_fixtures.py` (yalnız `PATH_ID_LENGTH`, gerekirse) |
+| 10 | `scripts/site_gate.sh`, `scripts/site_publish.py`, `config/site_redirects.yaml`, `tests/test_site_web_gate.py`, `tests/test_site_web_publish.py` | `verify.sh`, `.github/workflows/ci.yml`, `.github/workflows/site.yml` (girdi, kaybolan-slug ve yayın sonrası adımları, `--no-build`; Node adımları gerekirse) |
 
 B-1'in dosyalarına (T10'daki sıralı istisnalar dışında) HİÇ yazılmaz. `tests/test_site_web_*.py` öneki B-1'in
 `tests/test_site_*.py` dosyalarıyla çakışmaz.
 
-**Yürütme sırası:** tek implementer, sıralı: T0 → T1 → (B-1 T1 birleşimi) → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 →
+**Yürütme sırası:** tek implementer, sıralı: T0 → T1 → (B-1 Task 1 birleşimi) → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 →
 (B-1 dalga sonu) → T10. T3/T4 ve T7'nin yasal metinleri birbirinden bağımsızdır ama hepsi `web/package.json`/kilit
 dosyasının tek yazarı T1'e dayanır; paralelleştirme kazancı küçük, çakışma riski (tek `layout.tsx`) büyük.
 
@@ -186,7 +194,7 @@ doğrulaması): T5 (görsel şablonlar; veri bağlantısı T9'da ölçülür), T
 
 ### Task 0: Araç zinciri ve sözleşme durumunun ölçümü (kayıt, kod yok)
 
-**Kademe:** ölçüm · **Spec:** §13 (Node 24, pnpm 10, "sürüm plan günündeki kararlı sürüm"), §15 (B-1 T1 başlangıç kapısı), §12.1
+**Kademe:** ölçüm · **Spec:** §13 (Node 24, pnpm 10, "sürüm plan günündeki kararlı sürüm"), §15 (B-1 Task 1 başlangıç kapısı), §12.1
 ("pnpm ya da Node yoksa … FAIL")
 
 Sonraki görevlerin sabitlediği her sürüm BU kayıttan okunur; hiçbir görev sürümü ezberden yazmaz. Kayıt depoya
@@ -248,7 +256,7 @@ ls src/football_edge/site/ 2>/dev/null || echo "site paketi yok"
 uv run python -m football_edge.site verify-snapshot --help 2>&1 | head -3
 grep -rn "PATH_ID\|path_id" src/football_edge/site/slugs.py 2>/dev/null | head -5
 ```
-Expected: B-1 T1 birleşmediyse "şema yok" — T2 başlayamaz; T1 yine koşar. `B1_CONTRACT=` ve `B1_VERIFY_SNAPSHOT=` satırlarını
+Expected: B-1 Task 1 birleşmediyse "şema yok" — T2 başlayamaz; T1 yine koşar. `B1_CONTRACT=` ve `B1_VERIFY_SNAPSHOT=` satırlarını
 yaz; `slugs.py` varsa `path_id` önek uzunluğunu da yaz (`PATH_ID_LENGTH=`; yoksa `bilinmiyor`).
 
 - [ ] **Step 6: Kaydı yaz ve oku**
@@ -443,7 +451,10 @@ Expected: FAIL — `FileNotFoundError: … web/package.json` (paket testleri) ve
 
 - [ ] **Step 3: `.gitignore`a derleme çıktılarını ekle**
 
-`.gitignore`un SONUNA (mevcut satırlara dokunmadan; B-1 T1 aynı satırlardan bazılarını eklemişse yalnız eksikleri):
+`.gitignore` iki planın ortak dosyasıdır (B-1 Task 1 spec'in dört satırını ekler). Tek yazar kuralı: `git log --oneline
+main -- .gitignore` ve `git check-ignore -q web/node_modules/x` ile ölç. B-1 Task 1 `main`deyse YALNIZ son iki satırı
+(`web/next-env.d.ts`, `web/*.tsbuildinfo`) ekle — çakışma yok. Değilse altısını da tek blok olarak SONA ekle ve raporuna
+yaz: controller B-1 Task 1'i birleştirirken metin çakışmasını birleşim kümesiyle (her satır bir kez) çözer. Blok:
 ```gitignore
 web/node_modules/
 web/.next/
@@ -605,8 +616,10 @@ export default defineConfig({
 
 export const SITE_NAME = "[site-name]";
 export const SITE_URL = "https://example.invalid";
-// Çıpa geçmişinin herkese açık adresi (spec §6.1): depo adı da bir yayın kararıdır.
-export const LEDGER_HISTORY_URL = "https://example.invalid/ledger-history";
+// Çıpa geçmişinin herkese açık adresi (spec §6.1): depo adı da bir yayın kararıdır. Taban, deponun
+// `ledger/` DİZİNİNİN geçmişidir — sayfa ona çıplak `head-YYYY-MM-DD.txt` adını ekler (sözleşmenin çıpa
+// `file` alanı dizinsizdir). Gerçek değer AK3/AK4 ile birlikte yazılır, ör. `…/commits/main/ledger`.
+export const LEDGER_HISTORY_URL = "https://example.invalid/ledger";
 
 export const SITE_LANGS = ["en", "tr"] as const;
 export type Lang = (typeof SITE_LANGS)[number];
@@ -745,7 +758,7 @@ Expected: tsc çıktısız; vitest `2 passed`; derleme `○ /_not-found`, `● /
 - [ ] **Step 11: Tam kapı**
 
 Run: `TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t1-gate.log 2>&1; echo exit=$?`
-ve WEB-KAPI (Global Constraints). Expected: `exit=0`, T0 tabanı kadar PASS (pytest yeni 17 testle); WEB-KAPI dört komutu da 0.
+ve WEB-KAPI (Global Constraints). Expected: `exit=0`, T0 tabanı kadar PASS (pytest yeni 14 testle); WEB-KAPI dört komutu da 0.
 
 - [ ] **Step 12: Commit**
 
@@ -764,7 +777,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Kademe:** K2 · **Spec:** §5.2 ("TS `Snapshot` tipini elle taşır; fixture `satisfies Snapshot` ile `tsc`'de sınanır; bir pytest
 şemanın anahtar kümesini TS tip dosyasınınkiyle karşılaştırır"; "Fixture'lar **sentetiktir**"), §6.4/1 (fixture varyantları),
-§8.1 (ayrılmış slug'lar, `path_id` çakışması), H3, B6 · **Ön koşul:** B-1 T1 (`web/contract/snapshot.schema.json`) `main`de.
+§8.1 (ayrılmış slug'lar, `path_id` çakışması), H3, B6 · **Ön koşul:** B-1 Task 1 (`web/contract/snapshot.schema.json` +
+`src/football_edge/site/schema.py`) `main`de.
 
 **Files:**
 - Create: `tests/site_web_fixtures.py` (fixture'ların TEK kaynağı), `tests/test_site_web_contract.py`,
@@ -772,7 +786,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   `web/src/lib/snapshot-types.ts`, `web/src/lib/snapshot.ts`, `web/src/lib/fixture.ts`, `web/src/lib/snapshot.test.ts`
 
 **Interfaces:**
-- Consumes: `web/contract/snapshot.schema.json` (B-1 T1); `football_edge.ledger._canonical(payload: dict) -> str`.
+- Consumes: `web/contract/snapshot.schema.json` ve `football_edge.site.schema.validate(instance, schema) -> list[str]`
+  (B-1 Task 1; boş liste = geçerli); `football_edge.ledger._canonical(payload: dict) -> str`.
 - Produces:
   ```ts
   // web/src/lib/snapshot-types.ts — tipler: Triple, Round, H2h, Anchor, Ledger, MoveDistribution, League, Team,
@@ -800,13 +815,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   (`synthetic-league-alpha`, 5 maç, `move_distribution` dolu) ve `xlb.1` "Synthetic League Beta" (1 maç, `null`); takımlar
   Kuzeyspor, Güneyköy İdmanyurdu, Doğu & Batı FK, O'Brien Rovers, Delta City, Epsilon Town; altı maç (ilki
   `407957362b2a…` Kuzeyspor–Güneyköy, mühürlü; `34e5be017510…` açılışı eşik altı; `cdc63e7b45d9…` tek turlu, mühürsüz,
-  gelecekte; `9694c89e7056…` mühürsüz, gelecekte; `40bb30156880…` `40.0` taşıyan); dolu sicil 2 girdi (`clv` 6.28 ve
-  −4.76), boş sicil 0 girdi. `content_sha256`: dolu `84b758af18c8bc52930d8998f9600b4217f5d191152b73eba55a5dfc581890b3`,
-  boş `21a8bcf01b07804c7b38abbd8b322bea7a50dd2562e3b888888f5a80a4b8ede7`.
+  gelecekte; `9694c89e7056…` mühürsüz, gelecekte; `40bb30156880…` `40.0` taşıyan); dolu sicil 2 girdi (`outcome` `home` ve
+  `draw` — şema enum'u `home/draw/away`; `clv` 6.28 ve −4.76), boş sicil 0 girdi; çıpa dosyası `head-2026-09-24.txt` (şema
+  deseni `^head-YYYY-MM-DD\.txt$`). `content_sha256`: dolu
+  `9fac82327d8956076cd2bf51784be6a877790bef29fca284d4b1d482f88be215`, boş
+  `efe3944e0c59d9c9c8da15b1544902ac695831e84edbb1efb0d934f230ffb006`.
 
 - [ ] **Step 1: B-1'in sözleşmesini dala al**
 
-Run: `git merge --no-ff main -m "Merge main: B-1 T1 sözleşmesi (B-2 T2 ön koşulu)"` ve `test -f web/contract/snapshot.schema.json && echo var`
+Run: `git merge --no-ff main -m "Merge main: B-1 Task 1 sözleşmesi (B-2 T2 ön koşulu)"` ve
+`test -f web/contract/snapshot.schema.json && test -f src/football_edge/site/schema.py && echo var`
 Expected: `var`. Yoksa DUR (T2 başlayamaz; T0 kaydındaki `B1_CONTRACT` güncellenir).
 
 - [ ] **Step 2: Başarısız sözleşme testini yaz — `tests/test_site_web_contract.py`**
@@ -818,7 +836,8 @@ Sözleşmenin sahibi `web/contract/snapshot.schema.json`dur (B-1 T1). TS `Snapsh
 elle taşır (spec §5.2); bir anahtar bir tarafta kalırsa sayfa ya sessizce boş basar ya da
 derleme olmayan bir alanı okur. Bu dosya iki yönü de kırmızı yapar. Fixture'ların tam
 içerik denetimi `verify-snapshot`in (B-1) işidir; burada yalnız B-2'nin dayandığı şekil,
-sıralama ve `content_sha256` sınanır — `verify-snapshot` fixture'larda T10'dan beri kapıda.
+sıralama ve `content_sha256` sınanır; DEĞERLER B-1'in doğrulayıcısıyla
+(`football_edge.site.schema.validate`) şemaya karşı sınanır. `verify-snapshot` T10'dan beri kapıda.
 """
 
 from __future__ import annotations
@@ -830,6 +849,7 @@ from typing import Any
 
 import pytest
 
+from football_edge.site import schema as site_schema
 from tests import site_web_fixtures
 
 REPO = Path(__file__).resolve().parent.parent
@@ -982,6 +1002,14 @@ def test_fixture_objects_fit_the_schema(schema: Shape, fixture: Path) -> None:
         for keys in key_sets:
             assert keys <= properties, f"{fixture.name} {path}: fazla {sorted(keys - properties)}"
             assert required <= keys, f"{fixture.name} {path}: eksik {sorted(required - keys)}"
+
+
+@pytest.mark.parametrize("fixture", B2_FIXTURES, ids=lambda path: path.name)
+def test_fixture_values_pass_the_b1_schema_validator(fixture: Path) -> None:
+    """Anahtar kümesi yetmez: `outcome` enum'u ve çıpa dosya adı deseni DEĞER kuralıdır."""
+    root = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    document = json.loads(fixture.read_text(encoding="utf-8"))
+    assert site_schema.validate(document, root) == []
 
 
 def test_committed_fixtures_equal_the_generator_output() -> None:
@@ -1252,7 +1280,7 @@ def _full_record() -> Json:
             "publication_id": 1,
             "match_id": _event_id(1),
             "market": "h2h",
-            "outcome": "Kuzeyspor",
+            "outcome": "home",
             "published_at": "2026-09-18T09:00:00Z",
             "published_price": 2.2,
             "publication_ledger_id": 1201,
@@ -1264,7 +1292,7 @@ def _full_record() -> Json:
             "publication_id": 2,
             "match_id": _event_id(4),
             "market": "h2h",
-            "outcome": "Draw",
+            "outcome": "draw",
             "published_at": "2026-09-21T09:00:00Z",
             "published_price": 3.4,
             "publication_ledger_id": 1455,
@@ -1279,7 +1307,7 @@ def _full_record() -> Json:
 
 def _anchor(rows: int, last_id: int) -> Json:
     return {
-        "file": "ledger/head-2026-09-24.txt",
+        "file": "head-2026-09-24.txt",
         "rows": rows,
         "last_id": last_id,
         "head": _hex(f"fixture-head-{last_id}"),
@@ -1332,8 +1360,11 @@ if __name__ == "__main__":
 - [ ] **Step 5: Fixture'ları üret ve hash'leri doğrula**
 
 Run: `mkdir -p web/fixtures && uv run python -m tests.site_web_fixtures && grep -h content_sha256 web/fixtures/snapshot.fixture.web-*.json`
-Expected: iki yol basılır; hash'ler `21a8bcf01b07804c7b38abbd8b322bea7a50dd2562e3b888888f5a80a4b8ede7` (empty) ve
-`84b758af18c8bc52930d8998f9600b4217f5d191152b73eba55a5dfc581890b3` (full). Farklıysa üretici plandan sapmıştır — düzelt.
+Expected: iki yol basılır; hash'ler `efe3944e0c59d9c9c8da15b1544902ac695831e84edbb1efb0d934f230ffb006` (empty) ve
+`9fac82327d8956076cd2bf51784be6a877790bef29fca284d4b1d482f88be215` (full). Farklıysa üretici plandan sapmıştır — düzelt.
+Ayrıca B-1'in CLI'ı: `uv run python -m football_edge.site verify-snapshot web/fixtures/snapshot.fixture.web-full.json`
+(ve `-empty`) → `anlık görüntü geçerli: …`, exit 0 (B-1 Task 4 henüz yoksa bu satır T10 Step 1'e kalır; DEĞER kontrolü
+Step 7'nin pytest'inde zaten B-1 Task 1'in doğrulayıcısıyla koşar).
 
 - [ ] **Step 6: TS tipini yaz — `web/src/lib/snapshot-types.ts` (katı biçim; ayrıştırıcı testte)**
 
@@ -1418,7 +1449,7 @@ export type RecordEntry = {
   publication_id: number;
   match_id: string;
   market: string;
-  outcome: string;
+  outcome: "home" | "draw" | "away";
   published_at: string;
   published_price: number;
   publication_ledger_id: number;
@@ -1459,7 +1490,7 @@ export type Snapshot = {
 - [ ] **Step 7: Sözleşme testini koştur**
 
 Run: `uv run pytest -q tests/test_site_web_contract.py`
-Expected: PASS — `27 passed` (mock şemayla ölçüldü: 18 yol × tip + 2 × 3 fixture + 3 tekil). **Şema spec §5.2'den farklıysa**
+Expected: PASS — `29 passed` (B-1 Task 1'in gerçek şemasıyla ölçüldü: 18 yol × tip + 2 × 4 fixture + 3 tekil). **Şema spec §5.2'den farklıysa**
 (B-1 bir alanı yeniden adlandırdı, ekledi ya da `$defs` düzeni `TYPE_OF_PATH`e uymuyor): sözleşmenin sahibi şemadır —
 `snapshot-types.ts`, `TYPE_OF_PATH` ve üreticiyi şemaya uydur, farkı görev raporuna yaz. Fark spec'in yasakladığı bir
 alan ise (model olasılığı, kitap adı/fiyatı, dolu `value_badge`) uydurma: DUR, controller'a eskale et.
@@ -1637,19 +1668,22 @@ JSON içe aktarmak (`import … with { type: "json" }` + `satisfies`) fixture'ı
 
 1. `snapshot-types.ts` `Round` tipinden `  books: number;` satırını SİL → `uv run pytest -q tests/test_site_web_contract.py`
    → `test_ts_type_keys_equal_schema_keys[matches[].h2h.opening]` (ve latest/closing) FAIL. Satırı geri koy.
-2. `web/fixtures/snapshot.fixture.web-full.json`de ilk `45.7`yi `45.8` yap → `test_committed_fixtures_equal_the_generator_output`
+2. `tests/site_web_fixtures.py`de `"outcome": "draw"` → `"outcome": "Draw"`, fixture'ları yeniden üret →
+   `test_fixture_values_pass_the_b1_schema_validator[snapshot.fixture.web-full.json]` FAIL (`$.record.entries[1].outcome`:
+   enum; anahtar testleri YEŞİL kalır — inceleme I1'in deseni). Geri al, yeniden üret.
+3. `web/fixtures/snapshot.fixture.web-full.json`de ilk `45.7`yi `45.8` yap → `test_committed_fixtures_equal_the_generator_output`
    ve `test_fixture_content_hash_and_order[…full…]` FAIL. Geri al.
-3. `tests/site_web_fixtures.py` `_teams()` sonundaki `sorted(...)`ı kaldır (listeyi doğrudan döndür) ve fixture'ları yeniden
+4. `tests/site_web_fixtures.py` `_teams()` sonundaki `sorted(...)`ı kaldır (listeyi doğrudan döndür) ve fixture'ları yeniden
    üret → `test_fixture_content_hash_and_order` "teams ('league_id', 'slug') sırasında değil" FAIL. Geri al, yeniden üret,
    `git diff --stat -- web/fixtures tests/site_web_fixtures.py` boş.
-4. `snapshot.ts`de `RESERVED_LEAGUE_SLUGS` döngüsünü yorum satırına al → vitest "ayrılmış lig slug'ı track-record" (ve
+5. `snapshot.ts`de `RESERVED_LEAGUE_SLUGS` döngüsünü yorum satırına al → vitest "ayrılmış lig slug'ı track-record" (ve
    legal, data) FAIL. Geri al.
-5. `loadSnapshot`ta `if (!path) fail(...)`ı `const path = env.SITE_SNAPSHOT ?? "fixtures/snapshot.fixture.web-full.json";`
+6. `loadSnapshot`ta `if (!path) fail(...)`ı `const path = env.SITE_SNAPSHOT ?? "fixtures/snapshot.fixture.web-full.json";`
    yap → "SITE_SNAPSHOT yoksa varsayılan dosyaya DÜŞMEZ" FAIL (Review Focus 5). Geri al.
 
 - [ ] **Step 12: Tam kapı**
 
-`verify.sh` (log `b2-t2-gate.log`) + WEB-KAPI. Expected: taban PASS; pytest yeni 27 + 14 testle yeşil.
+`verify.sh` (log `b2-t2-gate.log`) + WEB-KAPI. Expected: taban PASS; pytest yeni 29 + 14 testle yeşil.
 
 - [ ] **Step 13: Commit**
 
@@ -2444,7 +2478,7 @@ YOK. Eşik altı tur "Yetersiz kitap", mühürsüz maçın kapanışı "Kapanı�
   export function Num(props: { fe: string; value: number; kind: NumberKind; lang: Lang }): JSX.Element;
   //   → <span data-fe={fe} data-fe-value={String(value)}>{formatNumber(...)}</span>  (tek metin çocuk)
   export function Txt(props: { fe: string; value: string }): JSX.Element;  // <code data-fe data-fe-value>{value}</code>
-  export function Flag(props: { fe: string; value: boolean; children: ReactNode }): JSX.Element; // yalnız öznitelik sınanır
+  export function Flag(props: { fe: string; value: boolean | string; children: ReactNode }): JSX.Element; // yalnız öznitelik
   export function ValueBadge(props: { value: null }): null;  export function AnalysisSlot(props: { value: null }): null;
   export function JsonLdScript(props: { data: JsonLd }): JSX.Element;       // tek <script type="application/ld+json">
   export function Breadcrumbs(props: { crumbs: readonly Crumb[]; label: string }): JSX.Element;
@@ -2515,8 +2549,9 @@ export function Txt(props: { fe: string; value: string }) {
   );
 }
 
-// Değeri metin olarak GÖSTERİLMEYEN alan (ör. mühür durumu): yalnız öznitelik sınanır.
-export function Flag(props: { fe: string; value: boolean; children: ReactNode }) {
+// Değeri metin olarak GÖSTERİLMEYEN alan (mühür durumu, yerelleştirilmiş sonuç adı): yalnız
+// öznitelik sınanır; görünen metin sözlükten ya da kayıttan gelir.
+export function Flag(props: { fe: string; value: boolean | string; children: ReactNode }) {
   return (
     <span data-fe={props.fe} data-fe-value={String(props.value)}>
       {props.children}
@@ -3283,30 +3318,82 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Kademe:** K2 · **Spec:** §6.1, §6.2, §6.3, AK21 (hash "doğrulama değil taahhüt"), H6
 
 **Files:**
-- Create: `web/src/app/[lang]/track-record/page.tsx`, `web/src/components/RecordTable.tsx`
+- Create: `web/src/app/[lang]/track-record/page.tsx`, `web/src/components/RecordTable.tsx`, `web/src/lib/outcome.ts`,
+  `web/src/lib/outcome.test.ts`
 
 **Interfaces:**
 - Consumes: T5 bileşenleri (`Num`, `Txt`, `LocalTime`, `Breadcrumbs`, `JsonLdScript`), T3 sözlük anahtarları `record.*`.
 - Produces: `/{lang}/track-record/` — `data-fe-page="track-record"`; `data-fe` anahtarları: `ledger:-:{rows,last_id,head,
   anchor.file,anchor.rows,anchor.last_id,anchor.head}`, `record:-:published`, dolu sicilde `record:-:summary.{n,mean_clv,
   ci_low,ci_high}` ve girdi başına `entry:<publication_id>:{market,outcome,published_price,closing_fair_price,clv,
-  publication_ledger_id,publication_hash}`, `root:-:content_sha256` (T9'un beklenen kümesi budur).
+  publication_ledger_id,publication_hash}`, `root:-:content_sha256` (T9'un beklenen kümesi budur). `outcome` sözleşmede
+  `home/draw/away`dır; ekranda takım adı ya da "Beraberlik" basılır (`Flag`: yalnız öznitelik sınanır, metin eşlemedir).
 
 - [ ] **Step 1: Kırmızı duman (sayfa yok)**
 
 Run: `test -f web/out/en/track-record/index.html && echo var || echo yok` (T5 derlemesinden sonra)
 Expected: `yok`.
 
-- [ ] **Step 2: Sicil tablosu — `web/src/components/RecordTable.tsx`**
+- [ ] **Step 2: Sonuç etiketi — testi yaz (kırmızı), sonra `web/src/lib/outcome.ts`**
+
+Çıktı tarayıcısı `entry:*:outcome` için yalnız ham özniteliği (`home`/`draw`/`away`) sınar; görünen takım adı bir eşlemedir
+ve doğruluğu burada ölçülür (yanlış takımı basan bir eşleme T9'dan geçerdi).
+
+`web/src/lib/outcome.test.ts`:
+```ts
+import { describe, expect, it } from "vitest";
+import { fullFixture } from "./fixture.ts";
+import { outcomeLabel } from "./outcome.ts";
+
+const match = fullFixture().matches[0];
+
+describe("sonuç etiketi (sicil tablosu)", () => {
+  it("home → ev sahibi, away → deplasman, draw → sözlük etiketi", () => {
+    if (!match) throw new Error("fixture boş");
+    expect(outcomeLabel("home", match, "Beraberlik")).toBe(match.home);
+    expect(outcomeLabel("away", match, "Beraberlik")).toBe(match.away);
+    expect(outcomeLabel("draw", match, "Beraberlik")).toBe("Beraberlik");
+  });
+
+  it("maç anlık görüntüde yoksa ham değer (uydurma ad yok)", () => {
+    expect(outcomeLabel("home", undefined, "Beraberlik")).toBe("home");
+  });
+});
+```
+
+Run: `pnpm -C web exec vitest run src/lib/outcome.test.ts` → FAIL (`./outcome.ts` yüklenemiyor).
+
+`web/src/lib/outcome.ts`:
+```ts
+// Sicil girdisinin sonucu sözleşmede `home`/`draw`/`away`dır (şema enum'u). Ekranda takım adı ya da
+// sözlüğün "Beraberlik"i basılır — hesap değil eşleme. Çıktı tarayıcısı yalnız ham özniteliği sınar;
+// bu eşlemenin doğruluğu BURADA birim testiyle ölçülür (outcome.test.ts).
+import type { Match, RecordEntry } from "./snapshot-types.ts";
+
+export function outcomeLabel(
+  outcome: RecordEntry["outcome"],
+  match: Match | undefined,
+  drawLabel: string,
+): string {
+  if (outcome === "draw") return drawLabel;
+  return match ? match[outcome] : outcome;
+}
+```
+
+Run: `pnpm -C web exec vitest run src/lib/outcome.test.ts` → `2 passed`. Mutasyon: `match[outcome]` → `match.home` →
+"home → ev sahibi, away → deplasman…" FAIL; geri al.
+
+- [ ] **Step 2b: Sicil tablosu — `web/src/components/RecordTable.tsx`**
 
 ```tsx
 // Dolu sicil (spec §6.1): her değer Python'da hesaplanmış, TS yalnız biçimler.
 import type { Lang } from "../../site.config.ts";
 import { t } from "../i18n/dict.ts";
 import { feKey } from "../lib/fe.ts";
+import { outcomeLabel } from "../lib/outcome.ts";
 import type { Snapshot } from "../lib/snapshot-types.ts";
 import styles from "../styles/site.module.css";
-import { Num, Txt } from "./Fe.tsx";
+import { Flag, Num, Txt } from "./Fe.tsx";
 import { LocalTime } from "./LocalTime.tsx";
 
 export function RecordTable({ snapshot, lang }: { snapshot: Snapshot; lang: Lang }) {
@@ -3342,7 +3429,13 @@ export function RecordTable({ snapshot, lang }: { snapshot: Snapshot; lang: Lang
                   <Txt fe={feKey("entry", id, "market")} value={entry.market} />
                 </td>
                 <td>
-                  <Txt fe={feKey("entry", id, "outcome")} value={entry.outcome} />
+                  <Flag fe={feKey("entry", id, "outcome")} value={entry.outcome}>
+                    {outcomeLabel(
+                      entry.outcome,
+                      snapshot.matches.find((match) => match.id === entry.match_id),
+                      t(lang, "match.draw"),
+                    )}
+                  </Flag>
                 </td>
                 <td>
                   <Num fe={feKey("entry", id, "published_price")} value={entry.published_price} kind="price2" lang={lang} />
@@ -3540,12 +3633,13 @@ yap → boş-fixture dumanı `YOK: Temel modelimiz…` ile düşer. Geri al; `gi
 - [ ] **Step 6: Biçim, tip, test, tam kapı**
 
 Run: `pnpm -C web exec biome check --write . && pnpm -C web exec biome ci . && pnpm -C web exec tsc --noEmit && pnpm -C web exec vitest run`
-ve `verify.sh` (`b2-t6-gate.log`). Expected: vitest `50 passed`; taban PASS.
+ve `verify.sh` (`b2-t6-gate.log`). Expected: vitest `52 passed` (50 + sonuç etiketi 2); taban PASS.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add "web/src/app/[lang]/track-record/page.tsx" web/src/components/RecordTable.tsx
+git add "web/src/app/[lang]/track-record/page.tsx" web/src/components/RecordTable.tsx web/src/lib/outcome.ts \
+  web/src/lib/outcome.test.ts
 git commit -m "feat: sicil sayfası — boş durum, defter durumu, doğrulamanın sınırı (B-2 T6)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -4132,7 +4226,7 @@ export default async function LangLayout(props: {
 - [ ] **Step 5: Yeşil + tip + biçim**
 
 Run: `pnpm -C web exec biome check --write . && pnpm -C web exec biome ci . && pnpm -C web exec tsc --noEmit && pnpm -C web exec vitest run`
-Expected: vitest `65 passed` (50 + AgeGate 3 + yasal 12). Yer tutucu taraması artık `content/`i de tarar.
+Expected: vitest `67 passed` (52 + AgeGate 3 + yasal 12). Yer tutucu taraması artık `content/`i de tarar.
 
 - [ ] **Step 6: Derleme dumanı (bayrak AÇIK varyantta bile yasal sayfa noindex)**
 
@@ -4769,7 +4863,7 @@ process.exitCode = main();
 - [ ] **Step 5: Yeşil + tip + biçim**
 
 Run: `pnpm -C web exec biome check --write . && pnpm -C web exec biome ci . && pnpm -C web exec tsc --noEmit && pnpm -C web exec vitest run && uv run pytest -q tests/test_site_web_netlify.py`
-Expected: vitest `78 passed` (65 + pages 2 + html 5 + emit 6); pytest `2 passed`. Yer tutucu taraması artık `scripts/`i de tarar.
+Expected: vitest `80 passed` (67 + pages 2 + html 5 + emit 6); pytest `2 passed`. Yer tutucu taraması artık `scripts/`i de tarar.
 
 - [ ] **Step 6: Derleme dumanı ve `_headers` ölçümü (iki bayrak)**
 
@@ -4981,6 +5075,9 @@ describe("(6) kalıplar", () => {
   it("H4: aksan ve büyük harf katlanır; işaretli olumsuzlama muaf", () => {
     expect(licenseFindings("p", "<p>RESMÎ VERİ kaynağı</p>")).toHaveLength(1);
     expect(licenseFindings("p", "<p>Lisanslı veri</p>")).toHaveLength(1);
+    // Büyük harf Türkçe: `İ` NFKD'de `I` + nokta, `I` küçük harfte `i` — ikisi de `lisansli`ye katlanmalı.
+    expect(licenseFindings("p", "<p>LİSANSLI veri</p>")).toHaveLength(1);
+    expect(licenseFindings("p", "<p>LISANSLI veri</p>")).toHaveLength(1);
     expect(licenseFindings("p", '<p data-fe-allow="license-negation">not licensed</p>')).toEqual([]);
   });
 
@@ -5083,7 +5180,8 @@ const FIELD_KINDS: readonly [string, RegExp, FieldKind][] = [
   ["entry", /^(published_price|closing_fair_price)$/, "price2"],
   ["entry", /^clv$/, "pct2"],
   ["entry", /^publication_ledger_id$/, "int"],
-  ["entry", /^(market|outcome|publication_hash)$/, "text"],
+  ["entry", /^(market|publication_hash)$/, "text"],
+  ["entry", /^outcome$/, "attr"],
   ["root", /^content_sha256$/, "text"],
 ];
 
@@ -5745,7 +5843,7 @@ satır içi betik` · `lisans iddiası kalıbı "licensed" (H4)` · `/en/track-r
 görüntüde kaydı olmayan sayfa` · `sitemap.xml: 0 URL, beklenen 22` ve `_headers: X-Robots-Tag noindex=true, bayrak=true` ·
 `gizli anahtar kalıbı "eyJ" (H5)` · `hreflang dilleri en,x-default` · `tek <h1> yok` · `tabandan eski tarih 2025-12-01 (H1)` ·
 `görünen metinde "undefined"` · `H4 işaret sayısı: kaynak 2 ≠ derlenmiş 1` · `data/snapshot.sha256 dosya baytlarıyla
-eşleşmiyor` · `root:-:content_sha256 özniteliği 84b7… ≠ 21a8…` (bayat derleme). HER satırda son satır `… N bulgu` ile N ≥ 1.
+eşleşmiyor` · `root:-:content_sha256 özniteliği 9fac… ≠ efe3…` (bayat derleme). HER satırda son satır `… N bulgu` ile N ≥ 1.
 Biri 0 bulgu verirse o kontrol ISIRMIYOR — görev bitmemiştir.
 
 - [ ] **Step 8: Kaynak tarafı mutasyonları (birim + CLI)**
@@ -5754,15 +5852,16 @@ Biri 0 bulgu verirse o kontrol ISIRMIYOR — görev bitmemiştir.
    "metin ≠ format(değer) kırmızı" FAIL ve Step 7'nin "görünen metin" mutasyonu 0 bulgu verir. Geri al.
 2. `expect.ts` `matchFields`de `if (match.h2h[round] === null) continue;` satırını kaldır → birim "eşik altı tur alan
    üretmez" FAIL ve temiz derlemede `çözülemeyen alan …h2h.opening…` bulguları. Geri al.
-3. `checks.ts` `fold()`dan `.replace(/ı/g, "i")`yi kaldır → "H4: … Lisanslı veri" FAIL (Türkçe büyük/küçük harf, Review
-   Focus 1). Geri al.
+3. `checks.ts` `fold()`dan `.replace(/ı/g, "i")`yi kaldır → "H4: aksan ve büyük harf katlanır…" FAIL — ısıran vaka
+   BÜYÜK harftir: `LİSANSLI`/`LISANSLI` `lisansli`ye katlanır, kalıp ise `lisanslı` kalır (küçük harf `Lisanslı` iki
+   tarafta aynı katlandığı için yeşil kalırdı; kazımada ölçüldü). Geri al.
 4. `html.ts` `decodeEntities`ten `.replace(/&amp;/g, "&")` satırını kaldır → `html.test.ts` "React'in kaçışlarını çözer"
    FAIL (Review Focus 1: `&` taşıyan bir `Txt` alanı sessizce kırmızıya düşerdi). Geri al; `git diff --stat -- web/scripts` boş.
 
 - [ ] **Step 9: Biçim, tip, test, tam kapı**
 
 Run: `pnpm -C web exec biome check --write . && pnpm -C web exec biome ci . && pnpm -C web exec tsc --noEmit && pnpm -C web exec vitest run`
-ve `verify.sh` (`b2-t9-gate.log`). Expected: vitest `96 passed` (78 + 18); taban PASS.
+ve `verify.sh` (`b2-t9-gate.log`). Expected: vitest `98 passed` (80 + 18); taban PASS.
 
 - [ ] **Step 10: Commit**
 
@@ -5776,54 +5875,74 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Site kapısının Node adımları `verify.sh` / `ci.yml` / `site.yml`e bağlanır (B-1 birleştikten SONRA)
+### Task 10: Site kapısı `verify.sh` / `ci.yml`e bağlanır; `site.yml`in yayın kapıları (B-1 birleştikten SONRA)
 
-**Kademe:** K2 · **Spec:** §12.1 (`site-kurulum`…`site-uyum`, `pnpm ya da Node yoksa FAIL`, uçtan uca JSON'un `run-id`
-denetimi, `CI=true` iken FAIL), §12.2 ("B-2 son görevi: `actions/setup-node` (sürüm `web/.nvmrc`) + `pnpm/action-setup`
-(`packageManager`) ve Node adımları"), §12.3 (tek yazar), §15 ("§4.4/3'ün JSON'uyla `next build` + tarayıcı"), §11 (`site.yml`
-adımları) · **Ön koşul:** B-1'in dalga sonu birleştirmesi `main`de (`site-db` adımı, `FE_VERIFY_RUN_ID`, `verify-snapshot`,
-`site.yml`).
+**Kademe:** K2 (kapı entegrasyonu) + K1 süreci `site.yml` yayın kapıları için (spec §14 "`site.yml` adım secret sınırı" K1;
+kaybolan-slug ve yayın sonrası kontrol yayını durduran kapılardır) · **Spec:** §12.1 (`site-kurulum`…`site-uyum`, `pnpm ya da
+Node yoksa FAIL`, uçtan uca JSON'un `run-id` denetimi, `CI=true` iken FAIL), §12.2 ("B-2 son görevi: `actions/setup-node`
+(sürüm `web/.nvmrc`) + `pnpm/action-setup` (`packageManager`) ve Node adımları"), §12.3 (tek yazar), §11 (kaybolan-slug
+kontrolü, yayın, yayın sonrası kontrol), §6.4/3f, AK20 (b), AK22, B9 · **Controller kararı (inceleme I3):** kaybolan-slug
+ve yayın sonrası kontrolün sahibi BU görevdir; biri kırmızıysa yayın yapılmaz. · **Ön koşul:** B-1 Task 9 (dalga sonu)
+`main`de — `site-db` adımı, `FE_VERIFY_RUN_ID`, `verify-snapshot` (B-1 Task 4), `site.yml` (B-1 Task 8).
 
 **Files:**
-- Create: `scripts/site_gate.sh` (çalıştırılabilir), `tests/test_site_web_gate.py`
-- Modify: `verify.sh` (B-1'in `site-db` adımından SONRA, `zincir` bloğundan ÖNCE bir blok), `.github/workflows/ci.yml`
-  (`uv sync` ile `./verify.sh` arasına iki adım + adım listesi yorumu), `.github/workflows/site.yml` (YALNIZ Node adımları,
-  B-2 arayüzüyle uyuşmuyorsa), `tests/site_web_fixtures.py` (YALNIZ `PATH_ID_LENGTH`, `verify-snapshot` gerektirirse)
+- Create: `scripts/site_gate.sh` (çalıştırılabilir), `scripts/site_publish.py`, `config/site_redirects.yaml`,
+  `tests/test_site_web_gate.py`, `tests/test_site_web_publish.py`
+- Modify: `verify.sh` (tek blok: B-1'in `site-db` `if/elif/else … fi` bloğunun KAPANIŞ `fi` satırının hemen ARDINA — bu,
+  `zincir` bloğundan öncedir), `.github/workflows/ci.yml` (`uv sync` adımının hemen ardına iki adım + yorum listesi),
+  `.github/workflows/site.yml` (`workflow_dispatch` girdisi `first_publish`; çıktı tarayıcısından sonra kaybolan-slug adımı;
+  yayın komutuna `--no-build`; yayından sonra kontrol adımı; Node adımları B-2 arayüzüyle uyuşmuyorsa onlar)
 
 **Interfaces:**
-- Consumes: B-1 — `verify.sh`te `step "site-db"` ve `export FE_VERIFY_RUN_ID`; `${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e/
-  {snapshot.json,run-id}`; `uv run python -m football_edge.site verify-snapshot <dosya>` (exit 0 = geçerli);
-  `.github/workflows/site.yml`. B-2 T1–T9'un bütün komutları.
+- Consumes: B-1 — `verify.sh`te girintili `step "site-db"` (`if [ -n "${SITE_TEST_DATABASE_URL:-}" ] … fi`) ve
+  `export FE_VERIFY_RUN_ID`, `export SITE_E2E_DIR`; `$SITE_E2E_DIR/{snapshot.json,snapshot.sha256,run-id}` (`run-id` satır
+  sonu taşımaz; adım başında üç dosya boşaltılır); `uv run python -m football_edge.site verify-snapshot <dosya>
+  [--sha256 <dosya>]` (exit 0 / 24); `site.yml`in adımları (dışa aktarım `web/.snapshot/`e; yayın
+  `npx --yes netlify-cli@<T0> deploy --prod --dir web/out --config web/netlify.toml`) ve `tests/test_site_workflow.py`
+  (secret yalnız dışa aktarım ve yayın adımlarının `env`inde). B-2 T1–T9'un komutları; T8'in `out/data/{slugs.json,
+  snapshot.sha256}` ve `out/_headers` biçimleri.
 - Produces: `scripts/site_gate.sh {toolchain|e2e|install|build|check}`; `verify.sh` adımları `site-kurulum`, `site-tip`,
   `site-lint`, `site-test`, `site-derleme`, `site-uyum` (+ CI'da uçtan uca JSON yoksa `site-e2e` FAIL); yerel SKIP satırı
   `SKIP: site-derleme/e2e (…)`.
+  ```python
+  # scripts/site_publish.py (site.yml koşar; ağ yalnız get/head üzerinden, testte sahte)
+  def site_url(config_text: str) -> str                          # web/site.config.ts SITE_URL (tek kaynak)
+  def load_redirects(text: str) -> Redirects                      # config/site_redirects.yaml: {gone: [...], renamed: {...}}
+  def vanished_findings(previous: str, current: str, redirects: Redirects) -> list[str]
+  def live_findings(base: str, out: Path, export: Path, get: Get, head: Head) -> list[str]
+  def main(argv=None, get=_get, head=_head) -> int                # `slugs [--first-publish]` | `live`; bulgu varsa 1
+  ```
+  `config/site_redirects.yaml` biçimi: `gone:` (pasifleşen lig slug'ları; altındaki takımlar da muaf) ve `renamed:`
+  (`"<lig>/<eski takım>": "<lig>/<yeni takım>"`, hedef yeni derlemede olmalı); başka anahtar reddedilir.
 
 - [ ] **Step 1: B-1'i dala al ve arayüzü ölç**
 
 Run:
 ```bash
 git merge --no-ff main -m "Merge main: B-1 dalga sonu (B-2 T10 ön koşulu)"
-grep -n 'step "site-db"' verify.sh; grep -n 'FE_VERIFY_RUN_ID' verify.sh
-test -f .github/workflows/site.yml && echo "site.yml var"
+grep -nE '^\s*step "site-db"' verify.sh; grep -nE 'export (FE_VERIFY_RUN_ID|SITE_E2E_DIR)' verify.sh
+grep -n "deploy --prod" .github/workflows/site.yml
 uv run python -m football_edge.site verify-snapshot web/fixtures/snapshot.fixture.web-full.json; echo "full exit=$?"
 uv run python -m football_edge.site verify-snapshot web/fixtures/snapshot.fixture.web-empty.json; echo "empty exit=$?"
 ```
-Expected: `site-db` adımı ve `FE_VERIFY_RUN_ID` (dışa aktarılmış) var; `site.yml var`; iki fixture `exit=0`. Arayüzden biri
-YOKSA DUR (B-1 ile arayüz ihlali; controller'a eskale et — B-2 B-1'in adımını kendisi YAZMAZ). `verify-snapshot` bir B-2
-fixture'ını reddederse nedeni oku: (a) `path_id` uzunluğu → `tests/site_web_fixtures.py`de `PATH_ID_LENGTH`i B-1'in
-`slugs.py` sabitine eşitle, `uv run python -m tests.site_web_fixtures` ile yeniden üret, yeni `content_sha256`ları rapora yaz,
-`pnpm -C web exec vitest run` ve `uv run pytest -q tests/test_site_web_contract.py` yeşil (rota testleri `path_id`yi
-fixture'dan okur); (b) başka bir biçim kuralı → üreticiyi B-1'in kuralına uydur; kural spec'le çelişiyorsa DUR, eskale et.
+Expected: iki girintili `step "site-db"` satırı (if ve elif dalları), iki `export`; yayın satırı; iki fixture `anlık görüntü
+geçerli`, `exit=0` (T2 değerleri B-1 Task 1'in doğrulayıcısıyla zaten sınadı). Arayüzden biri YOKSA DUR (B-1 ile arayüz
+ihlali; controller'a eskale et — B-2 B-1'in adımını kendisi YAZMAZ). Bir fixture exit 24 verirse `ANLIK GÖRÜNTÜ İHLALİ`
+satırını oku: üretici (`tests/site_web_fixtures.py`) B-1 Task 4'ün bir değer kuralına takılıyor demektir — üreticiyi kurala
+uydur, yeniden üret, yeni `content_sha256`ları ve T9 Step 7'deki bayat-derleme bulgusunun hash önekini rapora yaz; kural
+spec'le çelişiyorsa DUR, eskale et.
 
-- [ ] **Step 2: Başarısız testi yaz — `tests/test_site_web_gate.py`**
+- [ ] **Step 2: Başarısız testleri yaz**
 
+`tests/test_site_web_gate.py`:
 ```python
 """Site kapısının Node adımları `verify.sh` / `ci.yml` / `site.yml`e doğru bağlı (spec §12.1–§12.3).
 
 Adımlar B-1'in `site-db` adımından SONRA koşar (uçtan uca anlık görüntüyü o yazar); CI
 Node ve pnpm'i `web/.nvmrc` / `packageManager`dan kurar; uçtan uca anlık görüntü yalnız bu
 koşunundur (bayat dosyayla PASS yok, CI'da yokluğu FAIL); `site.yml` derlemeyi `_headers`
-üreten `run build` ile yapar ve yayından önce çıktı tarayıcısını koşar.
+üreten `run build` ile yapar, yayından önce çıktı tarayıcısını ve kaybolan-slug kontrolünü,
+yayından sonra "yayımlanan = doğrulanan" kontrolünü koşar; Netlify CLI derlemez (`--no-build`).
 """
 
 from __future__ import annotations
@@ -5846,7 +5965,8 @@ NODE_STEPS = ("site-kurulum", "site-tip", "site-lint", "site-test", "site-derlem
 
 
 def _step_names() -> list[str]:
-    return re.findall(r'^step "([^"]+)"', VERIFY.read_text(encoding="utf-8"), flags=re.M)
+    # B-1 `site-db`yi `if/elif` içinde girintili yazar: girinti kabul edilir.
+    return re.findall(r'^\s*step "([^"]+)"', VERIFY.read_text(encoding="utf-8"), flags=re.M)
 
 
 def _steps(path: Path) -> list[dict[str, Any]]:
@@ -5865,6 +5985,14 @@ def test_node_steps_run_in_order_after_site_db() -> None:
     names = _step_names()
     positions = [names.index(name) for name in ("site-db", *NODE_STEPS)]
     assert positions == sorted(positions), f"sıra yanlış: {names}"
+
+
+def test_the_site_block_starts_after_the_site_db_block_closes() -> None:
+    """Sıra testi `site-db`nin İLK geçişini görür; blok `if … fi` kapandıktan SONRA başlar."""
+    text = VERIFY.read_text(encoding="utf-8")
+    closing = re.compile(r"^fi$", flags=re.M).search(text, text.rindex('step "site-db"'))
+    assert closing is not None, "site-db bloğunun `fi`si yok"
+    assert text.index('SITE_BUILDS="$(mktemp -d') > closing.start()
 
 
 def test_builds_go_to_a_fresh_directory_per_run_and_nothing_is_deleted() -> None:
@@ -5983,14 +6111,240 @@ def test_site_workflow_builds_with_headers_and_checks_before_deploy() -> None:
     )
 
 
+def test_site_workflow_runs_both_publish_gates_around_the_deploy() -> None:
+    """§11, §6.4/3f: kaybolan-slug yayından ÖNCE (kırmızıysa yayın yok), kontrol yayından SONRA."""
+    steps = _steps(SITE)
+    check = _index(steps, "web/scripts/check-out.ts")
+    slugs = _index(steps, "scripts/site_publish.py slugs")
+    deploy = _index(steps, "deploy --prod")
+    live = _index(steps, "scripts/site_publish.py live")
+    assert check < slugs < deploy < live
+    assert "--first-publish" in steps[slugs]["run"]
+    assert set(steps[slugs].get("env", {})) == {"FIRST_PUBLISH"}
+
+
+def test_first_publish_is_an_explicit_input_that_defaults_to_off() -> None:
+    document = yaml.safe_load(SITE.read_text(encoding="utf-8"))
+    triggers = document.get("on") or document.get(True)
+    first = triggers["workflow_dispatch"]["inputs"]["first_publish"]
+    assert (first["type"], first["default"]) == ("boolean", False)
+
+
+def test_netlify_cli_never_runs_the_refusing_build_command() -> None:
+    """netlify-cli v21+ `deploy` yapılandırmadaki derlemeyi koşar; bizimki bilerek düşer."""
+    steps = _steps(SITE)
+    assert "--no-build" in steps[_index(steps, "deploy --prod")]["run"]
+
+
 def test_site_workflow_never_turns_indexing_on() -> None:
     assert "SITE_INDEXABLE" not in SITE.read_text(encoding="utf-8"), "AK14 onayı yok"
 ```
 
+`tests/test_site_web_publish.py`:
+```python
+"""`scripts/site_publish.py`: yayından önce kaybolan-slug, yayından sonra yayımlanan = doğrulanan.
+
+Ağ yoktur: `get`/`head` sahtedir. Dosyalar geçici dizinde kurulur (spec §11, §6.4/3f, AK20 b).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _load() -> ModuleType:
+    """`scripts/` bir paket değil: workflow'un koştuğu dosya kendi yolundan yüklenir."""
+    spec = importlib.util.spec_from_file_location("site_publish", REPO / "scripts/site_publish.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclass modülünü sys.modules'ta arar
+    spec.loader.exec_module(module)
+    return module
+
+
+site_publish = _load()
+BASE = "https://site.example"
+CSP = "default-src 'self'; script-src 'self' 'sha256-A='"
+HEX = "a" * 64
+
+
+def _slugs(leagues: list[str], teams: list[str]) -> str:
+    return json.dumps({"version": 1, "leagues": leagues, "teams": teams})
+
+
+PREVIOUS = _slugs(["alpha", "beta"], ["alpha/kuzey", "alpha/guney", "beta/delta"])
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    (tmp_path / "out/data").mkdir(parents=True)
+    (tmp_path / "export").mkdir()
+    (tmp_path / "site.config.ts").write_text(f'export const SITE_URL = "{BASE}";\n', "utf-8")
+    (tmp_path / "redirects.yaml").write_text("gone: []\nrenamed: {}\n", encoding="utf-8")
+    (tmp_path / "out/data/slugs.json").write_text(PREVIOUS, encoding="utf-8")
+    (tmp_path / "out/data/snapshot.sha256").write_text(f"{HEX}\n", encoding="utf-8")
+    (tmp_path / "export/snapshot.sha256").write_text(f"{HEX}  snapshot.json\n", encoding="utf-8")
+    headers = f"/*\n  X-Robots-Tag: noindex\n\n/en/\n  Content-Security-Policy: {CSP}\n"
+    (tmp_path / "out/_headers").write_text(headers, encoding="utf-8")
+    return tmp_path
+
+
+def _run(tree: Path, *args: str, get: object, head: object = None) -> int:
+    paths = ["--config", str(tree / "site.config.ts"), "--redirects", str(tree / "redirects.yaml")]
+    paths += ["--out", str(tree / "out"), "--export", str(tree / "export")]
+    result: int = site_publish.main([*args, *paths], get=get, head=head)
+    return result
+
+
+def _serving(slugs: str | None, status: int = 200) -> object:
+    return lambda url: (status, slugs or "") if url == f"{BASE}/data/slugs.json" else (404, "")
+
+
+def test_site_url_is_read_from_the_single_config() -> None:
+    assert site_publish.site_url('export const SITE_URL = "https://x.test/";\n') == "https://x.test"
+
+
+def test_unchanged_slugs_pass(tree: Path) -> None:
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 0
+
+
+def test_a_vanished_team_without_acknowledgement_is_red(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    current = _slugs(["alpha", "beta"], ["alpha/kuzey", "beta/delta"])
+    (tree / "out/data/slugs.json").write_text(current, encoding="utf-8")
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 1
+    assert "kaybolan takım slug'ı kabul edilmemiş: alpha/guney" in capsys.readouterr().out
+
+
+def test_a_rename_passes_only_when_its_target_exists(tree: Path) -> None:
+    current = _slugs(["alpha", "beta"], ["alpha/kuzey", "alpha/guney-yeni", "beta/delta"])
+    (tree / "out/data/slugs.json").write_text(current, encoding="utf-8")
+    redirects = tree / "redirects.yaml"
+    redirects.write_text('gone: []\nrenamed: {"alpha/guney": "alpha/guney-yeni"}\n', "utf-8")
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 0
+    redirects.write_text('gone: []\nrenamed: {"alpha/guney": "alpha/yok"}\n', "utf-8")
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 1
+
+
+def test_a_vanished_league_is_red_even_without_teams(tree: Path) -> None:
+    previous = _slugs(["alpha", "beta", "gamma"], ["alpha/kuzey", "alpha/guney", "beta/delta"])
+    assert _run(tree, "slugs", get=_serving(previous)) == 1
+    (tree / "redirects.yaml").write_text("gone: [gamma]\nrenamed: {}\n", encoding="utf-8")
+    assert _run(tree, "slugs", get=_serving(previous)) == 0
+
+
+def test_a_gone_league_covers_its_teams(tree: Path) -> None:
+    current = _slugs(["alpha"], ["alpha/kuzey", "alpha/guney"])
+    (tree / "out/data/slugs.json").write_text(current, encoding="utf-8")
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 1
+    (tree / "redirects.yaml").write_text("gone: [beta]\nrenamed: {}\n", encoding="utf-8")
+    assert _run(tree, "slugs", get=_serving(PREVIOUS)) == 0
+
+
+@pytest.mark.parametrize("status", [0, 404, 500])
+def test_an_unreadable_previous_publication_is_red(tree: Path, status: int) -> None:
+    assert _run(tree, "slugs", get=_serving(None, status)) == 1
+
+
+def test_first_publish_passes_only_when_there_is_no_previous_publication(tree: Path) -> None:
+    assert _run(tree, "slugs", "--first-publish", get=_serving(None, 404)) == 0
+    assert _run(tree, "slugs", "--first-publish", get=_serving(PREVIOUS)) == 1
+
+
+def test_first_publish_is_red_when_the_site_is_unreachable(
+    tree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Spec §11/AK20 b: erişilemeyen site kırmızıdır — ilk yayında da."""
+    assert _run(tree, "slugs", "--first-publish", get=_serving(None, 0)) == 1
+    assert "site erişilemiyor" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["slugs", "live"])
+def test_a_placeholder_domain_is_red_without_touching_the_network(tree: Path, command: str) -> None:
+    config = 'export const SITE_URL = "https://example.invalid";\n'
+    (tree / "site.config.ts").write_text(config, encoding="utf-8")
+
+    def offline(url: str) -> tuple[int, str]:
+        raise AssertionError(f"yer tutucu adresle ağa çıkıldı: {url}")
+
+    args = ("--first-publish",) if command == "slugs" else ()
+    assert _run(tree, command, *args, get=offline, head=offline) == 1
+
+
+def test_the_committed_site_config_is_still_a_placeholder() -> None:
+    """Bugün AK4 kararı yok: depodaki SITE_URL iki kapıyı da kırmızı tutar (bilerek)."""
+    base = site_publish.site_url((REPO / "web/site.config.ts").read_text("utf-8"))
+    assert site_publish.placeholder_findings(base) != []
+
+
+def test_the_redirects_file_shape_is_strict() -> None:
+    with pytest.raises(ValueError, match="yalnız `gone` ve `renamed`"):
+        site_publish.load_redirects("gone: []\nrenamed: {}\nextra: 1\n")
+
+
+def test_the_committed_redirects_file_loads() -> None:
+    loaded = site_publish.load_redirects((REPO / "config/site_redirects.yaml").read_text("utf-8"))
+    assert loaded.gone == frozenset() and dict(loaded.renamed) == {}
+
+
+def _live(sha: str = HEX, csp: str = CSP, robots: str | None = "noindex") -> tuple[object, object]:
+    def get(url: str) -> tuple[int, str]:
+        return (200, f"{sha}\n") if url == f"{BASE}/data/snapshot.sha256" else (404, "")
+
+    def head(url: str) -> tuple[int, Mapping[str, str]]:
+        headers = {"Content-Security-Policy": csp}
+        if robots is not None:
+            headers["X-Robots-Tag"] = robots
+        return (200, headers) if url == f"{BASE}/en/" else (404, {})
+
+    return get, head
+
+
+def test_published_equals_verified_passes(tree: Path) -> None:
+    get, head = _live()
+    assert _run(tree, "live", get=get, head=head) == 0
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"sha": "b" * 64}, "canlı /data/snapshot.sha256 derlenmiş olanla eşit değil"),
+        ({"csp": "default-src *"}, "canlı CSP derlenmiş _headers'la aynı değil"),
+        ({"robots": None}, "canlıda X-Robots-Tag: noindex yok"),
+    ],
+)
+def test_a_live_mismatch_is_red(
+    tree: Path, capsys: pytest.CaptureFixture[str], change: dict[str, object], message: str
+) -> None:
+    get, head = _live(**change)  # type: ignore[arg-type]
+    assert _run(tree, "live", get=get, head=head) == 1
+    assert message in capsys.readouterr().out
+
+
+def test_the_built_hash_must_match_the_export(tree: Path) -> None:
+    (tree / "export/snapshot.sha256").write_text(f"{'c' * 64}  snapshot.json\n", "utf-8")
+    get, head = _live()
+    assert _run(tree, "live", get=get, head=head) == 1
+```
+
+İki dosya AYRI koşulur — birlikte koşulunca yayın dosyasının toplama hatası oturumu keser ve gate dosyasının
+kırmızıları hiç görünmez:
+Run: `uv run pytest -q tests/test_site_web_publish.py`
+Expected: `ERROR … FileNotFoundError: … scripts/site_publish.py` (toplama hatası, `Interrupted: 1 error during collection`).
 Run: `uv run pytest -q tests/test_site_web_gate.py`
-Expected: FAIL — `site-kurulum` adım listesinde yok (`ValueError: 'site-kurulum' is not in list`), `pnpm/action-setup` adımı
-yok, `scripts/site_gate.sh` yok (`FileNotFoundError`/`PermissionError`). `site.yml` testleri B-1'in komutlarına göre geçebilir
-ya da düşebilir — düşerse Step 6'da hizalanır.
+Expected: FAIL (10+) — `ValueError: 'site-kurulum' is not in list`, `pnpm/action-setup` yalnız `site.yml`de (CI testi),
+`scripts/site_gate.sh` yok (`FileNotFoundError`), `site.yml`de `site_publish.py slugs` adımı, `first_publish` girdisi ve
+`--no-build` yok.
 
 - [ ] **Step 3: `scripts/site_gate.sh`**
 
@@ -6037,7 +6391,7 @@ variants() {
 # koşusunun `site-db` adımının yazdığı dosya (`run-id` = FE_VERIFY_RUN_ID) kullanılır.
 # Tek satır basar: `USE <yol>` · `SKIP <neden>` (yerel) · `FAIL <neden>` (CI=true, exit 1).
 e2e() {
-  local dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e"
+  local dir="${SITE_E2E_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e}"
   if [ -n "${FE_VERIFY_RUN_ID:-}" ] && [ -f "$dir/snapshot.json" ] \
     && [ "$(cat "$dir/run-id" 2>/dev/null)" = "$FE_VERIFY_RUN_ID" ]; then
     echo "USE $dir/snapshot.json"
@@ -6051,10 +6405,14 @@ e2e() {
 
 build() {
   : "${SITE_BUILDS:?SITE_BUILDS tanımlı değil — verify.sh başta mktemp ile kurar}"
-  local name snapshot flag
+  local name snapshot flag sha
   while IFS='|' read -r name snapshot flag; do
     echo "--- $name: verify-snapshot"
-    (cd "$REPO" && uv run python -m football_edge.site verify-snapshot "$snapshot") \
+    # Dışa aktarımın `snapshot.sha256`i yanındaysa (uçtan uca) dosya baytları da sınanır.
+    sha="$(dirname "$snapshot")/snapshot.sha256"
+    set -- "$snapshot"
+    if [ -s "$sha" ]; then set -- "$snapshot" --sha256 "$sha"; fi
+    (cd "$REPO" && uv run python -m football_edge.site verify-snapshot "$@") \
       || fail "anlık görüntü doğrulanmadı: $name"
     echo "--- $name: derleme (SITE_INDEXABLE=${flag:-yok})"
     SITE_SNAPSHOT="$snapshot" SITE_INDEXABLE="$flag" pnpm -C "$WEB" run build \
@@ -6092,7 +6450,231 @@ esac
 
 Run: `chmod +x scripts/site_gate.sh`
 
-- [ ] **Step 4: `verify.sh` — blok, B-1'in `site-db` adımından hemen SONRA, `if [ -n "${DATABASE_URL:-}" ]` satırından ÖNCE**
+- [ ] **Step 4: Yayın kapıları — `scripts/site_publish.py` ve `config/site_redirects.yaml`**
+
+`scripts/site_publish.py`:
+```python
+#!/usr/bin/env python3
+"""Yayının iki kapısı (spec §11, §6.4/3f, AK20 b): `site.yml` koşar; biri kırmızıysa yayın yok.
+
+`slugs` (yayından ÖNCE): önceki yayının `/data/slugs.json`ı yeni derlemenin
+`web/out/data/slugs.json`ıyla karşılaştırılır. Kaybolan her lig slug'ı `config/site_redirects.yaml`
+`gone:` listesinde, kaybolan her takım slug'ı `renamed:` eşlemesinde (hedefi yeni derlemede var) ya
+da ligi `gone:`da olmalı. Önceki yayın okunamazsa kırmızı; yalnız açık `--first-publish` ile ve
+site GERÇEK bir HTTP yanıtıyla önceki yayının olmadığını söylediğinde (200 dışı, ör. 404) geçer.
+Site erişilemezse (bağlantı yok, HTTP 0) `--first-publish` da kırmızıdır (spec §11, AK20 b).
+
+`live` (yayından SONRA): canlı `/data/snapshot.sha256` indirilir; hex alanı derlenmiş
+`web/out/data/snapshot.sha256` ve dışa aktarımın `web/.snapshot/snapshot.sha256` hex alanıyla eşit
+olmalı (yayımlanan = doğrulanan). Örnek sayfaların HEAD başlıkları `web/out/_headers`le aynı
+olmalı: sayfanın CSP'si birebir, bayrak kapalıyken `X-Robots-Tag: noindex`.
+
+Taban adres `web/site.config.ts` `SITE_URL`dir (tek kaynak). Ana makine `.invalid` ile bitiyorsa
+(yer tutucu, AK4 kararı yok) iki komut da ağa çıkmadan kırmızıdır.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+import yaml
+
+REPO = Path(__file__).resolve().parent.parent
+CONFIG = REPO / "web/site.config.ts"
+REDIRECTS = REPO / "config/site_redirects.yaml"
+OUT = REPO / "web/out"
+EXPORT = REPO / "web/.snapshot"
+TIMEOUT = 20.0
+
+Get = Callable[[str], tuple[int, str]]
+Head = Callable[[str], tuple[int, Mapping[str, str]]]
+
+
+@dataclass(frozen=True)
+class Redirects:
+    gone: frozenset[str]
+    renamed: Mapping[str, str]
+
+
+def site_url(config_text: str) -> str:
+    found = re.search(r'^export const SITE_URL = "([^"]+)";$', config_text, flags=re.M)
+    if found is None:
+        raise ValueError("web/site.config.ts SITE_URL taşımıyor")
+    return found[1].rstrip("/")
+
+
+def placeholder_findings(base: str) -> list[str]:
+    host = httpx.URL(base).host
+    if host == "" or host.endswith(".invalid"):
+        return [f"SITE_URL yer tutucu ({base}) — alan adı kararı (AK4) olmadan yayın doğrulanamaz"]
+    return []
+
+
+def load_redirects(text: str) -> Redirects:
+    document = yaml.safe_load(text) or {}
+    if not isinstance(document, dict) or set(document) != {"gone", "renamed"}:
+        raise ValueError("config/site_redirects.yaml yalnız `gone` ve `renamed` taşır")
+    gone, renamed = document["gone"], document["renamed"]
+    if not isinstance(gone, list) or not isinstance(renamed, dict):
+        raise ValueError("`gone` liste, `renamed` eşleme olmalı")
+    return Redirects(frozenset(map(str, gone)), {str(k): str(v) for k, v in renamed.items()})
+
+
+def slug_index(text: str) -> tuple[set[str], set[str]]:
+    document: Any = json.loads(text)
+    if not isinstance(document, dict) or document.get("version") != 1:
+        raise ValueError("slugs.json sürüm 1 değil")
+    return set(document["leagues"]), set(document["teams"])
+
+
+def vanished_findings(previous: str, current: str, redirects: Redirects) -> list[str]:
+    old_leagues, old_teams = slug_index(previous)
+    new_leagues, new_teams = slug_index(current)
+    findings = [
+        f"kaybolan lig slug'ı kabul edilmemiş: {league} (`gone:`a yazılmalı)"
+        for league in sorted(old_leagues - new_leagues)
+        if league not in redirects.gone
+    ]
+    for team in sorted(old_teams - new_teams):
+        if team.split("/", 1)[0] in redirects.gone:
+            continue
+        target = redirects.renamed.get(team)
+        if target is None:
+            findings.append(f"kaybolan takım slug'ı kabul edilmemiş: {team}")
+        elif target not in new_teams:
+            findings.append(f"yeniden adlandırma hedefi yeni derlemede yok: {team} → {target}")
+    return findings
+
+
+def first_token(text: str) -> str:
+    return (text.split() or [""])[0]
+
+
+def parse_headers(text: str) -> dict[str, dict[str, str]]:
+    blocks: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            current = blocks.setdefault(line.strip(), {})
+        elif current is not None:
+            name, _, value = line.strip().partition(":")
+            current[name.strip().lower()] = value.strip()
+    return blocks
+
+
+def samples(blocks: Mapping[str, Mapping[str, str]]) -> list[str]:
+    pages = sorted(path for path in blocks if path != "/*")
+    return sorted({pages[0], pages[len(pages) // 2], pages[-1]}) if pages else []
+
+
+def live_findings(base: str, out: Path, export: Path, get: Get, head: Head) -> list[str]:
+    built = first_token((out / "data/snapshot.sha256").read_text(encoding="utf-8"))
+    exported = first_token((export / "snapshot.sha256").read_text(encoding="utf-8"))
+    findings = [] if built == exported else ["derlenmiş snapshot.sha256 dışa aktarımla aynı değil"]
+    status, body = get(f"{base}/data/snapshot.sha256")
+    if status != 200:
+        findings.append(f"canlı /data/snapshot.sha256 okunamadı (HTTP {status})")
+    elif first_token(body) != built:
+        findings.append("canlı /data/snapshot.sha256 derlenmiş olanla eşit değil")
+    blocks = parse_headers((out / "_headers").read_text(encoding="utf-8"))
+    noindex = blocks.get("/*", {}).get("x-robots-tag") == "noindex"
+    for path in samples(blocks):
+        status, headers = head(f"{base}{path}")
+        live = {name.lower(): value for name, value in headers.items()}
+        if status != 200:
+            findings.append(f"{path}: HTTP {status}")
+            continue
+        if live.get("content-security-policy") != blocks[path].get("content-security-policy"):
+            findings.append(f"{path}: canlı CSP derlenmiş _headers'la aynı değil")
+        if noindex and live.get("x-robots-tag") != "noindex":
+            findings.append(f"{path}: canlıda X-Robots-Tag: noindex yok")
+    return findings
+
+
+def _get(url: str) -> tuple[int, str]:
+    try:
+        response = httpx.get(url, timeout=TIMEOUT, follow_redirects=True)
+    except httpx.HTTPError:
+        return 0, ""
+    return response.status_code, response.text
+
+
+def _head(url: str) -> tuple[int, Mapping[str, str]]:
+    try:
+        response = httpx.head(url, timeout=TIMEOUT)
+    except httpx.HTTPError:
+        return 0, {}
+    return response.status_code, dict(response.headers)
+
+
+def _slugs(args: argparse.Namespace, base: str, get: Get) -> list[str]:
+    status, body = get(f"{base}/data/slugs.json")
+    if args.first_publish:
+        if status == 0:
+            return ["site erişilemiyor (HTTP 0) — ilk yayın da erişilebilir bir site ister"]
+        if status == 200:
+            return ["önceki yayın var (/data/slugs.json HTTP 200) — --first-publish yanlış"]
+        sys.stdout.write(f"İLK YAYIN: kaybolan-slug karşılaştırması yapılmadı (HTTP {status})\n")
+        return []
+    if status != 200:
+        return [f"önceki yayının /data/slugs.json'ı okunamadı (HTTP {status}) — ilk yayın mı?"]
+    current = (args.out / "data/slugs.json").read_text(encoding="utf-8")
+    redirects = load_redirects(args.redirects.read_text(encoding="utf-8"))
+    return vanished_findings(body, current, redirects)
+
+
+def main(argv: Sequence[str] | None = None, get: Get = _get, head: Head = _head) -> int:
+    parser = argparse.ArgumentParser(prog="site_publish")
+    parser.add_argument("command", choices=("slugs", "live"))
+    parser.add_argument("--first-publish", action="store_true")
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    parser.add_argument("--redirects", type=Path, default=REDIRECTS)
+    parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--export", type=Path, default=EXPORT)
+    args = parser.parse_args(argv)
+    base = site_url(args.config.read_text(encoding="utf-8"))
+    findings = placeholder_findings(base)
+    if not findings:
+        if args.command == "slugs":
+            findings = _slugs(args, base, get)
+        else:
+            findings = live_findings(base, args.out, args.export, get, head)
+    for finding in findings:
+        sys.stdout.write(f"YAYIN KAPISI: {finding}\n")
+    sys.stdout.write(f"site_publish {args.command}: {len(findings)} bulgu\n")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+`config/site_redirects.yaml`:
+```yaml
+# Kaybolan slug kabulleri (spec §8.1, AK20 b, AK22) — ELLE commit'lenir; `site.yml` yayından önce
+# `scripts/site_publish.py slugs` ile okur. Önceki yayında olup yeni derlemede olmayan her slug
+# burada kabul edilmiş olmalıdır; değilse yayın YAPILMAZ.
+#   gone:    pasifleşen lig slug'ları — altındaki bütün takım slug'ları da muaftır.
+#   renamed: "<lig>/<eski takım>": "<lig>/<yeni takım>" — hedef yeni derlemede bulunmalıdır.
+# Not: kabul edilen yeniden adlandırma bugün `_redirects`e YAZILMAZ (plan B-2, açık küçük nokta 1).
+gone: []
+renamed: {}
+```
+
+Run: `uv run pytest -q tests/test_site_web_publish.py && uv run mypy src scripts && uv run ruff check scripts tests && uv run ruff format --check scripts tests`
+Expected: `21 passed`; mypy ve ruff temiz (kazımada `mypy --strict` ve ruff ölçüldü).
+
+- [ ] **Step 5: `verify.sh` — blok, B-1'in `site-db` bloğunun kapanış `fi`sinin hemen ARDINA**
 
 ```bash
 # ── Site (Plan B-2, spec §12.1) ───────────────────────────────────────────────────────────
@@ -6120,8 +6702,9 @@ step "site-derleme" ./scripts/site_gate.sh build
 step "site-uyum"    ./scripts/site_gate.sh check
 ```
 
-- [ ] **Step 5: `.github/workflows/ci.yml` — `- run: uv sync --frozen` satırının hemen ARDINA**
+- [ ] **Step 6: `.github/workflows/ci.yml` — `- run: uv sync --frozen` ile BAŞLAYAN adımın hemen ardına**
 
+(`main`de satır `- run: uv sync --frozen --extra scrape`dir; ekleme o satırın ARDINADIR, satırın kendisi değişmez.)
 ```yaml
       # Site kapısının Node adımları (Plan B-2): sürümler `web/.nvmrc` ve `packageManager`dan
       # okunur — kapının `site-kurulum` adımı yerelde de aynısını ister.
@@ -6136,34 +6719,58 @@ step "site-uyum"    ./scripts/site_gate.sh check
 ```
 Aynı dosyada `Kapı` adımının yorumundaki "Geri kalan … adım koşar:" listesinin sonuna
 `· site-kurulum · site-tip · site-lint · site-test · site-derleme · site-uyum` ekle (sayıyı da güncelle). Secret EKLENMEZ
-(`test_ci_reads_no_repository_secret_at_all`). `timeout-minutes` Step 9'un ölçümüyle güncellenir.
+(`test_ci_reads_no_repository_secret_at_all`). `timeout-minutes` Step 11'in ölçümüyle güncellenir.
 
-- [ ] **Step 6: `.github/workflows/site.yml`i B-2 arayüzüyle hizala (yalnız Node adımları)**
+- [ ] **Step 7: `.github/workflows/site.yml` — yayın kapıları ve `--no-build`**
 
-Run: `grep -nE "pnpm|next build|check-out|setup-node|action-setup|SITE_INDEXABLE|NEXT_TELEMETRY" .github/workflows/site.yml`
-Hedef (B-1'in yazdığı adımlar zaten böyleyse DOKUNMA): `pnpm/action-setup@v4` (`package_json_file: web/package.json`) ve
-`actions/setup-node@v4` (`node-version-file: web/.nvmrc`) kurulum adımları pnpm adımından önce; kurulum
-`run: pnpm -C web install --frozen-lockfile`; derleme adımı
+Run: `grep -nE "pnpm|next build|check-out|setup-node|action-setup|SITE_INDEXABLE|NEXT_TELEMETRY|deploy" .github/workflows/site.yml`
+Node adımları (B-1 Task 8 bunları B-2'nin §11 komutlarıyla yazdı; farklıysa YALNIZ gövdeleri hizala): `actions/setup-node@v4`
+(`node-version-file: web/.nvmrc`) ve `pnpm/action-setup@v4` (`package_json_file: web/package.json`); kurulum
+`pnpm -C web install --frozen-lockfile`; derleme adımı `env`: `SITE_SNAPSHOT: ${{ github.workspace }}/web/.snapshot/snapshot.json`,
+`NEXT_TELEMETRY_DISABLED: "1"`, `run: pnpm -C web run build`; çıktı tarayıcısı `node web/scripts/check-out.ts --snapshot
+web/.snapshot/snapshot.json --out web/out`. Sonra dört değişiklik (kazımada B-1 Task 8'in `site.yml`ine uygulandı; B-1'in
+`tests/test_site_workflow.py`si 6/6 yeşil kaldı):
+
+1. `on:` bloğu:
 ```yaml
-      - name: Site derlemesi (next build + _headers/_redirects/data)
-        env:
-          SITE_SNAPSHOT: ${{ github.workspace }}/web/.snapshot/snapshot.json
-          NEXT_TELEMETRY_DISABLED: "1"
-        run: pnpm -C web run build
+on:
+  workflow_dispatch:
+    inputs:
+      first_publish:
+        # AK20 b: önceki yayının /data/slugs.json'ı yokken YALNIZ ilk yayında açılır.
+        description: "İlk yayın — önceki /data/slugs.json yok (kaybolan-slug karşılaştırması yapılmaz)"
+        type: boolean
+        default: false
 ```
-ve deploy adımından ÖNCE `run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out`.
-`web/.snapshot/` spec §13'ün gitignore'daki anlık görüntü dizinidir; B-1'in `site export --out` değeri başka bir dizinse
-(Step 6'nın grep çıktısı) iki satırdaki yol O dizinle yazılır. `SITE_INDEXABLE` hiçbir
-yerde (AK14). Bu adımlar secret TAŞIMAZ (H5d). Değişiklik yaptıysan B-1'in adım ortamı testini koş:
-`uv run pytest -q -k "site and workflow"` → yeşil.
+2. `- name: Yayın` adımından hemen ÖNCE (çıktı tarayıcısından sonra):
+```yaml
+      - name: Kaybolan slug kontrolü (AK20 b — kırmızıysa yayın yok)
+        env:
+          FIRST_PUBLISH: ${{ inputs.first_publish }}
+        run: |
+          if [ "$FIRST_PUBLISH" = "true" ]; then set -- --first-publish; fi
+          uv run python scripts/site_publish.py slugs "$@"
+```
+3. Yayın komutu: `deploy --prod --dir web/out --config web/netlify.toml` → `deploy --prod --dir web/out --no-build --config
+   web/netlify.toml` (netlify-cli v21'den beri `deploy` yapılandırmadaki derleme komutunu KENDİSİ koşar; `netlify.toml`unki
+   bilerek `exit 1` verir — `--no-build` olmadan hiçbir yayın olamazdı. `--dir web/out` `publish = "out"`u geçersiz kılar;
+   `--config` yalnız dosyayı bulmak içindir). B-1 testinin aradığı `deploy --prod --dir web/out` alt dizesi korunur.
+4. İşin SONUNA, yayından sonra:
+```yaml
+      # §6.4/3f: yayımlanan = doğrulanan. Kırmızıysa koşu kırmızıdır (yayın geri alınmaz; alarm).
+      - name: Yayın sonrası kontrol (§6.4/3f)
+        run: uv run python scripts/site_publish.py live
+```
+Yeni adımlar secret TAŞIMAZ (H5d). `SITE_INDEXABLE` hiçbir yerde (AK14). Run: `uv run pytest -q tests/test_site_workflow.py`
+(B-1) → yeşil.
 
-- [ ] **Step 7: Gate testi yeşil**
+- [ ] **Step 8: Testler yeşil**
 
-Run: `uv run pytest -q tests/test_site_web_gate.py`
-Expected: `15 passed` (kazımada B-1 benzetimiyle ölçüldü: sıra 1 · dizin 1 · CI 1 · uçtan uca 2 + 2 + 1 · araç zinciri 4 + 1
-· `site.yml` 2).
+Run: `uv run pytest -q tests/test_site_web_gate.py tests/test_site_web_publish.py`
+Expected: `40 passed` (gate 19: sıra 1 · blok `fi`den sonra 1 · dizin 1 · CI 1 · uçtan uca 2 + 2 + 1 · araç zinciri 4 + 1 ·
+`site.yml` 5; yayın 21). Kazımada B-1 Task 9'un girintili `site-db` bloğu ve B-1 Task 8'in `site.yml`i kurularak ölçüldü.
 
-- [ ] **Step 8: Tam kapı — Node 24 etkin, yerel**
+- [ ] **Step 9: Tam kapı — Node 24 etkin, yerel**
 
 Run:
 ```bash
@@ -6172,67 +6779,84 @@ start=$(date +%s); TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23
 grep -E "^(PASS|FAIL|SKIP)" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-gate.log
 grep -E "^(--- |check-out:)" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-gate.log
 ```
-Expected: `exit=0`, `KAPI YEŞİL`; T0 tabanı + B-1'in `site-db`si + altı site adımı PASS. Yerelde `SITE_TEST_DATABASE_URL`
-yoksa `site-db` adıyla SKIP basar (B-1 kuralı) ve bu koşuda `SKIP: site-derleme/e2e (bu koşunun uçtan uca anlık görüntüsü yok
-ya da bayat …)` satırı görünür — ATLANAN KONTROL GEÇMEK DEĞİLDİR: Step 10 uçtan uca yolu kapla ayrıca koşar. Üç fixture
-varyantı için `check-out: 40 sayfa, 0 bulgu`. Node 22 etkin iken koşulursa `FAIL: site-kurulum` (`HATA: Node 22, .nvmrc 24
-istiyor`) BEKLENEN davranıştır.
+Expected: `exit=0`, `KAPI YEŞİL`; T0 tabanı + B-1'in adımları + altı site adımı PASS. Yerelde `SITE_TEST_DATABASE_URL` yoksa
+`SKIP: site-db (…)` (B-1) ve `SKIP: site-derleme/e2e (bu koşunun uçtan uca anlık görüntüsü yok ya da bayat …)` satırları
+görünür — ATLANAN KONTROL GEÇMEK DEĞİLDİR: Step 10 uçtan uca yolu kapla ayrıca koşar. Üç fixture varyantı için
+`check-out: 40 sayfa, 0 bulgu`. Node 22 etkin iken koşulursa `FAIL: site-kurulum` (`HATA: Node 22, .nvmrc 24 istiyor`)
+BEKLENEN davranıştır.
 
-- [ ] **Step 9: Kapı süresini ölç, `timeout-minutes`i güncelle**
+- [ ] **Step 10: Uçtan uca yol (B-1'in kabıyla) ve CI kipi**
+
+Run (B-1'in `scripts/sandbox_db.sh` tarifiyle yerel `supabase/postgres` kabı ayaktayken):
+```bash
+source ~/.nvm/nvm.sh && nvm use 24 >/dev/null
+export SITE_TEST_DATABASE_URL   # B-1'in yerel kap tarifinin verdiği adres (B-1 Task 0 kaydı)
+TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-e2e.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL|SKIP)|--- e2e|check-out:" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-e2e.log
+unset SITE_TEST_DATABASE_URL
+CI=true TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-ci-nodb.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)|FAIL CI=true" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-ci-nodb.log
+```
+Expected: ilk koşu `exit=0`, `--- e2e: verify-snapshot` (yanındaki `snapshot.sha256` ile), `--- e2e: derleme`, dört
+`check-out: … 0 bulgu`. İkinci koşu (`CI=true`, DB yok) `exit=1`: B-1'in `FAIL: site-db`si ve `FAIL: site-e2e` + `FAIL CI=true ve
+bu koşunun uçtan uca anlık görüntüsü yok ya da bayat …` — CI'da SKIP yeşili yok (B10). Kap kurulamıyorsa uçtan uca yol
+yerelde ÖLÇÜLMEMİŞ olarak raporlanır; CI'da (B-1'in servis kabıyla) ilk push'ta ölçülür (controller).
+
+- [ ] **Step 11: Kapı süresini ölç, `timeout-minutes`i güncelle**
 
 Run: `source ~/.nvm/nvm.sh && nvm use 24 >/dev/null; export SITE_BUILDS=$(mktemp -d); s=$(date +%s); ./scripts/site_gate.sh install && pnpm -C web exec tsc --noEmit && pnpm -C web exec biome ci . && pnpm -C web exec vitest run && ./scripts/site_gate.sh build && ./scripts/site_gate.sh check; echo "site adımları=$(( $(date +%s)-s ))s"`
 Expected: sayı rapora yazılır (S saniye). `ci.yml` `timeout-minutes` = B-1'in bıraktığı değer + max(5, ⌈2·S/60⌉). İlk CI
 koşusu bu değerin %70'ini aşarsa controller yeniden ölçer (HANDOFF'a satır).
 
-- [ ] **Step 10: Uçtan uca yol (B-1'in kabıyla) ve CI kipi**
-
-Run (B-1'in RUNBOOK/`sandbox_db.sh` tarifiyle yerel `supabase/postgres` kabı ayaktayken, `SITE_TEST_DATABASE_URL` ile):
-```bash
-source ~/.nvm/nvm.sh && nvm use 24 >/dev/null
-export SITE_TEST_DATABASE_URL   # B-1'in yerel kap tarifinin verdiği adres (RUNBOOK §4 / B-1 T0 kaydı)
-TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-e2e.log 2>&1; echo "exit=$?"
-grep -E "^(PASS|FAIL|SKIP)|--- e2e|check-out:" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-e2e.log
-CI=true TMPDIR=$(mktemp -d) ./verify.sh > .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-ci-nodb.log 2>&1; echo "exit=$?"
-grep -E "^(PASS|FAIL)|FAIL CI=true" .superpowers/sdd/2026-09-23-oturum9-dalga-a/b2-t10-ci-nodb.log
-```
-Expected: ilk koşu `exit=0`, `--- e2e: verify-snapshot`, `--- e2e: derleme`, dört `check-out: … 0 bulgu` (dördüncüsü uçtan
-uca JSON'un sayfası). İkinci koşu (`CI=true`, DB yok) `exit=1`: B-1'in `site-db`si FAIL ve `FAIL: site-e2e` + `FAIL CI=true ve
-bu koşunun uçtan uca anlık görüntüsü yok ya da bayat …` — CI'da SKIP yeşili yok (B10). Kap kurulamıyorsa uçtan uca yol yerelde
-ÖLÇÜLMEMİŞ olarak raporlanır; CI'da (B-1'in servis kabıyla) ilk push'ta ölçülür (controller).
-
-- [ ] **Step 11: Mutasyon kanıtları**
+- [ ] **Step 12: Mutasyon kanıtları (her biri KIRMIZI, sonra geri; `PYTHONDONTWRITEBYTECODE=1`)**
 
 1. `verify.sh`de `site-derleme` ile `site-uyum` satırlarının yerini değiştir → `test_node_steps_run_in_order_after_site_db`
    FAIL. Geri al.
-2. `site_gate.sh` `e2e`de `[ -n "${FE_VERIFY_RUN_ID:-}" ] &&` koşulunu kaldır → `test_missing_run_id_variable_never_accepts_a_file`
-   FAIL (boş `run-id` boş değişkene eşit sayılırdı). Geri al.
-3. `site_gate.sh` `toolchain`de Node karşılaştırma satırını `true` yap → `test_wrong_or_missing_toolchain_fails_by_name[echo 22-…]`
+2. B-2 bloğunu B-1'in `site-db` `if` satırının ÜSTÜNE taşı → `test_node_steps_run_in_order_after_site_db` ve
+   `test_the_site_block_starts_after_the_site_db_block_closes` FAIL. Geri al.
+3. `site_gate.sh` `e2e`de `[ -n "${FE_VERIFY_RUN_ID:-}" ] &&` koşulunu kaldır → `test_missing_run_id_variable_never_accepts_a_file`
    FAIL. Geri al.
-4. `ci.yml`de `node-version-file: web/.nvmrc` → `node-version: 22` → `test_ci_installs_node_and_pnpm_from_the_pins_before_the_gate`
+4. `site_gate.sh` `toolchain`de Node karşılaştırma satırını `true` yap → `test_wrong_or_missing_toolchain_fails_by_name[echo 22-…]`
    FAIL. Geri al.
-5. `site.yml` derleme adımında `pnpm -C web run build` → `pnpm -C web exec next build` →
-   `test_site_workflow_builds_with_headers_and_checks_before_deploy` FAIL. Geri al.
-6. `web/src/components/Fe.tsx` `Num`da `data-fe-value={String(props.value)}` → `data-fe-value={String(props.value).slice(0, -1)}`
-   → tam kapıda `FAIL: site-uyum` (log: `özniteliği … ≠ …`). Geri al; `git diff --stat` boş (yalnız bu görevin dosyaları
-   değişmiş görünür).
+5. `ci.yml`de `node-version-file: web/.nvmrc` → `node-version: 22` → `test_ci_installs_node_and_pnpm_from_the_pins_before_the_gate`
+   FAIL. Geri al.
+6. `site.yml`: (a) `--no-build`ı sil → `test_netlify_cli_never_runs_the_refusing_build_command` FAIL; (b) kaybolan-slug adımını
+   işin sonuna (yayından sonraya) taşı → `test_site_workflow_runs_both_publish_gates_around_the_deploy` FAIL; (c) derlemede
+   `pnpm -C web run build` → `pnpm -C web exec next build` → `test_site_workflow_builds_with_headers_and_checks_before_deploy`
+   FAIL. Her birinden sonra geri al.
+7. `site_publish.py`: (a) `if league not in redirects.gone` → `if False` → `test_a_vanished_league_is_red_even_without_teams`
+   FAIL; (b) `--first-publish` dalında `if status == 200:` → `if False:` →
+   `test_first_publish_passes_only_when_there_is_no_previous_publication` FAIL; (c) CSP karşılaştırma satırını `if False:`
+   yap → `test_a_live_mismatch_is_red[change1-…]` FAIL; (d) `elif first_token(body) != built:` → `elif False:` →
+   `test_a_live_mismatch_is_red[change0-…]` FAIL; (e) `findings = [] if built == exported` → `findings = [] if True` →
+   `test_the_built_hash_must_match_the_export` FAIL; (f) `--first-publish` dalında `if status == 0:` → `if False:` →
+   `test_first_publish_is_red_when_the_site_is_unreachable` FAIL (erişilemeyen site ilk yayında geçerdi — yeniden inceleme
+   N1); (g) `placeholder_findings`de `if host == "" or host.endswith(".invalid"):` → `if False:` →
+   `test_a_placeholder_domain_is_red_without_touching_the_network[slugs]`, `[live]` ve
+   `test_the_committed_site_config_is_still_a_placeholder` FAIL. (Kazımada yedisi de ölçüldü.) Her birinden sonra geri al.
+8. `web/src/components/Fe.tsx` `Num`da `data-fe-value={String(props.value)}` → `data-fe-value={String(props.value).slice(0, -1)}`
+   → tam kapıda `FAIL: site-uyum` (log: `özniteliği … ≠ …`). Geri al; `git diff --stat` yalnız bu görevin dosyalarını gösterir.
 
-- [ ] **Step 12: Tam kapı (son)** — Step 8'in komutu; `exit=0`.
+- [ ] **Step 13: Tam kapı (son)** — Step 9'un komutu; `exit=0`.
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
-git add scripts/site_gate.sh tests/test_site_web_gate.py verify.sh .github/workflows/ci.yml
-# yalnız değiştiyse: git add .github/workflows/site.yml tests/site_web_fixtures.py web/fixtures/snapshot.fixture.web-full.json web/fixtures/snapshot.fixture.web-empty.json
-git commit -m "ci: site kapısının Node adımları verify.sh ve ci.yml'e bağlandı (B-2 T10)
+git add scripts/site_gate.sh scripts/site_publish.py config/site_redirects.yaml tests/test_site_web_gate.py \
+  tests/test_site_web_publish.py verify.sh .github/workflows/ci.yml .github/workflows/site.yml
+git commit -m "ci: site kapısının Node adımları ve site.yml yayın kapıları — kaybolan slug, yayın sonrası kontrol (B-2 T10)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 14: Controller'a devir (rapor)**
+- [ ] **Step 15: Controller'a devir (rapor)**
 
 Rapora yaz: (a) yerel kapı komutu artık Node 24 ister — HANDOFF'taki kapı tarifine `source ~/.nvm/nvm.sh && nvm use 24`
-eklenmeli (controller dosyası); (b) Step 9 süresi ve yeni `timeout-minutes`; (c) uçtan uca yolun yerelde koşup koşmadığı;
-(d) `_headers` boyutu (T8) ve uçtan uca JSON'un sayfa sayısı.
+eklenmeli (controller dosyası); (b) Step 11 süresi ve yeni `timeout-minutes`; (c) uçtan uca yolun yerelde koşup koşmadığı;
+(d) `_headers` boyutu (T8) ve uçtan uca JSON'un sayfa sayısı; (e) `SITE_URL` (AK4) gerçek alan adına çevrilmeden iki yayın
+kapısı da ağa çıkmadan kırmızıdır (bilerek, testli); ilk yayın `first_publish: true` ile ve YALNIZ site gerçek bir HTTP
+yanıtıyla (200 dışı, ör. 404) önceki yayının olmadığını söylediğinde geçer — alan adı henüz çözülmüyorsa (HTTP 0) ilk yayın
+da kırmızıdır (spec §11, AK20 b); alan adı önce Netlify'a bağlanıp yanıt verir hâle getirilir.
 
 ---
 
@@ -6240,14 +6864,14 @@ eklenmeli (controller dosyası); (b) Step 9 süresi ve yeni `timeout-minutes`; (
 
 1. **T0 öncesi:** worktree `.worktrees/wt-s9-b2` (`feat/s9-iz-b2`, `main`den). T0 Step 2–3'ün indirmeleri (Node 24.21.0,
    pnpm 10.x) ve T1 Step 6'nın `pnpm install`ı (npm kayıt defterinden okuma) için onay.
-2. **B-1'e iletilecek üç nokta (B-1 T1/T4'ün sözleşmesine dokunur, B-2 yazamaz):** (a) lig slug'ı `data` ve `_next` de
-   ayrılmıştır (derleme çıktısının dizinleri; B-2 yükleyicisi bunları reddeder — B-1'in `slugs.py`si üretmemeli);
-   (b) `path_id` önek uzunluğu B-2 fixture'ında 12'dir, B-1'in sabiti farklıysa T10 Step 1 uzlaştırır; (c) `out/data/slugs.json`
-   biçimi yukarıdaki arayüz tablosundadır — `site.yml`in kaybolan-slug kontrolü onu okur.
-3. **B-1 T1 `main`e birleşince:** B-2 T2 başlar (T2 Step 1 `main`i dala alır).
+2. **B-1 ile hizalı noktalar (yeniden inceleme N4'te ölçüldü):** B-1'in güncel planı ayrılmış lig slug'larının dördünü de
+   (`track-record`, `legal`, `data`, `_next`; `config/site_leagues.yaml` ile) uygular ve `site.yml`in yayın kapılarını B-2
+   T10'a devreder — iki plan arasında açık iş kalmadı. Tek koordinasyon noktası `.gitignore`: B-1 Task 1 ve B-2 T1 aynı
+   dört satırı ekleyebilir — birleşimde her satır bir kez (T1 Step 3).
+3. **B-1 Task 1 `main`e birleşince:** B-2 T2 başlar (T2 Step 1 `main`i dala alır).
 4. **T9:** K1 süreci — mutasyonlu görev incelemesi kabuklu inceleyiciyle (`general-purpose`), T9 Step 7'nin 15 kırma-geri-
    yükleme vakası inceleyici tarafından yeniden koşulur.
-5. **B-1 dalga sonu birleştirmesi `main`de olduktan SONRA:** B-2 T10. Ardından bütün-dal incelemesi, `main`e `--no-ff`,
+5. **B-1 Task 9 (dalga sonu) `main`de olduktan SONRA:** B-2 T10. Ardından bütün-dal incelemesi, `main`e `--no-ff`,
    `git fetch origin && git merge --no-ff origin/main` + tam kapı (Node 24 etkin) + push; ilk CI koşusunun süresi
    `timeout-minutes`e karşı okunur; uçtan uca varyantın CI'da `check-out: … 0 bulgu` verdiği logdan doğrulanır.
 6. **HANDOFF (controller dosyası):** kapı tarifine `source ~/.nvm/nvm.sh && nvm use 24` eklenir; "Kapının ölçmedikleri
@@ -6263,9 +6887,10 @@ T5, T6, T7 · slug yolları + `hreflang` + site haritası + `_redirects` → T4,
 `verify.sh` Node adımları + `ci.yml` Node kurulumu + kapı süresi ölçümü + §4.4/3'ün JSON'uyla `next build` + tarayıcı → T10.
 Bölüm bazında: §5.2 TS tipi/anahtar eşitliği/fixture'lar → T2 · §5.3 (1)–(8) → T9 · §5.4 → T3 · §6.1–§6.3 → T6 · §6.4/1
 fixture varyantları (boş/dolu sicil, eşik altı, mühürsüz, tek tur) → T2 · §7 → T5 · §8.1–§8.6 → T4, T5, T8 · §9 → T4, T9 ·
-§10.1–§10.2 → T7 (düz metin dökümü T9 Step 6b) · §11 `netlify.toml` → T8, `site.yml` hizalama → T10 · §12.1–§12.3 → T10 · §13 → T1 · H4/H5b/H6c/H7 → T8,
-T9 · H5a → T1 · §18.5/2 ölçümü → T9 Step 6. Boşluk: §18.5/4 ve /6 (Netlify davranışı) ölçülemez → "Kapının ölçmedikleri";
-AK20 b'nin kaybolan-slug karşılaştırması `site.yml` adımıdır (B-1 T6), B-2 yalnız deposunu (`data/slugs.json`) üretir.
+§10.1–§10.2 → T7 (düz metin dökümü T9 Step 6b) · §11 `netlify.toml` → T8; `site.yml`in kaybolan-slug (AK20 b) ve yayın
+sonrası (§6.4/3f) adımları ve `--no-build` → T10 (controller kararı) · §12.1–§12.3 → T10 · §13 → T1 · H4/H5b/H6c/H7 →
+T8, T9 · H5a → T1 · §18.5/2 ölçümü → T9 Step 6. Boşluk: §18.5/4 ve /6 (Netlify davranışı) ölçülemez → "Kapının
+ölçmedikleri".
 
 **2. Yer tutucu taraması:** kod adımlarının tamamı kazımada derlenmiş ve koşturulmuş dosyalardan birebir alındı. Kalan
 bilinçli değişkenler yalnız ÖLÇÜM sonuçlarıdır (T0 sürümleri; T10'da B-1'in `site.yml` dışa aktarım dizini ve yerel kap
@@ -6281,25 +6906,40 @@ bastıklarıyla kazımada birebir (15 mutasyon + 3 temiz derleme); `pageFiles`/`
 
 **Doğrulanmadan kalanlar (adıyla):** Biome 2 yerelde kurulu değildi — biçim/lint T1 Step 8'de ilk kez ölçülür; kod Next
 16.2.9 / React 19.2.4 / Vitest 4.1.9 ile koşturuldu, plan 16.3.x / 19.3.x / 4.1.11 sabitler (aynı ana sürümler); pnpm 10 ile
-kilit dosyası ve `--frozen-lockfile` davranışı T1'de ölçülür; `verify.sh`/`ci.yml` değişikliği ve gate testi B-1'in
-`site-db`sinin BENZETİMİYLE koşturuldu (gerçek B-1 adımı T10'da).
+kilit dosyası ve `--frozen-lockfile` davranışı T1'de ölçülür; `verify.sh`/`ci.yml`/`site.yml` değişiklikleri ve gate testi
+B-1 Task 9'un girintili `site-db` bloğu ve B-1 Task 8'in `site.yml`i kazımada kurularak koşturuldu (B-1'in
+`test_site_workflow.py`si 6/6); fixture değerleri B-1 Task 1'in doğrulayıcısı ve Task 4'ün `verify-snapshot`ıyla (exit 0)
+ölçüldü; netlify-cli `--no-build` davranışı Netlify belgesine dayanır, çalıştırılmadı.
+
+**Düzeltme turu 2 (`b2-plan-rereview.md`):** N1 `--first-publish` erişilemeyen sitede (HTTP 0) kırmızı + `.invalid` taban
+iki komutta da ağa çıkmadan kırmızı (4 test, 2 mutasyon; yayın testleri 21) · N2 sonuç etiketi `outcome.ts`e ayrıldı ve
+birim testli, sınır "ölçmedikleri" (i)'de · N3 `LEDGER_HISTORY_URL` `ledger/` dizininin geçmişi · N4 çapraz plan metni
+güncellendi · N5 T10 Step 2 iki dosyayı ayrı koşar.
+
+**Düzeltme turu 1 (`b2-plan-review.md`):** I1 fixture değerleri (`outcome` `home/draw`, çıpa `head-2026-09-24.txt`) + T2'ye
+B-1 doğrulayıcısıyla değer testi, hash'ler güncellendi · I2 sıra testi girintili `step`i okur + blok `fi`den sonra testi · I3
+kaybolan-slug ve yayın sonrası kontrol T10'da (`scripts/site_publish.py`, `config/site_redirects.yaml`, `site.yml` adımları,
+17 test, 5 mutasyon) · I4 yayında `--no-build` + test · I5 H4 büyük harf vakaları · M1 B-1 görev numaraları · M2 `ci.yml` çapası ·
+M3 blok yeri · M4 sayılar ve dosya tablosu · M5 `.gitignore` sırası (T1 Step 3) · M7 sonuç adı yerelleştirildi · M8, M10
+"Kapının ölçmedikleri"nde · M9 WEB-KAPI öncesi `biome check --write` · M6 aşağıda.
 
 ---
 
 ## Açık sorular — spec'in cevaplamadığı ve bu plandaki kararlar
 
-1. **`site.yml` kimin?** Görev tanımı deploy iş akışını B-2'ye sayıyor; spec §15 onu B-1 T6'ya veriyor (bağlayıcı otorite
-   spec). **Karar:** `site.yml`i B-1 yazar; B-2 `netlify.toml`u yazar ve T10'da `site.yml`in YALNIZ Node adımlarını B-2
-   arayüzüyle hizalar (sıralı, tek yazar korunur). Yanlışsa: T10 Step 6 tam `site.yml` yazımına genişler.
+1. **`site.yml` kimin?** Spec §15 onu B-1'e veriyor (B-1 Task 8 yazar). **Controller kararı (düzeltme turu 1):** kaybolan-slug
+   kontrolü, yayın sonrası kontrol ve yayın komutunun `--no-build`u B-2 T10'undur; B-2 ayrıca Node adımlarını hizalar.
+   Sıralı yazım (B-1 Task 8 → B-1 Task 9 → B-2 T10) tek yazar kuralını korur.
 2. **B-2 ne zaman başlar?** Spec "B-1 T1 birleşince paralel"; görev tanımı "B-1 inmeden önce koşabilsin". **Karar:** T0–T1
-   B-1'den bağımsız; T2–T9 yalnız B-1 T1'in şema dosyasını ister (başka hiçbir B-1 çıktısını değil); geliştirme B-2'nin kendi
+   B-1'den bağımsız; T2–T9 yalnız B-1 Task 1'in şema dosyasını ister (başka hiçbir B-1 çıktısını değil); geliştirme B-2'nin kendi
    sentetik fixture'larıyla. `verify-snapshot` ve uçtan uca JSON yalnız T10'da tüketilir.
 3. **Şema ↔ TS anahtar eşitliği testinin sahibi.** Spec §12.1 onu B-1'in `pytest` satırında sayıyor ama TS dosyası B-2'nin.
    **Karar:** B-2 T2 yazar (`tests/test_site_web_contract.py`); B-1 de yazdıysa controller birini tutar (ikisi çelişmez).
-4. **`config/site_redirects.yaml` yönlendirmeleri `_redirects`e nasıl girer?** Spec dosyayı kaybolan-slug kontrolü için
-   tanımlıyor, biçimini ve `_redirects`e aktarımını tanımlamıyor. **Karar:** B-2 bu dosyayı okumaz; yeniden adlandırılan
-   takım/lig URL'si yönlendirilmez ("Kapının ölçmedikleri" d). Kaybolan-slug kontrolünü yazan görev (B-1 T6 ya da deploy
-   bağlama işi) biçimi belirlerken bu aktarımı da planlamalı.
+4. **`config/site_redirects.yaml`in biçimi.** Spec dosyayı adlandırıyor, biçimini vermiyor. **Karar (T10):** yalnız `gone:`
+   (pasif lig slug'ları) ve `renamed:` (`<lig>/<eski>` → `<lig>/<yeni>`, hedef yeni derlemede); kaybolan-slug kontrolü önceki
+   yayının `/data/slugs.json`ını `web/site.config.ts` `SITE_URL`inden okur; ilk yayın yalnız `first_publish` girdisiyle ve
+   site gerçek bir HTTP yanıtıyla (200 dışı) önceki yayının olmadığını söylediğinde geçer; erişilemeyen site (HTTP 0) ve
+   `.invalid` yer tutucu taban her iki kapıda kırmızıdır. Kabul edilen yeniden adlandırmanın `_redirects`e yazılması açık küçük nokta 1.
 5. **Bağımlılık listesi.** Spec'in dev listesi `@types/react-dom`u içermiyor; `react-dom/server` testleri (18+, `Fe`) onsuz
    tip denetiminden geçmez. **Karar:** bilinçli ekleme (yalnız tip paketi), allowlist testinde adıyla; `schema-dts`
    kullanılmıyor (spec "plan kaldırabilir"). TypeScript 5.9 ve Vitest 4'te tutuldu (kayıt defterinde TS 7, Vitest 5 var):
@@ -6308,7 +6948,8 @@ kilit dosyası ve `--frozen-lockfile` davranışı T1'de ölçülür; `verify.sh
    paketine sokar. **Karar:** eşdeğer iki kontrol — fixture'ın şekli şemaya karşı, TS tipinin anahtarları şemaya karşı
    (ikisi de pytest, T2); yükleyici `Snapshot` tipini döndürür.
 7. **Ayrılmış lig slug'ları.** Spec yalnız `track-record`/`legal` diyor; `data` (yayın dosyaları) ve `_next` (Next
-   varlıkları) da derleme çıktısında dizin. **Karar:** dördü de ayrılmış (yükleyici reddeder); B-1'e iletilir (Controller 2a).
+   varlıkları) da derleme çıktısında dizin. **Karar:** dördü de ayrılmış — B-2 yükleyicisi reddeder, B-1'in güncel planı da
+   aynı dördünü uygular (iki katman, aynı liste).
 8. **Yasal sayfaların indekslenmesi.** Spec bayrak açıkken yasal sayfalar için politika vermiyor. **Karar:** taslak
    oldukları sürece (AK13) bayraktan bağımsız `noindex` ve site haritası dışı.
 9. **Bayrak kapalıyken site haritası.** **Karar:** boş `urlset` (spec: site haritası = indekslenebilir sayfa kümesi; hepsi
@@ -6327,3 +6968,21 @@ kilit dosyası ve `--frozen-lockfile` davranışı T1'de ölçülür; `verify.sh
     sonucu `path_id`i ya da maç sayfası içeriğini değiştirirse T4/T5 yeniden açılır. Kullanıcı kararı olarak kalır.
 15. **Next'in 404 sayfası ve `*.netlify.app`.** Netlify hesabı olmadan ölçülemez (§18.5/4, /6); 404 yanıtına sayfa CSP'si
     konamaz. **Karar:** "Kapının ölçmedikleri"ne yazıldı; deploy bağlanırken ölçülür.
+16. **Sonuç adının gösterimi (inceleme M7, N2).** Şema `outcome`u `home/draw/away` enum'u olarak taşır. **Karar:** sicil
+    tablosu takım adını ya da "Beraberlik/Draw"u gösterir; `data-fe` özniteliği ham değeri taşır ve tarayıcı yalnız
+    özniteliği sınar (`Flag`), çünkü metin bir eşlemedir, sayı değildir. Eşlemenin kendisi `src/lib/outcome.ts`te tek
+    yerdedir ve T6'nın birim testi ölçer; tarayıcıdaki sınır "Kapının ölçmedikleri" (i)'de.
+17. **Yayın sonrası kontrolün taban adresi.** Spec "canlı `/data/snapshot.sha256` indirilir" diyor, adresi vermiyor.
+    **Karar:** `web/site.config.ts` `SITE_URL` (tek kaynak); yer tutucu iken kontrol kırmızıdır — alan adı kararı (AK4)
+    verilmeden yayın doğrulanmış sayılmaz. Örnek sayfalar `_headers`teki sayfa yollarının ilk, orta ve son öğesidir.
+
+## Açık küçük noktalar (gerekçesiyle bırakılanlar)
+
+1. **Kabul edilen takım yeniden adlandırması `_redirects`e yazılmıyor.** Kaybolan-slug kontrolü onu KABUL eder ama eski URL
+   404 verir. Gerekçe: bağlanmamış yayında hiçbir URL dışarıda değil; ilk yeniden adlandırma ancak yayın bağlandıktan sonra
+   görülebilir; aktarım `emit-headers`in YAML okumasını (bağımlılık ya da el yazımı ayrıştırıcı) gerektirir. Yayın bağlanırken
+   (AK15/AK18 işi) açılır.
+2. **Biome hiç koşturulmadı (inceleme M9).** T1 Step 8 ilk ölçümdür ve her görev WEB-KAPI'dan önce `biome check --write`
+   uygular; recommended kurallardan biri plan kodunu reddederse kural kapatılmaz, kod düzeltilir (Global Constraints).
+3. **`netlify deploy --no-build` gerçek CLI'da koşturulmadı** (Netlify hesabı yok); dayanak netlify-cli v21 değişiklik günlüğü
+   ve `deploy` belgesi. Yayın bağlanırken ilk koşu ölçer.
