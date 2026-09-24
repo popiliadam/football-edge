@@ -13,10 +13,11 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
 
 from football_edge.site.contract import FORBIDDEN_KEYS, PUBLIC_FLOOR, RECORD_COLUMNS
 from football_edge.site.schema import property_names
-from tests.site_db import as_reader, full_sequence, site_cluster, site_db
+from tests.site_db import _require_empty, as_reader, full_sequence, site_cluster, site_db
 
 pytestmark = pytest.mark.sitedb
 
@@ -134,6 +135,16 @@ def closure(cur: psycopg.Cursor[Any]) -> tuple[dict[str, str], set[str]]:
     return relations, functions
 
 
+def test_the_emptiness_lock_refuses_a_database_other_than_postgres(site_cluster: str) -> None:
+    """Yeniden inceleme N-I1: aynı kümenin `/template1`i boştur ama kilit onu kabul etmemeli."""
+    with (
+        psycopg.connect(make_conninfo(site_cluster, dbname="template1"), autocommit=True) as conn,
+        conn.cursor() as cur,
+        pytest.raises(pytest.fail.Exception, match="postgres veritabanına değil"),
+    ):
+        _require_empty(cur)
+
+
 # ── (i) tam sıra, postgres veritabanında, geri alınan işlem ──────────────────────────────────
 
 
@@ -208,7 +219,10 @@ def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
             f"SELECT {QUALIFIED} {FROM_CLASS} WHERE {NON_CATALOG} "
             "AND (has_table_privilege('site_reader', c.oid, "
             "'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') "
-            "OR has_any_column_privilege('site_reader', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES'))",
+            "OR has_any_column_privilege('site_reader', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES') "
+            # Dizide USAGE = `nextval`; has_table_privilege onu görmez (yeniden inceleme n1).
+            "OR CASE WHEN c.relkind = 'S' "
+            "THEN has_sequence_privilege('site_reader', c.oid, 'USAGE,SELECT,UPDATE') END)",
         )
     }
     ((login, bypass, inherit),) = _rows(
@@ -229,7 +243,8 @@ def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
 def test_site_reader_reaches_only_the_site_schemas_and_the_named_exceptions(
     full_sequence: psycopg.Cursor[Any],
 ) -> None:
-    """Şema USAGE'ı = site şemaları + `public` + `net`; hiçbir şemada CREATE yok (I1)."""
+    """Şema USAGE'ı = site şemaları + `public` + `net`; hiçbir şemada ve veritabanında CREATE
+    yok, rol hiçbir rolün üyesi değil (I1, yeniden inceleme n1)."""
     usage = {
         name
         for (name,) in _rows(
@@ -244,8 +259,18 @@ def test_site_reader_reaches_only_the_site_schemas_and_the_named_exceptions(
         f"WHERE {NON_CATALOG} AND has_schema_privilege('site_reader', n.oid, 'CREATE')",
     )
 
+    database_create = _rows(
+        full_sequence, "SELECT has_database_privilege('site_reader', current_database(), 'CREATE')"
+    )
+    memberships = _rows(
+        full_sequence,
+        "SELECT roleid::regrole::text FROM pg_auth_members WHERE member = 'site_reader'::regrole",
+    )
+
     assert usage == READER_SCHEMAS
     assert create == []
+    assert database_create == [(False,)]
+    assert memberships == []
 
 
 def test_site_reader_executes_only_the_floor_and_the_named_exceptions(
@@ -300,6 +325,34 @@ def test_every_accepted_exception_belongs_to_supabase_admin(
         ("supabase_admin", "supabase_admin")
     }
     assert functions == [("supabase_admin",)] and net_owner == ("supabase_admin",)
+
+
+# Yayımlanan görünümlerin kolon TİPLERİ (yeniden inceleme n2); ifadeler metin testinde sabittir.
+SITE_TYPES = {
+    "site.leagues": [("id", "text"), ("name", "text"), ("country", "text")],
+    "site.matches": [
+        ("id", "text"),
+        ("league_id", "text"),
+        ("commence_time", "timestamp with time zone"),
+        ("home_team", "text"),
+        ("away_team", "text"),
+    ],
+    "site.ledger_head": [("rows", "bigint"), ("last_id", "bigint"), ("head", "text")],
+}
+
+
+@pytest.mark.parametrize("view", sorted(SITE_TYPES))
+def test_each_published_view_has_exactly_its_column_types(
+    full_sequence: psycopg.Cursor[Any], view: str
+) -> None:
+    columns = _rows(
+        full_sequence,
+        "SELECT attname::text, format_type(atttypid, atttypmod) FROM pg_attribute "
+        "WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+        (view,),
+    )
+
+    assert columns == SITE_TYPES[view]
 
 
 def _record_columns(cur: psycopg.Cursor[Any]) -> list[tuple[str, str]]:

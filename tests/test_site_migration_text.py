@@ -41,11 +41,18 @@ FILTERS = {
 }
 _TYPES = {"timestamptz": "timestamp with time zone"}
 # §4.3: `site` şemasındaki her kolon yayımlanabilir; eklenen kolon AK6 onayı ister (ör. `sealed_at`
-# alınmaz). `site.record` kolonları `RECORD_COLUMNS`la ayrıca sabitlenir.
-SITE_COLUMNS = {
-    "site.leagues": ("id", "name", "country"),
-    "site.matches": ("id", "league_id", "commence_time", "home_team", "away_team"),
-    "site.ledger_head": ("rows", "last_id", "head"),
+# alınmaz). Seçim listesi İFADE düzeyinde sabittir: yayımlanmayan kolon yayımlanan bir ad altında
+# (`m.sealed_at::text as away_team`) da kırmızıdır. Tipler katalogda (`test_site_views_db.py`).
+# `site.record` kolonları `RECORD_COLUMNS`la ayrıca sabitlenir.
+SITE_SELECT = {
+    "site.leagues": ("l.id", "l.name", "l.country"),
+    "site.matches": ("m.id", "m.league_id", "m.commence_time", "m.home_team", "m.away_team"),
+    "site.ledger_head": (
+        "count(*)::bigint as rows",
+        "coalesce(max(o.id), 0)::bigint as last_id",
+        "coalesce( (select o2.row_hash from public.odds_snapshots o2 order by o2.id desc limit 1),"
+        " repeat('0', 64) ) as head",
+    ),
 }
 
 
@@ -62,8 +69,8 @@ def _views() -> dict[str, str]:
     return found
 
 
-def _output_columns(body: str) -> tuple[str, ...]:
-    """`select … from` listesinin çıktı adları: parantez içindeki virgül ve `from` sayılmaz."""
+def _select_items(body: str) -> tuple[str, ...]:
+    """`select … from` listesinin öğeleri: parantez içindeki virgül ve `from` sayılmaz."""
     items, current, depth, index = [], "", 0, len("select ")
     assert body.startswith("select "), body
     while index < len(body):
@@ -78,10 +85,7 @@ def _output_columns(body: str) -> tuple[str, ...]:
             current += char
         index += 1
     items.append(current.strip())
-    return tuple(
-        alias.group(1) if (alias := re.search(r" as (\w+)$", item)) else item.split(".")[-1]
-        for item in items
-    )
+    return tuple(items)
 
 
 def test_0014_bounds_its_lock_wait_in_the_form_every_sender_honours() -> None:
@@ -141,10 +145,10 @@ def test_the_record_placeholder_is_where_false_with_the_contract_columns() -> No
     assert [(name, _TYPES.get(kind, kind)) for kind, name in columns] == list(RECORD_COLUMNS)
 
 
-@pytest.mark.parametrize("view", sorted(SITE_COLUMNS))
+@pytest.mark.parametrize("view", sorted(SITE_SELECT))
 def test_each_published_view_carries_exactly_its_columns(view: str) -> None:
-    """I3: `site` = yayımlanabilir; kolon listesi ad ve sırayla sabit (`*` de kırmızı)."""
-    assert _output_columns(_views()[view]) == SITE_COLUMNS[view]
+    """I3: `site` = yayımlanabilir; seçim listesi ifade, ad ve sırayla sabit (`*` de kırmızı)."""
+    assert _select_items(_views()[view]) == SITE_SELECT[view]
 
 
 def test_the_audit_view_carries_id_plus_the_hashed_ledger_columns() -> None:

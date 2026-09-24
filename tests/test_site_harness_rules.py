@@ -10,10 +10,11 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from tests.site_db import SITE_TEST_VAR, guarded_url, refusal
+from tests.site_db import SITE_TEST_VAR, _require_empty, guarded_url, refusal
 
 TESTS = Path(__file__).resolve().parent
 HARNESS = TESTS / "site_db.py"
@@ -164,6 +165,39 @@ def test_the_emptiness_lock_runs_before_the_cluster_is_written() -> None:
     )
 
     assert lock and lock[0] < first_write, [text for *_, text in calls]
+
+
+class _OneRowCursor:
+    """`_require_empty`in tek sorgusuna sabit satır döner (DB'siz; kapıda koşar)."""
+
+    def __init__(self, row: tuple[str, bool]) -> None:
+        self.row = row
+
+    def execute(self, query: str) -> None:
+        assert "current_database()" in query
+
+    def fetchone(self) -> tuple[str, bool]:
+        return self.row
+
+
+@pytest.mark.parametrize(
+    ("database", "empty", "refused"),
+    [
+        ("postgres", True, False),
+        ("postgres", False, True),
+        ("template1", True, True),  # yeniden inceleme N-I1: dolu kümede boş veritabanı
+        ("site_tpl", True, True),
+    ],
+)
+def test_the_emptiness_lock_accepts_only_an_empty_postgres_database(
+    database: str, empty: bool, refused: bool
+) -> None:
+    cursor: Any = _OneRowCursor((database, empty))
+    if refused:
+        with pytest.raises(pytest.fail.Exception, match="hiçbir şey kurulmadı"):
+            _require_empty(cursor)
+    else:
+        _require_empty(cursor)
 
 
 def _fixture_graph(tree: ast.Module) -> dict[str, set[str]]:

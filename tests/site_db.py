@@ -109,9 +109,16 @@ def _require_postgres(cur: psycopg.Cursor[Any]) -> None:
 
 
 def _require_empty(cur: psycopg.Cursor[Any]) -> None:
-    """Kum havuzu kilidi: migration'ları uygulanmış bir küme (kap, tünel) atılabilir değildir."""
-    cur.execute("SELECT to_regclass('public.odds_snapshots') IS NULL")
-    if not (cur.fetchone() or (False,))[0]:
+    """Kum havuzu kilidi: migration'ları uygulanmış bir küme (kap, tünel) atılabilir değildir.
+
+    Bağlantı KÜMENİN `postgres` veritabanına olmalı: dolu bir kümede boş bir veritabanına
+    (`template1`, elle yaratılmış) bağlanan adres de şablonu, rolü ve üyeliği commit ederdi.
+    """
+    cur.execute("SELECT current_database(), to_regclass('public.odds_snapshots') IS NULL")
+    database, empty = cur.fetchone() or ("?", False)
+    if database != "postgres":
+        pytest.fail(f"bağlantı postgres veritabanına değil ({database}) — hiçbir şey kurulmadı")
+    if not empty:
         pytest.fail("postgres veritabanı boş değil (odds_snapshots var) — hiçbir şey kurulmadı")
 
 
