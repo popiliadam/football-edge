@@ -16,7 +16,10 @@ from typing import Any
 
 import pytest
 
+from football_edge.site import __main__ as cli
+from football_edge.site import verify
 from football_edge.site.contract import EXIT_SITE_INVALID, content_sha256
+from football_edge.site.slugs import match_slug, slugify
 from football_edge.site.verify import snapshot_errors
 
 REPO = Path(__file__).resolve().parent.parent
@@ -182,6 +185,146 @@ def test_internal_consistency(change: Callable[[dict[str, Any]], None], needle: 
     assert any(needle in error for error in _broken(change)), needle
 
 
+def _before_floor(snapshot: dict[str, Any]) -> None:
+    snapshot["matches"][0]["commence_time"] = "2026-07-01T23:59:59Z"
+    snapshot["matches"][0]["date"] = "2026-07-01"
+
+
+@pytest.mark.leakage
+def test_the_floor_rule_stands_alone_when_the_date_scan_misses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H1: kat kuralı, tarama kırılırsa savunmadır; mesajı taramanınkinden ayrıdır (`tarih` yok)."""
+    monkeypatch.setattr(verify, "_date_errors", lambda snapshot, known: iter(()))
+
+    errors = _broken(_before_floor)
+
+    assert "$.matches[0].commence_time: holdout tabanından eski (H1)" in errors, errors
+
+
+def _drop(key: str) -> Callable[[dict[str, Any]], None]:
+    """Dizinin SON öğesini atar: `tst.2` ligi ya da `zeta-rovers` takımı."""
+
+    def change(snapshot: dict[str, Any]) -> None:
+        snapshot[key].pop()
+
+    return change
+
+
+def _rename_team(old: str, new: str) -> Callable[[dict[str, Any]], None]:
+    """Takımı her yerde tutarlı yeniden adlandırır; yalnız sınanan kural kırmızı kalsın."""
+
+    def change(snapshot: dict[str, Any]) -> None:
+        for team in snapshot["teams"]:
+            if team["name"] == old:
+                team["name"], team["slug"] = new, slugify(new)
+        for match in snapshot["matches"]:
+            match["home"] = new if match["home"] == old else match["home"]
+            match["away"] = new if match["away"] == old else match["away"]
+            match["slug"] = match_slug(match["home"], match["away"])
+
+    return change
+
+
+def _same_cut_other_head(snapshot: dict[str, Any]) -> None:
+    anchor, ledger = snapshot["ledger"]["anchor"], snapshot["ledger"]
+    anchor["rows"], anchor["last_id"] = ledger["rows"], ledger["last_id"]
+
+
+@pytest.mark.parametrize(
+    ("change", "needle", "path"),
+    [
+        (_set("ledger.rows", 138), "$.ledger: satır sayısı son kimliği aşıyor", BASE),
+        (
+            _set("record.summary", None),
+            "$.record.summary: yalnız boş sicilde null olur",
+            FULL_RECORD,
+        ),
+        (_set("record.summary.n", 3), "$.record.summary.n: yayın sayısıyla uyuşmuyor", FULL_RECORD),
+        (_set("matches.0.rounds", 0), "$.matches[0].rounds: kesimde satırı olmayan maç", BASE),
+        (_drop("leagues"), "$.matches[5].league_id: bilinmeyen lig", BASE),
+        (_drop("leagues"), "$.teams[4].league_id: bilinmeyen lig", BASE),
+        (_drop("teams"), "$.teams: maçlardaki takım kümesiyle uyuşmuyor", BASE),
+        (_rename_team("Beta FK", "Match"), "$.teams[1].slug: ayrılmış bölüt (§8.1)", BASE),
+        (
+            _same_cut_other_head,
+            "$.ledger.anchor.head: aynı kesimde farklı baş hash (çatallanmış zincir)",
+            BASE,
+        ),
+        (
+            _set("ledger.anchor.file", "head-2026-09-25.txt"),
+            "$.ledger.anchor.file: dışa aktarım gününden ileri tarihli çıpa",
+            BASE,
+        ),
+    ],
+    ids=[
+        "ledger-rows",
+        "summary-null",
+        "summary-n",
+        "rounds",
+        "match-league",
+        "team-league",
+        "team-set",
+        "reserved-team",
+        "anchor-head",
+        "anchor-future",
+    ],
+)
+def test_every_rule_branch_names_its_own_rule(
+    change: Callable[[dict[str, Any]], None], needle: str, path: Path
+) -> None:
+    """Her kural kolu KENDİ mesajıyla kırmızı; kol silinirse bu test kırmızı (inceleme I1, M5)."""
+    assert needle in _broken(change, path), needle
+
+
+def test_a_team_called_match_is_reserved_not_underived() -> None:
+    errors = _broken(_rename_team("Beta FK", "Match"))
+
+    assert "$.teams[1].slug: addan türemiyor (§8.2)" not in errors, errors
+
+
+def test_an_anchor_dated_on_the_export_day_is_fine() -> None:
+    assert _broken(_set("ledger.anchor.file", "head-2026-09-24.txt")) == []
+
+
+def test_a_team_name_without_a_slug_is_a_named_violation() -> None:
+    """`ЦСКА` slug üretmez; `slugify`in ValueError'ı istisna olarak kaçmaz (inceleme M1)."""
+    errors = _broken(_set("teams.1.name", "ЦСКА"))
+
+    assert "$.teams[1].name: slug üretmiyor, harf ya da rakam yok (§8.2)" in errors, errors
+
+
+def test_a_match_with_a_slugless_team_name_is_a_named_violation() -> None:
+    errors = _broken(_set("matches.0.home", "ЦСКА"))
+
+    assert "$.matches[0].slug: takım adından slug üretilemiyor (§8.2)" in errors, errors
+
+
+def test_a_lone_surrogate_is_a_named_violation() -> None:
+    """Eşleşmemiş vekil UTF-8'e yazılamaz; hash'e ulaşmadan adıyla kırmızı (inceleme M1)."""
+    snapshot = _fixture()
+    snapshot["leagues"][0]["country"] = "Nord\ud800land"
+
+    errors = snapshot_errors(snapshot, SCHEMA)
+
+    assert "$.leagues[0].country: UTF-8'e kodlanamayan karakter (eşleşmemiş vekil)" in errors
+
+
+@pytest.mark.parametrize(
+    "key", ["postgresql" + "://u:S3CRETPW@h/d", "satır\nsonu http", "Nord\ud800land"]
+)
+def test_an_unknown_key_is_not_echoed(key: str) -> None:
+    """İnceleme M2: saldırgan anahtar adı da değer gibi loga basılmaz; yol sırasını söyler."""
+    snapshot = _fixture()
+    snapshot["leagues"][0][key] = "http://x.invalid"  # yolu basan bir tarama kuralı da ateşlesin
+
+    errors = snapshot_errors(snapshot, SCHEMA)
+
+    assert "$.leagues[0]: bilinmeyen anahtar (ad basılmaz)" in errors, errors
+    assert all(key not in error and "\n" not in error for error in errors), errors
+    assert any(error.startswith("$.leagues[0].<bilinmeyen anahtar #6>") for error in errors)
+
+
 def test_a_league_slug_need_not_follow_the_league_name() -> None:
     """I3: lig slug'ı yapılandırmadandır (`ger.1`/`aut.1` ikisi de "Bundesliga")."""
     assert _broken(_set("leagues.0.slug", "kuzey-bolgesi")) == []
@@ -202,12 +345,12 @@ def test_a_stale_content_hash_is_red() -> None:
     assert any("$.content_sha256" in error for error in snapshot_errors(snapshot, SCHEMA))
 
 
-def _cli(*args: str) -> subprocess.CompletedProcess[str]:
+def _cli(*args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "football_edge.site", "verify-snapshot", *args],
         capture_output=True,
         text=True,
-        cwd=REPO,
+        cwd=cwd,
         env={"PYTHONPATH": str(REPO / "src"), "PATH": "/usr/bin:/bin"},
         check=False,
     )
@@ -250,6 +393,91 @@ def test_the_cli_refuses_a_file_that_is_not_json(tmp_path: Path) -> None:
     assert result.returncode == EXIT_SITE_INVALID
     assert "ANLIK GÖRÜNTÜ İHLALİ: snapshot.json: geçerli JSON değil" in result.stdout
     assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("body", "needle"),
+    [
+        ("[" * 2000 + "]" * 2000, "snapshot.json: iç içelik ayrıştırıcının sınırını aşıyor"),
+        ("[" * 100_000 + "]" * 100_000, "snapshot.json: iç içelik ayrıştırıcının sınırını aşıyor"),
+        ("\ufeff{}", "snapshot.json: geçerli JSON değil"),
+    ],
+    ids=["depth-2000", "depth-100000", "bom"],
+)
+def test_the_cli_names_unparseable_input(tmp_path: Path, body: str, needle: str) -> None:
+    """İnceleme M1/M6d: traceback + exit 1 yerine adlandırılmış satır + exit 24."""
+    target = tmp_path / "snapshot.json"
+    target.write_text(body, encoding="utf-8")
+
+    result = _cli(str(target))
+
+    assert result.returncode == EXIT_SITE_INVALID, result.stdout + result.stderr
+    assert f"ANLIK GÖRÜNTÜ İHLALİ: {needle}" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+def test_the_cli_refuses_utf16(tmp_path: Path) -> None:
+    """`json.loads(bytes)` UTF-16'yı sezerdi; B-2'nin UTF-8 okuyucusu sezmez."""
+    target = tmp_path / "snapshot.json"
+    target.write_bytes(BASE.read_text(encoding="utf-8").encode("utf-16"))
+
+    result = _cli(str(target))
+
+    assert result.returncode == EXIT_SITE_INVALID
+    assert "ANLIK GÖRÜNTÜ İHLALİ: snapshot.json: geçerli JSON değil" in result.stdout
+
+
+def test_the_cli_names_a_lone_surrogate(tmp_path: Path) -> None:
+    snapshot = _fixture()
+    snapshot["leagues"][0]["country"] = "Nord\ud800land"
+    target = tmp_path / "snapshot.json"
+    target.write_text(json.dumps(snapshot), encoding="utf-8")
+
+    result = _cli(str(target))
+
+    assert result.returncode == EXIT_SITE_INVALID, result.stdout + result.stderr
+    assert "ANLIK GÖRÜNTÜ İHLALİ: $.leagues[0].country: UTF-8'e kodlanamayan" in result.stdout
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "missing-sha256"])
+def test_the_cli_names_an_unreadable_file(tmp_path: Path, kind: str) -> None:
+    target = tmp_path / "snapshot.json"
+    if kind == "directory":
+        target.mkdir()
+    args = [str(target if kind != "missing-sha256" else BASE)]
+    if kind == "missing-sha256":
+        args += ["--sha256", str(tmp_path / "snapshot.sha256")]
+    name = "snapshot.sha256" if kind == "missing-sha256" else "snapshot.json"
+
+    result = _cli(*args)
+
+    assert result.returncode == EXIT_SITE_INVALID, result.stdout + result.stderr
+    assert f"ANLIK GÖRÜNTÜ İHLALİ: {name}: okunamadı (" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+def test_the_cli_outside_the_repo_root_names_the_limit(tmp_path: Path) -> None:
+    """Sınır: şema yolu göreli; depo kökü dışından koşu adıyla exit 24 (sessiz yeşil değil)."""
+    result = _cli(str(BASE), cwd=tmp_path)
+
+    assert result.returncode == EXIT_SITE_INVALID, result.stdout + result.stderr
+    assert "snapshot.schema.json: okunamadı — komut depo kökünden koşulur" in result.stdout
+
+
+def test_an_unforeseen_error_in_a_rule_stays_a_named_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kural kollarının öngörmediği istisna exit 1 + traceback değil, adlandırılmış satırdır."""
+
+    def explode(snapshot: object, schema: object) -> list[str]:
+        raise ValueError("gizli değer")
+
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(cli, "snapshot_errors", explode)
+
+    assert cli._content_errors(BASE, BASE.read_bytes()) == [
+        "snapshot.fixture.json: denetlenemedi (ValueError)"
+    ]
 
 
 def test_the_cli_checks_the_file_hash_when_asked(tmp_path: Path) -> None:
