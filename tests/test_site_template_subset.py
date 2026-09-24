@@ -19,7 +19,8 @@ import pytest
 from tests.site_db import MIGRATIONS, SKIPPED_MIGRATIONS, TEMPLATE_MIGRATIONS
 from tests.sql_text import statements
 
-_TARGET = r'(?:public\.)?"?(?:leagues|matches|odds_snapshots)"?(?![\w])'
+# İnceleme m1: `"public"."matches"` ve `public . matches` de nitelenmiş addır.
+_TARGET = r'(?:"?public"?\s*\.\s*)?"?(?:leagues|matches|odds_snapshots)"?(?![\w])'
 _SCHEMAS = r'"?(?:public|site|site_input|site_audit)"?(?![\w])'
 _LIST = r'(?:[\w."]+\s*,\s*)*'
 FORBIDDEN = {
@@ -29,6 +30,9 @@ FORBIDDEN = {
     ),
     "drop trigger/policy/rule": rf"\bdrop\s+(?:trigger|policy|rule)\b[^;]*?\bon\s+{_TARGET}",
     "drop index": r"\bdrop\s+index\b",
+    "drop table": rf"\bdrop\s+table\s+(?:if\s+exists\s+)?{_LIST}{_TARGET}",
+    "alter policy": rf"\balter\s+policy\b[^;]*?\bon\s+{_TARGET}",
+    "reassign owned": r"\breassign\s+owned\b",
     "create policy": rf"\bcreate\s+policy\b[^;]*?\bon\s+{_TARGET}",
     "create index": rf"\bcreate\s+(?:unique\s+)?index\b[^;]*?\bon\s+(?:only\s+)?{_TARGET}",
     "create rule": rf"\bcreate\s+(?:or\s+replace\s+)?rule\b[^;]*?\bto\s+{_TARGET}",
@@ -101,6 +105,12 @@ def test_a_skipped_migration_does_not_touch_what_the_site_reads(name: str) -> No
         ("grant site_reader to anon;", "site object or role"),
         ("insert into leagues values ('x');", "dml on target"),
         ("do $$ begin update public.matches set home_team = 'x'; end $$;", "dml on target"),
+        ('grant select on "public"."matches" to anon;', "grant/revoke on table"),
+        ('alter table "public".matches force row level security;', "alter table"),
+        ("alter table public . matches add column x int;", "alter table"),
+        ("drop table if exists hist_files, matches;", "drop table"),
+        ("alter policy p on public.odds_snapshots using (true);", "alter policy"),
+        ("reassign owned by postgres to supabase_admin;", "reassign owned"),
     ],
 )
 def test_each_forbidden_form_is_caught(statement: str, rule: str) -> None:
@@ -117,6 +127,8 @@ def test_each_forbidden_form_is_caught(statement: str, rule: str) -> None:
         "revoke all on schema ops from public;",
         "create trigger t before update on hist_fetches for each row execute function f();",
         "-- grant select on matches to anon;",
+        "drop table if exists hist_matches;",
+        'alter table "public".hist_matches add column x int;',
     ],
 )
 def test_the_documented_exceptions_and_comments_are_not_findings(statement: str) -> None:

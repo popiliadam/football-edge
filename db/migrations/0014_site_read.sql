@@ -3,10 +3,13 @@
 --
 -- Üç şema, bir rol: `site` (her kolonu anlık görüntüye BİREBİR girebilir = yayımlanabilir),
 -- `site_input` (hesap girdisi, yayımlanmaz: kitap bazında fiyat), `site_audit` (yalnız zincir
--- doğrulaması, yayımlanmaz). `site_reader` yalnız bu üç şemanın görünümlerini okur; HİÇBİR tabloda
--- yetkisi yoktur. Görünümler sahibinin (`postgres` = tablo sahibi) yetkisiyle okunur: 0013'ün RLS'i
--- politikasızdır ve sahibi bağlamaz. Görünüm sahibi tablo sahibi değilse ya da `security_invoker`
--- taşırsa görünüm HATASIZ 0 satır döner — katalog testi ikisini de kırmızı yapar (§4.2).
+-- doğrulaması, yayımlanmaz). `site_reader` yalnız bu üç şemanın görünümlerini okur; bu migration ona
+-- HİÇBİR tablo yetkisi vermez. İstisna PUBLIC'ten gelir ve `postgres` onu geri alamaz: imajın pg_net
+-- (`net`) şeması ve nesneleri `supabase_admin`in PUBLIC yetkisidir (kabul edilen istisna listesi ve
+-- gerekçesi `tests/test_site_views_db.py`de; karar kullanıcınındır). Görünümler sahibinin
+-- (`postgres` = tablo sahibi) yetkisiyle okunur: 0013'ün RLS'i politikasızdır ve sahibi bağlamaz.
+-- Görünüm sahibi tablo sahibi değilse ya da `security_invoker` taşırsa görünüm HATASIZ 0 satır
+-- döner — katalog testi ikisini de kırmızı yapar (§4.2).
 -- Parola ve oturum açma hakkı burada YOKTUR: onaydan sonra kullanıcı istemci tarafında verir (AK18).
 
 -- DEFERRED 18f'in biçimi: `set … reset` her gönderim biçiminde bağlar (`set local` yalnız işlem
@@ -27,7 +30,8 @@ begin
   end if;
 end
 $$;
--- Kaza önleyiciler, güvenlik sınırı DEĞİL (oturumda kapatılabilir). Sınır: yetki yok.
+-- Kaza önleyiciler, güvenlik sınırı DEĞİL: rol bunları oturumda kapatabilir, hatta kendi rol
+-- varsayılanını KALICI sıfırlayabilir (`alter role site_reader reset …`). Sınır: yetki yok.
 alter role site_reader set default_transaction_read_only = on;
 alter role site_reader set statement_timeout = '30s';
 

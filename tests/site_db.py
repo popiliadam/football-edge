@@ -7,8 +7,11 @@ kapanışındaki ve 0013'ün dokunduğu migration'larla kurulur, her modül (ve 
 Append-only tablolar DELETE/TRUNCATE kabul etmez: temizlik veritabanı düzeyindedir, tetikleyici
 ASLA kapatılmaz (`tests/test_site_harness_rules.py`).
 
-Koruma: adres yerel (loopback) değilse ya da canlı adrese eşitse testler REDDEDİLİR; adres yoksa
-yerelde SKIP, `CI=true` iken FAIL (B10). Hata metni adresi basmaz (parola taşır).
+Koruma: adres yerel (loopback) değilse, canlı adrese eşitse ya da hedefi `host` DIŞINDA bir yoldan
+seçebiliyorsa (`REDIRECT_PARAMS`, ortamda `REDIRECT_ENV`) testler REDDEDİLİR; adres yoksa yerelde
+SKIP, `CI=true` iken FAIL (B10). Hata metni adresi basmaz (parola taşır). Döngü adresi
+atılabilirliği kanıtlamaz (başka yerel küme, tünel): küme düzeyinde hiçbir şey yazılmadan önce
+`postgres` veritabanının BOŞ olduğu sınanır (`_require_empty`).
 Migration bağlantısı her yerde `postgres` rolüyledir: 0013'ün `alter default privileges for role
 postgres` satırı yalnız onun yarattığı nesnelere uygulanır.
 """
@@ -17,7 +20,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -55,15 +58,26 @@ SKIPPED_MIGRATIONS = (
     "0012_jev_features.sql",
 )
 NO_SITE_DB = f"SKIP: site-db ({SITE_TEST_VAR} yok)"
+# libpq hedefi `host`tan başka bu yollarla da seçer: `hostaddr` DNS'siz adrestir ve `host`u ezer;
+# servis dosyası (`service`, ortamdaki adı ya da dosyası) kendi host/hostaddr'ını getirir.
+REDIRECT_PARAMS = ("hostaddr", "service")
+REDIRECT_ENV = ("PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
 
 
-def refusal(url: str, live: str) -> str | None:
-    """Atılabilir olmayan hedefin nedeni; atılabilirse None. Metin adresi TAŞIMAZ."""
+def refusal(url: str, live: str, environ: Mapping[str, str] | None = None) -> str | None:
+    """Atılabilir olmayan hedefin nedeni; atılabilirse None. Metin adresi TAŞIMAZ (yalnız adlar)."""
+    env = os.environ if environ is None else environ
     try:
-        host = conninfo_to_dict(url).get("host")
+        params = conninfo_to_dict(url)
     except psycopg.ProgrammingError:
         return f"{SITE_TEST_VAR} ayrıştırılamadı — testler reddedildi"
-    if host not in LOOPBACK:
+    redirects = [name for name in REDIRECT_PARAMS if params.get(name)]
+    if redirects:
+        return f"{SITE_TEST_VAR} hedefi host dışından seçiyor ({', '.join(redirects)}) — reddedildi"
+    inherited = [name for name in REDIRECT_ENV if env.get(name)]
+    if inherited:
+        return f"ortam libpq hedefini yönlendiriyor ({', '.join(inherited)}) — testler reddedildi"
+    if params.get("host") not in LOOPBACK:
         return f"{SITE_TEST_VAR} yerel bir kabı göstermiyor — append-only tablolara yazılmaz"
     if live and url == live:
         return f"{SITE_TEST_VAR} {LIVE_VAR}'e eşit — testler reddedildi"
@@ -94,16 +108,28 @@ def _require_postgres(cur: psycopg.Cursor[Any]) -> None:
         pytest.fail(f"migration'lar postgres rolüyle uygulanmalı, bağlantı {user!r}")
 
 
+def _require_empty(cur: psycopg.Cursor[Any]) -> None:
+    """Kum havuzu kilidi: migration'ları uygulanmış bir küme (kap, tünel) atılabilir değildir."""
+    cur.execute("SELECT to_regclass('public.odds_snapshots') IS NULL")
+    if not (cur.fetchone() or (False,))[0]:
+        pytest.fail("postgres veritabanı boş değil (odds_snapshots var) — hiçbir şey kurulmadı")
+
+
 def _admin(url: str) -> psycopg.Connection[Any]:
     return psycopg.connect(url, autocommit=True)
 
 
 @pytest.fixture(scope="session")
 def site_cluster() -> str:
-    """Oturum başında bayat şablon ve kopyalar silinir, şablon yeniden kurulur (n2)."""
+    """Oturum başında bayat şablon ve kopyalar silinir, şablon yeniden kurulur (n2).
+
+    Boşluk kilidi HER ŞEYDEN önce: dolu bir kümede şablon, `site_reader` rolü ve SET üyeliği
+    (küme düzeyinde, commit'li) yaratılmaz.
+    """
     url = guarded_url()
     with _admin(url) as admin, admin.cursor() as cur:
         _require_postgres(cur)
+        _require_empty(cur)
         cur.execute(
             "SELECT datname FROM pg_database WHERE datname = %s OR starts_with(datname, %s)",
             (TEMPLATE_DB, COPY_PREFIX),
@@ -177,9 +203,7 @@ def full_sequence(site_cluster: str) -> Iterator[psycopg.Cursor[Any]]:
     try:
         with conn.cursor() as cur:
             _require_postgres(cur)
-            cur.execute("SELECT to_regclass('public.odds_snapshots') IS NULL")
-            if not (cur.fetchone() or (False,))[0]:
-                pytest.fail("postgres veritabanı boş değil — tam sıra uygulanmadı")
+            _require_empty(cur)
             for path in sorted(MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql")):
                 apply(cur, path.name)
             yield cur

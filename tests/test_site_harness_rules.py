@@ -25,6 +25,8 @@ DISABLING = (
 )
 SITE_FIXTURES = frozenset({"site_cluster", "site_db", "site_db_each", "full_sequence"})
 ENV_PART = "SITE_TEST_" + "DATABASE"
+SITEDB_MARK = "mark." + "sitedb"
+DB_MODULE = re.compile(r"test_site_\w+_db\.py")
 
 
 def test_the_scope_is_the_site_tests_and_the_harness() -> None:
@@ -112,13 +114,101 @@ def test_the_gate_runs_sitedb_tests_only_where_it_names_them() -> None:
             True,
         ),
         ("bu bir adres değil ===", "", True),
+        # I2: libpq hedefi `hostaddr`la seçer (host'u ezer); servis dosyası kendi hedefini getirir.
+        ("postgresql://postgres:gizli@localhost:5432/postgres?hostaddr=203.0.113.7", "", True),
+        ("host=localhost hostaddr=203.0.113.7 dbname=postgres password=gizli", "", True),
+        ("host=db.uzak.invalid hostaddr=127.0.0.1 dbname=postgres password=gizli", "", True),
+        ("postgresql://postgres:gizli@127.0.0.1:5432/postgres?service=uzak", "", True),
+        ("host=127.0.0.1 service=uzak dbname=postgres password=gizli", "", True),
     ],
 )
 def test_only_a_local_disposable_address_is_accepted(url: str, live: str, refused: bool) -> None:
-    reason = refusal(url, live)
+    reason = refusal(url, live, environ={})
 
     assert (reason is not None) is refused, reason
     assert reason is None or "gizli" not in reason
+
+
+# Liste harness sabitinden TÜRETİLMEZ: sabitten bir ad düşerse vaka da düşerdi.
+@pytest.mark.parametrize("name", ["PGHOSTADDR", "PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR"])
+def test_an_environment_that_redirects_libpq_is_refused(name: str) -> None:
+    """`PGHOSTADDR`/`PGSERVICE…` bağlantı dizesinde olmayan hedefi ortamdan getirir."""
+    url = "postgresql://postgres:gizli@127.0.0.1:55481/postgres"
+
+    assert refusal(url, "", environ={}) is None
+    reason = refusal(url, "", environ={name: "203.0.113.7"})
+    assert reason is not None and name in reason and "203.0.113.7" not in reason
+
+
+def test_the_emptiness_lock_runs_before_the_cluster_is_written() -> None:
+    """I2: `site_cluster` dolu bir kümede şablon/rol/üyelik YARATMADAN kırmızı olmalı.
+
+    Kaynak sırası ölçülür: `_require_empty` çağrısı, ilk DROP/CREATE, migration uygulaması,
+    üyelik ve commit çağrısından önce gelir.
+    """
+    tree = ast.parse(HARNESS.read_text(encoding="utf-8"))
+    (fixture,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "site_cluster"
+    ]
+    calls = sorted(
+        (node.lineno, node.col_offset, ast.unparse(node))
+        for node in ast.walk(fixture)
+        if isinstance(node, ast.Call)
+    )
+    writes = ("DROP DATABASE", "CREATE DATABASE", "apply(", "become_reader_allowed(", ".commit(")
+    lock = [index for index, (*_, text) in enumerate(calls) if text.startswith("_require_empty(")]
+    first_write = min(
+        index for index, (*_, text) in enumerate(calls) if any(w in text for w in writes)
+    )
+
+    assert lock and lock[0] < first_write, [text for *_, text in calls]
+
+
+def _fixture_graph(tree: ast.Module) -> dict[str, set[str]]:
+    """Modüldeki fonksiyon adı → parametre adları (fixture bağımlılığı)."""
+    return {
+        node.name: {arg.arg for arg in node.args.args}
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+
+
+def _closure(name: str, graph: dict[str, set[str]]) -> set[str]:
+    seen: set[str] = set()
+    pending = list(graph.get(name, ()))
+    while pending:
+        current = pending.pop()
+        if current not in seen:
+            seen.add(current)
+            pending.extend(graph.get(current, ()))
+    return seen
+
+
+def test_the_sitedb_mark_cannot_hide_a_test_that_needs_no_database() -> None:
+    """m2: `sitedb` kapının pytest/sızıntı adımından çıkarır; DB'siz bir test onunla saklanamaz.
+
+    İşaret yalnız `test_site_*_db.py` dosyalarında durur ve oradaki her test (yerel fixture'lar
+    üzerinden, geçişli) bir site fixture'ı kullanır.
+    """
+    marked = sorted(
+        path.name
+        for path in TESTS.glob("*.py")
+        if path != Path(__file__) and SITEDB_MARK in path.read_text(encoding="utf-8")
+    )
+    orphans = {}
+    for name in marked:
+        tree = ast.parse((TESTS / name).read_text(encoding="utf-8"))
+        graph = _fixture_graph(tree)
+        orphans[name] = sorted(
+            test
+            for test in graph
+            if test.startswith("test_") and not _closure(test, graph) & SITE_FIXTURES
+        )
+
+    assert marked and all(DB_MODULE.fullmatch(name) for name in marked), marked
+    assert all(tests == [] for tests in orphans.values()), orphans
 
 
 def test_a_missing_address_skips_locally_and_fails_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -40,6 +40,13 @@ FILTERS = {
     "site_audit.ledger_rows": (),
 }
 _TYPES = {"timestamptz": "timestamp with time zone"}
+# §4.3: `site` şemasındaki her kolon yayımlanabilir; eklenen kolon AK6 onayı ister (ör. `sealed_at`
+# alınmaz). `site.record` kolonları `RECORD_COLUMNS`la ayrıca sabitlenir.
+SITE_COLUMNS = {
+    "site.leagues": ("id", "name", "country"),
+    "site.matches": ("id", "league_id", "commence_time", "home_team", "away_team"),
+    "site.ledger_head": ("rows", "last_id", "head"),
+}
 
 
 def _statements() -> list[str]:
@@ -53,6 +60,28 @@ def _views() -> dict[str, str]:
         if head is not None:
             found[head.group(1)] = head.group(2)
     return found
+
+
+def _output_columns(body: str) -> tuple[str, ...]:
+    """`select … from` listesinin çıktı adları: parantez içindeki virgül ve `from` sayılmaz."""
+    items, current, depth, index = [], "", 0, len("select ")
+    assert body.startswith("select "), body
+    while index < len(body):
+        char = body[index]
+        depth += (char == "(") - (char == ")")
+        if depth == 0 and body.startswith(" from ", index):
+            break
+        if depth == 0 and char == ",":
+            items.append(current.strip())
+            current = ""
+        else:
+            current += char
+        index += 1
+    items.append(current.strip())
+    return tuple(
+        alias.group(1) if (alias := re.search(r" as (\w+)$", item)) else item.split(".")[-1]
+        for item in items
+    )
 
 
 def test_0014_bounds_its_lock_wait_in_the_form_every_sender_honours() -> None:
@@ -110,6 +139,12 @@ def test_the_record_placeholder_is_where_false_with_the_contract_columns() -> No
 
     assert body.endswith("where false")
     assert [(name, _TYPES.get(kind, kind)) for kind, name in columns] == list(RECORD_COLUMNS)
+
+
+@pytest.mark.parametrize("view", sorted(SITE_COLUMNS))
+def test_each_published_view_carries_exactly_its_columns(view: str) -> None:
+    """I3: `site` = yayımlanabilir; kolon listesi ad ve sırayla sabit (`*` de kırmızı)."""
+    assert _output_columns(_views()[view]) == SITE_COLUMNS[view]
 
 
 def test_the_audit_view_carries_id_plus_the_hashed_ledger_columns() -> None:

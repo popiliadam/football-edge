@@ -24,6 +24,51 @@ REPO = Path(__file__).resolve().parent.parent
 SCHEMAS = ("site", "site_input", "site_audit")
 API_ROLES = ("anon", "authenticated", "service_role")
 BASE_TABLES = {"public.leagues", "public.matches", "public.odds_snapshots"}
+SITE_VIEWS = {
+    "site.leagues",
+    "site.matches",
+    "site.ledger_head",
+    "site.record",
+    "site_input.h2h_quotes",
+    "site_audit.ledger_rows",
+}
+# ── KABUL EDİLEN İSTİSNALAR (düzeltme turu 1, I1) ──────────────────────────────────────────────
+# site_reader'ın site nesneleri DIŞINDAKİ yetkileri. Hepsi PUBLIC'e `supabase_admin` (sahip)
+# tarafından verilmiştir; `postgres` (süper değil) GERİ ALAMAZ — kapta ölçüldü: `revoke … from
+# public` ve `from site_reader` "no privileges could be revoked", `granted by supabase_admin`
+# "grantor must be current user", `alter schema net owner` "must be owner". Liste dışındaki her
+# yetki kırmızıdır; listedeki bir yetki kaybolursa da kırmızıdır (liste bayatlamaz).
+# `net` (pg_net) ERİŞİLEBİLİRDİR (şema USAGE'ı da PUBLIC'ten): LOGIN verilmiş site_reader sunucudan
+# HTTP isteği atabilir, dispatch kuyruğunu okuyup yazabilir — karar kullanıcınındır (HANDOFF, §4.5).
+PG_NET_RELATIONS = {"net._http_response", "net.http_request_queue", "net.http_request_queue_id_seq"}
+PG_NET_FUNCTIONS = {
+    "net._await_response(bigint)",
+    "net._encode_url_with_params_array(text,text[])",
+    "net._http_collect_response(bigint,boolean)",
+    "net._urlencode_string(character varying)",
+    "net.check_worker_is_up()",
+    "net.http_collect_response(bigint,boolean)",
+    "net.http_delete(text,jsonb,jsonb,integer,jsonb)",
+    "net.http_get(text,jsonb,jsonb,integer)",
+    "net.http_post(text,jsonb,jsonb,jsonb,integer)",
+    "net.wait_until_running()",
+    "net.wake()",
+    "net.worker_restart()",
+}
+# Nesne yetkisi PUBLIC'te ama şemanın USAGE'ı site_reader'da YOK: erişilemez (şema testi sabitler).
+UNREACHABLE_RELATIONS = {
+    "cron.job",
+    "cron.job_run_details",
+    "extensions.pg_stat_statements",
+    "extensions.pg_stat_statements_info",
+}
+# `public`: USAGE PUBLIC'ten (sahibi pg_database_owner); içinde site_reader'ın nesne yetkisi YOK.
+# Geri almak PUBLIC'e dayanan her rolü etkiler — 0014'ün kapsamı değil (kullanıcı kararı).
+READER_SCHEMAS = {"public", "net", *SCHEMAS}
+NON_CATALOG = (
+    "n.nspname NOT IN ('pg_catalog', 'information_schema') "
+    "AND n.nspname NOT LIKE 'pg\\_toast%%' AND n.nspname NOT LIKE 'pg\\_temp%%'"
+)
 
 
 def _rows(cur: psycopg.Cursor[Any], query: str, params: tuple[Any, ...] = ()) -> list[Any]:
@@ -155,11 +200,17 @@ def test_api_roles_get_nothing_in_the_site_schemas(full_sequence: psycopg.Cursor
 def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
     full_sequence: psycopg.Cursor[Any],
 ) -> None:
-    held = _rows(
-        full_sequence,
-        f"SELECT {QUALIFIED} {FROM_CLASS} WHERE c.relkind IN ('r', 'p') AND n.nspname = 'public' "
-        "AND has_table_privilege('site_reader', c.oid, 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')",
-    )
+    """Bütün şemalarda (katalog hariç), her ilişki türü, tablo ya da kolon yetkisi (I1)."""
+    held = {
+        name
+        for (name,) in _rows(
+            full_sequence,
+            f"SELECT {QUALIFIED} {FROM_CLASS} WHERE {NON_CATALOG} "
+            "AND (has_table_privilege('site_reader', c.oid, "
+            "'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') "
+            "OR has_any_column_privilege('site_reader', c.oid, 'SELECT,INSERT,UPDATE,REFERENCES'))",
+        )
+    }
     ((login, bypass, inherit),) = _rows(
         full_sequence,
         "SELECT rolcanlogin, rolbypassrls, rolinherit FROM pg_roles WHERE rolname = 'site_reader'",
@@ -170,9 +221,85 @@ def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
         "WHERE setrole = 'site_reader'::regrole AND setdatabase = 0 ORDER BY 1",
     )
 
-    assert held == []
+    assert held - SITE_VIEWS == PG_NET_RELATIONS | UNREACHABLE_RELATIONS
     assert (login, bypass, inherit) == (False, False, False)
     assert settings == [("default_transaction_read_only=on",), ("statement_timeout=30s",)]
+
+
+def test_site_reader_reaches_only_the_site_schemas_and_the_named_exceptions(
+    full_sequence: psycopg.Cursor[Any],
+) -> None:
+    """Şema USAGE'ı = site şemaları + `public` + `net`; hiçbir şemada CREATE yok (I1)."""
+    usage = {
+        name
+        for (name,) in _rows(
+            full_sequence,
+            "SELECT n.nspname::text FROM pg_namespace n "
+            f"WHERE {NON_CATALOG} AND has_schema_privilege('site_reader', n.oid, 'USAGE')",
+        )
+    }
+    create = _rows(
+        full_sequence,
+        "SELECT n.nspname::text FROM pg_namespace n "
+        f"WHERE {NON_CATALOG} AND has_schema_privilege('site_reader', n.oid, 'CREATE')",
+    )
+
+    assert usage == READER_SCHEMAS
+    assert create == []
+
+
+def test_site_reader_executes_only_the_floor_and_the_named_exceptions(
+    full_sequence: psycopg.Cursor[Any],
+) -> None:
+    """ERİŞİLEBİLEN (USAGE'lı şemadaki) fonksiyonlarda EXECUTE = taban + pg_net (I1).
+
+    USAGE'sız şemalardaki fonksiyonlar Postgres varsayılanıyla PUBLIC EXECUTE taşır ve
+    çağrılamaz; şema kümesini bir önceki test sabitler.
+    """
+    executable = {
+        name
+        for (name,) in _rows(
+            full_sequence,
+            "SELECT p.oid::regprocedure::text FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace "
+            f"WHERE {NON_CATALOG} AND has_schema_privilege('site_reader', n.oid, 'USAGE') "
+            "AND has_function_privilege('site_reader', p.oid, 'EXECUTE')",
+        )
+    }
+
+    assert executable == {"site.public_floor()"} | PG_NET_FUNCTIONS
+
+
+def test_every_accepted_exception_belongs_to_supabase_admin(
+    full_sequence: psycopg.Cursor[Any],
+) -> None:
+    """İstisnanın gerekçesi ölçülür: sahip ve PUBLIC yetkisini veren `postgres` DEĞİL."""
+    relations = _rows(
+        full_sequence,
+        f"SELECT DISTINCT {QUALIFIED}, pg_get_userbyid(c.relowner), "
+        "pg_get_userbyid((aclexplode(c.relacl)).grantor) AS grantor, "
+        "(aclexplode(c.relacl)).grantee AS grantee "
+        f"{FROM_CLASS} WHERE {QUALIFIED} = ANY(%s)",
+        (sorted(PG_NET_RELATIONS | UNREACHABLE_RELATIONS),),
+    )
+    public_grants = {
+        (name, owner, grantor) for name, owner, grantor, grantee in relations if grantee == 0
+    }
+    functions = _rows(
+        full_sequence,
+        "SELECT DISTINCT pg_get_userbyid(proowner) FROM pg_proc "
+        "WHERE oid::regprocedure::text = ANY(%s)",
+        (sorted(PG_NET_FUNCTIONS),),
+    )
+    (net_owner,) = _rows(
+        full_sequence, "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = 'net'"
+    )
+
+    assert {name for name, *_ in public_grants} == PG_NET_RELATIONS | UNREACHABLE_RELATIONS
+    assert {(owner, grantor) for _, owner, grantor in public_grants} == {
+        ("supabase_admin", "supabase_admin")
+    }
+    assert functions == [("supabase_admin",)] and net_owner == ("supabase_admin",)
 
 
 def _record_columns(cur: psycopg.Cursor[Any]) -> list[tuple[str, str]]:
