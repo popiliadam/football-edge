@@ -102,6 +102,18 @@ export function rscLinks(text: string): string[] {
     .filter((value) => EXACT_LINK.test(value));
 }
 
+// React Flight metin satırı `<id>:T<onaltılık bayt uzunluğu>,<ham metin>` (T9 yeniden inceleme 2 B4): React
+// 1024 karakterden uzun dizeyi tırnaksız bu satırla basar ve `rscStrings` onu OKUMAZ. Bugün hiçbir
+// derlemede yok (fixture ve 700 maç ölçüldü). Tuzak teli: görülürse bulgu; tam okuma ilk gerçek T satırı
+// çıktığında eklenir (son inceleme triyajı).
+export const FLIGHT_TEXT_ROW = /^[0-9a-f]+:T[0-9a-f]+,/m;
+
+export function flightTextRowFindings(where: string, raw: string): string[] {
+  return FLIGHT_TEXT_ROW.test(raw)
+    ? [`${where}: React Flight metin (T) satırı — sözcük taraması okumaz (B4 tuzak teli)`]
+    : [];
+}
+
 // Next'in satır içi betikleri (T9 yeniden inceleme FP1, N2): önce birebir önyükleme, ardından BİR YA DA
 // DAHA FAZLA veri itişi. Her itiş TAM ayrışmalı: `self.__next_f.push(` + JSON dizi `[1,"…"]` + `)`.
 // Büyük sayfada Next veriyi birden çok itişe böler (700 maçlık lig sayfasında 4). RSC metni itişlerin

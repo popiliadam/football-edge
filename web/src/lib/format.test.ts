@@ -12,7 +12,9 @@ describe("formatNumber — yalnız ayraç ve birim, yuvarlama yok (spec §5.4)",
     [2.2, "price2", "en", "2.20"],
     [3.57, "price2", "tr", "3,57"],
     [-4.76, "pct2", "tr", "%-4,76"],
+    [-4.76, "pct2", "en", "-4.76%"],
     [1834, "int", "en", "1834"],
+    [12345, "int", "tr", "12345"],
   ] as const)("%s %s %s → %s", (value, kind, lang, expected) => {
     expect(formatNumber(value, kind, lang)).toBe(expected);
   });

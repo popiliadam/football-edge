@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -67,7 +68,16 @@ def test_the_round_mean_is_the_exact_fsum_float_in_both_callers() -> None:
 
     Ev fiyatları 1.1, 1.2, 3.4 (bu sırayla üç tam kitap): `math.fsum` → 1.9000000000000001,
     Python 3.11'in düz `sum`ı → 1.8999999999999997 (T2 M3; CI 3.11 koşar). `approx` değil `==`.
+    Önkoşul: iki toplama bu yorumlayıcıda AYRIŞIR — 3.12+'nın `sum`ı telafili toplar ve ikisi
+    eşitlenir; o zaman pin `sum`a dönüşü artık yakalamaz ve test bunu adıyla söyler (B-1 son
+    düzeltme yeniden incelemesi (b)).
     """
+    home = [1.1, 1.2, 3.4]
+    assert sum(home) / 3 != math.fsum(home) / 3, (
+        "önkoşul düştü: bu Python'da sum ile math.fsum aynı float'ı veriyor (3.12+ telafili "
+        "toplar); pin yalnız Python 3.11'de (CI) ayırt edicidir — ayrışan başka bir fiyat üçlüsü "
+        "seçilmeli"
+    )
     quotes = [
         *_book("a", T0, (1.1, 5.0, 9.0)),
         *_book("b", T0, (1.2, 5.0, 9.0)),

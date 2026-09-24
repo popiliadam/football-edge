@@ -281,6 +281,8 @@ export const SECRET_PATTERNS = [
   "service_role",
   "SUPABASE_",
   "NETLIFY_AUTH",
+  // Supabase'in yeni gizli anahtar biçimi (T9 yeniden inceleme 2 x21): JWT değil, `eyJ` kuralı görmez.
+  "sb_secret_",
 ];
 // JWT biçimi (T9 yeniden inceleme FP2): `eyJ` + base64url başlık `.` base64url yük `.` imza. Çıplak `eyJ`
 // alt dizesi base64 CSP hash'lerinde ve Next'in rastgele dosya adlarında rastlantıyla geçer (≈1,6·10⁻⁴/hash).

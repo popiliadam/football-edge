@@ -452,9 +452,20 @@ def test_node_tools_see_only_the_allowlisted_environment(tmp_path: Path) -> None
     ]
 
 
-# `verify.sh`in site bloğu baytla sabittir (I1, I3): adım komutları, e2e kararının okunuşu ve
-# SKIP/FAIL ayrımı. B-1'in kendi komutlarını sabitlediği gibi (`tests/test_site_gate.py`).
-VERIFY_SITE_BLOCK = """\
+# `verify.sh`in site bölgesi baytla sabittir (I1, I3; son inceleme I1): `site-db`nin kapanış
+# `fi`sinden `step "dil-kalibrasyonu"`na kadar, yorumlar dâhil. Adım komutları, e2e kararının
+# okunuşu ve SKIP/FAIL ayrımı; bölgeye eklenen bir `if [ "${CI:-}" != "true" ]; then … fi`
+# sarmalı da metni değiştirir. B-1'in kendi komutlarını sabitlediği gibi
+# (`tests/test_site_gate.py`).
+VERIFY_SITE_REGION = """\
+
+# ── Site (Plan B-2, spec §12.1) ───────────────────────────────────────────────────────────
+# Node adımları `site-db`den SONRA koşar: uçtan uca anlık görüntüyü o adım yazar. Her koşu
+# derlemelerini KENDİ geçici dizinine kopyalar (silme yok, bayat çıktı yok). Uçtan uca
+# anlık görüntünün seçimi ve bayat dosya reddi `site_gate.sh e2e`dedir (testli). Node araçları
+# yalnız `site_gate.sh` üzerinden, izin listeli ortamla koşar (secret'lar pnpm/node'a geçmez).
+# Blok baytla sabittir (`tests/test_site_web_gate.py`); `CI=true` iken `build`/`check` uçtan uca
+# varyant yoksa ayrıca kırmızıdır.
 SITE_BUILDS="$(mktemp -d "${TMPDIR:-/tmp}/site-builds.XXXXXX")"
 export SITE_BUILDS
 SITE_E2E_SNAPSHOT=""
@@ -474,12 +485,79 @@ step "site-lint"    ./scripts/site_gate.sh lint
 step "site-test"    ./scripts/site_gate.sh test
 step "site-derleme" ./scripts/site_gate.sh build
 step "site-uyum"    ./scripts/site_gate.sh check
+
+# Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
+# harcamaz: yalnız `config/languages.yaml`'daki `production_enabled` bayraklarının bir
+# kalibrasyon raporuyla desteklendiğini sorar (`calibration.language_config_violations`).
+# Rapor yoksa ya da `production_ready()`yi geçmiyorsa bayrak açık olamaz. `calibrate`
+# (gerçek Jev çağrısı, PARA HARCAR) kapının parçası DEĞİLDİR — Ruling R4, task-12-brief.
+step "dil-kalibrasyonu" uv run python -m football_edge.collect check-languages
 """
 
 
-def test_the_verify_site_block_is_pinned_byte_for_byte() -> None:
+def _site_region(text: str) -> str:
+    closing = re.compile(r"^fi$", flags=re.M).search(text, text.rindex('step "site-db"'))
+    assert closing is not None, "site-db bloğunun `fi`si yok"
+    end = text.index("\n", text.index('step "dil-kalibrasyonu"')) + 1
+    return text[closing.end() + 1 : end]
+
+
+def test_the_verify_site_region_is_pinned_byte_for_byte() -> None:
     text = VERIFY.read_text(encoding="utf-8")
-    start = text.index('SITE_BUILDS="$(mktemp -d')
-    end = text.index('step "site-uyum"', start)
-    assert text[start : text.index("\n", end) + 1] == VERIFY_SITE_BLOCK
+    assert _site_region(text) == VERIFY_SITE_REGION
     assert not re.search(r"^\s*step \"site-[^\"]+\"\s+pnpm", text, flags=re.M)
+
+
+# Kabuk yapılarının açılış/kapanışı yalnız KOMUT konumunda sayılır (satır başı, `;`/`&`/`|`
+# sonrası, `then`/`do`/`else` ardı): `echo "… if …"` metni sayılmaz. `bash -c '…'` gövdeleri
+# kendi içinde dengelidir.
+_OPENERS = re.compile(r"(?:^|[;&|]\s*|\b(?:then|do|else)\s+)(?:if|case|for|while|until|select)\b")
+_CLOSERS = re.compile(r"(?:^|[;&|]\s*)(?:fi|esac|done)\b")
+
+
+def _depths(text: str) -> list[tuple[int, str]]:
+    """Her satırın ÖNÜNDEKİ iç içelik derinliği: if/case/döngü ve `{ … }` (işlev ya da grup).
+    Son öğe dosya sonunun derinliğidir (boş satır)."""
+    depth, found = 0, []
+    for raw in [*text.splitlines(), ""]:
+        line = raw.strip()
+        found.append((depth, line))
+        if line.startswith("#"):
+            continue
+        depth += len(_OPENERS.findall(line)) - len(_CLOSERS.findall(line))
+        depth += line.endswith("{") - line.startswith("}")
+    return found
+
+
+def test_site_steps_run_at_the_top_level_of_verify_sh() -> None:
+    """Son inceleme I1 (mutasyon A): bayt pin'i bölgenin DIŞINDAN gelen bir sarmalı görmez — ör.
+    `site-db` bloğundan önce açılıp `dil-kalibrasyonu`ndan sonra kapanan bir `if`/`{`/işlev. Her
+    `site-*` Node adımı ve dosyanın sonu derinlik 0'dadır."""
+    depths = _depths(VERIFY.read_text(encoding="utf-8"))
+    steps = {
+        name: depth
+        for depth, line in depths
+        for name in NODE_STEPS
+        if line.startswith(f'step "{name}" ')
+    }
+    assert sorted(steps) == sorted(NODE_STEPS), f"site adımları eksik: {sorted(steps)}"
+    assert steps == dict.fromkeys(NODE_STEPS, 0), f"site adımı bir yapının içinde: {steps}"
+    assert depths[-1][0] == 0, f"dosya sonunda derinlik {depths[-1][0]}: dengesiz yapı"
+
+
+def test_the_depth_reader_sees_the_wrappers_the_pin_cannot() -> None:
+    wrapped = (
+        'if [ "${CI:-}" != "true" ]; then\n'
+        'step "site-kurulum" ./scripts/site_gate.sh install\n'
+        "fi\n"
+        '[ "${CI:-}" = "true" ] || {\n'
+        'step "site-tip"     ./scripts/site_gate.sh tip\n'
+        "}\n"
+        "while false; do\n"
+        'step "site-lint"    ./scripts/site_gate.sh lint\n'
+        "done\n"
+        'echo "if bu metin değil"; step "site-test" x\n'
+    )
+    depths = _depths(wrapped)
+    assert [depth for depth, line in depths if line.startswith("step ")] == [1, 1, 1]
+    assert depths[-1][0] == 0, "echo metnindeki `if` sayılmamalı"

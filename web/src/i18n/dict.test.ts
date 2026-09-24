@@ -15,8 +15,11 @@ describe("sözlükler (spec §8.3)", () => {
     );
   });
 
+  // İki katlama (son inceleme m1): düz `toLowerCase()` "YAKINDA"yı `yakinda`ya çevirir (noktasız ı
+  // kaybolur); `toLocaleLowerCase("tr")` "COMING"i `comıng`e çevirir. Her yasak ifade ikisinde de aranır.
   it("hiçbir arayüz metni 'yakında' vaadi ya da value önerisi taşımaz", () => {
-    const all = [...Object.values(en), ...Object.values(tr)].join("\n").toLowerCase();
+    const joined = [...Object.values(en), ...Object.values(tr)].join("\n");
+    const folds = [joined.toLowerCase(), joined.toLocaleLowerCase("tr")];
     for (const banned of [
       "yakında",
       "coming soon",
@@ -24,7 +27,7 @@ describe("sözlükler (spec §8.3)", () => {
       "tip of the day",
       "günün tahmini",
     ]) {
-      expect(all).not.toContain(banned);
+      for (const all of folds) expect(all).not.toContain(banned);
     }
   });
 });

@@ -82,6 +82,10 @@ export const SUGGESTION_WORDS: readonly string[] = [
   "iddaa",
 ].map(fold);
 
+// "Yakında" vaadi (spec §6.2, §7: boş durumda "yakında" GÖSTERİLMEZ; son inceleme m1). Tam sözcük:
+// `yakındaki` (konum) vaat değildir. Katlama Türkçe büyük harfe duyarlı: "Sicil YAKINDA" = `yakinda`.
+export const PROMISE_PHRASES: readonly string[] = ["yakında", "coming soon"].map(fold);
+
 // İzinli cümleler TAM cümle olarak SÖZLÜKTEN okunur: sorumluluk reddi, "value önerisi
 // yayımlamıyoruz" ve boş sicilin CLV açıklaması. Terim ya da kelime düzeyinde muafiyet YOK.
 export const ALLOWED_SENTENCE_KEYS = [

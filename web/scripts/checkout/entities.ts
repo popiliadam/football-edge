@@ -5,8 +5,6 @@
 // Adlar büyük/küçük harfe duyarlıdır (HTML5 gibi).
 import { stripScripts } from "../lib/html.ts";
 
-const REACT_NAMED = ["amp", "lt", "gt", "quot"];
-
 const INVISIBLE = "​";
 const NAMED: Record<string, string> = {
   // URL ve sözdizimi karakterleri
@@ -78,11 +76,24 @@ export function decodeNamed(text: string): string {
   return text.replace(/&([A-Za-z][A-Za-z0-9]*);/g, (whole, name: string) => NAMED[name] ?? whole);
 }
 
+// Kapalı kural (T9 yeniden inceleme 2 B1/B2, son inceleme m2): betik dışı HTML'de `&` YALNIZ `&amp;`,
+// `&lt;`, `&gt;`, `&quot;` ya da `;` ile biten sayısal başvuruyla (`&#39;`, `&#x27;`) devam eder. Tarayıcı
+// sayısal başvuruyu ve eski adları `;` OLMADAN da çözer (`/&#47evil.example/` = `//evil.example/`,
+// `Pin&shynacle`); denetimin çözücüleri `;` ister. React her zaman `;` basar ve çıplak `&`i kaçışlar.
+const ALLOWED_REFERENCE = /^&(?:amp|lt|gt|quot|#[0-9]+|#[xX][0-9A-Fa-f]+);/;
+
 export function entityFindings(where: string, html: string): string[] {
-  const names = [...stripScripts(html).matchAll(/&([A-Za-z][A-Za-z0-9]*);/g)]
-    .map((match) => match[1] ?? "")
-    .filter((name) => !REACT_NAMED.includes(name));
-  return [...new Set(names)].map(
-    (name) => `${where}: adlı HTML varlığı &${name}; (React yalnız &amp; &lt; &gt; &quot; basar)`,
-  );
+  const text = stripScripts(html);
+  const found = new Set<string>();
+  for (const match of text.matchAll(/&/g)) {
+    const rest = text.slice(match.index, match.index + 64);
+    if (ALLOWED_REFERENCE.test(rest)) continue;
+    const named = /^&([A-Za-z][A-Za-z0-9]*);/.exec(rest)?.[1];
+    found.add(
+      named !== undefined
+        ? `adlı HTML varlığı &${named}; (React yalnız &amp; &lt; &gt; &quot; basar)`
+        : `izinsiz karakter başvurusu "${/^&[#A-Za-z0-9]{0,16}/.exec(rest)?.[0] ?? "&"}" (yalnız &amp; &lt; &gt; &quot; ve ; ile biten sayısal)`,
+    );
+  }
+  return [...found].map((finding) => `${where}: ${finding}`);
 }

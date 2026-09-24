@@ -46,7 +46,7 @@ import {
 import { entityFindings } from "./checkout/entities.ts";
 import { type ExpectedPage, expectedPages } from "./checkout/expect.ts";
 import { frameworkNumberFindings, numberFindings } from "./checkout/numbers.ts";
-import { nextPushes, rscLinks, rscStrings } from "./checkout/surface.ts";
+import { flightTextRowFindings, nextPushes, rscLinks, rscStrings } from "./checkout/surface.ts";
 import { squash } from "./checkout/text.ts";
 import { stripScripts, tags } from "./lib/html.ts";
 import { pageFiles, readText, walk } from "./lib/outdir.ts";
@@ -98,7 +98,7 @@ type Site = {
 };
 
 // RSC verisi (satır içi `self.__next_f` itişlerinin birleşimi ya da istemci gezinmesinin `.txt` dosyası):
-// sözcük ve lisans taraması, tam yol/URL dizelerinin bağlantı denetimi, ham host taraması. İşaretli
+// sözcük ve lisans taraması, tam yol/URL dizelerinin bağlantı denetimi, ham host taraması, T satırı teli. İşaretli
 // olumsuzlama öğesinin cümlesi (HTML'de sayılı) burada işaretsiz dize olarak geçer ve çıkarılır.
 function rscFindings(where: string, raw: string, negations: readonly string[]) {
   const label = `${where} (RSC)`;
@@ -112,6 +112,7 @@ function rscFindings(where: string, raw: string, negations: readonly string[]) {
       .filter((link) => !internal(link))
       .map((link) => `${label}: dış bağlantı "${link}"`),
     ...hostFindings(label, raw),
+    ...flightTextRowFindings(label, raw),
   ];
 }
 

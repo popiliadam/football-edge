@@ -17,6 +17,7 @@ import {
   BOOKMAKERS,
   escapeRegExp,
   fold,
+  PROMISE_PHRASES,
   SUGGESTION_WORDS,
   wordPattern,
 } from "./words.ts";
@@ -97,7 +98,7 @@ export function hostFindings(where: string, text: string): string[] {
   return [...new Set(hosts)].map((host) => `${where}: izinsiz host ${host}`);
 }
 
-// (T5 2) Yasak sözcükler: bahis şirketi adı, value/öneri/tavsiye dağarcığı (tr dahil). İzinli cümleler
+// (T5 2) Yasak sözcükler: bahis şirketi adı, value/öneri/tavsiye dağarcığı (tr dahil), "yakında" vaadi. İzinli cümleler
 // TAM cümle olarak çıkarılır (sözlük + yasal taslaktaki adıyla yazılmış cümleler). Metin kümesi: düğümler,
 // satır içi birleşik düğümler, `alt`/`title`/`placeholder`/`value`/`aria-*`/`<meta content>`, JSON-LD.
 // İzinli cümle yalnız KENDİ BAŞINA duruyorsa çıkarılır (yeniden inceleme N6): metnin başında ya da
@@ -133,6 +134,7 @@ export function scanWords(where: string, texts: readonly string[]): string[] {
   for (const [list, stem, label] of [
     [BOOKMAKERS, false, "bahis şirketi adı"],
     [SUGGESTION_WORDS, true, "öneri sözcüğü"],
+    [PROMISE_PHRASES, false, "vaat ifadesi"],
   ] as const) {
     for (const word of list) {
       const pattern = wordPattern(word, stem);
