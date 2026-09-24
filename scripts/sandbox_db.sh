@@ -35,7 +35,7 @@ SANDBOX_VAR="SANDBOX_DATABASE""_URL"
 # sırayı geri alınan işlemde uygular; şablonu ve kopyalarını AYRI veritabanlarında kurar.
 SITE_VAR="SITE_TEST_DATABASE""_URL"
 DEFAULT_TESTS=(tests/test_api_roles_lockdown_db.py tests/test_jev_tables_db.py tests/test_holdout_phase_db.py
-  tests/test_site_views_db.py)
+  tests/test_site_views_db.py tests/test_site_e2e_db.py)
 
 die() { echo "sandbox_db: $*" >&2; exit 1; }
 
