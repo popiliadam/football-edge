@@ -1,0 +1,7 @@
+# Netlify DERLEMEZ (spec §11, AK16): yayın yalnız `site.yml`in hazır `out/` dizinini
+# Netlify CLI ile yüklemesidir. Netlify Git'e bağlanırsa aşağıdaki komut derlemeyi adıyla
+# reddeder — DB kimliği Netlify'a hiç verilmez. Başlıklar ve yönlendirmeler burada DEĞİL,
+# derlemenin ürettiği `out/_headers` ve `out/_redirects`tedir (tek kaynak, B8).
+[build]
+  publish = "out"
+  command = "echo 'Netlify tarafinda derleme yapilmaz: yayin yalniz site.yml hazir dizini (spec 11, AK16)' >&2; exit 1"

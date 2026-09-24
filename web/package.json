@@ -7,7 +7,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "next build",
+    "build": "next build && node scripts/emit-headers.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome ci .",
     "test": "vitest run"
