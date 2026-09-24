@@ -799,3 +799,8 @@ gitignored) ve görev incelemeleri. Kapının ölçmedikleri ayrıca `docs/phase
 | 20g | en boş sicil metni "registered in advance" → "to be registered in advance" (T6 m2) | Metin onayı kapsamında | AK2 |
 | 20h | Sicil sayfası GA düzeyini göstermiyor (T6 m5) | Ürün kararı | Faz 5 sicili bağlanırken |
 | 20i | tr koşullar metni: "yalnız baş hash'leri"nden "yalnız" düşsün (en ile tutarlı) (T7 n1); "bahis kabul etmez" cümlesinin öznesi defter gibi okunuyor (T7 n2) | Yasal taslaklar avukat incelemesinden geçecek | Taslakların avukat incelemesiyle (AK13; HANDOFF "Hukuk incelemesi") |
+| 20j | `verify.sh` site bloğunun alt kabukla (`[ "${CI:-}" = "true" ] \|\| ( … )`, `site-db`den önce açılan) sarılması ve `step` fonksiyonunun yeniden tanımlanması test takımını yeşil bırakır (derinlik testi parantez saymıyor) — son B-2 düzeltme dalgası yeniden incelemesi | Kasıtlı kaçış; kazara giriş bayt pini ve derinlik testiyle yakalanıyor | `verify.sh`in bir sonraki yapısal değişikliği |
+| 20k | Python ve TS `_headers` ayrıştırıcıları ortak fixture'la eşitlenmiyor (B-2 bütün-dal m7) | İkisi ayrı ayrı testli; ayrışma yalnız biri değişirse | `_headers` biçimi değişirken |
+| 20l | `TMPDIR` bir git çalışma ağacının içindeyse iki B-1 testi ("git yok" varsayımı) kırmızı (B-2 bütün-dal m8) | Kapı komutu `T=$(mktemp -d)` ile depo dışında çalışır | Bu testlere dokunulduğunda: `GIT_CEILING_DIRECTORIES` ile yalıt |
+| 20m | DEFERRED 20d'deki hazır `eventStatus` test parçacığı `matchPath` importunu içermiyor | Parçacık belge içinde | 20d uygulanırken |
+

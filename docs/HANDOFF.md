@@ -1,10 +1,11 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-24 (oturum 9) · **Durum:** Dalga A `main`de (`932bfa3`, CI yeşil) — **0013 API rolleri
-kilidi CANLIDA** (2026-09-23 21:36 UTC); İz B spec'i + B-1/B-2 planları `docs/s9-iz-b-tasarim` dalında (kullanıcı
-onayı bekler, §0.7/10) · **FIFA milli arası: kulüp maçı 2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken
-2026-10-07 · holdout açılmadı · kapı **10 adım yeşil + `zincir` adıyla SKIP** (DB bağlıyken 11/11; kurulum artık
-`uv sync --extra scrape`) · `EXPECTED_MIN_LEAKAGE` 418 · `EXPECTED_MIN_CONTRACT` 25
+**Son güncelleme:** 2026-09-24 (oturum 9 sonu) · **Durum:** Dalga A + **Faz 6 İz B (B-1 okuma katmanı + B-2 web
+yüzeyi) `main`de** (`7033083`) — spec ve planlar kullanıcı onayı bekler (§0.7/10); **0014 canlıya UYGULANMADI**, deploy
+BAĞLI DEĞİL · **0013 API rolleri kilidi CANLIDA** (2026-09-23 21:36 UTC) · **FIFA milli arası: kulüp maçı
+2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken 2026-10-07 · holdout açılmadı · kapı yerelde **16 PASS + adıyla 3
+SKIP** (`site-db`, `site-derleme/e2e`, `zincir`), CI'da 17 PASS + `SKIP: zincir` · kurulum `uv sync --extra scrape` +
+**Node 24.21.0 / pnpm 10.34.5** (`nvm use 24.21.0`; Node 22 ile `site-kurulum` adıyla FAIL)
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -45,12 +46,25 @@ Plan `docs/superpowers/plans/2026-09-23-oturum9-dalga-a.md` (T1–T6). Her göre
 - **T6 (eklendi, K1):** 6 eski tabloda RLS yoktu ve `anon`/`authenticated` tam yetkiliydi (advisor ERROR ×6). `0013`
   yazıldı, kapta test edildi (`scripts/sandbox_db.sh`, RUNBOOK §4), ROLLBACK kuru koşusundan sonra **canlıya
   uygulandı**; ilk mühür turu yeşil; advisors ERROR/WARN yok. DEFERRED 12a kapandı, §18 açıldı.
-- **İz B (Dalga B):** spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md` (4 düzeltme turu → "Planlanabilir";
-  mimari A: Actions'ta salt okuma rolüyle statik üretim, tarayıcıya/Netlify'a DB anahtarı gitmez; açık kararlar
-  AK1–AK22 spec §16) + planlar `…/plans/2026-09-24-faz6-iz-b-1-okuma-katmani.md` (K1, T0–T9) ve
-  `…-b-2-web-yuzeyi.md` (T0–T10) — dal `docs/s9-iz-b-tasarim`, `main`e henüz birleşmedi. Plan incelemesi sonucu
-  defterde. **Yürütme sırası:** B-1 T0–T1 → B-2 T0'dan başlayabilir; 0014 canlıya UYGULANMAZ (§0.7/3).
-- **Açık worktree'ler** (`.worktrees/wt-s9-*`) ve yerel dallar birleşti ama silinmedi (silme onayı §0.7/11).
+- **İz B (Dalga B) — YAPILDI, `main`de:** spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md` (4 düzeltme
+  turu → "Planlanabilir"; mimari A; açık kararlar AK1–AK22 spec §16) · planlar
+  `docs/superpowers/plans/2026-09-24-faz6-iz-b-{1-okuma-katmani,2-web-yuzeyi}.md` (her biri 2 tur bağımsız plan
+  incelemesi, planın kodu tek ağaçta kurulup koşuldu) · yürütme SDD: B-1 T0–T9 (K1), B-2 T0–T10; her görev bağımsız
+  inceleme (mutasyonlu, `git archive` kopyası) + düzeltme turları + her iz için bütün-dal incelemesi ve tek düzeltme
+  dalgası. **Faz belgesi (canlıya geçiş kontrol listesi, kapının ÖLÇMEDİKLERİ B-1 1–19 ve B-2, hukuk soruları
+  C1–C11): `docs/phases/06-site/HANDOFF.md`.** SDD defterleri (gitignored): `.superpowers/sdd/2026-09-24-faz6-iz-b-{1,2}-…/progress.md`.
+  - **B-1:** 0014 (`site_reader`, `site`/`site_input`/`site_audit`) yalnız depoda ve kapta test edildi; dışa aktarıcı
+    (REPEATABLE READ, zincir GENESIS'ten, her çıpa, ikinci türetim alt süreçte, atomik yazım, çıkış 20–24),
+    `verify-snapshot`, `config/site_leagues.yaml`, `site.yml` (build/deploy/live üç iş; YALNIZ elle tetiklenir;
+    tetiklenmesi §0.7/14'e bağlı), CI `site-db` adımı (kap; 28 test; ilk CI 2 dk 24 sn).
+  - **B-2:** `web/` Next.js 16 statik site (value önerisi YOK, varsayılan noindex, yer tutucu marka/alan adı,
+    TASLAK hukuk metinleri, CSP hash'leri `unsafe-inline`sız), `check-out` çıktı denetleyicisi (yasak kelime/bahis
+    şirketi/lisans/iç bağlantı/`data-fe` dışı sayı/CSP/görünür TASLAK), `site_gate.sh` (Node çağrıları `env -i`
+    izin listesiyle), yayın bekçileri (`site_publish.py slugs|live`).
+  - **Oturumda bulunup kapatılanlar:** canlıda 51 maç içi oran satırı → türetimde başlama öncesi süzgeci; aynı adlı iki
+    lig (ger.1/aut.1) → kalıcı `site_slug`; secret taramasının bulduğu değeri herkese açık CI loguna basması (mevcut
+    tarama dahil) → yalnız `dosya:satır`; kapı pytest'inin bağlantı hatasında parola basması → `--tb=short` bekçisi.
+- **Açık worktree'ler** (`.worktrees/wt-s9-*`, `wt-izb-*`) ve yerel dallar birleşti ama silinmedi (silme onayı §0.7/11).
 
 **Kullanıcı kararı (2026-09-23):** §0.2'deki ön koşullar acil değil — Plan 2'nin başlangıç kontrol listesidir. Haber
 senkronu ve gölge raporu kendiliğinden birikir; arşiv kapsam ölçümü Plan 2 yazılırken (en erken 2026-10-07) yapılır.
@@ -134,8 +148,10 @@ Yerini §0.6 (kullanıcı girdisi gerekmeyen iş listesi) ve §0.7 (toplu kullan
 yapılanlar §0.2b'de.
 
 ### 0.6 Taze oturum iş listesi — kullanıcı girdisi GEREKMEYEN işler (oturum 9 için)
-**Oturum 9 durumu:** Dalga A 1–4 BİTTİ (§0.0a); madde 5 (İz B tasarımı + planlar) bitti, onay bekler; madde 6 (İz B
-yapımı) planları incelendikten sonra başlar — yürütme durumu SDD defterinde. İsteğe bağlı 7–8 yapılmadı.
+**Oturum 9 durumu:** Dalga A 1–4 ve Dalga B 5–6 BİTTİ, hepsi `main`de (§0.0a). Kullanıcı girdisi gerekmeyen iş
+listesi tükendi; İz B'nin kalanı (0014'ün canlıya uygulanması, deploy, alan adı, hukuk) §0.7 kararlarına bağlı.
+İsteğe bağlı 7 (DEFERRED 16g DC memo anahtarı) ve 8 (arşiv kapsamı runner ölçümü, 17k) yapılmadı — sonraki oturum
+bunlarla ya da 2026-10-07'den sonra §0.2 (Plan 2) ile başlar.
 Kullanıcı kararı (2026-09-23): Netlify'a kadar yapılabilecek her şey taze oturumda bitirilir; kullanıcıdan
 istenenler (§0.7) sonra toplu verilir. Alt ajanlar Opus 5.5 high (`~/.claude/settings.json`, bellek
 `subagents-opus-high`). Her dalga: ayrık dosya kümesi → worktree başına bir ajan → entegrasyon dalı → bağımsız
@@ -222,10 +238,23 @@ hazır olur.
    dalları; **yerel `feat/s9-scrapling` dalı gerçek adlı PFDK fixture'larını taşıyor** (`922a445`; hiç push
    edilmedi, `main`de yok) — silinmesi önerilir; `.superpowers/sdd/…/t3-scratch` (~1,5 GB ölçüm artığı); B-2 plan
    yazarının `/tmp`ye bıraktığı atıklar (`b2fake/`, `b2fe.bak`, `b2-tsconfig-before.json`, `b2build.log`, `x`).
+   Ayrıca: `.worktrees/wt-izb-{b1,b1-t4,b1-t8,b2}` ve dalları (hepsi `main`de); SDD scratch'lerinde büyük derleme
+   kopyaları (B-2 `t1-scratch/b2t1_pre-biome` ~435 MB, `t9-scratch/b2t9_mut` ~353 MB, `t9-review-scratch` ~653 MB);
+   durdurulmuş ama silinmemiş kum havuzu kapları (`izb-*`, `izb-b1t*`, `izb-b2*`, `t6r-*` önekli — `docker ps -a`).
 12. **TFF koşulları** (`pageID=179`): bilgi "ticari amaçlarla kullanılamaz", kaynak gösterilmeden kopyalanamaz.
    Açık `tff` kaynağını (hakem atamaları, günlük) ve kapalı `tff-pfdk`yi etkiler. Ayrıca `tests/fixtures/tff/` tam
    sayfa kopyaları (hakem adları) public repoda — kırpılsın mı?
-
+13. **pg_net (canlıda ölçüldü, 2026-09-24):** `anon`/`authenticated`/`service_role` `net` şemasında USAGE, kuyrukta
+   SELECT/INSERT ve `net.http_post` EXECUTE taşıyor (yetkiyi `supabase_admin` vermiş; `postgres` geri alamaz — kapta
+   ölçüldü). Dışarıdan erişim yalnız PostgREST `net`i açarsa mümkün: **Supabase panelinde "Exposed schemas" listesinde
+   `net` OLMADIĞINI doğrula** (asistanın REST yoklaması izin sınıflandırıcısınca reddedildi). `site_reader`'a LOGIN
+   verilmeden önce bu artık risk kabul edilmeli (`docs/phases/06-site/HANDOFF.md` canlıya geçiş adım 3).
+14. **Site yayını için GitHub ayarları (AK18):** `production` ortamını `main` dalına sınırla; `NETLIFY_AUTH_TOKEN`,
+   `NETLIFY_SITE_ID` ve `SITE_DATABASE_URL` ortam kapsamlı secret olsun (`build` işi için de ortam gerekir). Bunlar,
+   alan adı (AK4) ve 0014'ün canlıya uygulanması onaylanmadan `site.yml` TETİKLENMEZ.
+15. **Hukuk soruları C1–C11** (B-2 T7 incelemesi): `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" — §0.7/7'nin
+   parçası (KVKK aydınlatma metni öğeleri, "kesinlikle gerekli yerel depolama" sınıflaması, sorumlu bahis dili,
+   yardım hattı adları/numaraları, barındırıcının çerez/log davranışı).
 ### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)
 - **Model (2026-09-23, kullanıcı):** bütün alt ajanlar Opus 5.5 high — `~/.claude/settings.json`
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=claude-opus-5-5` + `effortLevel: high`. Aşağıdaki ve eski bölümlerdeki "K1 incelemeleri /
