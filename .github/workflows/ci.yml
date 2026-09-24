@@ -54,9 +54,10 @@ jobs:
       # 127.0.0.1'i gösterir (koşucunun kendi Postgres'iyle çakışmasın diye 55432); test düzeni başka
       # adresi reddeder. Aynı kap 0013'ün kum havuzu testlerini de koşar (DEFERRED 18a).
       # `DATABASE_URL` yine VERİLMEZ: katalog testleri adıyla SKIP.
-      # Kap logu BASILMAZ: imaj ilk kurulumda parolayı kendi loguna yazar ve maskeleme yalnız bu
-      # adımın çıktısını kapsar. Kap kalkmazsa yalnız durumu basılır (`test_ci_never_prints_the_
-      # container_log`).
+      # Kap logu BASILMAZ (derinlemesine savunma): imaj ilk kurulumda parolayı düz metin olarak kendi
+      # loguna yazar; `::add-mask::` tam dize eşleşmesine dayanan en iyi çaba korumasıdır. Kap kalkmazsa
+      # yalnız `inspect -f` ile durumu basılır — çıplak `inspect` `Config.Env`i, yani parolayı basar
+      # (`test_ci_never_prints_the_container_log`).
       - name: Site test veritabanı
         env:
           SITE_DB_IMAGE: public.ecr.aws/supabase/postgres:17.6.1.143@sha256:80d7b27c3e8d77cfa7226eee9508671796da214781ff15a35b3670d7ad5ee453

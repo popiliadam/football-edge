@@ -13,7 +13,8 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
 - Kapı: `verify.sh` `site-db` adımı (`sitedb` testleri; alt sınırlar `EXPECTED_MIN_SITEDB=28`,
   `EXPECTED_MIN_SITEDB_LEAKAGE=4`; `sızıntı` adımı `EXPECTED_MIN_LEAKAGE=442` — Task 9'da `--collect-only` ile ölçüldü)
   ve koşu kimliği `FE_VERIFY_RUN_ID`. CI'da iş içinde doğan `supabase/postgres` kabı (aynı kap 0013 kum havuzu
-  testlerini de koşar); kabın logu CI'da basılmaz (imaj parolayı oraya yazar).
+  testlerini de koşar; `CI=true` iken `SANDBOX_DATABASE_URL` yoksa kum havuzu testleri atlanmaz, kırmızı verir);
+  kabın logu CI'da basılmaz (derinlemesine savunma: imaj parolayı oraya düz metin yazar).
 - `.github/workflows/site.yml` — yalnız `workflow_dispatch`; üç iş: `build` (dışa aktarım, derleme, çıktı tarayıcısı) →
   `deploy` (yalnız `main`, `environment: production`, Netlify kimliği yalnız yayın adımında) → `live`. Secret'lar
   eklenmedi. **Yayın kapıları (kaybolan-slug, yayın sonrası kontrol) ve `netlify deploy`un `--no-build`u B-2 Task
@@ -56,11 +57,15 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
   kaybolan-slug ve yayın sonrası kontrol adımları ve `--no-build`; Node adımlarını `verify.sh`in `site-db` adımından
   SONRA eklemek; `verify.sh`e eklenen her `uv run pytest` çağrısı `--tb=short` taşımalı (`tests/test_gate_traceback.py`
   sayımı — bugün `verify.sh` 4 — güncellenir) ve `sitedb`i adıyla seçmeli/dışlamalı ya da `-m contract` olmalı
-  (`test_the_gate_runs_sitedb_tests_only_where_it_names_them`); `ci.yml`e hiçbir adımda `docker logs` girmez
-  (`test_ci_never_prints_the_container_log`); `site.yml`e dokunurken `test_site_workflow.py`nin secret sınırı ve sıra
+  (`test_the_gate_runs_sitedb_tests_only_where_it_names_them`); `ci.yml`e hiçbir adımda `docker logs` ya da
+  `-f`siz `docker inspect` girmez (`test_ci_never_prints_the_container_log`); `site.yml`e dokunurken `test_site_workflow.py`nin secret sınırı ve sıra
   testleri yeşil kalmalı. `web/fixtures/`e B-2'nin kendi fixture'larını eklemesi serbesttir (B-1'in testi kapsayıcı
   değil, varlık sınar). Not: dışa aktarımın `snapshot.sha256`i `sha256sum` biçimindedir (`<hex>  snapshot.json`);
   yayındaki `/data/snapshot.sha256`in biçimi B-2'nindir — §6.4/3f karşılaştırması ikisinin hex alanını kıyaslamalıdır.
+- **B-2 T10 Step 10'un beklenen çıktısı değişti:** `CI=true` ve test DB'si yokken kapı `FAIL: site-db` ve B-2'nin
+  `FAIL: site-e2e`sinin yanında **`FAIL: pytest`** de basar — 0013'ün kum havuzu testleri `CI=true` altında
+  atlanmaz, `SANDBOX_DATABASE_URL` yokluğunda hata verir (Faz 6 B-1 Task 9 düzeltme turu 1). Beklenen liste bu
+  satırla okunmalı.
 
 ## Canlıya geçiş (kullanıcı onayı, §0.7 — bu dalga YAPMADI)
 
@@ -76,6 +81,10 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
    kapsamlı; GitHub'da `production` ortamının dağıtım dalı `main`e sınırlanır (kullanıcının depo ayarı).
 
 ## Kapının ÖLÇMEDİKLERİ (B-1)
+
+Tam liste bu bölümdür (16 madde). 1–13 planın "Kapının ölçmedikleri (bu plan)" bölümünün andığı on üç maddedir;
+14–16 Task 6–9 incelemelerinden sonra eklendi. Plan dosyası değiştirilmedi: oradaki "on üç" sayısı yazıldığı anın
+listesidir, güncel liste burasıdır.
 
 1. Gerçek veriyle sayfa ↔ defter uyuşması: `site.yml` hiç koşmadı (secret yok) — sentetik veride her push'ta ölçülür.
 2. Canlı DB'de görünümler ve yetkiler (0014 uygulanmadı); CI kabı Supabase'in canlı rol/varsayılan yetki kurulumunun
@@ -115,5 +124,6 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
     okuma): bugün böyle satır 0 — defter 2026-09-19'da başlıyor, geri doldurma yok. Geri doldurma yapılırsa önce bu
     karar açılır (görünümde `observed_at >= taban` süzgeci tek satır).
 16. CI kabının soğuk imaj çekme süresi (1,8 GB) ilk CI koşusundan önce ölçülmedi; `timeout-minutes: 20` bu yüzden
-    tabandır. Kap kalkmazsa CI yalnız kabın durumunu basar (logu parola taşır): nedeni için yerelde
-    `scripts/sandbox_db.sh up` ile yeniden üretilir.
+    tabandır. Kap kalkmazsa CI yalnız kabın durumunu basar (log parolayı düz taşır; maske en iyi çaba korumasıdır,
+    log derinlemesine savunma olarak hiç basılmaz): nedeni için yerelde `scripts/sandbox_db.sh up` ile yeniden
+    üretilir.

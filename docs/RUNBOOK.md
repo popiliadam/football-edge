@@ -563,7 +563,8 @@ Vault hazır gelir).
 
 **CI'da (Faz 6 B-1 Task 9'dan beri):** `ci.yml`in "Site test veritabanı" adımı aynı imajla iş içinde bir kap kurar;
 `SITE_TEST_DATABASE_URL` ve `SANDBOX_DATABASE_URL` onu gösterir. `sitedb` testleri `verify.sh`in `site-db` adımında,
-0013'ün kum havuzu testleri `pytest` adımında koşar. `DATABASE_URL` verilmez: katalog testleri CI'da hâlâ adıyla
+0013'ün kum havuzu testleri `pytest` adımında koşar (ikisi de `CI=true` iken değişken yoksa atlanmaz, kırmızı
+verir). `DATABASE_URL` verilmez: katalog testleri CI'da hâlâ adıyla
 SKIP (DEFERRED 18a).
 
 ```bash

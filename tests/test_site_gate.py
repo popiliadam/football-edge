@@ -65,11 +65,19 @@ def test_the_site_database_is_local_and_its_password_is_generated_and_masked() -
 
 
 def test_ci_never_prints_the_container_log() -> None:
-    """supabase/postgres imajı ilk kurulumda kap parolasını kendi loguna yazar; `::add-mask::`
-    yalnız bu adımın çıktısını maskeler, `docker logs` kuyruğu açık CI loguna parolayı taşırdı."""
+    """Derinlemesine savunma: supabase/postgres imajı ilk kurulumda kap parolasını düz metin olarak
+    kendi loguna yazar; `::add-mask::` tam dize eşleşmesine dayanan en iyi çaba korumasıdır. Log hiç
+    basılmaz. `inspect` yalnız `-f` biçimiyle: çıplak `inspect` `Config.Env`i (parola) basar."""
     runs = [str(step.get("run", "")) for step in _steps(CI)]
+    inspects = [
+        line
+        for run in runs
+        for line in run.splitlines()
+        if re.search(r"docker\s+(container\s+)?inspect\b", line)
+    ]
 
     assert not [run for run in runs if re.search(r"docker\s+(container\s+)?logs\b", run)]
+    assert inspects and all(re.search(r"\binspect\s+-f\s", line) for line in inspects), inspects
 
 
 def _verify_text() -> str:
@@ -105,6 +113,7 @@ def test_the_end_to_end_directory_is_emptied_before_the_step_without_deleting() 
     start = text.index('SITE_E2E_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e"')
     block = text[start : text.index(f'if [ -n "${{{VAR}:-}}" ]; then')]
 
+    assert "export SITE_E2E_DIR" in block
     for name in ("snapshot.json", "snapshot.sha256", "run-id"):
         assert f': > "$SITE_E2E_DIR/{name}"' in block
     assert "rm " not in block

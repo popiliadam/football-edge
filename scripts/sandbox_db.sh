@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Migration kum havuzu: DB testlerini yerel supabase/postgres kaplarında koşar (docs/RUNBOOK.md §4).
 #
-# Kapı ve CI bu testleri adıyla ATLAR (DATABASE_URL de kum havuzu adresi de yok). Davranış kanıtı
-# (sahibin yazımı, API rollerinin reddi, TRUNCATE bekçisi, idempotentlik, kilit zaman aşımı) yalnız
-# burada ölçülür. CANLIYA BAĞLANMAZ: iki adres de bu betiğin kurduğu 127.0.0.1 kaplarını gösterir;
+# Kapı yerelde bu testleri adıyla ATLAR (DATABASE_URL de kum havuzu adresi de yok). CI kum havuzu ve
+# `sitedb` testlerini iş içi kapta koşar; katalog testleri orada da atlanır (DATABASE_URL verilmez).
+# Katalog davranışının kanıtı (sahibin yazımı, API rollerinin reddi, TRUNCATE bekçisi, idempotentlik,
+# kilit zaman aşımı) yerelde burada ölçülür. CANLIYA BAĞLANMAZ: iki adres de bu betiğin kurduğu 127.0.0.1 kaplarını gösterir;
 # `.env` okunmaz, kabuktaki veritabanı adresi `test` komutunda EZİLİR.
 #
 #   scripts/sandbox_db.sh up           iki kabı kurar (varsa başlatır); ilkine migration'ları uygular
