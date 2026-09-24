@@ -26,7 +26,9 @@ step "mypy"        uv run mypy src scripts
 # `--tb=short`: uzun traceback psycopg karesinin yerel değişkenlerini (bağlantı dizesi, PAROLA dâhil)
 # basar; canlı DATABASE_URL'le koşan kapıda bir bağlantı hatası parolayı loga yazardı. Kapı
 # gevşemez, yalnız traceback biçimi kısalır (tests/test_gate_traceback.py sabitler).
-step "pytest"      uv run pytest -q --tb=short
+# `sitedb` işaretli testler atılabilir bir Postgres kabı ister: kendi adımlarında (`site-db`,
+# Faz 6 B-1 Task 9) koşar. `CI=true` iken kapsız bir adımda o fixture FAIL verir.
+step "pytest"      uv run pytest -q -m "not sitedb" --tb=short
 
 # Testler `pythonpath = ["src"]` ile koşar: KURULU PAKET BOZUK OLSA BİLE geçerler.
 # CI ise `python -m football_edge.collect` ile kurulu paketi çağırır. PYTHONPATH'in
@@ -116,7 +118,7 @@ step "veri-sözleşmesi" bash -c '
 step "sızıntı" bash -c '
   EXPECTED_MIN_LEAKAGE=418
 
-  collect_output=$(uv run pytest tests/ -q -m leakage --collect-only 2>&1)
+  collect_output=$(uv run pytest tests/ -q -m "leakage and not sitedb" --collect-only 2>&1)
   collect_code=$?
   if [ "$collect_code" -eq 5 ]; then
     collected=0
@@ -131,7 +133,7 @@ step "sızıntı" bash -c '
     exit 1
   fi
 
-  uv run pytest tests/ -q -m leakage --tb=short
+  uv run pytest tests/ -q -m "leakage and not sitedb" --tb=short
 '
 
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para

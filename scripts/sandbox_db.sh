@@ -9,7 +9,7 @@
 #   scripts/sandbox_db.sh up           iki kabı kurar (varsa başlatır); ilkine migration'ları uygular
 #   scripts/sandbox_db.sh apply        bütün migration'ları "uygulanmış" kaba sırayla YENİDEN uygular
 #   scripts/sandbox_db.sh test [ARG…]  pytest'i iki adresle koşar (yol yoksa DB test dosyaları)
-#   scripts/sandbox_db.sh env          elle kullanım için iki `export` satırı basar
+#   scripts/sandbox_db.sh env          elle kullanım için üç `export` satırı basar
 #   scripts/sandbox_db.sh stop         bu betiğin kaplarını durdurur
 #   scripts/sandbox_db.sh rm --yes     bu betiğin kaplarını SİLER (bayraksız reddeder)
 #
@@ -31,7 +31,11 @@ EMPTY="$PREFIX-empty"
 # Ortam değişkeni adları parçalardan kurulur: kapının secrets taraması `AD=değer` biçimini arar.
 DB_VAR="DATABASE""_URL"
 SANDBOX_VAR="SANDBOX_DATABASE""_URL"
-DEFAULT_TESTS=(tests/test_api_roles_lockdown_db.py tests/test_jev_tables_db.py tests/test_holdout_phase_db.py)
+# Sitenin `sitedb` testleri (Faz 6 İz B §4.4/4) de BOŞ kabı kullanır: `postgres` veritabanında tam
+# sırayı geri alınan işlemde uygular; şablonu ve kopyalarını AYRI veritabanlarında kurar.
+SITE_VAR="SITE_TEST_DATABASE""_URL"
+DEFAULT_TESTS=(tests/test_api_roles_lockdown_db.py tests/test_jev_tables_db.py tests/test_holdout_phase_db.py
+  tests/test_site_views_db.py)
 
 die() { echo "sandbox_db: $*" >&2; exit 1; }
 
@@ -126,6 +130,7 @@ cmd_env() {
   empty_url="$(url "$EMPTY")"
   printf 'export %s=%q\n' "$DB_VAR" "$applied_url"
   printf 'export %s=%q\n' "$SANDBOX_VAR" "$empty_url"
+  printf 'export %s=%q\n' "$SITE_VAR" "$empty_url"
 }
 
 cmd_test() {
@@ -140,7 +145,7 @@ cmd_test() {
   applied_url="$(url "$APPLIED")"
   empty_url="$(url "$EMPTY")"
   # `--tb=short`: uzun traceback psycopg karesindeki bağlantı dizesini (parola dâhil) basar.
-  env "$DB_VAR=$applied_url" "$SANDBOX_VAR=$empty_url" \
+  env "$DB_VAR=$applied_url" "$SANDBOX_VAR=$empty_url" "$SITE_VAR=$empty_url" \
     PYTHONDONTWRITEBYTECODE=1 uv run pytest -p no:cacheprovider -rs --tb=short "$@"
 }
 

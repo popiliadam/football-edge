@@ -573,12 +573,16 @@ scripts/sandbox_db.sh stop    # kapları durdurur; `rm --yes` kaldırır
   bütün migration'ları tek işlemde uygular ve geri alır; hedefte `odds_snapshots` varsa hiçbir şey
   uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe_<özet>` veritabanını (0001+0002
   commit'li; ad iki dosyanın özetinden) yeniden kullanır.
+- **Site testleri** (`sitedb` işareti; `test` komutu `SITE_TEST_DATABASE_URL`i BOŞ kaba çevirir): `postgres`
+  veritabanında 0001→0014'ü tek işlemde uygulayıp geri alır; ayrıca `site_tpl` şablonunu (0001, 0002, 0013, 0014) ve
+  modül başına `site_t_<rastgele>` kopyalarını kurar, bitince `DROP … WITH (FORCE)` ile kaldırır (oturum başında
+  bayatları da). `site_reader` rolü ve testin ona `SET` üyeliği KÜME düzeyinde kalır — yalnız bu atılabilir kapta.
 - Kaplar `football-edge.sandbox=1` etiketini taşır; betik etiketsiz aynı adlı bir kaba dokunmaz.
   **Paralel oturumlar** (iki ajan, iki worktree) kendi `FE_SANDBOX_PREFIX` ve `FE_SANDBOX_PORT`'unu
   kullanır: önek ortaksa kaplar da ortaktır ve birinin `rm --yes`'i ötekinin kabını kaldırır.
 - `test` pytest'i `--tb=short` ile koşar: uzun traceback bağlantı dizesini (parola dâhil) basar.
   Ön ek ve port: `FE_SANDBOX_PREFIX`, `FE_SANDBOX_PORT`.
-- Elle koşu için `scripts/sandbox_db.sh env` iki `export` satırı basar (yerel parola içerir; kabın
+- Elle koşu için `scripts/sandbox_db.sh env` üç `export` satırı basar (yerel parola içerir; kabın
   kendisinde durur, depoya girmez).
 
 **Beklenen:** `tests/test_api_roles_lockdown_db.py` 21 geçer (kilit testi ~5 sn bekler); öteki DB
