@@ -8,3 +8,9 @@ __pycache__/
 .env.*
 !.env.example
 .worktrees/
+web/node_modules/
+web/.next/
+web/out/
+web/.snapshot/
+web/next-env.d.ts
+web/*.tsbuildinfo
