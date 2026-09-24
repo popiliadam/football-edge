@@ -11,8 +11,9 @@ name: site
 # geçirebilir. Bu yüzden Netlify kimliği derleme işine HİÇ girmez: `build` DB adresini yalnız dışa
 # aktarım adımında görür ve denetlenmiş çıktıyı artifact olarak bırakır; `deploy` taze bir runner'da
 # artifact'ı indirir, pnpm/next/npx koşmaz, sabit sürümlü netlify-cli'yi kurar ve Netlify kimliğini
-# yalnız yayın adımına verir. Kırmızı bir adımdan sonra hiçbir şey koşmaz: adımlarda `if:` ve
-# `continue-on-error` yok; `deploy` `needs: build` ile derlemenin yeşiline bağlı.
+# yalnız yayın adımına verir; `live` yayından sonra secret'sız denetler. Kırmızı bir adımdan sonra
+# hiçbir şey koşmaz: adımlarda `if:`, `continue-on-error`, `shell:` yok; işler `needs` ile önceki işin
+# yeşiline bağlı.
 on:
   workflow_dispatch:
 
@@ -64,6 +65,9 @@ jobs:
         run: pnpm -C web run build
       - name: Çıktı tarayıcısı
         run: node web/scripts/check-out.ts --snapshot web/.snapshot/snapshot.json --out web/out
+      # B-2 T10 → kaybolan-slug: `scripts/site_publish.py slugs` adımı BURAYA — tarayıcıdan sonra,
+      # yayın paketinden ÖNCE (AK20 b). Secret'sızdır (`FIRST_PUBLISH` girdisi), Python bu işte kurulu;
+      # kırmızıysa paket yüklenmez ve `needs` yayını durdurur (controller kararı, T8 düzeltme turu 2).
       # Yalnız yayına gidecek olan: denetlenmiş site ve dışa aktarımın özeti (B-2'nin yayın sonrası
       # kontrolü "yayımlanan = doğrulanan"ı onunla sınar). Kitap bazında veri taşıyan hiçbir şey ve
       # snapshot.json yüklenmez. `.snapshot` gizli dizin: `include-hidden-files` olmadan düşerdi.
@@ -101,13 +105,33 @@ jobs:
           node-version-file: web/.nvmrc
       - name: Netlify CLI
         run: npm install --global netlify-cli@27.8.1
-      # B-2 Task 10 bu işe ekler (controller kararı, B-1 plan düzeltme turu 1 + T8 düzeltme turu 1):
-      # `Yayın`dan hemen ÖNCE kaybolan-slug adımını (`scripts/site_publish.py slugs`, AK20 b),
-      # işin SONUNA yayın sonrası kontrolü (`scripts/site_publish.py live`, §6.4/3f),
-      # `on.workflow_dispatch.inputs.first_publish`i ve yayın komutuna `--no-build`ı. Bu iş Python
-      # kurmaz: iki adımın istediği `setup-uv` + `uv sync --frozen` da B-2'nindir.
+      # Bu iş BEŞ adımdır ve testle sabittir: Python/Node kurulumu, `uv sync`, `pip`, `NODE_OPTIONS`
+      # ya da başka bir adım girmez (tokenlı süreçten önce kilitsiz kod koşardı). B-2 T10 buraya YALNIZ
+      # yayın komutuna `--no-build`ı ekler; kaybolan-slug `build` işinde, yayın sonrası kontrol `live`
+      # işindedir (işaretli yerler; controller kararı, T8 düzeltme turu 2).
       - name: Yayın
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: netlify deploy --prod --dir web/out --config web/netlify.toml
+
+  # Yayından sonra secret'sız denetim işi (§6.4/3f): Netlify kimliği ve DB adresi burada YOK; Python
+  # kurulumu serbesttir. Artifact "yayımlanan = doğrulanan" karşılaştırmasının derleme tarafıdır.
+  live:
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: web
+      # B-2 T10 → yayın sonrası kontrol: `scripts/site_publish.py live` adımı BURAYA (işin sonu).
