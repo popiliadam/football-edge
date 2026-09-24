@@ -5,8 +5,9 @@
 `web/out/data/slugs.json`ıyla karşılaştırılır. Kaybolan her lig slug'ı `config/site_redirects.yaml`
 `gone:` listesinde, kaybolan her takım slug'ı `renamed:` eşlemesinde (hedefi yeni derlemede var) ya
 da ligi `gone:`da olmalı. Önceki yayın okunamazsa kırmızı; yalnız açık `--first-publish` ile ve
-site GERÇEK bir HTTP yanıtıyla önceki yayının olmadığını söylediğinde (200 dışı, ör. 404) geçer.
-Site erişilemezse (bağlantı yok, HTTP 0) `--first-publish` da kırmızıdır (spec §11, AK20 b).
+site GERÇEK bir HTTP 404'üyle önceki yayının olmadığını söylediğinde geçer. Başka her yanıt
+kırmızıdır: bağlantı yok (HTTP 0), 5xx (ör. önündeki vekilin 502/521'i, geçici kesinti) ya da 403
+önceki yayının YOKLUĞUNU kanıtlamaz (spec §11, AK20 b; T10 düzeltme turu 1, controller kararı m1).
 
 `live` (yayından SONRA): canlı `/data/snapshot.sha256` indirilir; hex alanı derlenmiş
 `web/out/data/snapshot.sha256` ve dışa aktarımın `web/.snapshot/snapshot.sha256` hex alanıyla eşit
@@ -164,12 +165,17 @@ def _head(url: str) -> tuple[int, Mapping[str, str]]:
 def _slugs(args: argparse.Namespace, base: str, get: Get) -> list[str]:
     status, body = get(f"{base}/data/slugs.json")
     if args.first_publish:
-        if status == 0:
-            return ["site erişilemiyor (HTTP 0) — ilk yayın da erişilebilir bir site ister"]
+        if status == 404:
+            sys.stdout.write(
+                f"İLK YAYIN: kaybolan-slug karşılaştırması yapılmadı (HTTP {status})\n"
+            )
+            return []
         if status == 200:
             return ["önceki yayın var (/data/slugs.json HTTP 200) — --first-publish yanlış"]
-        sys.stdout.write(f"İLK YAYIN: kaybolan-slug karşılaştırması yapılmadı (HTTP {status})\n")
-        return []
+        return [
+            f"site erişilemiyor ya da yanıtı belirsiz (HTTP {status}) — ilk yayın yalnız 404 ile"
+            " (önceki /data/slugs.json yok) kanıtlanır"
+        ]
     if status != 200:
         return [f"önceki yayının /data/slugs.json'ı okunamadı (HTTP {status}) — ilk yayın mı?"]
     current = (args.out / "data/slugs.json").read_text(encoding="utf-8")

@@ -191,3 +191,51 @@ def test_the_built_hash_must_match_the_export(tree: Path) -> None:
     (tree / "export/snapshot.sha256").write_text(f"{'c' * 64}  snapshot.json\n", "utf-8")
     get, head = _live()
     assert _run(tree, "live", get=get, head=head) == 1
+
+
+# ── Düzeltme turu 1 (T10 incelemesi m1, m2) ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("status", [0, 403, 410, 500, 502, 503, 521])
+def test_first_publish_is_red_on_every_answer_but_404(
+    tree: Path, capsys: pytest.CaptureFixture[str], status: int
+) -> None:
+    """Controller kararı m1: önceki yayının YOKLUĞUNU yalnız 404 kanıtlar. Bağlantısızlık, vekilin
+    5xx'i, geçici kesinti ya da 403 ilk yayını açmaz (spec §11 "site erişilemezse kırmızı")."""
+    assert _run(tree, "slugs", "--first-publish", get=_serving(None, status)) == 1
+    out = capsys.readouterr().out
+    assert f"site erişilemiyor ya da yanıtı belirsiz (HTTP {status})" in out
+    assert "İLK YAYIN" not in out
+
+
+def test_first_publish_names_what_it_saw(tree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert _run(tree, "slugs", "--first-publish", get=_serving(None, 404)) == 0
+    assert (
+        "İLK YAYIN: kaybolan-slug karşılaştırması yapılmadı (HTTP 404)" in capsys.readouterr().out
+    )
+    assert _run(tree, "slugs", "--first-publish", get=_serving(PREVIOUS)) == 1
+    assert "önceki yayın var (/data/slugs.json HTTP 200)" in capsys.readouterr().out
+
+
+def _refuse(url: str, **_: object) -> object:
+    raise site_publish.httpx.ConnectError("bağlantı reddedildi")
+
+
+def test_a_connection_error_is_status_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """m2: ağ sarmalayıcıları bağlantı hatasını HTTP 0'a çevirir — 0 her iki kapıda kırmızıdır.
+    Başka bir sayıya (ör. 404) düşerse erişilemeyen site ilk yayını açardı."""
+    monkeypatch.setattr(site_publish.httpx, "get", _refuse)
+    monkeypatch.setattr(site_publish.httpx, "head", _refuse)
+
+    assert site_publish._get(f"{BASE}/data/slugs.json") == (0, "")
+    assert site_publish._head(f"{BASE}/en/") == (0, {})
+
+
+def test_the_network_wrappers_pass_the_answer_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = site_publish.httpx.Response(503, text="bakım", headers={"X-Robots-Tag": "noindex"})
+    monkeypatch.setattr(site_publish.httpx, "get", lambda url, **_: response)
+    monkeypatch.setattr(site_publish.httpx, "head", lambda url, **_: response)
+
+    assert site_publish._get(f"{BASE}/data/slugs.json") == (503, "bakım")
+    status, headers = site_publish._head(f"{BASE}/en/")
+    assert (status, headers["x-robots-tag"]) == (503, "noindex")

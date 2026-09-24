@@ -187,7 +187,10 @@ fi
 # ── Site (Plan B-2, spec §12.1) ───────────────────────────────────────────────────────────
 # Node adımları `site-db`den SONRA koşar: uçtan uca anlık görüntüyü o adım yazar. Her koşu
 # derlemelerini KENDİ geçici dizinine kopyalar (silme yok, bayat çıktı yok). Uçtan uca
-# anlık görüntünün seçimi ve bayat dosya reddi `site_gate.sh e2e`dedir (testli).
+# anlık görüntünün seçimi ve bayat dosya reddi `site_gate.sh e2e`dedir (testli). Node araçları
+# yalnız `site_gate.sh` üzerinden, izin listeli ortamla koşar (secret'lar pnpm/node'a geçmez).
+# Blok baytla sabittir (`tests/test_site_web_gate.py`); `CI=true` iken `build`/`check` uçtan uca
+# varyant yoksa ayrıca kırmızıdır.
 SITE_BUILDS="$(mktemp -d "${TMPDIR:-/tmp}/site-builds.XXXXXX")"
 export SITE_BUILDS
 SITE_E2E_SNAPSHOT=""
@@ -202,9 +205,9 @@ case "$e2e_decision" in
 esac
 export SITE_E2E_SNAPSHOT
 step "site-kurulum" ./scripts/site_gate.sh install
-step "site-tip"     pnpm -C web exec tsc --noEmit
-step "site-lint"    pnpm -C web exec biome ci .
-step "site-test"    pnpm -C web exec vitest run
+step "site-tip"     ./scripts/site_gate.sh tip
+step "site-lint"    ./scripts/site_gate.sh lint
+step "site-test"    ./scripts/site_gate.sh test
 step "site-derleme" ./scripts/site_gate.sh build
 step "site-uyum"    ./scripts/site_gate.sh check
 

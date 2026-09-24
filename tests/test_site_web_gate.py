@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -200,3 +201,285 @@ def test_netlify_cli_never_runs_the_refusing_build_command() -> None:
 
 def test_site_workflow_never_turns_indexing_on() -> None:
     assert "SITE_INDEXABLE" not in SITE.read_text(encoding="utf-8"), "AK14 onayı yok"
+
+
+# ── Düzeltme turu 1 (T10 incelemesi I1–I4): `site_gate.sh`in davranışı sahte araçlarla ──────────
+# Betik geçici bir depo kopyasına konur (REPO betiğin yerinden türetilir) ve PATH'in başındaki sahte
+# `uv`/`pnpm`/`node` her çağrıyı (argümanlar, SITE_SNAPSHOT, SITE_INDEXABLE, çalışma dizini) ve
+# ortamını dosyaya yazar. Gerçek derleme koşmaz; ölçülen, kapının BAĞLANTISIDIR: sıra, hata
+# yayılımı, CI'da uçtan uca varyantın zorunluluğu ve Node araçlarının gördüğü ortam.
+
+# Node araçlarının göreceği ortamın izin listesi (`site_gate.sh` NODE_ENV_ALLOW + sabit NO_COLOR) ve
+# `/bin/sh`in sahte aracın kendi ortamına eklediği adlar.
+NODE_ENV_ALLOW = {
+    "NO_COLOR",
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "CI",
+    "PNPM_HOME",
+    "NEXT_TELEMETRY_DISABLED",
+    "SITE_SNAPSHOT",
+    "SITE_INDEXABLE",
+}
+SHELL_ADDED = {"PWD", "OLDPWD", "SHLVL", "_"}
+# Adlar parçalardan: kapının secrets taraması `AD=değer` biçimini arar.
+CANARIES = {
+    "DATABASE" + "_URL",
+    "SITE_TEST_" + "DATABASE_URL",
+    "SANDBOX_" + "DATABASE_URL",
+    "ODDS_API" + "_KEY",
+    "TYPESAFE_API" + "_KEY",
+    "NETLIFY_AUTH" + "_TOKEN",
+}
+FAKE_TOOL = """#!/bin/sh
+env > "{envs}/{tool}.$$"
+row="{tool}|$PWD|$*|${{SITE_SNAPSHOT:-}}|${{SITE_INDEXABLE:-}}"
+printf '%s\\n' "$row" >> "{calls}"
+if [ -e "{flags}/{tool}-fails" ]; then exit 1; fi
+case "{tool} $*" in
+  "node -p "*) cat "{flags}/node-version" ;;
+  "pnpm --version") echo 10.34.5 ;;
+  "pnpm -C "*" run build") mkdir -p "$2/out" && echo "$SITE_SNAPSHOT" > "$2/out/built-from" ;;
+esac
+"""
+
+
+class Rig:
+    """Geçici depo kopyası + sahte araçlar. `run` betiği verilen ek ortamla koşar."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.repo = (tmp_path / "repo").resolve()
+        self.web = self.repo / "web"
+        (self.repo / "scripts").mkdir(parents=True)
+        shutil.copy2(GATE, self.repo / "scripts/site_gate.sh")
+        (self.web / "fixtures").mkdir(parents=True)
+        for name in (".nvmrc", "package.json"):
+            shutil.copy2(REPO / "web" / name, self.web / name)
+        self.full = self.web / "fixtures/snapshot.fixture.web-full.json"
+        self.empty = self.web / "fixtures/snapshot.fixture.web-empty.json"
+        for fixture in (self.full, self.empty):
+            fixture.write_text("{}", encoding="utf-8")
+        e2e = tmp_path / "site-e2e"
+        e2e.mkdir()
+        self.e2e = e2e / "snapshot.json"
+        self.e2e.write_text("{}", encoding="utf-8")
+        self.e2e_sha = e2e / "snapshot.sha256"
+        self.e2e_sha.write_text(f"{'a' * 64}  snapshot.json\n", encoding="utf-8")
+        self.calls = tmp_path / "calls.log"
+        self.envs = tmp_path / "envs"
+        self.flags = tmp_path / "flags"
+        self.builds = tmp_path / "builds"
+        for directory in (self.envs, self.flags, self.builds):
+            directory.mkdir()
+        (self.flags / "node-version").write_text("24\n", encoding="utf-8")
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for tool in ("uv", "pnpm", "node"):
+            path = bin_dir / tool
+            text = FAKE_TOOL.format(envs=self.envs, tool=tool, calls=self.calls, flags=self.flags)
+            path.write_text(text, encoding="utf-8")
+            path.chmod(0o755)
+        self.base = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path)}
+        self.base["SITE_BUILDS"] = str(self.builds)
+
+    def run(self, command: str, **env: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(self.repo / "scripts/site_gate.sh"), command],
+            capture_output=True,
+            text=True,
+            env={**self.base, **env},
+            check=False,
+        )
+
+    def calls_of(self, *tools: str) -> list[tuple[str, str, str, str]]:
+        """(araç, argümanlar, SITE_SNAPSHOT, SITE_INDEXABLE) — çağrı sırasıyla."""
+        if not self.calls.exists():
+            return []
+        rows = [line.split("|") for line in self.calls.read_text("utf-8").splitlines()]
+        return [(t, args, snap, flag) for t, _, args, snap, flag in rows if t in tools]
+
+    def uv_dirs(self) -> set[str]:
+        rows = [line.split("|") for line in self.calls.read_text("utf-8").splitlines()]
+        return {pwd for tool, pwd, *_ in rows if tool == "uv"}
+
+    def env_names(self, tool: str) -> list[set[str]]:
+        return [
+            {line.split("=", 1)[0] for line in dump.read_text("utf-8").splitlines() if "=" in line}
+            for dump in sorted(self.envs.glob(f"{tool}.*"))
+        ]
+
+    def fail(self, tool: str) -> None:
+        (self.flags / f"{tool}-fails").write_text("", encoding="utf-8")
+
+
+def _verify(snapshot: Path, *extra: str) -> tuple[str, str, str, str]:
+    args = " ".join(("run python -m football_edge.site verify-snapshot", str(snapshot), *extra))
+    return ("uv", args, "", "")
+
+
+def _built(rig: Rig, snapshot: Path, flag: str = "") -> tuple[str, str, str, str]:
+    return ("pnpm", f"-C {rig.web} run build", str(snapshot), flag)
+
+
+def test_every_build_is_preceded_by_verify_snapshot_of_the_same_file(tmp_path: Path) -> None:
+    """Carry-in 5 (T2 kararı): her derlemeden ÖNCE aynı dosyaya `verify-snapshot`; uçtan uca dosya
+    yanındaki `snapshot.sha256`le. Sıra değişirse ya da doğrulama düşerse kırmızı (I2)."""
+    rig = Rig(tmp_path)
+    result = rig.run("build", SITE_E2E_SNAPSHOT=str(rig.e2e))
+
+    assert result.returncode == 0, result.stdout
+    assert rig.calls_of("uv", "pnpm") == [
+        _verify(rig.full),
+        _built(rig, rig.full),
+        _verify(rig.full),
+        _built(rig, rig.full, "1"),
+        _verify(rig.empty),
+        _built(rig, rig.empty),
+        _verify(rig.e2e, "--sha256", str(rig.e2e_sha)),
+        _built(rig, rig.e2e),
+    ]
+    assert rig.uv_dirs() == {str(rig.repo)}
+    built = sorted(path.name for path in rig.builds.iterdir())
+    assert built == ["e2e", "fixture-empty", "fixture-full", "fixture-full-indexable"]
+
+
+def test_check_scans_every_built_variant_with_its_own_snapshot(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    assert rig.run("build", SITE_E2E_SNAPSHOT=str(rig.e2e)).returncode == 0
+    rig.calls.write_text("", encoding="utf-8")
+    result = rig.run("check", SITE_E2E_SNAPSHOT=str(rig.e2e))
+
+    script = rig.web / "scripts/check-out.ts"
+    expected = [
+        (name, snapshot, flag)
+        for name, snapshot, flag in (
+            ("fixture-full", rig.full, ""),
+            ("fixture-full-indexable", rig.full, "1"),
+            ("fixture-empty", rig.empty, ""),
+            ("e2e", rig.e2e, ""),
+        )
+    ]
+    assert result.returncode == 0, result.stdout
+    assert rig.calls_of("node") == [
+        ("node", f"{script} --snapshot {snapshot} --out {rig.builds / name}", "", flag)
+        for name, snapshot, flag in expected
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tool", "command", "message"),
+    [
+        ("uv", "build", "HATA: anlık görüntü doğrulanmadı: fixture-full"),
+        ("pnpm", "build", "HATA: derleme düştü: fixture-full"),
+        ("node", "check", ""),
+    ],
+)
+def test_a_red_tool_makes_its_subcommand_red(
+    tmp_path: Path, tool: str, command: str, message: str
+) -> None:
+    """I3: `verify-snapshot`, derleme ya da çıktı tarayıcısı kırmızıysa alt komut da kırmızı —
+    `|| true` ile yutulamaz. Doğrulama düşünce derleme hiç koşmaz."""
+    rig = Rig(tmp_path)
+    if command == "check":
+        assert rig.run("build").returncode == 0
+    rig.fail(tool)
+    result = rig.run(command)
+
+    assert result.returncode == 1, result.stdout
+    assert message in result.stdout
+    if tool == "uv":
+        assert rig.calls_of("pnpm") == []
+
+
+@pytest.mark.parametrize("command", ["build", "check"])
+def test_ci_without_the_end_to_end_variant_is_red_even_if_verify_sh_lets_it_through(
+    tmp_path: Path, command: str
+) -> None:
+    """I1: `verify.sh`in e2e kararı bu alt komutlara `SITE_E2E_SNAPSHOT` ile ulaşır. Bağ koparsa
+    (değişken dışa verilmez, varyant listeden düşer) `CI=true` iken derleme ve tarama kırmızıdır;
+    yerelde kırmızı değildir (yerel SKIP'i `verify.sh` adıyla basar)."""
+    rig = Rig(tmp_path)
+    assert rig.run("build", SITE_E2E_SNAPSHOT=str(rig.e2e)).returncode == 0
+
+    missing = rig.run(command, CI="true")
+    assert missing.returncode == 1
+    assert "uçtan uca varyant işlenmedi" in missing.stdout
+    assert rig.run(command).returncode == 0
+    assert rig.run(command, CI="true", SITE_E2E_SNAPSHOT=str(rig.e2e)).returncode == 0
+
+
+def test_install_refuses_a_wrong_toolchain_before_installing(tmp_path: Path) -> None:
+    """I3: `site-kurulum` araç zinciri bekçisini atlayamaz — Node 22'de `pnpm install` koşmaz."""
+    rig = Rig(tmp_path)
+    (rig.flags / "node-version").write_text("22\n", encoding="utf-8")
+    wrong = rig.run("install")
+
+    assert (wrong.returncode, wrong.stdout.strip()) == (1, "HATA: Node 22, .nvmrc 24 istiyor")
+    assert [args for _, args, _, _ in rig.calls_of("pnpm")] == ["--version"]
+
+    (rig.flags / "node-version").write_text("24\n", encoding="utf-8")
+    rig.calls.write_text("", encoding="utf-8")
+    assert rig.run("install").returncode == 0
+    assert [(tool, args) for tool, args, _, _ in rig.calls_of("node", "pnpm")] == [
+        ("node", '-p process.versions.node.split(".")[0]'),
+        ("pnpm", "--version"),
+        ("pnpm", f"-C {rig.web} install --frozen-lockfile"),
+    ]
+
+
+def test_node_tools_see_only_the_allowlisted_environment(tmp_path: Path) -> None:
+    """I4 (controller kararı, spec H5d): pnpm/node alt süreçleri DB adresini, API anahtarlarını ve
+    Netlify kimliğini görmez; ortamları izin listesidir. Kanaryaların betiğe ULAŞTIĞI sahte `uv`un
+    ortamından görülür (izin listesi dışındaki Python adımı), yani test boş geçmez."""
+    rig = Rig(tmp_path)
+    canaries = {name: "kanarya-degeri" for name in CANARIES}
+    env = {**canaries, "SITE_E2E_SNAPSHOT": str(rig.e2e), "TMPDIR": str(tmp_path)}
+    commands = ("install", "tip", "lint", "test", "build", "check")
+    results = {command: rig.run(command, **env).returncode for command in commands}
+
+    assert results == dict.fromkeys(commands, 0)
+    node_envs = rig.env_names("pnpm") + rig.env_names("node")
+    assert len(node_envs) == len(rig.calls_of("pnpm", "node")) == 14  # 3 kurulum + 3 + 4 + 4
+    for names in node_envs:
+        assert names.isdisjoint(CANARIES), names & CANARIES
+        assert names <= NODE_ENV_ALLOW | SHELL_ADDED, names - NODE_ENV_ALLOW - SHELL_ADDED
+    assert all(names >= CANARIES for names in rig.env_names("uv"))
+    assert [args for _, args, _, _ in rig.calls_of("pnpm")][2:5] == [
+        f"-C {rig.web} exec tsc --noEmit",
+        f"-C {rig.web} exec biome ci .",
+        f"-C {rig.web} exec vitest run",
+    ]
+
+
+# `verify.sh`in site bloğu baytla sabittir (I1, I3): adım komutları, e2e kararının okunuşu ve
+# SKIP/FAIL ayrımı. B-1'in kendi komutlarını sabitlediği gibi (`tests/test_site_gate.py`).
+VERIFY_SITE_BLOCK = """\
+SITE_BUILDS="$(mktemp -d "${TMPDIR:-/tmp}/site-builds.XXXXXX")"
+export SITE_BUILDS
+SITE_E2E_SNAPSHOT=""
+e2e_decision="$(./scripts/site_gate.sh e2e)"
+case "$e2e_decision" in
+  "USE "*) SITE_E2E_SNAPSHOT="${e2e_decision#USE }" ;;
+  "SKIP "*) echo "SKIP: site-derleme/e2e (${e2e_decision#SKIP })" | tee -a "$LOG" ;;
+  *)
+    echo "$e2e_decision" | tee -a "$LOG"
+    step "site-e2e" false
+    ;;
+esac
+export SITE_E2E_SNAPSHOT
+step "site-kurulum" ./scripts/site_gate.sh install
+step "site-tip"     ./scripts/site_gate.sh tip
+step "site-lint"    ./scripts/site_gate.sh lint
+step "site-test"    ./scripts/site_gate.sh test
+step "site-derleme" ./scripts/site_gate.sh build
+step "site-uyum"    ./scripts/site_gate.sh check
+"""
+
+
+def test_the_verify_site_block_is_pinned_byte_for_byte() -> None:
+    text = VERIFY.read_text(encoding="utf-8")
+    start = text.index('SITE_BUILDS="$(mktemp -d')
+    end = text.index('step "site-uyum"', start)
+    assert text[start : text.index("\n", end) + 1] == VERIFY_SITE_BLOCK
+    assert not re.search(r"^\s*step \"site-[^\"]+\"\s+pnpm", text, flags=re.M)
