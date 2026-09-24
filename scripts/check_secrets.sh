@@ -6,6 +6,11 @@
 # geri alınamaz: push'lanmış bir anahtar artık yanmıştır, silmek yetmez, döndürülür.
 set -uo pipefail
 
+# Eşleşen SATIR secret'ın kendisidir ve CI logu public: taramalar yalnız `dosya:satır` basar
+# (T8 yeniden incelemesi N3). `pipefail` git grep'in kodunu (0 eşleşme / 1 temiz / ≥2 düştü)
+# `cut`tan geçirir; o olmadan boru her zaman `cut`un 0'ını dönerdi.
+only_location() { cut -d: -f1,2; }
+
 fail=0
 
 if ! git check-ignore -q .env 2>/dev/null; then
@@ -18,9 +23,11 @@ if git ls-files --error-unmatch .env >/dev/null 2>&1; then
   fail=1
 fi
 
-# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç).
-git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY|TYPESAFE_API_KEY)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
-  -- . ':!*.md' ':!.env.example' ':!uv.lock'
+# Dolu değer atanmış secret benzeri satırlar (boş .env.example şablonu hariç). `SITE_DATABASE_URL`
+# `DATABASE_URL` alt dizesiyle yakalanır; Netlify kişisel erişim tokenı hesabın bütün sitelerine
+# yetkilidir (AK18) — adıyla listededir.
+git grep -nIE '(ODDS_API_KEY|DATABASE_URL|SUPABASE_[A-Z_]*KEY|TYPESAFE_API_KEY|NETLIFY_AUTH_TOKEN)[[:space:]]*=[[:space:]]*.?[A-Za-z0-9+/:@._-]{12,}' \
+  -- . ':!*.md' ':!.env.example' ':!uv.lock' | only_location
 found=$?
 
 # 0 = eşleşme var, 1 = temiz, ≥2 = git'in KENDİSİ düştü (bozuk pathspec, repo yok).
@@ -34,6 +41,24 @@ case "$found" in
   1) ;;
   *)
     echo "HATA: git grep taraması koşamadı (exit $found) — tarama yapılmadı"
+    fail=1
+    ;;
+esac
+
+# Netlify kişisel erişim tokenı biçimiyle de aranır: ad=değer taraması YAML/JSON değerini,
+# `--auth` bayrağını, adsız tokenı, küçük harfli adı ve Markdown'ı görmez (T8 incelemesi I4).
+# `nfp_` + 36 alfasayısal yanlış alarm vermez (depoda 0 eşleşme ölçüldü) — `.md` DÂHİL.
+git grep -nIE 'nfp_[A-Za-z0-9]{36}' -- . ':!uv.lock' | only_location
+token=$?
+
+case "$token" in
+  0)
+    echo "HATA: izlenen dosyada Netlify erişim tokenı var"
+    fail=1
+    ;;
+  1) ;;
+  *)
+    echo "HATA: Netlify token taraması koşamadı (exit $token) — tarama yapılmadı"
     fail=1
     ;;
 esac
