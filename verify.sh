@@ -6,6 +6,12 @@ LOG="${TMPDIR:-/tmp}/football-edge-verify.log"
 : > "$LOG"
 FAILED=0
 
+# Bu koşunun kimliği (Faz 6 İz B §12.1): `site-db` adımının uçtan uca anlık görüntüsü bununla
+# etiketlenir; sitenin derleme adımı yalnız AYNI koşunun dosyasını kabul eder — önceki koşudan
+# kalmış bayat bir anlık görüntüyle PASS yok.
+FE_VERIFY_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
+export FE_VERIFY_RUN_ID
+
 step() {
   local name="$1"; shift
   echo "=== $name ===" | tee -a "$LOG"
@@ -115,8 +121,10 @@ step "veri-sözleşmesi" bash -c '
 # Veri-sözleşmesi adımının deseni: toplanan sayı --collect-only ile ölçülür ve alt sınırın
 # altındaysa pytest hiç koşmadan kırmızı — bir `leakage` işareti sessizce düşerse kapı görür.
 # Sabit yalnız ölçülerek büyütülür (Task 5, Task 12).
+# `sitedb` işaretli sızıntı testleri (holdout tohumları, bağımlılık kapanışı) `site-db` adımında
+# koşar ve orada sayılır: her test kapıda tam bir kez koşar.
 step "sızıntı" bash -c '
-  EXPECTED_MIN_LEAKAGE=418
+  EXPECTED_MIN_LEAKAGE=442
 
   collect_output=$(uv run pytest tests/ -q -m "leakage and not sitedb" --collect-only 2>&1)
   collect_code=$?
@@ -135,6 +143,46 @@ step "sızıntı" bash -c '
 
   uv run pytest tests/ -q -m "leakage and not sitedb" --tb=short
 '
+
+# Site okuma katmanı (Faz 6 İz B §4.4, §12.1, B10): 0014'ün kataloğu, davranışı ve uçtan uca dışa
+# aktarım GERÇEK Postgres ister — atılabilir yerel kap (`SITE_TEST_DATABASE_URL`; yerelde
+# `scripts/sandbox_db.sh`, CI'da iş içinde doğan kap). Değişken yoksa yerelde ADIYLA SKIP, `CI=true`
+# iken FAIL: SKIP'in CI'da sessizce yeşil olması Vaka 1 desenidir. Uçtan uca test anlık görüntüyü
+# `$SITE_E2E_DIR`e bu koşunun kimliğiyle bırakır; dizin önce BOŞALTILIR (dosyalar sıfırlanır,
+# silinmez) ki önceki koşunun dosyası bu koşunun sanılmasın.
+SITE_E2E_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/site-e2e"
+export SITE_E2E_DIR
+mkdir -p "$SITE_E2E_DIR"
+: > "$SITE_E2E_DIR/snapshot.json"
+: > "$SITE_E2E_DIR/snapshot.sha256"
+: > "$SITE_E2E_DIR/run-id"
+if [ -n "${SITE_TEST_DATABASE_URL:-}" ]; then
+  step "site-db" bash -c '
+    EXPECTED_MIN_SITEDB=28
+    # Hem `sitedb` hem `leakage` taşıyan H1 testleri (kapanış, taban, holdout tohumları, uçtan uca)
+    # `sızıntı` adımında sayılmaz: `leakage` işareti sessizce düşerse bu ikinci taban görür.
+    EXPECTED_MIN_SITEDB_LEAKAGE=4
+
+    count() {
+      collect_output=$(uv run pytest tests/ -q -m "$1" --collect-only 2>&1)
+      collected=$(printf "%s" "$collect_output" | grep -oE "^[0-9]+/" | head -1 | tr -d "/")
+      echo "${collected:-0}"
+    }
+    sitedb=$(count sitedb)
+    guarded=$(count "sitedb and leakage")
+    if [ "$sitedb" -lt "$EXPECTED_MIN_SITEDB" ] || [ "$guarded" -lt "$EXPECTED_MIN_SITEDB_LEAKAGE" ]; then
+      echo "HATA: sitedb testleri ($sitedb/$EXPECTED_MIN_SITEDB) ya da sitedb+leakage ($guarded/$EXPECTED_MIN_SITEDB_LEAKAGE) alt sınırın altında"
+      exit 1
+    fi
+
+    uv run pytest tests/ -q -m sitedb -rs --tb=short
+  '
+elif [ "${CI:-}" = "true" ]; then
+  step "site-db" bash -c 'echo "HATA: CI=true ama site test veritabanı yok — site-db atlanamaz (B10)"; exit 1'
+else
+  # SKIP GEÇMEK DEĞİLDİR: adıyla yazılır, `zincir` adımı gibi.
+  echo "SKIP: site-db (SITE_TEST_DATABASE_URL yok)" | tee -a "$LOG"
+fi
 
 # Ölçülmemiş dil üretime alınamaz (spec §5.4, açık soru #4). Bu adım ağa çıkmaz, para
 # harcamaz: yalnız `config/languages.yaml`'daki `production_enabled` bayraklarının bir

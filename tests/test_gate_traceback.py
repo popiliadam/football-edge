@@ -30,7 +30,7 @@ def _pytest_runs(path: Path) -> list[str]:
 
 @pytest.mark.parametrize(
     ("script", "expected_runs"),
-    [("verify.sh", 3), ("scripts/sandbox_db.sh", 1)],
+    [("verify.sh", 4), ("scripts/sandbox_db.sh", 1)],
 )
 def test_every_pytest_run_prints_no_local_variables(script: str, expected_runs: int) -> None:
     runs = _pytest_runs(REPO / script)

@@ -25,7 +25,10 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Site test kabı (imaj çekme + hazır olma) ve `site-db` adımı eklendi (Faz 6 B-1 Task 9). Önce
+    # kapı 75 sn sürüyordu (CI, 2026-09-24); kap adımı ve yeni DB testleri yerelde ölçüldü (Task 9
+    # raporu). CI'daki ilk ölçüme dek taban 20 dk: soğuk 1,8 GB imaj çekmesi ölçülmedi.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +47,40 @@ jobs:
       # Kapı ekstrasız koşarsa `mypy`, `pytest` ve `paket-kurulu` (`football_edge.scrape`)
       # kırmızı verir — sessiz geçmez.
       - run: uv sync --frozen --extra scrape
+      # Faz 6 İz B §12.2/B10: sitenin katalog, davranış ve uçtan uca testleri gerçek Postgres ister.
+      # Kap bu işin içinde doğar ve ölür; imaj T0'da ölçülüp sabitlendi (`docs/phases/06-site/
+      # b1-t0-olcumler.md`, tek kaynak — test eşitliği sınar). Parola burada üretilir: depo secret'ı
+      # DEĞİLDİR (`test_ci_reads_no_repository_secret_at_all`) ve maskelenir. Adres yalnız
+      # 127.0.0.1'i gösterir (koşucunun kendi Postgres'iyle çakışmasın diye 55432); test düzeni başka
+      # adresi reddeder. Aynı kap 0013'ün kum havuzu testlerini de koşar (DEFERRED 18a).
+      # `DATABASE_URL` yine VERİLMEZ: katalog testleri adıyla SKIP.
+      # Kap logu BASILMAZ: imaj ilk kurulumda parolayı kendi loguna yazar ve maskeleme yalnız bu
+      # adımın çıktısını kapsar. Kap kalkmazsa yalnız durumu basılır (`test_ci_never_prints_the_
+      # container_log`).
+      - name: Site test veritabanı
+        env:
+          SITE_DB_IMAGE: public.ecr.aws/supabase/postgres:17.6.1.143@sha256:80d7b27c3e8d77cfa7226eee9508671796da214781ff15a35b3670d7ad5ee453
+        run: |
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          docker run -d --name fe-site-db -e POSTGRES_PASSWORD="${password}" \
+            -p 127.0.0.1:55432:5432 "${SITE_DB_IMAGE}" postgres -D /etc/postgresql
+          for attempt in $(seq 1 90); do
+            if docker exec -e PGPASSWORD="${password}" fe-site-db \
+              psql -h localhost -U postgres -d postgres -Atc 'select 1' >/dev/null 2>&1; then
+              address="postgresql://postgres:${password}@127.0.0.1:55432/postgres"
+              # Adlar parçalardan: kapının secrets taraması `AD=değer` biçimini arar.
+              for name in "SITE_TEST_DATABASE""_URL" "SANDBOX_DATABASE""_URL"; do
+                echo "${name}=${address}" >> "${GITHUB_ENV}"
+              done
+              echo "site test veritabanı hazır (deneme ${attempt})"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "HATA: site test veritabanı 180 sn'de hazır olmadı"
+          docker container inspect -f 'durum={{.State.Status}} çıkış={{.State.ExitCode}} oom={{.State.OOMKilled}}' fe-site-db
+          exit 1
       - name: Kapı
         env:
           # `verify.sh` logu `${TMPDIR:-/tmp}` altına yazar. Runner'da `TMPDIR`
@@ -58,9 +95,9 @@ jobs:
         #   - `ODDS_API_KEY`: her push ücretli çağrı demek olurdu (ayda 500 kredi).
         # Kapı secret'sız DOĞRU biçimde bozulur: `zincir` adımı
         # "SKIP: zincir (DATABASE_URL yok)" basar — ATLANAN KONTROL GEÇMEK DEĞİLDİR,
-        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan on adım koşar:
+        # bu yüzden adıyla yazılır ve log'da görünür. Geri kalan on bir adım koşar:
         # ruff-check · ruff-format · mypy · pytest · paket-kurulu · kaynak-politikası ·
-        # veri-sözleşmesi · sızıntı · dil-kalibrasyonu · secrets.
+        # veri-sözleşmesi · sızıntı · site-db · dil-kalibrasyonu · secrets.
         #
         # `zincir` adımının gerçekten koştuğu tek yer `seal.yml`'dir (her 15 dakika,
         # varsayılan dalda, kendi secret'ıyla). Bu boşluk HANDOFF §3'te yazılıdır.

@@ -554,11 +554,17 @@ boşsa bekçi bir kez kırmızı verebilir; sonraki yeşil tur alarmı kapatır 
 
 ## 4. Migration'ları yerel kapta sınamak (kum havuzu)
 
-**Neden var.** Kapı ve CI veritabanına bağlanmaz: DB testleri (`tests/test_*_db.py`) orada adıyla
-SKIP'e düşer (DEFERRED 18a). Yetki, RLS, tetikleyici ve kilit davranışının kanıtı yalnız bu yolla
+**Neden var.** Kapı canlı veritabanına bağlanmaz: `DATABASE_URL`li katalog testleri kapıda ve CI'da adıyla SKIP'e
+düşer (DEFERRED 18a); CI'ın iş içi kabı yalnız `sitedb` ve kum havuzu testlerini koşar (aşağıda). Yetki, RLS,
+tetikleyici ve kilit davranışının yerel kanıtı bu yolla
 ölçülür. Canlıya bağlanmaz; `.env` okunmaz. Docker ve `public.ecr.aws/supabase/postgres:17.6.1.143`
 imajı gerekir (canlıyla aynı ana sürüm; `anon`/`authenticated`/`service_role`, pg_cron, pg_net ve
 Vault hazır gelir).
+
+**CI'da (Faz 6 B-1 Task 9'dan beri):** `ci.yml`in "Site test veritabanı" adımı aynı imajla iş içinde bir kap kurar;
+`SITE_TEST_DATABASE_URL` ve `SANDBOX_DATABASE_URL` onu gösterir. `sitedb` testleri `verify.sh`in `site-db` adımında,
+0013'ün kum havuzu testleri `pytest` adımında koşar. `DATABASE_URL` verilmez: katalog testleri CI'da hâlâ adıyla
+SKIP (DEFERRED 18a).
 
 ```bash
 scripts/sandbox_db.sh up      # iki kap kurar (varsa başlatır)
