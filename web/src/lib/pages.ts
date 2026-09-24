@@ -2,14 +2,8 @@
 // modülü kullanmadan kendisi kurar (scripts/checkout/expect.ts): iki bağımsız liste
 // birbirini denetler.
 import { type Lang, SITE_LANGS } from "../../site.config.ts";
-import {
-  absoluteUrl,
-  homePath,
-  leaguePath,
-  matchPath,
-  teamPath,
-  trackRecordPath,
-} from "./routes.ts";
+import { alternatesFor } from "./hreflang.ts";
+import { homePath, leaguePath, matchPath, teamPath, trackRecordPath } from "./routes.ts";
 import { leagueById } from "./snapshot.ts";
 import type { Snapshot } from "./snapshot-types.ts";
 
@@ -41,13 +35,10 @@ export function sitemapEntries(snapshot: Snapshot, enabled: boolean): SitemapEnt
   return indexablePages(snapshot)
     .filter((page) => page.indexable)
     .flatMap((page) =>
-      SITE_LANGS.map((lang) => ({
-        url: absoluteUrl(page.pathOf(lang)),
-        alternates: {
-          languages: Object.fromEntries(
-            SITE_LANGS.map((each) => [each, absoluteUrl(page.pathOf(each))]),
-          ),
-        },
-      })),
+      SITE_LANGS.map((lang) => {
+        // Sayfanın <head> hreflang'ıyla aynı kaynak: bütün diller + x-default (spec §8.3).
+        const { canonical, languages } = alternatesFor(lang, page.pathOf);
+        return { url: canonical, alternates: { languages } };
+      }),
     );
 }

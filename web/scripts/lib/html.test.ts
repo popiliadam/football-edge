@@ -42,6 +42,12 @@ describe("dar HTML okuyucusu", () => {
     expect(cspHash("self.x=1")).toMatch(/^'sha256-[A-Za-z0-9+/]+=*'$/);
   });
 
+  // Bilinen cevap: gövde UTF-8 baytlarıyla hash'lenir (tarayıcının hash'lediği baytlar). T9'un
+  // CSP denetimi de `cspHash`i kullanır; kodlama hatası iki tarafta birden görünmez kalırdı.
+  it("cspHash gövdeyi UTF-8 baytlarıyla hash'ler (bilinen cevap)", () => {
+    expect(cspHash("ğ")).toBe("'sha256-L6+Iw9+lTlq3M+J90iY2FW2/N6egpt6X6W3mwOIrNIE='");
+  });
+
   it("görünen metin betik ve yorum içermez", () => {
     expect(
       visibleText("<p>a<!-- x > y --></p><script>b</script><p>c &amp; d</p>")

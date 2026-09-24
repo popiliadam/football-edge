@@ -27,7 +27,7 @@ describe("_headers (spec §11, AK19 a, H7)", () => {
   it("her yürütülebilir satır içi betiğin gövdesi birebir hash'lenir", () => {
     const ld = '{"@context":"https://schema.org","name":"Doğu &amp; Batı"}';
     const boot = "(self.__next_f=self.__next_f||[]).push([0])";
-    const data = `self.__next_f.push([1,"[\\"$\\",\\"script\\",null,{\\"type\\":\\"application/ld+json\\"}]"])`;
+    const data = `self.__next_f.push([1,"[\\"$\\",\\"script\\",null,{\\"type\\":\\"application/ld+json\\"}]","Doğu & Batı"])`;
     const html = `<p>x</p><script type="application/ld+json">${ld}</script><script>${boot}</script><script>${data}</script>`;
     const sha = (body: string) =>
       `'sha256-${createHash("sha256").update(body, "utf8").digest("base64")}'`;

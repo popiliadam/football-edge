@@ -13,6 +13,13 @@ from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 NETLIFY = REPO / "web/netlify.toml"
+# Komut birebir sabittir: "burada başarısız olması" yetmez. Depo kökünde `package.json` yok;
+# `…; pnpm run build` gibi bir ek burada da düşerdi, ama Netlify'ın `web/` tabanında derlemeyi
+# gerçekten denerdi.
+REFUSAL = (
+    "echo 'Netlify tarafinda derleme yapilmaz: yayin yalniz site.yml hazir dizini"
+    " (spec 11, AK16)' >&2; exit 1"
+)
 
 
 def _config() -> dict[str, Any]:
@@ -24,6 +31,7 @@ def test_only_the_build_table_with_publish_and_command() -> None:
     assert set(config) == {"build"}, "başlık/yönlendirme/ortam netlify.toml'a girmez (B8)"
     assert set(config["build"]) == {"publish", "command"}
     assert config["build"]["publish"] == "out"
+    assert config["build"]["command"] == REFUSAL
 
 
 def test_a_netlify_side_build_refuses_by_name() -> None:
