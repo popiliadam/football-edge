@@ -21,7 +21,7 @@ sources:
     base_url: https://footystats.org
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 5.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths:
       - /england/premier-league/xg
       - /spain/la-liga/xg
@@ -62,7 +62,7 @@ sources:
     base_url: https://www.tff.org
     user_agent: football-edge/0.1
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: ['/Default.aspx?pageID=600']
     enabled: true
     access_basis: robots
@@ -106,7 +106,7 @@ sources:
     base_url: https://ajansspor.com
     user_agent: football-edge/0.1
     crawl_delay_seconds: 1.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: ['/sitemap', '/sitemap/news']
     enabled: true
     access_basis: robots
@@ -131,7 +131,7 @@ sources:
     base_url: https://api.open-meteo.com
     user_agent: football-edge/0.1
     crawl_delay_seconds: 1.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: ['/v1/forecast']
     enabled: true
     access_basis: api_terms
@@ -151,7 +151,7 @@ sources:
     base_url: https://www.wikidata.org
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 1.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: ['/wiki/Special:EntityData/Q81492.json']
     enabled: true
     access_basis: robots
@@ -179,7 +179,7 @@ sources:
     base_url: https://news.google.com
     user_agent: football-edge/0.1
     crawl_delay_seconds: 1.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: []
     enabled: false
     access_basis: robots
@@ -197,7 +197,7 @@ sources:
     base_url: https://understat.com
     user_agent: football-edge/0.1
     crawl_delay_seconds: 1.0
-    robots_verified_at: 2026-09-19
+    robots_verified_at: 2026-09-27
     declared_paths: []
     enabled: false
     access_basis: robots
