@@ -13,7 +13,7 @@ milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-0
 
 ---
 
-## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı; oturum 10 eki §0.2a)
+## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı; oturum 10/10b ekleri §0.2a–§0.2b)
 
 Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçedir. Kullanıcının yapacakları **§0.K**'de
 (tek yer, tam liste). Asistanın kullanıcısız yapacakları **§0.A**'da. Disiplin **§0.D**'de.
@@ -42,6 +42,17 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
   — sonuç LOG'dan; kurulum `uv sync --frozen --extra scrape`. Node 22 ile `site-kurulum` adıyla FAIL (kasıtlı).
   Secret'lı kabukta koşma: `env -u DATABASE_URL -u ODDS_API_KEY -u TYPESAFE_API_KEY …` (yalnız `zincir` için DB gerekir).
 - **Holdout:** açılmadı. Plan 2 en erken 2026-10-07.
+
+### 0.2b Oturum 10b'de biten (2026-10-02) — aynı disiplin (görev + bütün-dal incelemesi + tek düzeltme dalgası + tam kapı)
+- Plan `docs/superpowers/plans/2026-10-01-oturum10b-kalan-borclar.md` (defter `.superpowers/sdd/2026-10-01-oturum10b-kalan-borclar/progress.md`).
+- **K/S temizliği yapıldı** (kullanıcı onayıyla; ayrıntı §0.K/S).
+- **16g UYGULANDI:** DC memo soy bekçisi (`model/strategies.py`, `MemoReuseError`) — yalnız yükseltir, olasılık değişmez;
+  bütün zamanlanmış/CLI giriş noktalarından ulaşılamaz (izlendi, sentetik koşuldu). **19b KAPANDI:** seal `Bekçi` ve
+  sources-audit push adımı tarama başarısına bağlı (yeşil turda davranış aynı — 5.800 simüle tur). **21a–21e, 21j, 21k
+  kapandı** (workflow bekçileri, sıcak başlangıç ve harman testleri, `_headers` ayrıştırıcıları, 404'te iç import yok).
+  Yeni ertelenenler 21l–21n.
+- **Güvenlik olayı (zararsız):** bir inceleyici sondasında gerçek `git -C site push` 4 kez çalıştı, chdir'de düştü;
+  origin'de yeni ref yok (doğrulandı). Kural belleğe ve inceleyici talimatına girdi: sondalar sahte ikililerle.
 
 ### 0.2a Oturum 10'da biten (2026-10-01) — görev incelemesi + bütün-dal incelemesi + tek düzeltme dalgası + tam kapı
 - Plan `docs/superpowers/plans/2026-10-01-oturum10-kucuk-borclar.md` (defter `.superpowers/sdd/2026-10-01-oturum10-kucuk-borclar/progress.md`,
@@ -108,8 +119,9 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
    - (d) Plan 2 brief'lerine taşınacaklar: 17c–17e (T10), 17h kırmızı takım, 17n; `tier1` zamanlanırken exit 7 = "Jev
      kesintisi" adıyla; Plan metni Task 9 Step 8'de `min(boolean)` değil `bool_and`.
    - Plan 2'nin kullanıcıya bağlı kapıları: §0.K/4 (EN kaynağı), §0.K/5 (kalibrasyon onayı), §0.K/6 (ücretli Jev).
-2. ~~İsteğe bağlı küçük işler~~ **Oturum 10'da bitti (§0.2a).** Kalan kullanıcısız küçükler DEFERRED §21 (21a–21k),
-   19b kalanı ve 16g (c) uygulaması (Faz 4 `model/strategies.py` değişikliğiyle) — hiçbiri acil değil.
+2. ~~İsteğe bağlı küçük işler~~ **Oturum 10 ve 10b'de bitti (§0.2a–§0.2b).** Kalan kullanıcısız küçükler DEFERRED 21f,
+   21g, 21h, 21l–21n (hepsi tetikli, acil değil) ve 16g'nin DB'li kalanı: kilitli E verisinde `walkforward` +
+   `model-selftest` önce/sonra W1–W3 birebir (holdout yok) — Plan 2 hazırlığıyla birlikte yapılabilir.
 3. **İz B'de kullanıcısız kalan yok** — 0014'ün canlıya uygulanması, deploy, alan adı, hukuk hepsi §0.K'ye bağlı.
    Kullanıcı §0.K'yi tamamlayınca asistan `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" listesini 1→6 yürütür.
 
@@ -265,6 +277,10 @@ session pooler 5432) → `SITE_DATABASE_URL` ortam secret'ı (K/14). Asistan: po
 uygulandığını ölçer (faz HANDOFF adım 5).
 
 **K/S — Silme onayları (temizlik; asistan senin "sil" onayınla yapar ya da komutları sen çalıştırırsın).**
+> **YAPILDI 2026-10-01 (kullanıcı onayıyla):** 1–5 ve 7 — 19 worktree, 23 yerel dal (`feat/s9-scrapling` dahil), ~41 GB SDD
+> scratch (defterler + inceleme/rapor dosyaları `.superpowers/sdd/_kalici/defterler/` altında), 46 kap, `/tmp/b2fake`.
+> Dokunulmayanlar: `t6-rls-{pre,sandbox,pg}`, `rev8-pg`, `rev9-pg` kapları (listede ve defterde yok — büyük olasılıkla
+> oturum 8/9 kum havuzu; onay verirsen silinir) ve uzak dal `origin/faz-0-kayit-altyapisi` (birleşmiş; uzak silme ayrı onay).
 Hepsi `main`de birleşmiş ya da yeniden üretilebilir; **kalıcı tutulanlar `.superpowers/sdd/_kalici/` (silinmez).**
 1. **Worktree'ler + dalları (hepsi `main`de):** `.worktrees/wt-izb-{b1,b1-t4,b1-t8,b2}`,
    `.worktrees/wt-s9-{a1,borc,integ,izb,rls,scrapling-clean}` ve dallar `feat/izb-b1`, `feat/izb-b1-t4`,
