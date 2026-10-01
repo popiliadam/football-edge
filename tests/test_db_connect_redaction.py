@@ -30,6 +30,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from football_edge import db as db_module
 from football_edge.db import connect
 from football_edge.dsn_hygiene import MASK, masked
 
@@ -89,6 +90,23 @@ MALFORMED = [
     *(pytest.param(f"host={SOCKET_DIR} {key}={PASSWORD}", id=key) for key in ENUM_OPTIONS),
     *(pytest.param(f"{LOOPBACK} {key}={PASSWORD}", id=key) for key in TCP_INTEGER_OPTIONS),
     pytest.param(f"host={HOST} connect_timeout={PASSWORD}", id="connect_timeout"),
+    # C2'nin `postgres://` öneki (tur 3 m8)
+    pytest.param(f"postgres://kullanici:ab@{PASSWORD}/x@{HOST}:5432/db", id="postgres-at-slash"),
+    # yankılanan değerde tırnak ya da anahtar=değer kaçışı (tur 3 I4; inceleyicinin 12 + 4 biçimi)
+    pytest.param(f'host={SOCKET_DIR} sslmode= password=ab"{PASSWORD}', id="bos-slot-cift-tirnak"),
+    pytest.param(f"host={SOCKET_DIR} sslmode= password=ab'{PASSWORD}", id="bos-slot-tek-tirnak"),
+    pytest.param(f"host={SOCKET_DIR} sslmode= password=ab\\'{PASSWORD}", id="bos-slot-ters-bolu"),
+    pytest.param(f"host={SOCKET_DIR} sslmode= password=a\\b{PASSWORD}", id="bos-slot-ters-bolu-2"),
+    pytest.param(f"host={SOCKET_DIR} sslmode='x\\'{PASSWORD}'", id="tirnakli-deger-kacis"),
+    pytest.param(f"postgresql:///db?host={SOCKET_DIR}&sslmode=%22{PASSWORD}", id="sorgu-cift"),
+    pytest.param(f"postgresql:///db?host={SOCKET_DIR}&sslmode=%27{PASSWORD}", id="sorgu-tek"),
+    pytest.param(f"postgresql:///db?host={SOCKET_DIR}&sslmode=ab%22{PASSWORD}", id="sorgu-ortada"),
+    pytest.param(f'host={SOCKET_DIR} target_session_attrs=x"{PASSWORD}', id="target-cift-tirnak"),
+    pytest.param(f"host={SOCKET_DIR} connect_timeout=x'{PASSWORD}", id="timeout-tek-tirnak"),
+    pytest.param(f'host={SOCKET_DIR} service=x"{PASSWORD}', id="service-cift-tirnak"),
+    pytest.param(f'{URL}:ab"{PASSWORD}%zz@{HOST}/db', id="yuzde-cift-tirnak"),
+    pytest.param(f"{URL}:ab'{PASSWORD}%zz@{HOST}/db", id="yuzde-tek-tirnak"),
+    pytest.param(f'host={SOCKET_DIR} password=ab"{PASSWORD} foo', id="esitsiz-cift-tirnak"),
 ]
 
 WELL_FORMED = [
@@ -130,6 +148,15 @@ WELL_FORMED = [
         id="tamsayilar",
     ),
     pytest.param("host=h ssl_max_protocol_version=tlsv1.3 connect_timeout=10", id="tls-kucuk"),
+    # libpq/psycopg'nin kabul ettiği tamsayı biçimleri (tur 3 m7; ölçüm t2-r3-int-probe.out)
+    pytest.param("postgresql://u:p@h.example.com:5432\n", id="port-satir-sonu"),
+    pytest.param("postgresql://u@h.example.com:5432%0A/db", id="url-port-kodlu-satir-sonu"),
+    pytest.param("host=h port=' 5432 '", id="port-bosluk"),
+    pytest.param("host=h port=+5432,05433", id="port-arti-sifir"),
+    pytest.param("postgresql://u@h/db?connect_timeout=10%0A", id="timeout-satir-sonu"),
+    pytest.param("host=h connect_timeout=+10", id="timeout-arti"),
+    pytest.param("host=h connect_timeout=2.5", id="timeout-ondalik"),
+    pytest.param("host=h keepalives_idle='\t30 ' tcp_user_timeout=-5", id="tamsayi-bosluk-eksi"),
 ]
 
 # Alt süreç bekçisi: ad çözme düşer (DNS paketi çıkmaz). Bağlanma üreteci açık kalır: (A)
@@ -177,7 +204,13 @@ def _assert_silent(error: BaseException) -> None:
 # ── (A): bağlanmadan önce ─────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("dsn", [*MALFORMED, pytest.param(f"host={HOST} port=99999", id="aralik")])
+OUT_OF_RANGE = [
+    pytest.param(f"host={HOST} port=99999", id="aralik"),
+    pytest.param(f"{LOOPBACK} keepalives=2147483648", id="int32-disi"),
+]
+
+
+@pytest.mark.parametrize("dsn", [*MALFORMED, *OUT_OF_RANGE])
 def test_layer_a_rejects_a_malformed_dsn_before_psycopg_is_called(
     dsn: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -228,10 +261,37 @@ def test_layer_b_masks_every_quoted_fragment_taken_from_the_dsn() -> None:
     )
 
     assert masked(message, dsn) == (
-        f"connection is bad: invalid integer value {MASK} for connection option {MASK}; "
-        f'host {MASK}; yüzde-çözülmüş {MASK}; başka "x-sunucu"'
+        f'connection is bad: invalid integer value "{MASK}" for connection option "{MASK}"; '
+        f'host \'{MASK}\'; yüzde-çözülmüş "{MASK}"; başka "x-sunucu"'
     )
-    assert masked(f'"{PASSWORD}@"', f"{URL}:{PASSWORD}%40@{HOST}/db") == MASK, "çözülmüş hâl"
+    assert masked(f'"{PASSWORD}@"', f"{URL}:{PASSWORD}%40@{HOST}/db") == f'"{MASK}"', "çözülmüş"
+
+
+@pytest.mark.parametrize(
+    ("dsn", "message"),
+    [
+        pytest.param(
+            f'host=/x sslmode= password=ab"{PASSWORD}',
+            f'invalid sslmode value: "password=ab"{PASSWORD}"',
+            id="deger-icinde-cift-tirnak",
+        ),
+        pytest.param(
+            f"host=/x sslmode= password=ab\\'{PASSWORD}",
+            f'invalid sslmode value: "password=ab\'{PASSWORD}"',
+            id="anahtar-deger-kacisi",
+        ),
+        pytest.param(
+            f'{URL}:ab"{PASSWORD}%zz@{HOST}/db',
+            f'invalid percent-encoded token: "ab"{PASSWORD}%zz"',
+            id="ayristirilamayan-en-uzun-aralik",
+        ),
+    ],
+)
+def test_layer_b_masks_an_echo_that_carries_a_quote_or_an_escape(dsn: str, message: str) -> None:
+    # libpq ayrıştırdığı değeri AYNEN yankılar (kaçış çözülmüş, iç tırnak dâhil): önce o değerler,
+    # sonra DSN'in alt dizesi olan EN UZUN tırnaklı aralık maskelenir.
+    assert PASSWORD not in masked(message, dsn)
+    assert masked(message, dsn).endswith(f'"{MASK}"')
 
 
 def _raising(error: psycopg.Error) -> Any:
@@ -241,18 +301,36 @@ def _raising(error: psycopg.Error) -> Any:
     return fail
 
 
+@pytest.mark.parametrize(
+    "kind", [psycopg.OperationalError, psycopg.ProgrammingError, psycopg.InterfaceError]
+)
 def test_layer_b_reraises_the_same_class_with_the_dsn_fragments_masked(
-    monkeypatch: pytest.MonkeyPatch,
+    kind: type[psycopg.Error], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Her `psycopg.Error` (yalnız `OperationalError` değil): ör. psycopg'nin `ProgrammingError`ı
+    # (`bad value for connect_timeout`) ayrıştırmadan SONRA, bağlanmadan önce yükselir.
     dsn = f"host={HOST} password={PASSWORD} sslmode=require"
-    original = psycopg.OperationalError(f'invalid sslmode value: "password={PASSWORD}"')
+    original = kind(f'invalid sslmode value: "password={PASSWORD}"')
     monkeypatch.setattr(psycopg, "connect", _raising(original))
 
-    with pytest.raises(psycopg.OperationalError) as caught:
+    with pytest.raises(kind) as caught:
         connect(dsn)
 
-    assert type(caught.value) is psycopg.OperationalError
-    assert str(caught.value) == f"invalid sslmode value: {MASK}"
+    assert type(caught.value) is kind
+    assert str(caught.value) == f'invalid sslmode value: "{MASK}"'
+    _assert_silent(caught.value)
+
+
+@pytest.mark.parametrize("dsn", MALFORMED)
+def test_layer_b_alone_keeps_every_malformed_dsn_silent(
+    dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (A) kapalı: libpq/psycopg gerçekten koşar (DNS bekçide; hostlar yerel ya da `.invalid`).
+    monkeypatch.setattr(db_module, "dsn_well_formed", lambda _dsn: True)
+
+    with pytest.raises(psycopg.Error) as caught:
+        connect(dsn)
+
     _assert_silent(caught.value)
 
 

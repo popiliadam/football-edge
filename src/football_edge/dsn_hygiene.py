@@ -7,9 +7,9 @@ logları herkese açıktır; GitHub yalnız secret'ın TAMAMINI maskeler ve kök
 parolayı libpq'dan aldığı için bu biçimlerde onu bilemez. İki katman:
 
 (A) `dsn_well_formed`: bağlanmadan ÖNCE dar, biçim düzeyinde denetim — ad çözme ve soket yok.
-(B) `masked`: bağlanırken yükselen her psycopg hatasında, ham DSN'in alt dizesi olan her tırnaklı
-    parça maskelenir. Tırnaksız tanı ("Connection refused") okunur kalır. (A) bir biçimi kaçırırsa
-    (B) tırnaklı yankıyı yine yakalar; (B) bozulursa (A) bilinen biçimlerin hepsini zaten düşürür.
+(B) `masked`: bağlanırken yükselen her psycopg hatasında libpq'nun ayrıştırdığı değerlerin ve ham
+    DSN'in alt dizesi olan her tırnaklı yankı maskelenir; tırnaksız tanı okunur kalır. (A) bir
+    biçimi kaçırırsa (B) tırnaklı yankıyı yine yakalar; (B) bozulursa (A) bilinen biçimleri düşürür.
 """
 
 from __future__ import annotations
@@ -25,9 +25,12 @@ from psycopg.conninfo import conninfo_to_dict
 MASK = "<gizli>"
 
 _HOST_NAME = re.compile(r"[A-Za-z0-9_.-]+")
-_PORT = re.compile(r"[0-9]{1,5}")
-_INTEGER = re.compile(r"-?[0-9]{1,9}")
-_QUOTED = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+# libpq `parse_int_param`: `strtol` öncesi/sonrası ASCII boşluk ve işaret serbest, int32 aralığı
+# (ölçüldü: t2-r3-int-probe.out — ` 1`, `1\n`, `+1`, `01` kabul; `1.0`, `0x1`, `１`, `1 1` red).
+_LIBPQ_INTEGER = re.compile(r"[ \t\n\x0b\x0c\r]*[+-]?[0-9]+[ \t\n\x0b\x0c\r]*")
+_INT32 = range(-(2**31), 2**31)
+_PORTS = range(1, 65536)
+_QUOTES = ("'", '"')
 _URL_PREFIXES = ("postgresql://", "postgres://")
 
 # libpq 18'in belgelenmiş değer kümeleri (ölçüldü: review-t2-r2/r3-enum-sets.out). Küme dışı değer
@@ -56,7 +59,6 @@ _CASELESS_ENUMS: Mapping[str, frozenset[str]] = {
 _AUTH_METHODS = frozenset({"password", "md5", "gss", "sspi", "scram-sha-256", "oauth", "none"})
 _INTEGERS = frozenset(
     {
-        "connect_timeout",
         "keepalives",
         "keepalives_idle",
         "keepalives_interval",
@@ -81,8 +83,25 @@ def _host_ok(host: str) -> bool:
     return _ip_ok(host)
 
 
+def _libpq_integer(value: str) -> int | None:
+    """libpq'nun tamsayı olarak kabul ettiği değer (int32), değilse `None`."""
+    if _LIBPQ_INTEGER.fullmatch(value) is None:
+        return None
+    number = int(value)
+    return number if number in _INT32 else None
+
+
 def _port_ok(port: str) -> bool:
-    return not port or (_PORT.fullmatch(port) is not None and 1 <= int(port) <= 65535)
+    return not port or _libpq_integer(port) in _PORTS
+
+
+def _psycopg_timeout_ok(value: str) -> bool:
+    """`connect_timeout`u libpq değil psycopg okur: `int(float(değer))` (ör. `2.5` kabul)."""
+    try:
+        int(float(value))
+    except (ValueError, OverflowError):
+        return False
+    return True
 
 
 def _auth_ok(value: str) -> bool:
@@ -101,8 +120,10 @@ def _option_ok(key: str, value: str) -> bool:
         return value.lower() in _CASELESS_ENUMS[key]
     if key == "require_auth":
         return _auth_ok(value)
+    if key == "connect_timeout":
+        return _psycopg_timeout_ok(value)
     if key in _INTEGERS:
-        return _INTEGER.fullmatch(value) is not None
+        return _libpq_integer(value) is not None
     return True
 
 
@@ -136,18 +157,46 @@ def dsn_well_formed(dsn: str) -> bool:
     return True
 
 
+def _parsed_values(dsn: str) -> list[str]:
+    """libpq'nun ayrıştırdığı değerler, en uzundan; ayrıştırılamazsa boş (aralık kuralı kalır)."""
+    try:
+        params = conninfo_to_dict(dsn)
+    except (psycopg.Error, UnicodeError):
+        return []
+    return sorted({str(value) for value in params.values() if value}, key=len, reverse=True)
+
+
+def _span_end(message: str, start: int, sources: tuple[str, ...]) -> int | None:
+    """`start`taki tırnağın, aradaki metni DSN'in alt dizesi yapan EN UZAK eşi; yoksa `None`."""
+    quote = message[start]
+    for end in range(len(message) - 1, start + 1, -1):
+        if message[end] == quote and any(message[start + 1 : end] in src for src in sources):
+            return end
+    return None
+
+
 def masked(message: str, dsn: str) -> str:
-    """(B) Ham (ya da yüzde-çözülmüş) DSN'in alt dizesi olan her tırnaklı parça `MASK` olur.
+    """(B) DSN'den gelen her tırnaklı yankı `MASK` olur; tırnaklar kalır, tırnaksız tanı aynen.
 
-    Tırnaksız tanı ("Connection refused", "timeout expired") olduğu gibi kalır. Ölçülen her libpq
-    ve psycopg değer yankısı tırnaklıdır; tırnaksız bir yankı (B)'yi geçer ve (A)'ya kalır.
+    İki adım (tur 3 I4): (1) libpq ayrıştırdığı değeri AYNEN yankılar — anahtar=değer kaçışı
+    çözülmüş, iç tırnak dâhil (`"password=ab"<parola>"`): `conninfo_to_dict` değerleri tırnaklı
+    hâlleriyle maskelenir. (2) Kalan her tırnak, aradaki metni ham ya da yüzde-çözülmüş DSN'in alt
+    dizesi yapan EN UZAK eşiyle maskelenir — ilk eş, değerin içindeki tırnakta keserdi.
     """
+    text = message
+    for value in _parsed_values(dsn):
+        for quote in _QUOTES:
+            text = text.replace(f"{quote}{value}{quote}", f"{quote}{MASK}{quote}")
     sources = (dsn, unquote(dsn))
-
-    def hide(found: re.Match[str]) -> str:
-        fragment = found.group(1) if found.group(1) is not None else found.group(2)
-        if fragment and any(fragment in source for source in sources):
-            return MASK
-        return found.group(0)
-
-    return _QUOTED.sub(hide, message)
+    pieces: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        end = _span_end(text, index, sources) if char in _QUOTES else None
+        if end is None:
+            pieces.append(char)
+            index += 1
+        else:
+            pieces.append(f"{char}{MASK}{char}")
+            index = end + 1
+    return "".join(pieces)
