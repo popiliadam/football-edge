@@ -7,9 +7,16 @@ logları herkese açıktır; GitHub yalnız secret'ın TAMAMINI maskeler ve kök
 parolayı libpq'dan aldığı için bu biçimlerde onu bilemez. İki katman:
 
 (A) `dsn_well_formed`: bağlanmadan ÖNCE dar, biçim düzeyinde denetim — ad çözme ve soket yok.
-(B) `masked`: bağlanırken yükselen her psycopg hatasında libpq'nun ayrıştırdığı değerlerin ve ham
-    DSN'in alt dizesi olan her tırnaklı yankı maskelenir; tırnaksız tanı okunur kalır. (A) bir
-    biçimi kaçırırsa (B) tırnaklı yankıyı yine yakalar; (B) bozulursa (A) bilinen biçimleri düşürür.
+(B) `masked`: bağlanırken yükselen her `psycopg.Error`ın metninde DSN'den gelen yankı maskelenir:
+    libpq'nun ayrıştırdığı değerler ve virgülle ayrılmış girdileri, tırnaklı (`"…"`, `'…'`) ya da
+    psycopg'nin Python `repr`iyle bastığı hâlleriyle (`connect_timeout`, çözülemeyen host, çoklu
+    deneme listesi); sonra ham ya da yüzde-çözülmüş DSN'in alt dizesi olan her tırnaklı aralık.
+    Tırnaksız tanı okunur kalır.
+
+Kapsam: (B) yalnız tırnaklı ve `repr` yankıyı, yalnız `psycopg.Error`ın metninde tutar. Tırnaksız
+bir yankı ve `psycopg.Error` dışı bir istisna (vekil karakter → `UnicodeEncodeError`) yalnız (A)'ya
+kalır. (B) bozulursa (A) bilinen biçimleri düşürür; (A) bir biçimi kaçırırsa (B) bu kapsamdaki
+yankıyı yakalar.
 """
 
 from __future__ import annotations
@@ -158,12 +165,15 @@ def dsn_well_formed(dsn: str) -> bool:
 
 
 def _parsed_values(dsn: str) -> list[str]:
-    """libpq'nun ayrıştırdığı değerler, en uzundan; ayrıştırılamazsa boş (aralık kuralı kalır)."""
+    """libpq'nun ayrıştırdığı değerler ve virgülle ayrılmış girdileri, en uzundan; ayrıştırılamazsa
+    boş (aralık kuralı kalır). Girdiler: psycopg çoklu deneme listesini girdi başına basar."""
     try:
         params = conninfo_to_dict(dsn)
     except (psycopg.Error, UnicodeError):
         return []
-    return sorted({str(value) for value in params.values() if value}, key=len, reverse=True)
+    values = {str(value) for value in params.values() if value}
+    values |= {entry for value in values for entry in value.split(",") if entry}
+    return sorted(values, key=len, reverse=True)
 
 
 def _span_end(message: str, start: int, sources: tuple[str, ...]) -> int | None:
@@ -176,17 +186,21 @@ def _span_end(message: str, start: int, sources: tuple[str, ...]) -> int | None:
 
 
 def masked(message: str, dsn: str) -> str:
-    """(B) DSN'den gelen her tırnaklı yankı `MASK` olur; tırnaklar kalır, tırnaksız tanı aynen.
+    """(B) DSN'den gelen her tırnaklı ya da `repr` yankı `MASK` olur; tırnaksız tanı aynen.
 
-    İki adım (tur 3 I4): (1) libpq ayrıştırdığı değeri AYNEN yankılar — anahtar=değer kaçışı
-    çözülmüş, iç tırnak dâhil (`"password=ab"<parola>"`): `conninfo_to_dict` değerleri tırnaklı
-    hâlleriyle maskelenir. (2) Kalan her tırnak, aradaki metni ham ya da yüzde-çözülmüş DSN'in alt
-    dizesi yapan EN UZAK eşiyle maskelenir — ilk eş, değerin içindeki tırnakta keserdi.
+    İki adım (tur 3 I4, tur 4 I5): (1) libpq ayrıştırdığı değeri AYNEN yankılar — anahtar=değer
+    kaçışı çözülmüş, iç tırnak dâhil (`"password=ab"<parola>"`); psycopg ise `repr` ile basar
+    (ters bölü ikilenir, iki tırnak türü ve basılamayan karakter kaçışlanır): `conninfo_to_dict`
+    değerleri ve virgülle ayrılmış girdileri tırnaklı ve `repr` hâlleriyle maskelenir. (2) Kalan
+    her tırnak, aradaki metni ham ya da yüzde-çözülmüş DSN'in alt dizesi yapan EN UZAK eşiyle
+    maskelenir — ilk eş, değerin içindeki tırnakta keserdi.
     """
     text = message
     for value in _parsed_values(dsn):
         for quote in _QUOTES:
             text = text.replace(f"{quote}{value}{quote}", f"{quote}{MASK}{quote}")
+        echo = repr(value)
+        text = text.replace(echo, f"{echo[0]}{MASK}{echo[0]}")
     sources = (dsn, unquote(dsn))
     pieces: list[str] = []
     index = 0

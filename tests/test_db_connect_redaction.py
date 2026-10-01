@@ -107,6 +107,36 @@ MALFORMED = [
     pytest.param(f'{URL}:ab"{PASSWORD}%zz@{HOST}/db', id="yuzde-cift-tirnak"),
     pytest.param(f"{URL}:ab'{PASSWORD}%zz@{HOST}/db", id="yuzde-tek-tirnak"),
     pytest.param(f'host={SOCKET_DIR} password=ab"{PASSWORD} foo', id="esitsiz-cift-tirnak"),
+    # psycopg'nin `repr` ile yankıladığı değer (tur 4 I5): `bad value for connect_timeout: {!r}`,
+    # `failed to resolve host {!r}`, çoklu deneme listesi `host: %r` (girdi başına). `repr` ters
+    # bölüyü ikiler, iki tırnak türünde `\'` yazar, basılamayanı `\xNN` yazar.
+    pytest.param(
+        f"postgresql:///db?host={SOCKET_DIR}&connect_timeout=ab%5C{PASSWORD}",
+        id="repr-timeout-ters-bolu",
+    ),
+    pytest.param(
+        f"host={SOCKET_DIR} connect_timeout= password={PASSWORD}'x\"", id="repr-timeout-iki-tirnak"
+    ),
+    pytest.param(
+        f"host={SOCKET_DIR} connect_timeout='{PASSWORD}\\'x\"'", id="repr-timeout-tirnakli"
+    ),
+    pytest.param(
+        f"postgresql:///db?host={SOCKET_DIR}&connect_timeout={PASSWORD}%01",
+        id="repr-timeout-basilamayan",
+    ),
+    pytest.param(
+        f"host={SOCKET_DIR} connect_timeout= password=ab\\\\{PASSWORD}",
+        id="repr-timeout-cift-ters-bolu",
+    ),
+    pytest.param(f"{URL}@ab%5C{PASSWORD}/db", id="repr-host-ters-bolu"),
+    pytest.param(f"{URL}@{PASSWORD}%27x%22/db", id="repr-host-iki-tirnak"),
+    pytest.param(
+        f"{URL}@ab%5C{PASSWORD}:1,ab%5C{PASSWORD}:1/db"
+        "?hostaddr=127.0.0.1,127.0.0.1&connect_timeout=3",
+        id="repr-coklu-deneme-listesi",
+    ),
+    # libpq yüzde-kodlu ANAHTARI çözüp yankılar, ayrıştırma düşer (tur 4 m9: `unquote` kaynağı)
+    pytest.param(f"postgresql:///db?x%2D{PASSWORD}=1", id="yuzde-kodlu-anahtar"),
 ]
 
 WELL_FORMED = [
