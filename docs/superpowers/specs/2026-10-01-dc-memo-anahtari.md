@@ -12,6 +12,9 @@ Betikler depo dışında, oturum çalışma alanında (`.superpowers/sdd/2026-10
 **Düzeltme turu 1 (2026-10-01):** bağımsız inceleme I1 — ilk sürüm (c)'nin bekçisini yalnız isabette okuyordu;
 ıskada `memo.latest` başka soydan sıcak başlangıç verebiliyordu. Bekçi ıska denetimiyle genişletildi (§3, §3.1, §5,
 §7); §6 HANDOFF okuması ve E1 notu düzeltildi; (a) için test planı olmadığı açıkça yazıldı (§5).
+**Düzeltme turu 2 (2026-10-01, bütün-dal son incelemesi F2):** bu not T7'den (`5306837`) önce yazıldı; T7 E2'yi iki
+ayakta taze nesneyle kurdu. §5/3, §6 ve §7'deki E2 cümleleri buna göre güncellendi. Ayrıca §3 (c)'de `params`ın
+üçüncü kaynağı (soğuk fit) sayıldı, §3.1'de iki komşu satırın ölçek farkı yazıldı.
 
 ## 1. Bugünkü mekanizma
 
@@ -85,7 +88,9 @@ okur:
 - **ıskada:** `memo.latest[grup]` varsa onun mührü (`(grup, latest.fitted_on)` girdisininki) şimdiki akışın öneki
   değilse `MemoReuseError` — fit başka soyun parametresinden sıcak başlamaz.
 
-`params`ın çıktısı yalnız bu iki kaynaktan (memo girdisi ya da `start = latest` ile fit) gelir; ikisi de mühürlü.
+`params`ın çıktısı üç kaynaktan gelir: memo girdisi, `start = latest` ile fit, ya da `latest` yokken veya
+`latest.fitted_on ≥ at` iken soğuk fit. İlk ikisi mühürlü; soğuk fit yalnız şimdiki akışı kullanır, yabancı soy
+taşıyamaz.
 Aynı soyda akış yalnız uzar → bekçi hiç tetiklenmez; 1X2/Ü-A paylaşımı aynı maçları aynı sırada gözler → geçer;
 başka küme → ilk isabette ya da ilk ıskada adıyla düşer (sessiz değil). Ek yapı yok: ıska denetimi aynı mühür
 makinesini kullanır. Statik ek (isteğe bağlı): yapım yerlerini sabitleyen AST testi — 16h'deki kaçışları görmez,
@@ -120,6 +125,11 @@ Yanlış pozitif yok: isabet + ıska bekçisi dört taze senaryoda (§4) bayt e�
 | Anahtar maliyeti, 45 bin gözlem / 176 parça (sıcak) | 0,066 ms/çağrı | 0,090 ms/çağrı | 0,064 ms/isabet; ıskada bir önek denetimi daha (fit'in yanında ihmal edilebilir) |
 | Yapı değişikliği | parça özeti | parça özeti + parça özeti hash'i | parça özeti hash'i + girdi başına mühür; `Chunks` aynen |
 | Memo semantiği (strategies.py docstring) | genişler: "aynı gün, farklı geçmiş → farklı fit" | genişler | aynı kalır; kötüye kullanım hata olur |
+
+İki komşu satırın ölçeği farklıdır. "Ayrık anahtarlı yeniden kullanım" satırının 4,41e-05'i ikinci kümenin bütün 224
+tahminidir (`t6-c-iska.py`). "Sıcak başlangıç kanalı" satırının 2e-05 / 2–3e-05'i yalnız 2023/24'ün 56 tahminidir
+(§2: B1 2,18e-05, B1' (b) 3,22e-05). Bütün kümede (b) için ölçülen fark B1'de 2,18e-05 (168 tahmin), B1''de 4,22e-05
+(224), ayrık anahtarda 4,41e-05 (224). Kanal bu yüzden 2–4e-05 mertebesindedir.
 
 Ölçek satırının bağlamı (`t6-b1-olcum.py` §4, 45 bin rastgele gözlem, 92 takım): mevcut isabetsizlikte geçmişi
 düzleştirmek 0,57 ms, pencerede 5.400 maçlı bir soğuk fit 13 ms (rastgele veri hızlı yakınsar; gerçek fit daha
@@ -171,8 +181,9 @@ Her test mutasyonla kırmızıya düşürülür (`PYTHONDONTWRITEBYTECODE=1`, ge
    bekçiyi, yani (a)'yı öldüren test).
 3. **Paylaşım bozulmaz:** 1X2 + Ü/A ortak memo aynı küme → hata yok, `test_the_fit_runs_once_per_group_and_fit_day`
    (`tests/test_model_strategies.py:63-80`) aynen yeşil. Mutasyon: mühür akış yerine nesne kimliğine bağlanır →
-   kırmızı. Ayrıca E2 (`tests/test_context_parity.py:181-191`, aynı nesne + doğru akış) ve tam pytest
-   `MemoReuseError`sız kalır (`t6-pytest-bekcili.py`: 3086 passed, 0 hata).
+   kırmızı. Ayrıca tam pytest `MemoReuseError`sız kalır (`t6-pytest-bekcili.py`: 3086 passed, 0 hata; ölçüm T7
+   öncesi, E2 o sırada aynı nesneyle kuruluydu ve geçti). T7 (`5306837`) sonrası E2
+   (`tests/test_context_parity.py:182-205`) iki ayakta taze nesne kurar, bekçiyi hiç tetikleyemez.
 4. **Bayt eşliği altını:** haftada iki turlu sentetik geçmişte, kadans 1 ve 7, olasılık demetlerinin sha256'sı
    değişiklikten ÖNCE kaydedilir; sonra eşit olmalı. Mutasyon: anahtara toplam sayı eklenir → kadans 7 kırmızı.
 5. ((b) için) **Parça sınırı:** `CHUNK` küçük yamalanır, salı–cuma arasında parça mühürlenir → fit sayısı ve
@@ -181,6 +192,11 @@ Her test mutasyonla kırmızıya düşürülür (`PYTHONDONTWRITEBYTECODE=1`, ge
    değişiklikten önce ve sonra; W1–W3 satırları ve satır özeti birebir. Yalnız DEV/E — holdout açılmaz.
 
 ## 6. Yan bulgu — E2 paritesi DC ayağında boş
+
+**T7 sonrası durum:** T7 (`5306837`) E2'yi taze nesneyle kurdu (`tests/test_context_parity.py:182-205`). Her ayak
+kendi nesnesini kurar; `active_from=` hedef günü replay'de hedeften önce fit bırakmaz, iki ayak da soğuk başlar ve
+`==` ile bayt eşittir. Bu bölümün geri kalanı T7 ÖNCESİNİ anlatır (satır numaraları `30bf3bc`'ye göre); tablo ve
+ölçümler o kodun bulgusudur.
 
 `tests/test_context_parity.py:181-191` (E2, `leakage`) DC'yi önce `replay`e verir, sonra AYNI kök nesneyle canlı
 akışı gözleyip tahmin eder → canlı tahmin memo isabetidir, canlı kurucunun fit'ini sınamaz. Ölçüm
@@ -204,8 +220,9 @@ walk-forward (sıcak zincir) arasında bu mertebede fark beklenir. Gerçek verid
 **Ağırlık:** akış eşliği zaten sınanıyor — E1 (`tests/test_context_parity.py:166-177`) canlı kurucunun
 `decision.results`ini `historical.streams[index]`e ve bağlamı birebir doğrular; canlı akışı bozmak E1'de yakalanır.
 E2'nin DC ayağında gerçekte sınanmayan özellik "taze canlı DC fit'i ≈ replay"dır, ve o `approx` 1e-6'da düşer.
-16g'nin kapsamı dışı; ayrı satır önerisi rapordadır. (c) uygulanırsa E2'nin aynı-nesne biçimi bozuk akışta
-`MemoReuseError` verir — DC ayağı en azından akışı sınar hâle gelir.
+16g'nin kapsamı dışı; ayrı satır önerisi rapordadır. T7 sonrası E2 taze canlı DC fit'ini replay'le `==` ile
+karşılaştırır ve aynı-nesne biçimi kalmadı; ama iki ayak `active_from=` ile soğuk başlar, yani sıcak zincir ↔ soğuk
+canlı farkı (~3e-6) tolerans büyütülmeden testin dışında bırakıldı (E2 docstring'i) ve hâlâ sınanmaz.
 
 ## 7. Öneri ve zamanlama
 
@@ -217,8 +234,9 @@ E2'nin DC ayağında gerçekte sınanmayan özellik "taze canlı DC fit'i ≈ re
   ya hata olur; (a)/(b) bu kanalı açık bırakır. Ölçülen kapsam: üç yeniden kullanım senaryosu hata verdi, dört taze
   senaryo bayt eşit — genel ispat değil, §5/1, 1b, 2 testleriyle sabitlenir.
 - Projenin "sessiz değil, adıyla" çizgisine uyar. Üretim yolları zaten taze nesne kurduğu için davranış değişmez
-  (tam pytest bekçi takılıyken `MemoReuseError` 0). Bugünkü tek "aynı nesne" kullanımı E2'dir; doğru akışta geçer
-  (§6).
+  (tam pytest bekçi takılıyken `MemoReuseError` 0). Testlerde aynı nesnenin ikinci bir akışa yeniden verildiği
+  kullanım bugün yok (`replay` çağıranları `5b97221`de tarandı): T6 anında tek örnek E2'ydi, T7 (`5306837`)
+  onu taze nesneye çevirdi (§6). Ortak memo'lu 1X2 + Ü/A paylaşımı aynı kümeyi oynatır (§5/3).
 - Bekçi maliyeti isabet başına ~0,06 ms (45 bin gözlem), ıskada bir önek denetimi daha; karar anı başına bire
   indirilebilir.
 

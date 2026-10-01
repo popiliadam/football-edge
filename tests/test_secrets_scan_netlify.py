@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.workflow_helpers import _steps
+from tests.workflow_helpers import _index_of, _steps
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts/check_secrets.sh"
@@ -139,11 +139,13 @@ def _strings(node: Any) -> list[str]:
     return [node] if isinstance(node, str) else []
 
 
-def _reads_a_secret(document: dict[str, Any]) -> bool:
-    """`${{ … secrets.… }}` ifadesi var mı — çıplak kelime değil, ifade aranır."""
+def _reads_a_secret(node: Any) -> bool:
+    """`${{ … secrets … }}` ifadesi var mı — çıplak kelime değil, ifade aranır. Bağlamın her
+    biçimi sayılır: noktalı (`secrets.X`), indeksli (`secrets['X']`) ve bütün bağlam
+    (`toJSON(secrets)`, bütün secret'lar)."""
     return any(
-        "secrets." in expression
-        for text in _strings(document)
+        re.search(r"\bsecrets\b", expression)
+        for text in _strings(node)
         for expression in re.findall(r"\$\{\{(.*?)\}\}", text, flags=re.S)
     )
 
@@ -161,7 +163,7 @@ def _may_write_contents(document: dict[str, Any]) -> bool:
 
 def test_every_workflow_that_reads_a_secret_or_writes_the_repo_runs_the_scan() -> None:
     """19b: sayım tek başına yetmez — yeni bir secret'lı workflow taramasız eklenirse sayı yine
-    tutabilir. Kural ad listesiyle değil ÖZELLİKLE kurulur: `secrets.` okuyan ya da depoya yazma
+    tutabilir. Kural ad listesiyle değil ÖZELLİKLE kurulur: secret okuyan ya da depoya yazma
     yetkisi alan her workflow taramayı koşar (depo PUBLIC; kaçan secret geri alınamaz).
 
     `ci.yml` kuralın dışında kalır çünkü özelliği taşımaz: secret okumaz
@@ -178,3 +180,47 @@ def test_every_workflow_that_reads_a_secret_or_writes_the_repo_runs_the_scan() -
     assert covered, "hiçbir workflow secret okumuyor ya da yazmıyor — test kurgusu bayatlamış"
     missing = [name for name, scans in covered.items() if not scans]
     assert missing == [], f"secret okuyan ya da yazan ama taramayı koşmayan workflow: {missing}"
+
+
+SCAN = "check_secrets.sh"
+GIT_PUSH = re.compile(r"\bgit\b(?:\s+-c\s+\S+)*\s+push\b")
+
+
+def _exposes(step: dict[str, Any]) -> bool:
+    """Adım secret okuyor ya da depoya push'luyor mu (`git -c … push` de sayılır)."""
+    return _reads_a_secret(step) or GIT_PUSH.search(str(step.get("run", ""))) is not None
+
+
+def _needs(job: dict[str, Any]) -> set[str]:
+    needs = job.get("needs", [])
+    return {needs} if isinstance(needs, str) else set(needs)
+
+
+def test_the_scan_runs_before_the_first_secret_or_push_of_its_job() -> None:
+    """19b(1) SIRASI: tarama, taşıyan her işte secret okuyan ilk adımdan ve ilk `git push`tan
+    ÖNCE koşar — sonraya taşınan tarama secret'ı ya da main'e yazmayı korumaz (son inceleme
+    satır 2: `full-scan`de secret'lı adımdan, `sources-audit`te push adımından sonraya taşımak
+    yeşil kalıyordu). Taramasız ama secret okuyan iş taramalı bir işe `needs` ile bağlıdır
+    (`site.yml` `deploy` → `build`).
+
+    Ölçmediği: iş düzeyi `env:`deki secret ve `if: always()`/`!cancelled()` adımlarının
+    kırmızı taramadan sonra yine koşması (DEFERRED 19b kalanı)."""
+    checked, broken = [], []
+    for path in sorted((REPO / ".github/workflows").glob("*.y*ml")):
+        jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
+        scanning = {name for name, job in jobs.items() if _index_of(job["steps"], SCAN) is not None}
+        for name, job in jobs.items():
+            steps = job["steps"]
+            exposed = [index for index, step in enumerate(steps) if _exposes(step)]
+            if not exposed:
+                continue
+            where = f"{path.name}:{name}"
+            checked.append(where)
+            scan = _index_of(steps, SCAN)
+            if scan is None and not _needs(job) & scanning:
+                broken.append(f"{where}: tarama yok, taramalı işe `needs` da yok")
+            elif scan is not None and scan > exposed[0]:
+                broken.append(f"{where}: tarama adım {scan}, ilk secret/push adım {exposed[0]}")
+
+    assert checked, "hiçbir iş secret okumuyor ya da push'lamıyor — test kurgusu bayatlamış"
+    assert broken == [], broken

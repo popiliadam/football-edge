@@ -15,8 +15,11 @@ parolayı libpq'dan aldığı için bu biçimlerde onu bilemez. İki katman:
 
 Kapsam: (B) yalnız tırnaklı ve `repr` yankıyı, yalnız `psycopg.Error`ın metninde tutar. Tırnaksız
 bir yankı ve `psycopg.Error` dışı bir istisna (vekil karakter → `UnicodeEncodeError`) yalnız (A)'ya
-kalır. (B) bozulursa (A) bilinen biçimleri düşürür; (A) bir biçimi kaçırırsa (B) bu kapsamdaki
-yankıyı yakalar.
+kalır. libpq'nun değerden BİLEŞTİRDİĞİ tırnaklı metin de (B)'de maskelenmez, çünkü ne ayrıştırılmış
+bir değer ne DSN'in alt dizesidir: unix soket yolu (`"<host>/.s.PGSQL.<port>"`, tanı için kasten
+okunur) ve URL ayrıştırma hatasında portları atılmış, virgülle birleşik host listesi. İkincisini (A)
+her zaman reddeder; birincisi parolanın soket dizinine yazılmasını gerektirir. (B) bozulursa (A)
+bilinen biçimleri düşürür; (A) bir biçimi kaçırırsa (B) bu kapsamdaki yankıyı yakalar.
 """
 
 from __future__ import annotations

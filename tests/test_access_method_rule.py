@@ -52,7 +52,9 @@ Bilinen sınırlar:
 - Dize kuralı sabit dizeye bakar: hesaplanmış dizeler (`"cloud" + "scraper"`, adı değişkenden
   gelen f-string) ve `exec`/`eval` görünmez. Ek taşıyan dizelerden (DEFERRED 11a) yalnız gereksinim
   biçimiyle BAŞLAYAN dize ve dört kurulum fiilinden birini taşıyan dize yakalanır: başka fiil
-  (`"pip3 install cloudscraper"`, `pipx`, `conda`) ya da gereksinimin dizenin ortasında durması
+  (`"pip3 install cloudscraper"`, `pipx`, `conda`, `easy_install`; projenin kendi aracının
+  `uv tool install`, `uv run --with` ve `uvx --from` biçimleri de), bayt dizesi
+  (`b"pip install cloudscraper"`) ya da gereksinimin dizenin ortasında durması
   (`"bağımlılık: cloudscraper>=1"`) görünmez. Gereksinim kuralı dağıtım adına bakar (B gibi):
   `"twocaptcha==1"` (yalnız import kökü) görünmez.
 - (c) bot adı yalnız UA bağlamındaki SABİT dizelerde aranır: UA adı taşımayan bir değişkenden,
@@ -79,7 +81,11 @@ Bilinen sınırlar:
   `--proxy`/`--solve-cloudflare`/`scrapling shell` — hata ya da log mesajı dizesi
   (`log.warning("--proxy kullanılmaz")`) ve C'de satır sonu yorumu (`echo ok  # --proxy yok`;
   yalnız `#` ile BAŞLAYAN satır atlanır) — CLI kuralına takılır; savunma amaçlı yasak listesi
-  (`YASAK = {"proxy"}`) adı TAM taşıyan dize kuralına takılır.
+  (`YASAK = {"proxy"}`) adı TAM taşıyan dize kuralına takılır. DEFERRED 11a'nın dize
+  denetimleri de düzyazıda kırmızı verir: yasak adla başlayıp `(`, `;` ya da `=` ile süren dize
+  (`log.info("capsolver (CAPTCHA çözücü) kullanılmaz")`, `"cloudscraper; bu projede yasak"`,
+  `"Botasaurus=yasak"`) gereksinim kuralına, kurulum fiiliyle yasak adı birlikte anan dize
+  (`log.info("pip install ile cloudscraper kurulmaz")`) kurulum kuralına takılır.
 - Kaçışlar (bilinçli yazım ister; T2 Minor-D, DEFERRED 11h(c)): `shutil.which("scrapling")` ile
   kurulan argv başı (`[shutil.which("scrapling"), "extract", …]` — baş sabit değil), kabuk satır
   devamı (`scrapling \\` + sonraki satırda `extract …`; C satır satır tarar), demet hedefli UA
@@ -722,6 +728,11 @@ REQUIREMENT_PYTHON = [
     'os.system("uv add fake-useragent")',
     'os.system("poetry add capsolver")',
     "os.system(\"uv pip install 'scrapling[shell]'\")",
+    # Serbest ekstradan SONRA gelen yasak ad (`filter(None, …)`), büyük harfli fiil
+    # (`re.IGNORECASE`) ve baştaki boşluk (`_REQUIREMENT_HEAD`in `\s*`i).
+    'os.system("pip install scrapling[fetchers] cloudscraper")',
+    'komut = "PIP INSTALL cloudscraper"',
+    'surum = "  cloudscraper ==1"',
 ]
 EVERYWHERE_FORBIDDEN = (
     FORBIDDEN_TOOL_PYTHON
