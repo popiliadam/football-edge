@@ -23,6 +23,11 @@ dışında koşturur: C ekseni ve A'nın her dize sabiti `CLI_PATTERN`le taranı
 dahil) (d) kırmızı; A ayrıca `["scrapling", "extract", …]` argv listesini arar. `scrapling install`
 (tarayıcı kurulumu) serbest.
 
+A'nın dize kuralı ek taşıyan kurulum dizelerini de görür (DEFERRED 11a): PEP 508 gereksinimi gibi
+başlayan dize (ad + `[`/sürüm işleci/`;`/`@`/`(`: `"cloudscraper==0.4"`, `"scrapling[ai]"`) B'nin
+gereksinim kuralıyla, kurulum fiili (`pip install`, `uv pip install`, `uv add`, `poetry add`)
+taşıyan dize (`os.system("uv pip install cloudscraper")`) C'nin ad/ekstra kuralıyla sorulur.
+
 A ekseninin R77b kuralları (AST, `src/` ve `scripts/`):
 (a) proxy: `ProxyRotator` import/ad/öznitelik/`getattr` kullanımı, herhangi bir çağrıda
     `PROXY_KEYWORDS` anahtar argümanı ve bu adları TAM taşıyan dize (`opts["proxy"] = p`,
@@ -44,11 +49,12 @@ A ekseninin R77b kuralları (AST, `src/` ve `scripts/`):
 olmayan bir araç izinli değil, yalnız bu testin görmediği bir araçtır.
 
 Bilinen sınırlar:
-- Dize kuralı yalnız yasak adı TAM taşıyan sabiti yakalar: hesaplanmış dizeler
-  (`"cloud" + "scraper"`), ek taşıyan dizeler (`"cloudscraper==1"`, `"pip install cloudscraper"`) ve
-  `exec`/`eval` görünmez. Aynı sınıf: Python'da ekstra taşıyan kurulum dizesi
-  (`subprocess.run(["pip", "install", "scrapling[ai]"])`) — B ve C onu görür, A görmez
-  (DEFERRED 11a).
+- Dize kuralı sabit dizeye bakar: hesaplanmış dizeler (`"cloud" + "scraper"`, adı değişkenden
+  gelen f-string) ve `exec`/`eval` görünmez. Ek taşıyan dizelerden (DEFERRED 11a) yalnız gereksinim
+  biçimiyle BAŞLAYAN dize ve dört kurulum fiilinden birini taşıyan dize yakalanır: başka fiil
+  (`"pip3 install cloudscraper"`, `pipx`, `conda`) ya da gereksinimin dizenin ortasında durması
+  (`"bağımlılık: cloudscraper>=1"`) görünmez. Gereksinim kuralı dağıtım adına bakar (B gibi):
+  `"twocaptcha==1"` (yalnız import kökü) görünmez.
 - (c) bot adı yalnız UA bağlamındaki SABİT dizelerde aranır: UA adı taşımayan bir değişkenden,
   `setdefault`la ya da `[("User-Agent", ...)]` demet listesiyle gelen UA görünmez. Bot listesi
   kapalıdır: `AdsBot-Google`, `Storebot-Google`, `Mediapartners-Google` gibi listede olmayan
@@ -69,6 +75,16 @@ Bilinen sınırlar:
   yalnız Scrapling'i kapsar.
 - Kuralın davranış tarafı (403/429'da kimlik ya da yol değiştirip yeniden denemek,
   `Retry-After`) burada değil adaptörün testlerinde ölçülür.
+- Yanlış pozitifler (kırmızı verir, sessiz değil; T2 Minor-B/C, DEFERRED 11h(c)): düzyazıdaki
+  `--proxy`/`--solve-cloudflare`/`scrapling shell` — hata ya da log mesajı dizesi
+  (`log.warning("--proxy kullanılmaz")`) ve C'de satır sonu yorumu (`echo ok  # --proxy yok`;
+  yalnız `#` ile BAŞLAYAN satır atlanır) — CLI kuralına takılır; savunma amaçlı yasak listesi
+  (`YASAK = {"proxy"}`) adı TAM taşıyan dize kuralına takılır.
+- Kaçışlar (bilinçli yazım ister; T2 Minor-D, DEFERRED 11h(c)): `shutil.which("scrapling")` ile
+  kurulan argv başı (`[shutil.which("scrapling"), "extract", …]` — baş sabit değil), kabuk satır
+  devamı (`scrapling \\` + sonraki satırda `extract …`; C satır satır tarar), demet hedefli UA
+  ataması (`USER_AGENT, N = "Googlebot/2.1", 1` — hedef demet, ad sorulmaz), alt komutsuz
+  `scrapling-mcp` (MCP sunucusunu doğrudan başlatır; desen `scrapling-mcp` + alt komut ister).
 """
 
 from __future__ import annotations
@@ -359,8 +375,29 @@ def _string_findings(node: ast.Constant, gate_open: bool) -> Iterator[Finding]:
         reason = PROXY_REASON
     if reason is None:
         reason = cli_reason(node.value)
+    if reason is None:
+        reason = requirement_string_reason(node.value) or install_string_reason(node.value)
     if reason:
         yield node.lineno, f"{node.value!r} dizesi", reason
+
+
+# DEFERRED 11a (i): dize bir PEP 508 gereksinimi gibi başlıyor — ad, ardından ekstra `[`, sürüm
+# işleci, işaret `;`, URL `@` ya da eski biçim `(`. Düzyazı (`"cloudscraper kullanılmaz"`) değil.
+_REQUIREMENT_HEAD = re.compile(r"\s*[A-Za-z0-9][A-Za-z0-9._-]*\s*[\[<>=!~;@(]")
+# DEFERRED 11a (ii): kurulum fiili; `uv pip install` ve `python -m pip install` da `pip install`.
+_INSTALL_VERB = re.compile(r"\b(?:pip\s+install|uv\s+add|poetry\s+add)\b", re.IGNORECASE)
+
+
+def requirement_string_reason(text: str) -> str | None:
+    """`"cloudscraper==0.4"`, `"scrapling[ai]"`: B ekseninin gereksinim kuralı dizeye uygulanır."""
+    return _requirement_reason(text) if _REQUIREMENT_HEAD.match(text) else None
+
+
+def install_string_reason(text: str) -> str | None:
+    """`"uv pip install cloudscraper"`: kurulum fiili varsa C ekseninin ad/ekstra kuralı."""
+    if _INSTALL_VERB.search(text) is None:
+        return None
+    return next(filter(None, map(_install_reason, _INSTALL_PATTERN.finditer(text))), None)
 
 
 def cli_reason(text: str) -> str | None:
@@ -671,8 +708,28 @@ GATED_PYTHON = [
     "fetcher = scrapling.StealthyFetcher()",
     'getattr(scrapling, "DynamicFetcher")',
 ]
+# Ek taşıyan kurulum dizeleri (DEFERRED 11a): gereksinim biçimi ve kurulum fiili + ad.
+REQUIREMENT_PYTHON = [
+    'surum = "cloudscraper==0.4"',
+    'gereksinim = "cloudscraper[extra]"',
+    'gereksinim = "requests-ip-rotator @ https://ornek.invalid/x.whl"',
+    "gereksinim = 'capsolver; python_version >= \"3.11\"'",
+    'gereksinim = "capsolver(>=1)"',
+    'subprocess.run(["pip", "install", "scrapling[ai]"])',
+    'subprocess.run(["uv", "add", "botasaurus>=4"])',
+    'komut = "pip install cloudscraper"',
+    'os.system("uv pip install cloudscraper")',
+    'os.system("uv add fake-useragent")',
+    'os.system("poetry add capsolver")',
+    "os.system(\"uv pip install 'scrapling[shell]'\")",
+]
 EVERYWHERE_FORBIDDEN = (
-    FORBIDDEN_TOOL_PYTHON + PROXY_PYTHON + CHALLENGE_PYTHON + BOT_PYTHON + CLI_PYTHON
+    FORBIDDEN_TOOL_PYTHON
+    + PROXY_PYTHON
+    + CHALLENGE_PYTHON
+    + BOT_PYTHON
+    + CLI_PYTHON
+    + REQUIREMENT_PYTHON
 )
 FORBIDDEN_PYTHON = EVERYWHERE_FORBIDDEN + GATED_PYTHON
 ALLOWED_PYTHON = [
@@ -692,6 +749,13 @@ ALLOWED_PYTHON = [
     "from playwright_stealth import stealth_sync",
     "import tls_client",
     'subprocess.run([sys.executable, "-m", "pip", "install", "camoufox"])',
+    # DEFERRED 11a'nın R77b öncesi örnekleri: camoufox artık serbest; `fetchers` ekstrası da.
+    'surum = "camoufox==0.4"',
+    'komut = "pip install camoufox"',
+    'os.system("uv pip install camoufox")',
+    'subprocess.run(["pip", "install", "scrapling[fetchers]>=0.4.15"])',
+    'os.system("uv pip install cloudscraperish")',
+    'log.info("cloudscraper kullanılmaz (yasak)")',
     # Anma ve dürüst kullanım: kuralın adı ya da bot adı UA bağlamı dışında.
     "stealthy = True",
     '"""solve_cloudflare bu projede kapalı; Googlebot taklit edilmez."""',
@@ -762,6 +826,12 @@ def test_python_scan_reports_every_violation_with_path_and_line() -> None:
         ("session.get(url, proxies=havuz)", "proxies= argümanı", PROXY_REASON),
         ("ayar.solve_cloudflare = False", ".solve_cloudflare erişimi", CHALLENGE_REASON),
         ('Source(user_agent="YandexBot/3.0")', "User-Agent'ta YandexBot", BOT_REASON),
+        (
+            'os.system("uv pip install cloudscraper")',
+            "'uv pip install cloudscraper' dizesi",
+            FORBIDDEN_MODULES["cloudscraper"],
+        ),
+        ('kur(["scrapling[ai]"])', "'scrapling[ai]' dizesi", SCRAPLING_EXTRAS_REASON),
     ],
 )
 def test_python_scan_gives_each_rule_its_own_reason(
