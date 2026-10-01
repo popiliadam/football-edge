@@ -579,7 +579,7 @@ def test_no_job_that_runs_the_secret_scan_may_continue_on_error() -> None:
         f"{path.name}:{name}": job
         for path in sorted((REPO / ".github/workflows").glob("*.y*ml"))
         for name, job in yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"].items()
-        if _index_of(job["steps"], SCAN_SCRIPT) is not None
+        if _index_of(job.get("steps") or [], SCAN_SCRIPT) is not None
     }
 
     assert scanning, "hiçbir iş taramayı koşmuyor — test kurgusu bayatlamış"
@@ -654,9 +654,28 @@ def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
         f"bekçi yalnız schedule turunda koşmuyor: {condition!r}"
     )
     assert "!cancelled()" in conjuncts, f"bekçi kırmızı mühür turunda atlanıyor: {condition!r}"
+    # Bekçi `ODDS_API_KEY` okur: kırmızı secret taramasından sonra koşmaz (19b). Yeşil taramada
+    # terim doğrudur — kırmızı MÜHÜR turunda bekçi yine koşar.
+    assert "steps.secret_scan.outcome == 'success'" in conjuncts, (
+        f"bekçi kırmızı secret taramasından sonra da koşuyor: {condition!r}"
+    )
     env = steps[watchdog].get("env") or {}
     assert env.get("GITHUB_TOKEN") == "${{ github.token }}", "bekçiye token verilmiyor"
     assert str(env.get("RUN_URL", "")).endswith("/actions/runs/${{ github.run_id }}"), (
         "bekçi alarmı bekçi turuna bağlanmıyor"
     )
     assert '--run-url "$RUN_URL"' in str(steps[watchdog]["run"])
+
+
+def test_seal_reflects_a_red_seal_even_after_a_red_scan_without_reading_a_secret() -> None:
+    """19b kararı: `Mühür turunun sonucunu yansıt` taramaya BAĞLANMAZ: secret okumaz, push'lamaz
+    (adım çıktısı env'den geçer); `always()` kırmızı MÜHÜR turunu görünür kılar. Kırmızı taramada
+    koşu zaten kırmızıdır ve alarm açılır — bağlamak hiçbir şeyi korumazdı. (Kırmızı taramada
+    mühür adımı atlanır; çıktısı null'dır ve GitHub'ın gevşek eşitliği null'ı da `'0'`ı da 0'a
+    çevirir, yani bu adım o turda büyük olasılıkla hiç koşmaz — canlı ölçülmedi.)"""
+    steps = _steps(SEAL)
+    reflect = _index_of(steps, "mühür adımı exit")
+
+    assert reflect is not None
+    assert _condition(steps[reflect]) == "always() && steps.seal.outputs.code != '0'"
+    assert steps[reflect].get("env") == {"SEAL_CODE": "${{ steps.seal.outputs.code }}"}

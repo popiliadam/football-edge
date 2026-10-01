@@ -40,7 +40,9 @@ jobs:
           ref: ${{ github.ref }}
       - name: Secret taraması
         # Depo PUBLIC ve bu iş `contents: write` ile main'e commit'liyor: tarama, yazma yetkisi
-        # kullanılmadan ÖNCE koşar (DEFERRED 19b).
+        # kullanılmadan ÖNCE koşar (DEFERRED 19b). Sıra tek başına `!cancelled()` adımlarını
+        # durdurmaz: push'layan adım `steps.secret_scan.outcome`a ayrıca bağlıdır.
+        id: secret_scan
         run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
@@ -57,8 +59,9 @@ jobs:
         # Sapan bir kaynak turu kırmızı yapar ama aynı kalanların tarihi yine yazılır. Yalnız
         # main: başka dala elle tetiklenen tur bot commit'i atmaz. seal.yml'in botu da main'e
         # çıpa push'luyor: reddedilen push main birleştirilerek (rebase değil, deponun mesaj
-        # biçimiyle) en çok 3 kez denenir, force asla.
-        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        # biçimiyle) en çok 3 kez denenir, force asla. Kırmızı secret taramasından sonra push
+        # YOK (19b): yeşil taramada terim doğrudur, davranış değişmez.
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && github.ref == 'refs/heads/main' }}
         run: |
           if git diff --quiet -- config/sources.yaml; then
             echo "robots_verified_at değişmedi — commit yok"
