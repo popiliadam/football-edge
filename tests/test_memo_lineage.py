@@ -113,6 +113,16 @@ def _shifted() -> tuple[HistMatch, ...]:
             "2016-08-05",
             id="I1-eski-sezon-dolu-parcada",
         ),
+        # Son inceleme I-1: yukarıdaki dört vakanın farkı 0. parçada; 1920 `LONG`un 1. (dolu, ara)
+        # parçasında başlar — mührü yalnız İLK parçayla tutan bekçi bu farkı göremez.
+        pytest.param(
+            LONG,
+            LONG_ACTIVE,
+            lambda: _flipped(LONG, "1920"),
+            "isabet",
+            "2019-08-09",
+            id="I1-orta-dolu-parcada",
+        ),
     ],
 )
 def test_a_strategy_replayed_on_a_second_match_set_is_refused(

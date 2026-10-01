@@ -670,9 +670,10 @@ def test_seal_runs_the_watchdog_on_its_backup_schedule_after_the_seal() -> None:
 def test_seal_reflects_a_red_seal_even_after_a_red_scan_without_reading_a_secret() -> None:
     """19b kararı: `Mühür turunun sonucunu yansıt` taramaya BAĞLANMAZ: secret okumaz, push'lamaz
     (adım çıktısı env'den geçer); `always()` kırmızı MÜHÜR turunu görünür kılar. Kırmızı taramada
-    koşu zaten kırmızıdır ve alarm açılır — bağlamak hiçbir şeyi korumazdı. (Kırmızı taramada
-    mühür adımı atlanır; çıktısı null'dır ve GitHub'ın gevşek eşitliği null'ı da `'0'`ı da 0'a
-    çevirir, yani bu adım o turda büyük olasılıkla hiç koşmaz — canlı ölçülmedi.)"""
+    koşu zaten kırmızıdır ve alarm adımı koşar (açabilmesi `uv`a bağlı — DEFERRED 10f(3)) —
+    bağlamak hiçbir şeyi korumazdı. (Kırmızı taramada mühür adımı atlanır; çıktısı null'dır ve
+    GitHub'ın gevşek eşitliği null'ı da `'0'`ı da 0'a çevirir, yani bu adım o turda büyük
+    olasılıkla hiç koşmaz — canlı ölçülmedi.)"""
     steps = _steps(SEAL)
     reflect = _index_of(steps, "mühür adımı exit")
 
