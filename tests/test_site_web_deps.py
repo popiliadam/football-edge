@@ -79,8 +79,12 @@ BUILD_KEYS = {
 GUARD_TEST = "scripts/toolchain.test.ts"
 # `include` kalıpları vitest'in KÖKÜNE göre çözülür; kökü taşıyan ayar ya da bayrak bekçinin
 # okuduğu kalıpları anlamsızlaştırır (DEFERRED 20a): yapılandırmada `root`/`dir` anahtarı, komut
-# satırında `--root`/`-r`/`--dir`. Kök `web/`dür (`vitest.config.ts`in dizini).
-ROOT_KEYS = re.compile(r"""(?<![\w$.])["']?(root|dir)["']?\s*:""")
+# satırında `--root`/`-r`/`--dir`. Kök `web/`dür (`vitest.config.ts`in dizini). Anahtar iki
+# yazımla aranır: `root: …` (tırnaklı ya da değil) ve kısa yazım `{ root, … }` (`const root = …`
+# ile; son inceleme satır 20). Sınır: yayma (`...base`, `mergeConfig`) ile gelen anahtar görünmez.
+ROOT_KEYS = re.compile(
+    r"""(?<![\w$.])(?:["']?(?P<key>root|dir)["']?\s*:|(?P<short>root|dir)\s*(?=[,}]))"""
+)
 ROOT_FLAGS = re.compile(r"(?<!\S)(--root|-r|--dir)(?:=|\s|$)")
 SITE_GATE = REPO / "scripts/site_gate.sh"
 
@@ -231,7 +235,7 @@ def test_vitest_still_collects_the_pnpm_guard() -> None:
 
 def root_overrides(config: str) -> list[str]:
     """`vitest.config.ts` metninde `include`in çözüldüğü kökü değiştiren anahtarlar."""
-    return ROOT_KEYS.findall(config)
+    return [match["key"] or match["short"] for match in ROOT_KEYS.finditer(config)]
 
 
 def root_flags(command: str) -> list[str]:
@@ -243,6 +247,8 @@ def test_root_override_detector_reads_keys_and_flags() -> None:
     assert root_overrides('test: { root: "src", include: [] }') == ["root"]
     assert root_overrides('test: {\n    dir: "scripts",\n  }') == ["dir"]
     assert root_overrides('{ "root": "src" }') == ["root"]
+    assert root_overrides('const root = "src";\ndefineConfig({ root, test: {} })') == ["root"]
+    assert root_overrides("test: {\n    include: [],\n    dir\n  }") == ["dir"]
     assert root_overrides('test: { environment: "node", include: ["src/**/*.test.ts"] }') == []
     assert root_overrides('const rootDir = "x"; a.root(); vitestRoot: 1') == []
     assert root_flags("vitest run --root src") == ["--root"]
