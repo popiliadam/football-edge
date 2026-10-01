@@ -14,6 +14,9 @@ import { type Headers, parseHeaders } from "./checks.ts";
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures");
 
 // Bir bloğun Netlify'ın sunduğu hâli: aynı adlı başlıkların değerleri sırasıyla virgülle birleşir.
+// Test yardımcısı olarak kalır: hiçbir TS tüketicisi sunulan hâli istemez — check-out blokta yinelenen
+// adı (`checkHeaderBlocks`) zaten kırmızı sayar, kabul edilen dosyada ham liste = sunulan hâl. Burada
+// yalnız ortak fixture'ın (bilerek yinelenen ad taşıyan) Python biçimine indirgenmesi için var.
 function served(pairs: readonly (readonly [string, string])[]): Record<string, string> {
   const values = new Map<string, string[]>();
   for (const [name, value] of pairs) {

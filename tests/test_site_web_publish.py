@@ -255,3 +255,49 @@ def test_parse_headers_reads_the_shared_fixture_like_the_ts_parser() -> None:
     parsed = site_publish.parse_headers(HEADERS_FIXTURE.read_text(encoding="utf-8"))
 
     assert parsed == expected
+
+
+# DEFERRED 21d düzeltme turu 1 (inceleme I1): `parse_headers` aynı adlı başlıkları Netlify gibi
+# virgülle birleştirir; birleşik değer tam eşitlik yapan bekçiyi (`x-robots-tag == "noindex"`)
+# sessizce atlatırdı. Bu yüzden bir blokta (birleşen bloklar dahil, harfe duyarsız) yinelenen ad
+# birleştirmeden ÖNCE kırmızıdır. Eşi: `web/scripts/checkout/header-names.test.ts`.
+@pytest.mark.parametrize(
+    ("headers", "message"),
+    [
+        (
+            f"/*\n  X-Robots-Tag: noindex\n  x-robots-tag: noindex\n\n/en/\n"
+            f"  Content-Security-Policy: {CSP}\n",
+            "_headers: /* bloğunda yinelenen başlık x-robots-tag",
+        ),
+        (
+            f"/*\n  X-Robots-Tag: noindex\n\n/en/\n  Content-Security-Policy: {CSP}\n"
+            "  content-security-policy: default-src *\n",
+            "_headers: /en/ bloğunda yinelenen başlık content-security-policy",
+        ),
+        (
+            f"/*\n  X-Robots-Tag: noindex\n\n/en/\n  Content-Security-Policy: {CSP}\n\n"
+            f"/en/\n  Content-Security-Policy: {CSP}\n",
+            "_headers: /en/ bloğunda yinelenen başlık content-security-policy",
+        ),
+    ],
+)
+@pytest.mark.parametrize("robots", ["noindex", None])
+def test_a_repeated_header_name_is_red_before_joining(
+    tree: Path,
+    capsys: pytest.CaptureFixture[str],
+    headers: str,
+    message: str,
+    robots: str | None,
+) -> None:
+    (tree / "out/_headers").write_text(headers, encoding="utf-8")
+    get, head = _live(robots=robots)
+    assert _run(tree, "live", get=get, head=head) == 1
+    assert message in capsys.readouterr().out
+
+
+def test_repeated_header_findings_read_names_case_insensitively() -> None:
+    text = "/*\n  A: 1\n  b: 2\n  a: 3\n/x/\n  B: 1\n/x/\n  b: 2\n/y/\n  C: 1\n  # c: yorum\n"
+    assert site_publish.repeated_header_findings(text) == [
+        "_headers: /* bloğunda yinelenen başlık a",
+        "_headers: /x/ bloğunda yinelenen başlık b",
+    ]

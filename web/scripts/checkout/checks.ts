@@ -25,6 +25,12 @@ import { fold, LICENSE_PATTERNS } from "./words.ts";
 export type Built = { path: string; html: string };
 export type Headers = Map<string, [string, string][]>;
 
+// Başlık adları büyük/küçük harfe duyarsızdır (Netlify belgesi; DEFERRED 21d düzeltme turu 1):
+// `parseHeaders` yazımı korur, tüketiciler adı bununla karşılaştırır.
+function isHeader(name: string, wanted: string): boolean {
+  return name.toLowerCase() === wanted.toLowerCase();
+}
+
 export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   const left = [...a].sort();
   const right = [...b].sort();
@@ -225,7 +231,9 @@ export function checkIndexing(
     if (!sameSet(entry.links, links)) findings.push(`sitemap.xml: alternatif ${entry.loc}`);
   }
   const global = headers.get("/*") ?? [];
-  const robotsTag = global.some(([name, value]) => name === "X-Robots-Tag" && value === "noindex");
+  const robotsTag = global.some(
+    ([name, value]) => isHeader(name, "X-Robots-Tag") && value === "noindex",
+  );
   if (robotsTag === flag) {
     findings.push(`_headers: X-Robots-Tag noindex=${robotsTag}, bayrak=${flag}`);
   }
@@ -325,8 +333,8 @@ export function checkCsp(page: ExpectedPage, html: string, headers: Headers): st
   if (all.length !== scriptOpenings(html)) {
     findings.push(`${page.path}: okunamayan <script> etiketi`);
   }
-  const policies = (headers.get(page.path) ?? []).filter(
-    ([name]) => name === "Content-Security-Policy",
+  const policies = (headers.get(page.path) ?? []).filter(([name]) =>
+    isHeader(name, "Content-Security-Policy"),
   );
   if (policies.length !== 1) {
     findings.push(`${page.path}: ${policies.length} CSP başlığı`);
@@ -375,17 +383,32 @@ const GLOBAL_HEADERS: readonly [string, string][] = [
   ["Permissions-Policy", "camera=(), microphone=(), geolocation=()"],
 ];
 
-// `_headers` blokları: `/*` var, güvenlik başlıklarını taşır ve CSP taşımaz (tarayıcı iki CSP'nin
-// kesişimini uygulardı); sayfası olmayan blok yok.
-export function checkHeaderBlocks(headers: Headers, builtPaths: readonly string[]): string[] {
+// Bir blokta (aynı yolun birleşen blokları dahil) iki kez geçen ad, harfe duyarsız. Netlify onları
+// tek başlıkta virgülle birleştirir (ör. `noindex,noindex`, iki CSP politikası); emitter buna hiç
+// dayanmaz. Bu kural sayesinde kabul edilen her `_headers`ta ham liste (`parseHeaders`) ile Netlify'ın
+// sunduğu hâl (Python `parse_headers`) aynıdır (DEFERRED 21d düzeltme turu 1).
+function repeatedHeaderFindings(headers: Headers): string[] {
   const findings: string[] = [];
+  for (const [path, pairs] of headers) {
+    const names = pairs.map(([name]) => name.toLowerCase());
+    for (const name of new Set(names.filter((each, index) => names.indexOf(each) !== index))) {
+      findings.push(`_headers: ${path} bloğunda yinelenen başlık ${name}`);
+    }
+  }
+  return findings;
+}
+
+// `_headers` blokları: `/*` var, güvenlik başlıklarını taşır ve CSP taşımaz (tarayıcı iki CSP'nin
+// kesişimini uygulardı); sayfası olmayan blok ve blokta yinelenen başlık adı yok.
+export function checkHeaderBlocks(headers: Headers, builtPaths: readonly string[]): string[] {
+  const findings: string[] = repeatedHeaderFindings(headers);
   const global = headers.get("/*");
   for (const [name, value] of GLOBAL_HEADERS) {
-    if (!global?.some(([n, v]) => n === name && v === value)) {
+    if (!global?.some(([n, v]) => isHeader(n, name) && v === value)) {
       findings.push(`_headers: /* bloğu yok ya da ${name}: ${value} eksik`);
     }
   }
-  if (global?.some(([name]) => name === "Content-Security-Policy")) {
+  if (global?.some(([name]) => isHeader(name, "Content-Security-Policy"))) {
     findings.push("_headers: /* bloğunda CSP");
   }
   for (const path of headers.keys()) {
@@ -499,8 +522,9 @@ export function checkData(
 
 // Aynı yol iki blokta geçerse başlıklar BİRLEŞİR (üzerine yazılmaz): yinelenen CSP görünür kalır.
 // `#` ile başlayan satır (girintili olanı da) yorumdur — Netlify belgesi, DEFERRED 21d. Aynı adlı
-// başlıkların HEPSİ sırasıyla tutulur; Netlify onları tek başlıkta virgülle birleştirir (eşi
-// `scripts/site_publish.py::parse_headers` birleşik değeri verir; ortak fixture ikisini eşitler).
+// başlıkların HEPSİ sırasıyla, yazımı korunarak tutulur (yinelenen ad `checkHeaderBlocks`te kırmızı);
+// Netlify onları tek başlıkta virgülle birleştirir (eşi `scripts/site_publish.py::parse_headers`
+// birleşik değeri verir; ortak fixture ikisini eşitler).
 export function parseHeaders(text: string): Headers {
   const headers: Headers = new Map();
   let current: string | undefined;
