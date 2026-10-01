@@ -100,8 +100,17 @@ class ExportSummary:
 
 
 def devig_method(path: Path) -> str:
-    """Modelin vig yöntemi (`config/model_faz3.yaml` `method`); `backtest` import edilmez (H1f)."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    """Modelin vig yöntemi (`config/model_faz3.yaml` `method`); `backtest` import edilmez (H1f).
+
+    Okunamayan ya da ayrıştırılamayan dosya da adlandırılmış çıkıştır (exit 20, DEFERRED 19a),
+    kardeşi `site_league_slugs` gibi; yalnız sınıf adı basılır — YAML hatası içerikten parça taşır.
+    """
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"{path}: vig yöntemi okunamadı ({type(error).__name__})"
+        ) from None
     method = raw.get("method") if isinstance(raw, dict) else None
     if method not in METHODS:
         raise ExportRefused(EXIT_SITE_CONFIG, f"{path}: vig yöntemi okunamadı")
