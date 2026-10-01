@@ -183,8 +183,11 @@ def test_an_undeclared_path_is_refused_before_any_request(path: str) -> None:
         "https://x:y@www.tff.org/Default.aspx?pageID=600",
         "https://evil.example\\@www.tff.org/Default.aspx?pageID=600",
         "https://@www.tff.org/Default.aspx?pageID=600",
+        # `@` taşımayan ters bölü: yalnız `_carries_credentials`in ters bölü dalı reddeder
+        # (WHATWG `\`yu `/` okur; urlsplit yolun parçası sayar) — DEFERRED 11h(a).
+        "https://www.tff.org/\\evil.example/Default.aspx?pageID=600",
     ],
-    ids=["kullanıcı-parola", "ters-bölü", "boş-kimlik"],
+    ids=["kullanıcı-parola", "ters-bölü", "boş-kimlik", "yalın-ters-bölü"],
 )
 def test_a_url_carrying_credentials_is_refused_before_any_request(url: str) -> None:
     transport = transport_with(NO_ROBOTS, (url, [response(url)]))
@@ -282,6 +285,20 @@ def test_a_later_transport_with_another_user_agent_gets_its_own_crawl_delay() ->
     assert clock.sleeps == [TFF.crawl_delay_seconds, 9.0]
 
 
+def test_a_later_transport_without_a_crawl_delay_does_not_shorten_an_earlier_one() -> None:
+    """DEFERRED 11h(b): önbellekli robots yolu turun gecikmesini yalnız büyütür (`max`)."""
+    robots = response(ROBOTS, body="User-agent: ikinci\nCrawl-delay: 9\n\nUser-agent: *\n")
+    clock = FakeClock()
+    first = transport_with(robots, (PAGE, [response(PAGE)]))
+    first.user_agent = "ikinci/1"
+    scrape_round = ScrapeRound(clock=clock, robots_transport=first)
+    scrape_round.session(TFF, first).get(PAGE)
+    second = transport_with(robots, (PAGE, [response(PAGE)]))
+    scrape_round.session(TFF, second).get(PAGE)
+    assert clock.sleeps == [9.0, 9.0]
+    assert second.calls == [PAGE]
+
+
 def test_the_sources_crawl_delay_applies_when_robots_sets_none() -> None:
     clock = FakeClock()
     session = session_for(transport_with(NO_ROBOTS, (PAGE, [response(PAGE)])), clock)
@@ -355,7 +372,17 @@ def test_no_retry_after_form_lets_a_request_through_after_a_refusal(
     assert transport.calls == [ROBOTS, PAGE]
 
 
-@pytest.mark.parametrize("retry_after", ["tarih değil", "Mon, 99 Foo 99999 99:99:99 GMT", "²"])
+@pytest.mark.parametrize(
+    "retry_after",
+    [
+        "tarih değil",
+        "Mon, 99 Foo 99999 99:99:99 GMT",
+        "²",
+        # 3.11 `parsedate_to_datetime` taşan yılda ValueError değil OverflowError atar.
+        "Mon, 01 Jan 99999999999999999999 00:00:00 GMT",
+    ],
+    ids=["cop", "bozuk-tarih", "ascii-disi-rakam", "tasan-yil"],
+)
 def test_an_unreadable_retry_after_is_ignored_not_raised(retry_after: str) -> None:
     busy = response(PAGE, 503, headers={"Retry-After": retry_after})
     transport = transport_with(NO_ROBOTS, (PAGE, [busy, response(PAGE, body="ok")]))
@@ -445,8 +472,15 @@ def test_a_redirect_to_another_origin_is_not_followed(location: str) -> None:
     assert transport.calls == [ROBOTS, PAGE]
 
 
-def test_a_redirect_carrying_credentials_is_not_followed() -> None:
-    hop = response(PAGE, 302, headers={"Location": "https://x:y@www.tff.org/baska"})
+@pytest.mark.parametrize(
+    "location",
+    ["https://x:y@www.tff.org/baska", "/\\evil.example/x"],
+    ids=["kullanıcı-parola", "ters-bölü"],
+)
+def test_a_redirect_carrying_credentials_is_not_followed(location: str) -> None:
+    """`/\\evil.example/x`: urljoin aynı orijinde tutar, tarayıcı `//evil.example/x` okur —
+    yalnız ters bölü dalı reddeder (DEFERRED 11h(a))."""
+    hop = response(PAGE, 302, headers={"Location": location})
     transport = transport_with(NO_ROBOTS, (PAGE, [hop]))
     with pytest.raises(SourceBlocked, match="kimlik bilgisi"):
         session_for(transport).get(PAGE)
