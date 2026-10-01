@@ -1,6 +1,8 @@
 {
   "nav.home": "Home",
   "nav.trackRecord": "Track record",
+  "nav.main": "Main menu",
+  "nav.breadcrumb": "Breadcrumb",
   "nav.legal": "Legal",
   "age.title": "This site is for adults (18+) only.",
   "age.body": "Content concerns betting markets. Please confirm that you are 18 or older.",

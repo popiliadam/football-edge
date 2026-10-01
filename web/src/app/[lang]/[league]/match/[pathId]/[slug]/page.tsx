@@ -62,7 +62,7 @@ export default async function MatchPage({ params }: Params) {
   const move = match.move;
   return (
     <main data-fe-page={`match:${match.id}`}>
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{`${match.home} – ${match.away}`}</h1>
       <p>
         <a href={leaguePath(lang, league)}>{league.name}</a> · {t(lang, "match.kickoff")}:{" "}

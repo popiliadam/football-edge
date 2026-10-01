@@ -27,7 +27,7 @@ export default async function HomePage({ params }: Params) {
   const crumbs = [{ name: t(lang, "nav.home"), path: homePath(lang) }];
   return (
     <main data-fe-page="home">
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{t(lang, "home.title")}</h1>
       <p>{t(lang, "home.intro")}</p>
       <h2>{t(lang, "home.leagues")}</h2>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fullFixture } from "./fixture.ts";
 import { breadcrumbLd, matchLd, pageLd, serializeLd } from "./jsonld.ts";
+import { matchPath } from "./routes.ts";
 
 const snapshot = fullFixture();
 const league = snapshot.leagues[0];
@@ -15,6 +16,23 @@ describe("schema.org (spec §9)", () => {
     expect(matchLd(future, league, "/x/", snapshot.generated_at).eventStatus).toBe(
       "https://schema.org/EventScheduled",
     );
+  });
+
+  // DEFERRED 20d: sınır `>` (spec §9): dışa aktarım anında başlayan maç artık "planlı" değildir.
+  it("başlama anı dışa aktarım anına EŞİTse eventStatus YOK", () => {
+    for (const m of snapshot.matches) {
+      const league = snapshot.leagues.find((each) => each.id === m.league_id);
+      if (!league) throw new Error("lig");
+      expect(
+        "eventStatus" in
+          matchLd(
+            { ...m, commence_time: snapshot.generated_at },
+            league,
+            matchPath("en", league, m),
+            snapshot.generated_at,
+          ),
+      ).toBe(false);
+    }
   });
 
   it("maç düğümü oran, teklif, konum taşımaz", () => {

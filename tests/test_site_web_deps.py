@@ -77,6 +77,12 @@ BUILD_KEYS = {
     "allowBuilds",
 }
 GUARD_TEST = "scripts/toolchain.test.ts"
+# `include` kalıpları vitest'in KÖKÜNE göre çözülür; kökü taşıyan ayar ya da bayrak bekçinin
+# okuduğu kalıpları anlamsızlaştırır (DEFERRED 20a): yapılandırmada `root`/`dir` anahtarı, komut
+# satırında `--root`/`-r`/`--dir`. Kök `web/`dür (`vitest.config.ts`in dizini).
+ROOT_KEYS = re.compile(r"""(?<![\w$.])["']?(root|dir)["']?\s*:""")
+ROOT_FLAGS = re.compile(r"(?<!\S)(--root|-r|--dir)(?:=|\s|$)")
+SITE_GATE = REPO / "scripts/site_gate.sh"
 
 
 def _package() -> dict[str, Any]:
@@ -221,6 +227,40 @@ def test_vitest_still_collects_the_pnpm_guard() -> None:
     exclude = re.search(r"\bexclude:\s*\[(.*?)\]", config, re.S)
     dropped = re.findall(r'"([^"]+)"', exclude.group(1)) if exclude else []
     assert not any(glob_matches(glob, GUARD_TEST) for glob in dropped), f"bekçi dışlandı: {dropped}"
+
+
+def root_overrides(config: str) -> list[str]:
+    """`vitest.config.ts` metninde `include`in çözüldüğü kökü değiştiren anahtarlar."""
+    return ROOT_KEYS.findall(config)
+
+
+def root_flags(command: str) -> list[str]:
+    """Bir vitest komut satırında kökü değiştiren bayraklar."""
+    return ROOT_FLAGS.findall(command)
+
+
+def test_root_override_detector_reads_keys_and_flags() -> None:
+    assert root_overrides('test: { root: "src", include: [] }') == ["root"]
+    assert root_overrides('test: {\n    dir: "scripts",\n  }') == ["dir"]
+    assert root_overrides('{ "root": "src" }') == ["root"]
+    assert root_overrides('test: { environment: "node", include: ["src/**/*.test.ts"] }') == []
+    assert root_overrides('const rootDir = "x"; a.root(); vitestRoot: 1') == []
+    assert root_flags("vitest run --root src") == ["--root"]
+    assert root_flags("vitest run -r src") == ["-r"]
+    assert root_flags("vitest run --dir=scripts") == ["--dir"]
+    assert root_flags("vitest run --reporter dot") == []
+
+
+def test_vitest_include_root_stays_web() -> None:
+    """Bekçi kalıpları `web/`e göre okur; vitest de aynı kökten çözmeli (DEFERRED 20a)."""
+    config = (WEB / "vitest.config.ts").read_text(encoding="utf-8")
+    assert not root_overrides(config), f"vitest.config.ts kökü taşıyor: {root_overrides(config)}"
+    commands = [_package()["scripts"]["test"]] + [
+        line for line in SITE_GATE.read_text(encoding="utf-8").splitlines() if "vitest" in line
+    ]
+    assert len(commands) >= 2, "vitest komutları okunamadı"
+    moved = [command for command in commands if root_flags(command)]
+    assert not moved, f"vitest komutu kökü taşıyor: {moved}"
 
 
 @pytest.mark.parametrize(
