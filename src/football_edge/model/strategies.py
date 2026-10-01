@@ -5,6 +5,13 @@ Durum: grup (ülke, R94/R136) başına gözlenen goller, parça parça demetlerd
 Fit, karar gününün ISO günlük/haftalık tabanında (`cadence_days`) bir kez yapılır ve bir memo'da
 tutulur. Memo eşitliğe girmez; anahtarı (grup, fit günü) ve fit yalnız `fit günü`nden ÖNCEKİ
 maçları okur (`dixon_coles.fit`), bu yüzden memo geleceği taşıyamaz — en kötü hâli bayatlıktır.
+
+Soy bekçisi (DEFERRED 16g (c), `docs/superpowers/specs/2026-10-01-dc-memo-anahtari.md`): `observe`
+memo'yu yeni nesneye aynen taşır, yani aynı kök nesne ikinci bir maç kümesine oynatılırsa memo
+başka kümenin fit'ini (isabet) ya da sıcak başlangıcını (ıska) verirdi. Her girdi fit anındaki
+akışla mühürlenir; isabette girdinin, ıskada `latest`in mührü şimdiki akışın öneki değilse
+`MemoReuseError`. Bekçi yalnız yükseltir: anahtar, fit ve `start` aynen — aynı soyda akış yalnız
+uzar, bekçi tetiklenemez. Her oynatmaya yeni nesne kurulur (üretim yolları zaten öyle).
 """
 
 from __future__ import annotations
@@ -29,15 +36,47 @@ from football_edge.model.dixon_coles import (
 
 CHUNK = 256
 _ANCHOR_MONDAY = date(2000, 1, 3)
-Chunks = tuple[tuple[GoalRecord, ...], ...]
+Chunk = tuple[GoalRecord, ...]
+Chunks = tuple[Chunk, ...]
+
+
+class MemoReuseError(RuntimeError):
+    """Memo başka bir gözlem akışında kurulmuş: aynı nesne ikinci bir maç kümesine oynatıldı."""
 
 
 @dataclass
 class _FitMemo:
-    """Değişebilir memo — bilinçli istisna: saf bir fonksiyonun sonucunu (grup, gün) ile saklar."""
+    """Değişebilir memo — bilinçli istisna: saf bir fonksiyonun sonucunu (grup, gün) ile saklar.
+
+    `seals`: girdi başına fit anındaki akış (aynı parça nesneleri, kopya değil). `verified`: önek
+    denetiminde içerikçe eşit bulunmuş DOLU parça çiftleri, (yeni, mühürlü) — 1X2/Ü-A paylaşımında
+    her dolu parça bir kez karşılaştırılır; nesne tutulduğu için `id` başka nesneye geçemez."""
 
     fits: dict[tuple[str, date], DCParams | None] = field(default_factory=dict)
     latest: dict[str, DCParams] = field(default_factory=dict)
+    seals: dict[tuple[str, date], Chunks] = field(default_factory=dict)
+    verified: dict[int, tuple[Chunk, Chunk]] = field(default_factory=dict)
+
+
+def _extends(sealed: Chunks, current: Chunks, verified: dict[int, tuple[Chunk, Chunk]]) -> bool:
+    """Mühürlü akış şimdiki akışın öneki mi — kesin karşılaştırma (özet yok, çakışma yok).
+
+    Parça sınırları konumdan gelir (`_append` hep son parçayı doldurur): mühürlü i. parça şimdiki
+    i. parçanın başı olmalı. Aynı soyda dolu parçalar aynı nesnedir (`is`); son parça kayıtları
+    aynı nesneler olduğundan dilim karşılaştırması da kısadır."""
+    if len(current) < len(sealed):
+        return False
+    for old, new in zip(sealed, current, strict=False):
+        if old is new:
+            continue
+        known = verified.get(id(new))
+        if known is not None and known[0] is new and known[1] is old:
+            continue
+        if new[: len(old)] != old:
+            return False
+        if len(old) == len(new) == CHUNK:
+            verified[id(new)] = (new, old)
+    return True
 
 
 def _append(chunks: Chunks, record: GoalRecord) -> Chunks:
@@ -90,14 +129,31 @@ class DixonColesStrategy:
         chunks = _append(self.history.get(group, ()), record)
         return replace(self, history=MappingProxyType({**self.history, group: chunks}))
 
+    def _guard(self, key: tuple[str, date], sealed: tuple[str, date], path: str) -> None:
+        current = self.history.get(key[0], ())
+        if not _extends(self.memo.seals[sealed], current, self.memo.verified):
+            group, at = key
+            raise MemoReuseError(
+                f"DC memo'su başka bir gözlem akışında kurulmuş ({path}; grup {group!r}, fit günü "
+                f"{at.isoformat()}): memo'nun {sealed[1].isoformat()} fit'inin mührü bu nesnenin "
+                "gözlediği sonuçların öneki değil — aynı nesne ikinci bir maç kümesine "
+                "oynatılamaz, her oynatmaya yeni nesne kurun"
+            )
+
     def params(self, group: str, at: date) -> DCParams | None:
         key = (group, at)
-        if key not in self.memo.fits:
+        if key in self.memo.fits:
+            self._guard(key, key, "isabet")
+        else:
             latest = self.memo.latest.get(group)
+            if latest is not None:
+                self._guard(key, (group, latest.fitted_on), "ıska, sıcak başlangıç adayı")
             start = latest if latest is not None and latest.fitted_on < at else None
-            records = [record for chunk in self.history.get(group, ()) for record in chunk]
+            chunks = self.history.get(group, ())
+            records = [record for chunk in chunks for record in chunk]
             found = fit(records, at=at, config=self.config, start=start)
             self.memo.fits[key] = found
+            self.memo.seals[key] = chunks
             if found is not None and (latest is None or latest.fitted_on < at):
                 self.memo.latest[group] = found
         return self.memo.fits[key]
