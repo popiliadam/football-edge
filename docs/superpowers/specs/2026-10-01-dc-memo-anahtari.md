@@ -6,8 +6,12 @@ dokunan ilk değişikliğiyle (§7).
 `docs/phases/03-baz-model/HANDOFF.md` §1, §3.3/9 · kod `30bf3bc` (`integ/s10`).
 **Ölçüm:** yalnız SENTETİK veri (`tests/model_builders.py`, `tests/backtest_builders.py`); holdout, DB, ağ yok.
 Betikler depo dışında, oturum çalışma alanında (`.superpowers/sdd/2026-10-01-oturum10-kucuk-borclar/t6/`, gitignored):
-`t6-b1-olcum.py` (B1 + prototipler + ölçek), `t6-e2-bos-olcum.py` ve `t6-e2-fark.py` (yan bulgu §6). Prototipler
-`DixonColesStrategy`nin alt sınıflarıdır, yalnız `params`ı ezer; depo kodu değişmedi.
+`t6-b1-olcum.py` (B1 + prototipler + ölçek), `t6-e2-bos-olcum.py` ve `t6-e2-fark.py` (yan bulgu §6),
+`t6-c-iska.py` ve `t6-pytest-bekcili.py` (düzeltme turu 1: (c)'nin ıska yolu, §3/(c)). Prototipler
+`DixonColesStrategy`nin alt sınıflarıdır ya da `params`ı süreç içinde değiştirir; depo kodu değişmedi.
+**Düzeltme turu 1 (2026-10-01):** bağımsız inceleme I1 — ilk sürüm (c)'nin bekçisini yalnız isabette okuyordu;
+ıskada `memo.latest` başka soydan sıcak başlangıç verebiliyordu. Bekçi ıska denetimiyle genişletildi (§3, §3.1, §5,
+§7); §6 HANDOFF okuması ve E1 notu düzeltildi; (a) için test planı olmadığı açıkça yazıldı (§5).
 
 ## 1. Bugünkü mekanizma
 
@@ -75,22 +79,46 @@ prototip boş süzülmüş parçayı da özete katıyordu; kadans 7'de salı ile
 değişti → 2 fazla fit, soğuk başlangıç (`latest.fitted_on == at`), **bayt farkı**. Boş parça atlanınca düzeldi.
 
 **(c) Her oynatmada yeni nesne, bekçiyle.** Anahtar ve fit AYNEN kalır. Memo her girdiye bir mühür ekler: fit
-anındaki toplam gözlem sayısı `k` ve ilk `k` gözlemin (gözlem SIRASIYLA) özeti. İsabette şimdiki akışın ilk `k`
-gözlemi mühürle uyuşmazsa `MemoReuseError`. Aynı soyda akış yalnız uzar → bekçi hiç tetiklenmez; 1X2/Ü-A paylaşımı
-aynı maçları aynı sırada gözler → geçer; başka küme → ilk isabette adıyla düşer (sessiz değil). Statik ek (isteğe
-bağlı): yapım yerlerini sabitleyen AST testi — 16h'deki kaçışları görmez, yalnız kazara girişi durdurur.
+anındaki toplam gözlem sayısı `k` ve ilk `k` gözlemin (gözlem SIRASIYLA) özeti. Bekçi `params`ın İKİ yolunda da
+okur:
+- **isabette:** `(grup, at)` girdisinin mührü şimdiki akışın öneki değilse `MemoReuseError`;
+- **ıskada:** `memo.latest[grup]` varsa onun mührü (`(grup, latest.fitted_on)` girdisininki) şimdiki akışın öneki
+  değilse `MemoReuseError` — fit başka soyun parametresinden sıcak başlamaz.
+
+`params`ın çıktısı yalnız bu iki kaynaktan (memo girdisi ya da `start = latest` ile fit) gelir; ikisi de mühürlü.
+Aynı soyda akış yalnız uzar → bekçi hiç tetiklenmez; 1X2/Ü-A paylaşımı aynı maçları aynı sırada gözler → geçer;
+başka küme → ilk isabette ya da ilk ıskada adıyla düşer (sessiz değil). Ek yapı yok: ıska denetimi aynı mühür
+makinesini kullanır. Statik ek (isteğe bağlı): yapım yerlerini sabitleyen AST testi — 16h'deki kaçışları görmez,
+yalnız kazara girişi durdurur.
+
+**Neden ıska denetimi gerekir (ölçüldü, `t6-c-iska.py`; inceleyicinin sondasıyla aynı sonuç):** aynı nesne önce tam
+kümeye, sonra AYNI maçlar +3 gün kaydırılmış kümeye (cumartesi → salı; kadans 1'de fit günleri ayrık, memo hiç
+isabet almaz) oynatıldı:
+
+| İkinci küme | mevcut | (c) yalnız isabet | (c) isabet + ıska |
+|---|---|---|---|
+| ayrık anahtar (+3 gün) | hata yok · 4/224 taze ile bayt eşit · max fark 4,41e-05 | **aynı: hata yok · 4/224 · 4,41e-05** | `MemoReuseError` (ıska, `2020-08-04`; `latest` = `2023-11-03`) |
+| B1 (2022/23 çıkarıldı) | hata yok · 112/168 | `MemoReuseError` (isabet, `2023-08-04`) | `MemoReuseError` (isabet, `2023-08-04`) |
+| B1' (2022/23 golleri çevrildi) | hata yok · 116/224 | `MemoReuseError` (isabet, `2022-08-12`) | `MemoReuseError` (isabet, `2022-08-12`) |
+
+Yalnız isabette okuyan bekçi ayrık anahtarlı yeniden kullanımda mevcut kodla birebir aynı davranır: hata yok,
+yabancı soydan (ya da `latest.fitted_on ≥ at` olduğu için soğuk) başlayan fit'ler, taze nesneyle bayt farkı.
+Yanlış pozitif yok: isabet + ıska bekçisi dört taze senaryoda (§4) bayt eşit, fit sayısı 56/56/112/56 (= mevcut);
+`DixonColesStrategy.params`a süreç içinde takılıp tam pytest koşuldu (`t6-pytest-bekcili.py`): `3086 passed,
+50 skipped`, `MemoReuseError` 0.
 
 ### 3.1 Karşılaştırma
 
-| | (a) sayı | (b) özet | (c) bekçi |
+| | (a) sayı | (b) özet | (c) bekçi (isabet + ıska) |
 |---|---|---|---|
 | B1 (sayı farklı) | düzeltir | düzeltir | **reddeder** (hata) |
 | B1' (sayı aynı, içerik farklı) | **görmez** (56/56 taşır) | düzeltir | reddeder |
-| Sıcak başlangıç kanalı (yeniden kullanım ≠ taze) | kalır (2e-05) | kalır (2–3e-05) | yeniden kullanım olmaz → kanal yok |
-| Taze oynatmada bayt eşliği (sentetik, §4) | eşit | eşit (sınır tuzağı düzeltilince) | eşit — anahtar ve fit değişmez, tanım gereği |
+| Ayrık anahtarlı yeniden kullanım (+3 gün; memo isabeti yok) | hata yok · 4/224 taze ile bayt eşit · 4,41e-05 (anahtar zaten ayrık; sıcak başlangıç kanalı) | aynı (4/224 · 4,41e-05) | reddeder (ıska denetimi); yalnız isabet okuyan bekçi GÖRMEZ (4/224 bayt eşit, 4,41e-05) |
+| Sıcak başlangıç kanalı (yeniden kullanım ≠ taze) | kalır (2e-05) | kalır (2–3e-05) | ıska denetimiyle kapanır: `start` yalnız mühürü şimdiki akışın öneki olan `latest`ten gelir; değilse hata |
+| Taze oynatmada bayt eşliği (sentetik, §4) | eşit | eşit (sınır tuzağı düzeltilince) | eşit — anahtar, fit ve `start` değişmez; bekçi aynı soyda tetiklenemez |
 | Fit sayısı, kadans 7 haftada iki tur | 56 (= mevcut) | 56 (= mevcut) | 56 (= mevcut) |
-| Anahtar maliyeti, 45 bin gözlem / 176 parça (sıcak) | 0,066 ms/çağrı | 0,090 ms/çağrı | 0,064 ms/isabet |
-| Yapı değişikliği | parça özeti | parça özeti + parça özeti hash'i | parça özeti hash'i + mühür; `Chunks` aynen |
+| Anahtar maliyeti, 45 bin gözlem / 176 parça (sıcak) | 0,066 ms/çağrı | 0,090 ms/çağrı | 0,064 ms/isabet; ıskada bir önek denetimi daha (fit'in yanında ihmal edilebilir) |
+| Yapı değişikliği | parça özeti | parça özeti + parça özeti hash'i | parça özeti hash'i + girdi başına mühür; `Chunks` aynen |
 | Memo semantiği (strategies.py docstring) | genişler: "aynı gün, farklı geçmiş → farklı fit" | genişler | aynı kalır; kötüye kullanım hata olur |
 
 Ölçek satırının bağlamı (`t6-b1-olcum.py` §4, 45 bin rastgele gözlem, 92 takım): mevcut isabetsizlikte geçmişi
@@ -112,6 +140,8 @@ holdout satırları yeniden hesaplanamaz ve AÇILMAZ.
 Sentetik ölçüm (`t6-b1-olcum.py` §3): her varyant taze nesneyle, `wf_run` gibi 1X2 + Ü/A ortak memo'lu oynatıldı,
 olasılık demetleri `==` ile mevcut kodla kıyaslandı:
 
+(c) sütunu isabet + ıska bekçisi için `t6-c-iska.py` §2'de yeniden ölçüldü; dört satırda da aynı sonuç.
+
 | Veri / kadans | mevcut fit | (a) | (b) | (c) | düz sayı |
 |---|---|---|---|---|---|
 | main (cumartesi), kadans 1 | 56 | eşit · 56 | eşit · 56 | eşit · 56 | eşit · 56 |
@@ -119,22 +149,30 @@ olasılık demetleri `==` ile mevcut kodla kıyaslandı:
 | haftada iki tur, kadans 1 | 112 | eşit · 112 | eşit · 112 | eşit · 112 | eşit · 112 |
 | haftada iki tur, kadans 7 | 56 | eşit · 56 | eşit · 56 | eşit · 56 | **farklı · 112** |
 
-- **(c):** anahtar, fit sırası ve `start` değişmez → bayt eşliği koddan okunur; bekçi yalnız isabette okur.
+- **(c):** anahtar, fit sırası ve `start` değişmez → bayt eşliği koddan okunur; bekçi yalnız okur (isabette
+  girdinin, ıskada `latest`in mührünü), aynı soyda akış yalnız uzadığı için tetiklenemez.
 - **(a)/(b):** eşlik, "`(grup, at)` bir oynatmada tek bir `n_before`/özet görür" varsayımına bağlıdır (§1 son
   paragraf). Varsayım zaman kuralından çıkar; gerçek veride tutarsız satır (tarih ↔ başlama UTC'si bir günden fazla
   kayık) olursa (a)/(b) bugünkü bayat fit yerine yeniden fit eder → o grupta sayı değişir. **Ölçülmedi** (DB ister).
 
 ## 5. Test planı (önerilen (c) için; (b) seçilirse 5. madde eklenir)
 
+**(a) için test planı yok, gerekmez:** (a) elendi, çünkü sayı aynı içerik farklı yeniden kullanımı (B1') görmez
+(§2: 56/56 taşır) ve sıcak başlangıç kanalını açık bırakır. Onu öldüren test 2. maddedir.
+
 Her test mutasyonla kırmızıya düşürülür (`PYTHONDONTWRITEBYTECODE=1`, geri alınca `git diff` temiz).
 
 1. **B1:** aynı kök nesne tam kümeye, sonra sezonu çıkarılmış kümeye → `MemoReuseError`. Mutasyon: bekçi
    kaldırılır → oynatma hatasız biter, test kırmızı.
+   - **1b — ayrık anahtarlı yeniden kullanım (ıska yolu):** aynı kök nesne tam kümeye, sonra aynı maçlar +3 gün
+     kaydırılmış kümeye (memo hiç isabet almaz) → `MemoReuseError`. Mutasyon: ıska denetimi kaldırılır → oynatma
+     hatasız biter, test kırmızı (`t6-c-iska.py`: yalnız isabet okuyan bekçide hata yok, 4/224 bayt eşit).
 2. **B1':** sayı aynı, goller çevrilmiş → `MemoReuseError`. Mutasyon: mühür yalnız sayıyı denetler → kırmızı (zayıf
    bekçiyi, yani (a)'yı öldüren test).
 3. **Paylaşım bozulmaz:** 1X2 + Ü/A ortak memo aynı küme → hata yok, `test_the_fit_runs_once_per_group_and_fit_day`
    (`tests/test_model_strategies.py:63-80`) aynen yeşil. Mutasyon: mühür akış yerine nesne kimliğine bağlanır →
-   kırmızı.
+   kırmızı. Ayrıca E2 (`tests/test_context_parity.py:181-191`, aynı nesne + doğru akış) ve tam pytest
+   `MemoReuseError`sız kalır (`t6-pytest-bekcili.py`: 3086 passed, 0 hata).
 4. **Bayt eşliği altını:** haftada iki turlu sentetik geçmişte, kadans 1 ve 7, olasılık demetlerinin sha256'sı
    değişiklikten ÖNCE kaydedilir; sonra eşit olmalı. Mutasyon: anahtara toplam sayı eklenir → kadans 7 kırmızı.
 5. ((b) için) **Parça sınırı:** `CHUNK` küçük yamalanır, salı–cuma arasında parça mühürlenir → fit sayısı ve
@@ -156,27 +194,40 @@ akışı gözleyip tahmin eder → canlı tahmin memo isabetidir, canlı kurucun
 
 Taze nesnenin doğru akışta düşmesinin nedeni (`t6-e2-fark.py`): replay sıcak başlangıç zinciriyle, taze canlı
 nesne soğuk fit eder; fark max 3,19e-06 (mutlak), `pytest.approx` varsayılanı (göreli 1e-6) bunu aşar. Replay'de
-sıcak başlangıç kapatılınca replay ile taze canlı **bit düzeyinde eşit** (fark 0,0). Yani HANDOFF §3.3/9'daki
-"canlıda ve tarihte aynı" DC için optimizer toleransı kadar doğrudur; gölge satırı (slot başına taze, soğuk) ile
-walk-forward (sıcak zincir) arasında ~1e-6 mertebesi fark beklenir. Gerçek veride ölçülmedi. 16g'nin kapsamı dışı;
-ayrı satır önerisi rapordadır.
+sıcak başlangıç kapatılınca replay ile taze canlı **bit düzeyinde eşit** (fark 0,0).
+
+HANDOFF §3.3/9 bir **kural** eşliği söyler (DC aynı Londra gününün sonuçlarını `day < at` ile dışarıda bırakır, bu
+kural canlıda ve tarihte aynı) — sayısal eşlik iddia etmez ve bu bulgu onu çürütmez. Kural eşliği korunur; sayısal
+eşlik sıcak/soğuk başlangıç yüzünden ~3e-6 (sentetik, ölçüldü): gölge satırı (slot başına taze, soğuk fit) ile
+walk-forward (sıcak zincir) arasında bu mertebede fark beklenir. Gerçek veride ölçülmedi.
+
+**Ağırlık:** akış eşliği zaten sınanıyor — E1 (`tests/test_context_parity.py:166-177`) canlı kurucunun
+`decision.results`ini `historical.streams[index]`e ve bağlamı birebir doğrular; canlı akışı bozmak E1'de yakalanır.
+E2'nin DC ayağında gerçekte sınanmayan özellik "taze canlı DC fit'i ≈ replay"dır, ve o `approx` 1e-6'da düşer.
+16g'nin kapsamı dışı; ayrı satır önerisi rapordadır. (c) uygulanırsa E2'nin aynı-nesne biçimi bozuk akışta
+`MemoReuseError` verir — DC ayağı en azından akışı sınar hâle gelir.
 
 ## 7. Öneri ve zamanlama
 
-**Öneri: (c) — anahtar aynen, soy bekçisi (`MemoReuseError`).**
+**Öneri: (c) — anahtar aynen, soy bekçisi isabette VE ıskada (`MemoReuseError`).**
 - Mühürlü Faz 3 çıktılarına dokunmaz: bayt eşliği ölçüme değil koda dayanır (§4).
-- B1 ve B1'in ikisini de kapatır; (a) B1''yi görmez. Sıcak başlangıç kanalını da kapatır, çünkü yeniden kullanım
-  hata olur; (a)/(b) bu kanalı açık bırakır.
-- Projenin "sessiz değil, adıyla" çizgisine uyar. Üretim yolları zaten taze nesne kurduğu için davranış değişmez.
-  Bugünkü tek "aynı nesne" kullanımı E2'dir; doğru akışta geçer (§6).
-- Bekçi maliyeti isabet başına ~0,06 ms (45 bin gözlem); karar anı başına bire indirilebilir.
+- B1 ve B1'in ikisini de kapatır; (a) B1''yi görmez. Sıcak başlangıç kanalını ancak **ıska denetimiyle** kapatır:
+  yalnız isabette okuyan bekçi, memo'ya hiç isabet etmeyen yeniden kullanımı (+3 gün sondası) mevcut kod gibi
+  sessiz geçirir (4/224 bayt eşit, 4,41e-05). İki yol da denetlenince `params`ın her çıktısı ya şimdiki soydan gelir
+  ya hata olur; (a)/(b) bu kanalı açık bırakır. Ölçülen kapsam: üç yeniden kullanım senaryosu hata verdi, dört taze
+  senaryo bayt eşit — genel ispat değil, §5/1, 1b, 2 testleriyle sabitlenir.
+- Projenin "sessiz değil, adıyla" çizgisine uyar. Üretim yolları zaten taze nesne kurduğu için davranış değişmez
+  (tam pytest bekçi takılıyken `MemoReuseError` 0). Bugünkü tek "aynı nesne" kullanımı E2'dir; doğru akışta geçer
+  (§6).
+- Bekçi maliyeti isabet başına ~0,06 ms (45 bin gözlem), ıskada bir önek denetimi daha; karar anı başına bire
+  indirilebilir.
 
 **(b)'ye ne zaman geçilir:** Faz 4 bir nesneyi bilerek birden çok kümede yeniden kullanmak isterse (örneğin boşluk
 cezası gibi ne-olurdu koşularında fit paylaşımı). O zaman da parça sınırı testi (§5/5) ve sıcak başlangıcın soy
 bağı birlikte tasarlanır.
 
 **Ne zaman:** Faz 4'ün `model/strategies.py`ye dokunan ilk değişikliğiyle, aynı commit dizisinde: önce §5/4 altın
-kaydı, sonra bekçi + §5/1–3, en son §5/6 gerçek veri eşliği (DB'li adım controller'da). Ayrı bir oturum açmayı
+kaydı, sonra bekçi (isabet + ıska) + §5/1, 1b, 2, 3, en son §5/6 gerçek veri eşliği (DB'li adım controller'da). Ayrı bir oturum açmayı
 gerektirmez; Faz 4 strategies.py'ye dokunmazsa 16g gizil kalır (üretim tetiklemiyor).
 
 ## 8. Ölçmediklerimiz
