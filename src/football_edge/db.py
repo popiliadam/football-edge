@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import ipaddress
 import os
-import re
 from datetime import datetime
 from typing import Any
 
 import psycopg
-from psycopg.conninfo import conninfo_to_dict
 
+from football_edge.dsn_hygiene import dsn_well_formed, masked
 from football_edge.leagues import League
 from football_edge.ledger import GENESIS, canonical_timestamp, chain
 from football_edge.odds_api import PriceRow
@@ -67,74 +65,32 @@ INSERT_SNAPSHOTS = f"""
 
 
 _MALFORMED_DSN = (
-    "bağlantı dizesi ayrıştırılamadı (yüzde kodlaması, eksik '=', bilinmeyen seçenek, parolada "
-    "kodlanmamış '@', sayı olmayan port…); libpq metni parolayı taşıyabileceği için basılmadı"
+    "bağlantı dizesi ayrıştırılamadı ya da bozuk (yüzde kodlaması, eksik '=', bilinmeyen seçenek, "
+    "parolada kodlanmamış '@', sayı olmayan port, geçersiz seçenek değeri…); libpq metni parolayı "
+    "taşıyabileceği için basılmadı"
 )
-_HOST_NAME = re.compile(r"[A-Za-z0-9_.-]+")
-_PORT = re.compile(r"[0-9]{1,5}")
-
-
-def _host_ok(host: str) -> bool:
-    """Boş (varsayılan), `/` ile başlayan unix soket dizini, ad ya da IP; başka hiçbir şey."""
-    if not host or host.startswith("/") or _HOST_NAME.fullmatch(host):
-        return True
-    return _ip_ok(host)
-
-
-def _ip_ok(address: str) -> bool:
-    try:
-        ipaddress.ip_address(address)
-    except ValueError:
-        return False
-    return True
-
-
-def _port_ok(port: str) -> bool:
-    return not port or (_PORT.fullmatch(port) is not None and 1 <= int(port) <= 65535)
-
-
-def _dsn_well_formed(dsn: str) -> bool:
-    """DSN libpq'nun ayrıştırıcısından geçer ve host/hostaddr/port girdileri biçimce mümkündür.
-
-    Ayrıştırmayı GEÇEN iki yanlış yapıştırma parolayı bağlanırken basar: parolada kodlanmamış
-    `@` hostu `<parola>@…` yapar (`failed to resolve host '<parola>@…'`), port yerine düşen
-    parola `invalid integer value "<parola>"` olur. İkisi de ad çözmeden ÖNCE burada düşer.
-    `OperationalError` toptan sarılmaz: gerçek ağ tanısı ("connection refused") okunur kalmalı.
-    """
-    try:
-        params = conninfo_to_dict(dsn)
-    except (psycopg.ProgrammingError, UnicodeError):  # vekil karakter: `repr`i DSN'i taşır
-        return False
-
-    def entries(key: str) -> list[str]:
-        return str(params.get(key) or "").split(",")
-
-    return (
-        all(_host_ok(host) for host in entries("host"))
-        and all(not addr or _ip_ok(addr) for addr in entries("hostaddr"))
-        and all(_port_ok(port) for port in entries("port"))
-    )
 
 
 def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     resolved = dsn or os.getenv("DATABASE_URL")
     if not resolved:
         raise RuntimeError("DATABASE_URL tanımlı değil")
-    # Bozuk DSN (DEFERRED 18g b): libpq hatası DSN'in parçasını — parolayı — yankılar ve bu
-    # biçimlerde log redaksiyonu parolayı bilemez. Hata `except` DIŞINDA yükselir: `except` içinde
-    # `from None` yalnız gösterimi bastırır, `__context__` libpq metnini yine taşırdı. Sınıf
-    # `ProgrammingError` kalır; `psycopg.Error` yakalayan çağıranların davranışı değişmez.
-    if _dsn_well_formed(resolved):
+    # Bozuk DSN (DEFERRED 18g b, `dsn_hygiene`): (A) bağlanmadan önce biçim denetimi, (B)
+    # bağlanırken yükselen psycopg hatasında DSN'den gelen tırnaklı parçalar maskelenir. İkisinde de
+    # hata `except` DIŞINDA yükselir: `except` içinde `from None` yalnız gösterimi bastırır,
+    # `__context__` libpq metnini yine taşırdı. Sınıf korunur; çağıranlar değişmez.
+    if not dsn_well_formed(resolved):
+        raise psycopg.ProgrammingError(_MALFORMED_DSN) from None
+    try:
         # Oturum saat dilimi UTC'ye sabitlenir: zincir hash'i zaman damgasının
         # metin hâlini kapsıyor, oturum TZ'si değişirse geri okumada zincir kırılır.
         # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
         # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
         # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
-        try:
-            return psycopg.connect(resolved, options="-c timezone=UTC")
-        except psycopg.ProgrammingError:
-            pass  # psycopg'nin kendi denetimi de değeri yankılar (`bad value for connect_timeout`)
-    raise psycopg.ProgrammingError(_MALFORMED_DSN) from None
+        return psycopg.connect(resolved, options="-c timezone=UTC")
+    except psycopg.Error as error:
+        kind, text = type(error), masked(str(error), resolved)
+    raise kind(text) from None
 
 
 def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) -> dict[str, Any]:
