@@ -214,11 +214,14 @@ BASE_GIT_PUSH = re.compile(r"\bgit\b(?:\s+-c\s+\S+)*\s+push\b")
 def _git_subcommands(line: str) -> list[str]:
     """Satırdaki her `git` çağrısının alt komutu. Kabuk sözcüklerine bölünür (tırnaklı değer
     tek sözcük) ve genel seçenekler atlanır. Boşluk taşıyan sözcük (tırnaklı komut dizesi:
-    `bash -c '…'`, `eval '…'`, `ssh host '…'`) ve `$(…)`/`` `…` `` içindeki komut da ayrıca
-    okunur. Kapanmamış tırnakla satır bölünemezse kaba okumaya düşer (`git` … `push` = push):
-    yanlış pozitif gürültülüdür, kaçırılan push sessiz."""
+    `bash -c '…'`, `eval '…'`, `ssh host '…'`) BÜTÜNÜYLE, `$(…)`/`` `…` `` içindeki komut da
+    AYRICA okunur — ikisi bağımsız (N-1b). Hiçbir metin atılmaz: `#` yorum sayılmaz
+    (`${#a[@]}`, `https://x/a#b`, `\\` ile süren yorum satırı — N-1a, N-3). Kapanmamış
+    tırnakla satır bölünemezse kaba okumaya düşer (`git` … `push` = push): yanlış pozitif
+    gürültülüdür, kaçırılan push sessiz."""
     lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
         tokens = list(lexer)
     except ValueError:
@@ -229,7 +232,7 @@ def _git_subcommands(line: str) -> list[str]:
             inner = re.split(r"\$\(|`", token, maxsplit=1)[1]
             # Kapanan ters tırnak sözcüğe yapışır (`push``): boşluğa çevrilir.
             found.extend(_git_subcommands(inner.replace("`", " ")))
-        elif re.search(r"\s", token):
+        if re.search(r"\s", token) and token != line:
             found.extend(_git_subcommands(token))
         if token.rsplit("/", 1)[-1] != "git":
             continue
@@ -242,15 +245,15 @@ def _git_subcommands(line: str) -> list[str]:
 
 
 def _pushes(step: dict[str, Any]) -> bool:
-    """Adımın betiği `git … push` koşuyor mu; `\\` ile bölünmüş satır birleştirilerek okunur.
-    Kabuk okuması ile BASE regex'inin birleşimi: BASE'in gördüğü her biçim görülmeye devam eder
-    (I-1). Yalnız yorum satırı (`# git push`) koşmaz, sayılmaz."""
-    lines = [
-        line
-        for line in _logical_lines(str(step.get("run", "")))
-        if not line.lstrip().startswith("#")
-    ]
-    return any(BASE_GIT_PUSH.search(line) or "push" in _git_subcommands(line) for line in lines)
+    """Adımın betiği `git … push` koşuyor mu. Bekçi eşleştirmeden ÖNCE hiçbir metni atmaz
+    (controller kararı, düzeltme turu 2): BASE regex'i HAM betiğe uygulanır — yorum dâhil,
+    BASE'in kendisi gibi — ve kabuk okumasıyla (mantıksal satırlar, `\\` devamı birleşik)
+    birleşir. Kabuk okuması algı EKLER, hiçbir zaman çıkarmaz. Gürültü kırmızıdır ve kabul;
+    sessizlik değil."""
+    run = str(step.get("run", ""))
+    return BASE_GIT_PUSH.search(run) is not None or any(
+        "push" in _git_subcommands(line) for line in _logical_lines(run)
+    )
 
 
 def _exposes(step: dict[str, Any]) -> bool:
@@ -396,8 +399,10 @@ def _unbound_after_scan(workflows: dict[str, dict[str, Any]]) -> tuple[list[str]
                 checked.append(where)
                 if scan_id is None or not _bound(condition, term):
                     broken.append(
-                        f"{where}: `{condition}` kırmızı taramadan sonra da koşar — "
-                        f"taramaya `id` ver ve `{term}` ile bağla"
+                        f"{where}: `{condition}` kırmızı taramadan sonra da koşar — secret ya da "
+                        f"push'luysa taramaya `id` ver ve `{term}` ile bağla. Adım bir ALARMSA "
+                        "bağlama (kırmızı taramada açılmalı): `secrets.GITHUB_TOKEN` yerine "
+                        "`github.token` yaz, metindeki `git push`u yeniden ifade et (N-5)"
                     )
     return checked, broken
 
@@ -489,6 +494,15 @@ ORDER_RED_R1 = {
     "bash-c-git-C": _one({"run": "bash -c 'git -C alt push'"}, SCAN_STEP),
     # Ters tırnak sözcüğe yapışır (`` `git ``): yalnız ikame dalı ayırır.
     "ters-tirnak-ikamesi": _one({"run": 'cikti="`git -C alt push`"'}, SCAN_STEP),
+    # Düzeltme turu 2 (N-1, N-3): bash yorumu `\` ile sürdürmez — sonraki satır koşar.
+    "yorum-devami": _one({"run": "# eski: git commit -m x \\\ngit push origin HEAD"}, SCAN_STEP),
+    "yorum-devami-C": _one({"run": "# not \\\ngit -C site push"}, SCAN_STEP),
+    "bash-c-ikameli": _one(
+        {"run": 'bash -c "git -C site push origin $(git rev-parse HEAD)"'}, SCAN_STEP
+    ),
+    "sh-c-ters-tirnakli": _one({"run": 'sh -c "git --no-pager push origin `cat ref`"'}, SCAN_STEP),
+    "kelime-ici-diyez": _one({"run": "n=${#dosyalar[@]}; git -C site push"}, SCAN_STEP),
+    "url-diyez": _one({"run": "curl -s https://x/a#b && git -C site push"}, SCAN_STEP),
     # I-3: taramasız bir işi beklemek korumaz.
     "needs-taramasiz-is": {
         "sentetik.yml": {
@@ -644,11 +658,26 @@ def test_the_binding_guard_stays_quiet_on_safe_shapes(workflows: dict[str, Any])
         "eval 'git push origin HEAD'",
         "ssh host 'cd repo && git push'",
         'durum="git push reddedildi"',
+        "# git push origin HEAD",
+        "# eski: git commit -m x \\\ngit push origin HEAD",
+        # Ham metinde satır aşan eşleşme (BASE'in `\s+`i satır sonunu da yer): gürültü, BASE gördü.
+        "git -c a=b\npush",
     ],
-    ids=["duz", "bot", "bash-c", "eval", "ssh", "atama-icinde"],
+    ids=[
+        "duz",
+        "bot",
+        "bash-c",
+        "eval",
+        "ssh",
+        "atama-icinde",
+        "yorum",
+        "yorum-devami",
+        "satir-asiri",
+    ],
 )
 def test_push_detection_covers_everything_the_base_regex_saw(run: str) -> None:
-    """I-1: kabuk okuması BASE regex'inin (oturum 10) gördüğü hiçbir biçimi kaçırmaz — ikisinin
-    birleşimi alınır. Son vaka push değildir: birleşimin bedeli olan gürültü, sessiz kaçış değil."""
+    """I-1/N-1: kabuk okuması BASE regex'inin (oturum 10) gördüğü hiçbir biçimi kaçırmaz — BASE
+    regex'i HAM metne (yorum dâhil, hiçbir şey atılmadan) uygulanır ve kabuk okumasıyla birleşir.
+    `atama-icinde` ve `yorum` push değildir: birleşimin bedeli olan gürültü, sessiz kaçış değil."""
     assert BASE_GIT_PUSH.search(run), "vaka BASE'in gördüğü biçim değil — kurgu bayat"
     assert _pushes({"run": run})
