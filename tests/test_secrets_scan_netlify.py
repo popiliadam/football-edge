@@ -176,4 +176,5 @@ def test_every_workflow_that_reads_a_secret_or_writes_the_repo_runs_the_scan() -
             )
 
     assert covered, "hiçbir workflow secret okumuyor ya da yazmıyor — test kurgusu bayatlamış"
-    assert [name for name, scans in covered.items() if not scans] == [], covered
+    missing = [name for name, scans in covered.items() if not scans]
+    assert missing == [], f"secret okuyan ya da yazan ama taramayı koşmayan workflow: {missing}"
