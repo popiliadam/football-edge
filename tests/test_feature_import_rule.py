@@ -8,13 +8,17 @@ bulamamalı. İki katman: (1) AST taraması doğrudan anmayı yakalar — `impor
 (`importlib.import_module("…")`), ayrıca yasaklı bir modülün ÜST paketini bağlayan import
 (`import football_edge`, `from football_edge import live`, `import football_edge.live as fl`,
 `from football_edge.live import *`): bağlanan paketten yasaklı modüle öznitelikle
-(`live.store.x`) ulaşılır ve bu erişim import satırında adı hiç geçirmez; (2) ayrı bir süreçte
-paketin her modülü import edilir ve yasaklı modüllerin `sys.modules`e dolaylı yoldan da girmediği
-ölçülür. Yasaklı modülün kardeşine tam adıyla ulaşmak (`from football_edge.live import context`)
-serbesttir.
-Bilinen sınır: hesaplanmış dize (`"football_edge.live." + "store"`) (1)'de görünmez; (2) onu
-yalnız import anında çalışan kodda yakalar — fonksiyon içindeki hesaplanmış dize iki katmanda da
-görünmez.
+(`live.store.x`) ulaşılır ve bu erişim import satırında adı hiç geçirmez; aynı nedenle izinli bir
+import'un bağladığı kök paketten yasaklı modülün üst paketini DEĞER yapan ifade de yakalanır —
+yerel ada bağlama (`m = football_edge.live; m.store`) ve `getattr(football_edge, "live")` (17h);
+(2) ayrı bir süreçte paketin her modülü import edilir ve yasaklı modüllerin `sys.modules`e dolaylı
+yoldan da girmediği ölçülür. Yasaklı modülün kardeşine tam adıyla ulaşmak
+(`from football_edge.live import context`) serbesttir.
+Bilinen sınırlar: hesaplanmış dize (`"football_edge.live." + "store"`) ve üst paketi dizeyle alıp
+öznitelikle inmek (`import_module("football_edge.live").store`,
+`sys.modules["football_edge.live"].store`) ya da dunder üzerinden inmek
+(`football_edge.live.__dict__["store"]`) (1)'de görünmez; (2) bunları yalnız import anında çalışan
+kodda yakalar — fonksiyon içindeki bu biçimler iki katmanda da görünmez.
 """
 
 from __future__ import annotations
@@ -71,7 +75,18 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
+def _as_value(node: ast.Name | ast.Attribute, heads: set[ast.AST]) -> str | None:
+    """Zincirin SON düğümü (başka bir `.x`in başı değil) yasaklı modülün üst paketiyse o modül:
+    paket bir değere dönüşür (`m = football_edge.live`, `getattr(football_edge, "live")`) ve
+    sonraki erişim yasaklı adı hiç geçirmez (17h)."""
+    if node in heads or not isinstance(node.ctx, ast.Load):
+        return None
+    dotted = _dotted(node)
+    return None if dotted is None else _parent(dotted)
+
+
 def _findings(tree: ast.AST, module: str) -> Iterator[tuple[int, str]]:
+    heads: set[ast.AST] = {node.value for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -93,6 +108,8 @@ def _findings(tree: ast.AST, module: str) -> Iterator[tuple[int, str]]:
                     yield node.lineno, f"{form} → {hit} üst paketi bağlanıyor"
         elif isinstance(node, ast.Attribute) and _dotted(node) in FORBIDDEN:
             yield node.lineno, f"{_dotted(node)} erişimi"
+        elif isinstance(node, ast.Name | ast.Attribute) and (hit := _as_value(node, heads)):
+            yield node.lineno, f"{_dotted(node)} değer olarak → {hit} üst paketi"
         elif isinstance(node, ast.Constant) and node.value in FORBIDDEN:
             yield node.lineno, f"{node.value!r} dizesi"
 
@@ -144,6 +161,12 @@ REFERENCES = [
     "import football_edge.backtest",
     "from .. import live",
     "from football_edge.live import *",
+    # 17h: bağlanan kök paketten yasaklı modülün üst paketi bir DEĞER olur (yerel ada, `getattr`a);
+    # sonraki erişim `m.store` adı hiç geçirmez.
+    "import football_edge.features.types\nm = football_edge.live\nm.store.load_quotes",
+    "import football_edge.features.types\nm = football_edge\nm.history.holdout",
+    'import football_edge.features.types\ngetattr(football_edge.backtest, "final_eval").run',
+    'import football_edge.features.types\ngetattr(football_edge, "live").store',
 ]
 MENTIONS = [
     "from football_edge import features",
@@ -158,6 +181,9 @@ MENTIONS = [
     "# from football_edge.live.store import load_quotes",
     "storefront = football_edge.live.storefront",
     'LOGGER.info("football_edge.history.sync çağrılmadı")',
+    # Zincir izinli bir modülde biter: ara düğüm (`football_edge.live`) değer değildir.
+    "import football_edge.live.context\nctx = football_edge.live.context",
+    "import football_edge.features.types\nt = football_edge.features.types.FeatureRow",
 ]
 
 
