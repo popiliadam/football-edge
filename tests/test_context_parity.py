@@ -4,6 +4,7 @@ satırı biçiminde taşır (The Odds API adları, kitap başına fiyat, birden 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -179,17 +180,29 @@ def test_the_live_builder_reproduces_the_historical_context_and_stream(
 
 @pytest.mark.leakage
 def test_the_same_strategy_predicts_the_same_from_both_builders() -> None:
-    """E2: Elo ve Dixon-Coles'a iki kurucudan gelen girdi aynı tahmini verir."""
+    """E2: Elo ve Dixon-Coles'a iki kurucudan gelen girdi aynı tahmini verir — bayt eşit.
+
+    Her ayak TAZE nesneyle kurulur: replay'den kalan nesneyle canlı tahmin DC memo'sunun isabeti
+    olur, canlı akışı hiç okumaz (akış boş, gol çevrik ya da kesik olsa da yeşildi; T6 yan bulgusu).
+    İki ayak aynı başlangıç koşulunda ölçülür, tolerans gevşetilmez: tam replay her karar gününde
+    fit eder ve önceki günün fit'ini optimizer başlangıcı yapar (`memo.latest`, sıcak başlangıç);
+    canlı kurucu tek fit yapar (soğuk). Bu fark hedefte ~3,19e-06'dır ve `approx`ı aşar.
+    `active_from=` hedef günü replay'de hedeften önce fit bırakmaz → replay'in ilk fit'i hedefin
+    fit'idir, iki ayak da soğuk başlar. Sıcak/soğuk eşliği bu testin konusu değildir."""
     index = _targets()[40]
-    strategies = (EloModel(), DixonColesStrategy(config=DCConfig(min_matches=40)))
-    for strategy in strategies:
-        replayed = {p.match_index: p.probs for p in replay(GROUP, strategy).predictions}
-        (decision,) = _batch(GROUP[index]).decisions
-        state = strategy
+    target = GROUP[index]
+    (decision,) = _batch(target).decisions
+    makers: tuple[Callable[[], EloModel | DixonColesStrategy], ...] = (
+        EloModel,
+        lambda: DixonColesStrategy(config=DCConfig(min_matches=40), active_from=target.date),
+    )
+    for make in makers:
+        replayed = {p.match_index: p.probs for p in replay(GROUP, make()).predictions}
+        state = make()
         for result in decision.results:
-            state = state.observe(result)  # type: ignore[assignment]
+            state = state.observe(result)
         live = state.predict(replace(decision.context, match_index=index))
-        assert live is not None and live.probs == pytest.approx(replayed[index])
+        assert live is not None and live.probs == replayed[index]
 
 
 def test_snapshots_after_the_decision_and_incomplete_books_are_ignored() -> None:
