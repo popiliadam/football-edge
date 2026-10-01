@@ -103,18 +103,49 @@ def first_token(text: str) -> str:
     return (text.split() or [""])[0]
 
 
-def parse_headers(text: str) -> dict[str, dict[str, str]]:
-    blocks: dict[str, dict[str, str]] = {}
-    current: dict[str, str] | None = None
+def header_pairs(text: str) -> dict[str, list[tuple[str, str]]]:
+    """`_headers` → yol → (küçük harfli ad, değer) listesi, dosyadaki sırayla (DEFERRED 21d).
+
+    Netlify belgesi (docs.netlify.com/manage/routing/headers): `#` ile başlayan satır yorumdur
+    (girintili olanı da); adlar büyük/küçük harfe duyarsızdır. Aynı yolun blokları birleşir.
+    Eşi: TS `web/scripts/checkout/checks.ts::parseHeaders`; ortak fixture `web/fixtures/`.
+    """
+    blocks: dict[str, list[tuple[str, str]]] = {}
+    current: list[tuple[str, str]] | None = None
     for line in text.splitlines():
-        if not line.strip():
+        if not line.strip() or line.strip().startswith("#"):
             continue
         if not line[0].isspace():
-            current = blocks.setdefault(line.strip(), {})
+            current = blocks.setdefault(line.strip(), [])
         elif current is not None:
             name, _, value = line.strip().partition(":")
-            current[name.strip().lower()] = value.strip()
+            current.append((name.strip().lower(), value.strip()))
     return blocks
+
+
+def parse_headers(text: str) -> dict[str, dict[str, str]]:
+    """Yol → ad → Netlify'ın SUNDUĞU değer: aynı adın değerleri sırayla `,` ile birleşir (belge;
+    RFC 7230 §3.2.2). Canlıda ölçülmedi; `httpx` ayrı gelen satırları `", "` ile birleştirir, o
+    hâlde CSP karşılaştırması kırmızıya (güvenli yöne) düşer. Yinelenen ad zaten
+    `repeated_header_findings`te kırmızıdır; birleşme yalnız sözleşmeyi Netlify'a bağlar."""
+    served: dict[str, dict[str, str]] = {}
+    for path, pairs in header_pairs(text).items():
+        values: dict[str, list[str]] = {}
+        for name, value in pairs:
+            values.setdefault(name, []).append(value)
+        served[path] = {name: ",".join(each) for name, each in values.items()}
+    return served
+
+
+def repeated_header_findings(text: str) -> list[str]:
+    """Bir blokta (aynı yolun birleşen blokları dahil) iki kez geçen başlık adı: birleşik değer
+    (ör. `noindex,noindex`) tam eşitlik yapan bekçiyi sessizce atlatırdı (21d, inceleme I1)."""
+    findings: list[str] = []
+    for path, pairs in header_pairs(text).items():
+        names = [name for name, _ in pairs]
+        repeated = sorted({name for name in names if names.count(name) > 1})
+        findings += [f"_headers: {path} bloğunda yinelenen başlık {name}" for name in repeated]
+    return findings
 
 
 def samples(blocks: Mapping[str, Mapping[str, str]]) -> list[str]:
@@ -131,7 +162,9 @@ def live_findings(base: str, out: Path, export: Path, get: Get, head: Head) -> l
         findings.append(f"canlı /data/snapshot.sha256 okunamadı (HTTP {status})")
     elif first_token(body) != built:
         findings.append("canlı /data/snapshot.sha256 derlenmiş olanla eşit değil")
-    blocks = parse_headers((out / "_headers").read_text(encoding="utf-8"))
+    text = (out / "_headers").read_text(encoding="utf-8")
+    findings += repeated_header_findings(text)
+    blocks = parse_headers(text)
     noindex = blocks.get("/*", {}).get("x-robots-tag") == "noindex"
     for path in samples(blocks):
         status, headers = head(f"{base}{path}")

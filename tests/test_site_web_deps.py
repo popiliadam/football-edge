@@ -283,3 +283,70 @@ def test_vitest_include_root_stays_web() -> None:
 def test_build_output_never_enters_git(path: str) -> None:
     result = subprocess.run(["git", "check-ignore", "-q", path], cwd=REPO, check=False)
     assert result.returncode == 0, f"{path} gitignore'da değil"
+
+
+# DEFERRED 21c: Next'in iç modül yolu (`next/dist/...`) genel API değildir; sürümler arasında
+# haber vermeden taşınır. Web kaynakları yalnız Next'in genel girişlerini içe aktarır.
+# Düzeltme turu 1 (inceleme M2): import biçimine değil, yorum olmayan satırdaki `next/dist` dizge
+# sabitine bakılır (`require.resolve`, `vi.mock`, şablon dizgesi, bölünmüş import da yakalanır).
+NEXT_INTERNAL = re.compile(r"""["'`]next/dist(?:/|["'`])""")
+COMMENT_LINE = re.compile(r"^\s*(?://|/?\*|\{/\*)")
+WEB_SOURCE = re.compile(r"\.(?:[cm]?[jt]sx?)$")
+
+
+def next_internal_imports(text: str) -> list[str]:
+    """Metinde Next'in iç yoluna giden dizge sabiti taşıyan (yorum olmayan) satırlar."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if NEXT_INTERNAL.search(line) and not COMMENT_LINE.match(line)
+    ]
+
+
+def test_next_internal_import_detector() -> None:
+    hits = [
+        'import { X } from "next/dist/client/components/a";',
+        "import x from 'next/dist/a';",
+        'const m = await import("next/dist/a");',
+        'require("next/dist/a")',
+        'import "next/dist/a";',
+        'require.resolve("next/dist/a")',
+        'vi.mock("next/dist/a")',
+        "import(`next/dist/a`)",
+        'import X from\n  "next/dist/a"',
+        'import X from "next/dist"',
+    ]
+    for text in hits:
+        assert next_internal_imports(text) != [], text
+    misses = [
+        'import type { NextConfig } from "next";',
+        'import { notFound } from "next/navigation";',
+        'import Link from "next/link";',
+        "// Next 16.3.6 `next/dist/client/components/builtin/global-not-found.js`",
+        ' * "next/dist/a" belgede',
+        '{/* "next/dist/a" */}',
+        'import x from "@vendor/next/dist/a";',
+        'import x from "./next/dist/a";',
+    ]
+    for text in misses:
+        assert next_internal_imports(text) == [], text
+
+
+def test_web_sources_do_not_import_next_internals() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "web"], cwd=REPO, check=True, capture_output=True, text=True
+    ).stdout.split()
+    sources = [path for path in tracked if WEB_SOURCE.search(path)]
+    # İnceleme M1: kapsam pozitif olarak sınanır (.tsx, .ts kökte ve betiklerde).
+    for path in (
+        "web/src/app/global-not-found.tsx",
+        "web/next.config.ts",
+        "web/scripts/check-out.ts",
+    ):
+        assert path in sources, f"bekçi kapsamı {path}'i dışlıyor"
+    found = {
+        path: hits
+        for path in sources
+        if (hits := next_internal_imports((REPO / path).read_text(encoding="utf-8")))
+    }
+    assert not found, f"Next'in iç yolu içe aktarılıyor: {found}"
