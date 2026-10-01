@@ -160,6 +160,9 @@ def test_calibrate_without_a_key_exits_by_name_before_touching_the_database(
 
 
 # ── Kaynak kuralı: `TypeSafeJev` yalnız `BudgetedJev` içinden çağrılır ──────────────────────
+# Takma ad (`TypeSafeJev as X`) de çağrı yeridir; sarmalayıcı, ilk parametresini sarmadan önce
+# çıplak kullanamaz (17h). Bilinen sınır (kazara girişi durdurur, bilinçli kaçışı değil): dize
+# ile erişim (`getattr(jev, "TypeSafeJev")`, `globals()[…]`) görünmez.
 
 
 def _name(node: ast.expr) -> str | None:
@@ -171,20 +174,22 @@ def _name(node: ast.expr) -> str | None:
 
 
 def _wrappers(tree: ast.Module) -> frozenset[str]:
-    """`BudgetedJev` ve ilk parametresini `BudgetedJev`in ilk argümanı yapan modül fonksiyonları."""
+    """`BudgetedJev` ve ilk parametresinin HER okunuşu `BudgetedJev`in ilk argümanı olan modül
+    fonksiyonları: sarmadan önce tek bir çıplak kullanım (`jev.ask_choice(…)`) o çağrıyı tavanın
+    dışında bırakır ve fonksiyon sarmalayıcı sayılmaz (17h)."""
     found = {"BudgetedJev"}
+    parents = _parents(tree)
+    budgeted = frozenset({"BudgetedJev"})
     for func in ast.walk(tree):
         if not isinstance(func, ast.FunctionDef) or not func.args.args:
             continue
         first = func.args.args[0].arg
-        if any(
-            isinstance(call, ast.Call)
-            and _name(call.func) == "BudgetedJev"
-            and call.args
-            and isinstance(call.args[0], ast.Name)
-            and call.args[0].id == first
-            for call in ast.walk(func)
-        ):
+        uses = [
+            node
+            for node in ast.walk(func)
+            if isinstance(node, ast.Name) and node.id == first and isinstance(node.ctx, ast.Load)
+        ]
+        if uses and all(_wrapped(use, parents, budgeted) for use in uses):
             found.add(func.name)
     return frozenset(found)
 
@@ -250,12 +255,34 @@ def _imported_budget_wrappers(tree: ast.Module) -> frozenset[str]:
     return frozenset((offered & imported) - local)
 
 
+def _client_names(tree: ast.Module) -> frozenset[str]:
+    """`TypeSafeJev` ve dosyada onu bağlayan her takma ad (`from … import TypeSafeJev as X`)."""
+    return frozenset(
+        {"TypeSafeJev"}
+        | {
+            alias.asname
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name == "TypeSafeJev" and alias.asname is not None
+        }
+    )
+
+
+def _is_client(node: ast.Name | ast.Attribute, names: frozenset[str]) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in names
+    return node.attr == "TypeSafeJev"
+
+
 def _sites_in(tree: ast.Module, name: str) -> Iterator[tuple[str, bool]]:
-    """(yer, sarılı mı) — `TypeSafeJev`e her başvuru; çağrı olmayan (fabrika) sarılı sayılmaz."""
+    """(yer, sarılı mı) — `TypeSafeJev`e (takma adıyla da) her başvuru; çağrı olmayan (fabrika)
+    sarılı sayılmaz."""
     parents = _parents(tree)
     wrappers = _wrappers(tree) | _imported_budget_wrappers(tree)
+    clients = _client_names(tree)
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Name | ast.Attribute) and _name(node) == "TypeSafeJev"):
+        if not (isinstance(node, ast.Name | ast.Attribute) and _is_client(node, clients)):
             continue
         where = f"{name}:{node.lineno}"
         call = parents.get(node)
@@ -308,3 +335,58 @@ def test_a_budget_wrapper_name_counts_only_when_imported_from_the_budget_module(
     """Bütçe modülünün sarmalayıcı ADI yalnız oradan import edildiğinde güvenilir: aynı adla
     yerelde tanımlanmış, SARMAYAN bir fonksiyon tavanı atlatırdı (son inceleme M-1)."""
     assert [ok for _, ok in _sites_in(ast.parse(source), "m.py")] == [wrapped]
+
+
+# 17h: takma adla import ve sarmadan önce çıplak kullanım (her biri sentetik ağaçta adıyla).
+_ALIASED_BARE = """
+from football_edge.jev import TypeSafeJev as Istemci
+
+def main():
+    return Istemci().ask_choice("soru", ["a", "b"])
+"""
+_ALIASED_WRAPPED = """
+from football_edge.jev import TypeSafeJev as Istemci
+from football_edge.jev_budget import budgeted_jev
+
+def main(conn):
+    return budgeted_jev(Istemci(), conn, clock=None)
+"""
+_BOUND_BARE_FIRST = """
+from football_edge.jev import TypeSafeJev
+from football_edge.jev_budget import budgeted_jev
+
+def main(conn):
+    jev = TypeSafeJev()
+    jev.ask_choice("soru", ["a", "b"])
+    return budgeted_jev(jev, conn, clock=None)
+"""
+_WRAPPER_BARE_FIRST = """
+from football_edge.jev import TypeSafeJev
+
+def sar(jev, defter):
+    jev.ask_choice("soru", ["a", "b"])
+    return BudgetedJev(jev, defter, cap_usd=25.0, estimate_usd=0.01, clock=None)
+
+def main(defter):
+    return sar(TypeSafeJev(), defter)
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (_ALIASED_BARE, [("m.py:5", False)]),
+        (_ALIASED_WRAPPED, [("m.py:6", True)]),
+        (_BOUND_BARE_FIRST, [("m.py:6", False)]),
+        (_WRAPPER_BARE_FIRST, [("m.py:9", False)]),
+    ],
+    ids=["takma-ad-çıplak", "takma-ad-sarılı", "bağlı-önce-çıplak", "sarmalayıcı-önce-çıplak"],
+)
+def test_an_alias_or_a_bare_use_before_wrapping_is_red(
+    source: str, expected: list[tuple[str, bool]]
+) -> None:
+    """`TypeSafeJev as X` aynı sınıftır: `X()` de bir çağrı yeridir. Sarmalayıcı sayılan yerel
+    fonksiyon ilk parametresini `BudgetedJev`e vermeden ÖNCE çıplak çağırırsa o çağrı tavandan
+    geçmez: parametrenin HER okunuşu `BudgetedJev`in ilk argümanı olmalı (`x = TypeSafeJev()`
+    bağının kuralıyla aynı)."""
+    assert list(_sites_in(ast.parse(source), "m.py")) == expected
