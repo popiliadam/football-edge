@@ -46,9 +46,11 @@ def _index_of(steps: list[dict[str, Any]], needle: str, key: str = "run") -> int
 
 
 def _logical_lines(script: str) -> list[str]:
-    """Kabuk betiğinin MANTIKSAL satırları: `\\` ile biten satır sonrakiyle birleştirilir (kabuk
-    da öyle okur). Satır satır arayan bekçi bölünmüş komutun yarısını görür (21a, 21k)."""
-    return re.sub(r"\\\n", " ", script).splitlines()
+    """Kabuk betiğinin MANTIKSAL satırları, bash'in okuduğu gibi: tek `\\` + satır sonu SİLİNİR
+    (kelime ortasında da — `pu\\⏎sh` = `push`); `\\\\` + satır sonu (kaçışlı ters bölü) satır
+    devamı değildir, dokunulmaz. Satır satır arayan bekçi bölünmüş komutun yarısını görür
+    (21a, 21k; N-8)."""
+    return re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", script).splitlines()
 
 
 def _triggers(path: Path) -> dict[str, Any]:

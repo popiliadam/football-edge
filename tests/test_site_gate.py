@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import time
 from pathlib import Path
 
 import pytest
@@ -67,10 +68,15 @@ def test_the_site_database_is_local_and_its_password_is_generated_and_masked() -
 
 
 # `docker` ile alt komut arasında genel bayraklar olabilir (`--log-level error`, `-H unix://…`,
-# `-D`) — N-6. Bayrak en çok bir değer alır; değersiz bayrakta regex geri izler.
-DOCKER = r"\bdocker(?:\s+--?[^\s=]+(?:=\S+|\s+(?!-)\S+)?)*\s+(?:container\s+)?"
+# `-D`) — N-6. Bayrak en çok bir değer alır; değersiz bayrakta regex geri izler. `(?!-)`:
+# `--x` tek yoldan eşlenir, yoksa arama bayrak sayısında üstel olurdu (N-10).
+DOCKER = r"\bdocker(?:\s+-{1,2}(?!-)[^\s=]+(?:=\S+|\s+(?!-)\S+)?)*\s+(?:container\s+)?"
 INSPECT = re.compile(DOCKER + r"inspect\b")
 LOGS = re.compile(DOCKER + r"logs\b")
+# Kaba seçim (N-11): satırda `docker` ve `inspect` sözcükleri, sırasız. Tırnaklı ya da ANSI-C
+# alt komut (`docker "inspect"`, `docker $'inspect'`) ham regex'ten kaçar ama bu kuraldan kaçmaz.
+DOCKER_WORD = re.compile(r"\bdocker\b")
+INSPECT_WORD = re.compile(r"\binspect\b")
 
 
 # Şablonun TEK izinli eylem biçimi (gerçek beyaz liste, eylem başına tam eşleşme):
@@ -143,11 +149,20 @@ def _inspect_leaks(line: str) -> list[str]:
     inspects = [command for command in commands if INSPECT.search(" ".join(command))]
     if len(inspects) != len(INSPECT.findall(line)):
         return ["inspect komutu kabuk düzeyinde okunamıyor (tırnak ya da `$(…)` içinde)"]
+    if not inspects and _coarse_inspect(line):
+        return ["satırda `docker` ve `inspect` var ama inspect komutu okunamıyor"]
     return [leak for command in inspects for leak in _template_leaks(_templates(command))]
 
 
+def _coarse_inspect(line: str) -> bool:
+    return bool(DOCKER_WORD.search(line) and INSPECT_WORD.search(line))
+
+
 def _inspect_lines(script: str) -> list[str]:
-    return [line for line in _logical_lines(script) if INSPECT.search(line)]
+    """Denetlenecek satırlar: ham `INSPECT` regex'i YA DA kaba sözcük kuralı (N-11)."""
+    return [
+        line for line in _logical_lines(script) if INSPECT.search(line) or _coarse_inspect(line)
+    ]
 
 
 def test_ci_never_prints_the_container_log() -> None:
@@ -195,6 +210,13 @@ def test_ci_never_prints_the_container_log() -> None:
         # N-6: genel docker bayrağı inspect'ten önce.
         "docker --log-level error inspect fe-site-db",
         "docker -H unix:///var/run/docker.sock container inspect fe-site-db",
+        # Düzeltme turu 3 (N-9): sızıntı İLK şablonda — "yalnız sonuncu (kazanan)" da ölür.
+        "docker inspect -f '{{json .}}' -f '{{.State.Status}}' fe-site-db",
+        # N-8, N-11: kelime ortasında satır devamı; tırnaklı ya da ANSI-C alt komut.
+        "docker ins\\\npect fe-site-db",
+        'docker "inspect" fe-site-db',
+        '"docker" inspect fe-site-db',
+        "docker $'inspect' fe-site-db",
     ],
     ids=[
         "ciplak",
@@ -221,6 +243,11 @@ def test_ci_never_prints_the_container_log() -> None:
         "f-esittir-sonra-f",
         "genel-bayrak-log-level",
         "genel-bayrak-H",
+        "ilk-sablon-sizinti",
+        "kelime-ortasi-devam",
+        "tirnakli-alt-komut",
+        "tirnakli-docker",
+        "ansi-c-alt-komut",
     ],
 )
 def test_the_inspect_guard_rejects_any_template_beyond_state_fields(run: str) -> None:
@@ -302,3 +329,13 @@ def test_the_end_to_end_directory_is_emptied_before_the_step_without_deleting() 
     for name in ("snapshot.json", "snapshot.sha256", "run-id"):
         assert f': > "$SITE_E2E_DIR/{name}"' in block
     assert "rm " not in block
+
+
+def test_the_docker_flag_pattern_is_linear_in_the_number_of_flags() -> None:
+    """N-10: `--?[^\\s=]+` `--x`i iki yoldan eşleyince arama bayrak sayısında üstel geri izler
+    (n=22'de ~1 sn). Ayrık bayrak kalıbıyla 24 bayrak anında taranır."""
+    line = "docker " + " ".join(f"--b{index}" for index in range(24)) + " ps"
+    started = time.perf_counter()
+
+    assert INSPECT.search(line) is None
+    assert time.perf_counter() - started < 1.0

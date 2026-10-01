@@ -199,7 +199,17 @@ SCAN = "check_secrets.sh"
 # Değer alan genel git seçenekleri: alt komut değerden SONRA gelir (`git -C alt push`,
 # `git -c "user.name=fe bot" push`). `--git-dir=x` gibi tek parçalı biçim tek token'dır.
 GIT_VALUE_OPTIONS = frozenset(
-    {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
+    {
+        "-c",
+        "-C",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+        "--super-prefix",
+        "--config-env",
+        # git.c `handle_options`: `--attr-source <ağaç>` değeri sonraki argv'den alır (N-12).
+        "--attr-source",
+    }
 )
 # Durum fonksiyonları. GitHub, `if:`te HERHANGİ biri geçiyorsa örtük `success() &&`i eklemez
 # ("A default status check of success() is applied unless you include one of these functions"):
@@ -209,6 +219,11 @@ STATUS_FUNCTION = re.compile(r"\b(?:success|always|cancelled|failure)\s*\(\s*\)"
 # BASE'in push regex'i (oturum 10): ham metinde `git [-c x]… push`; tırnaklı dizeyi de görür
 # (`bash -c 'git push'`, `eval`, `ssh host '… git push'`). Kabuk okumasıyla BİRLEŞİMİ alınır.
 BASE_GIT_PUSH = re.compile(r"\bgit\b(?:\s+-c\s+\S+)*\s+push\b")
+# Kaba kural (N-7): aynı mantıksal satırda `git` ve `push` sözcükleri, sırasız. Kabuk okumasının
+# çözemediği biçimleri (`"$(git -c "a b" push)"` iç içe tırnağı, `$'push'`, takma ad, `$alt`,
+# `xargs`) kırmızı verir; bedeli `git config push.default` gibi gürültüdür — kabul.
+GIT_WORD = re.compile(r"\bgit\b")
+PUSH_WORD = re.compile(r"\bpush\b")
 
 
 def _git_subcommands(line: str) -> list[str]:
@@ -247,12 +262,13 @@ def _git_subcommands(line: str) -> list[str]:
 def _pushes(step: dict[str, Any]) -> bool:
     """Adımın betiği `git … push` koşuyor mu. Bekçi eşleştirmeden ÖNCE hiçbir metni atmaz
     (controller kararı, düzeltme turu 2): BASE regex'i HAM betiğe uygulanır — yorum dâhil,
-    BASE'in kendisi gibi — ve kabuk okumasıyla (mantıksal satırlar, `\\` devamı birleşik)
-    birleşir. Kabuk okuması algı EKLER, hiçbir zaman çıkarmaz. Gürültü kırmızıdır ve kabul;
-    sessizlik değil."""
+    BASE'in kendisi gibi — ve iki katmanla birleşir: mantıksal satırda sırasız `git`+`push`
+    sözcükleri (kaba kural, N-7) ve kabuk okuması (`\\` devamı birleşik). Katmanlar algı
+    EKLER, hiçbir zaman çıkarmaz. Gürültü kırmızıdır ve kabul; sessizlik değil."""
     run = str(step.get("run", ""))
     return BASE_GIT_PUSH.search(run) is not None or any(
-        "push" in _git_subcommands(line) for line in _logical_lines(run)
+        (GIT_WORD.search(line) and PUSH_WORD.search(line)) or "push" in _git_subcommands(line)
+        for line in _logical_lines(run)
     )
 
 
@@ -503,6 +519,20 @@ ORDER_RED_R1 = {
     "sh-c-ters-tirnakli": _one({"run": 'sh -c "git --no-pager push origin `cat ref`"'}, SCAN_STEP),
     "kelime-ici-diyez": _one({"run": "n=${#dosyalar[@]}; git -C site push"}, SCAN_STEP),
     "url-diyez": _one({"run": "curl -s https://x/a#b && git -C site push"}, SCAN_STEP),
+    # Düzeltme turu 3 (N-7): `"$(…)"` içinde iç içe çift tırnak — shlex dış tırnağı kapanmış sayar.
+    "ikame-ic-tirnak-c": _one(
+        {"run": 'cikti="$(git -c "user.name=fe bot" push origin HEAD 2>&1)"'}, SCAN_STEP
+    ),
+    "ikame-ic-tirnak-C": _one({"run": 'cikti="$(git -C "alt dizin" push 2>&1)"'}, SCAN_STEP),
+    # N-8: bash `\⏎`yi SİLER (kelime ortasında da); `\\⏎` satır devamı değildir.
+    "kelime-ortasi-devam": _one({"run": "git -C site pu\\\nsh origin HEAD"}, SCAN_STEP),
+    "kacisli-ters-bolu": _one({"run": "echo yol\\\\\ngit -C site push"}, SCAN_STEP),
+    # N-12/N-13: ANSI-C tırnağı, `--attr-source <ağaç>`, takma ad, değişkende alt komut, xargs.
+    "ansi-c-tirnak": _one({"run": "git -C site $'push' origin HEAD"}, SCAN_STEP),
+    "attr-source": _one({"run": "git --attr-source HEAD push origin HEAD"}, SCAN_STEP),
+    "takma-ad": _one({"run": "git -c alias.yolla=push yolla origin HEAD"}, SCAN_STEP),
+    "degiskende-alt-komut": _one({"run": "alt=push; git -C site $alt origin HEAD"}, SCAN_STEP),
+    "xargs-ile": _one({"run": "echo push | xargs git -C site"}, SCAN_STEP),
     # I-3: taramasız bir işi beklemek korumaz.
     "needs-taramasiz-is": {
         "sentetik.yml": {
@@ -681,3 +711,47 @@ def test_push_detection_covers_everything_the_base_regex_saw(run: str) -> None:
     `atama-icinde` ve `yorum` push değildir: birleşimin bedeli olan gürültü, sessiz kaçış değil."""
     assert BASE_GIT_PUSH.search(run), "vaka BASE'in gördüğü biçim değil — kurgu bayat"
     assert _pushes({"run": run})
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        'git -c "user.name=fe bot" push origin HEAD',
+        "git -C alt push",
+        'cikti="$(git -C alt push 2>&1)"',
+        'cikti="`git -C alt push`"',
+        "bash -c 'git -C alt push'",
+        'bash -c "git -C site push origin $(git rev-parse HEAD)"',
+        'sh -c "git --no-pager push origin `cat ref`"',
+        "n=${#dosyalar[@]}; git -C site push",
+        "curl -s https://x/a#b && git -C site push",
+        "# not \\\ngit -C site push",
+        "git --attr-source HEAD push origin HEAD",
+        "git -C site pu\\\nsh origin HEAD",
+        "echo yol\\\\\ngit -C site push",
+        "gi''t -C site pu\"\"sh",
+        'git -C alt push "yarim',
+    ],
+    ids=[
+        "c-tirnakli-deger",
+        "C-dizin",
+        "komut-ikamesi",
+        "ters-tirnak",
+        "bash-c-git-C",
+        "bash-c-ikameli",
+        "sh-c-ters-tirnakli",
+        "kelime-ici-diyez",
+        "url-diyez",
+        "yorum-devami-C",
+        "attr-source",
+        "kelime-ortasi-devam",
+        "kacisli-ters-bolu",
+        "tirnakla-bolunmus-sozcuk",
+        "kapanmamis-tirnak",
+    ],
+)
+def test_the_shell_reading_alone_sees_each_shape(run: str) -> None:
+    """Kabuk okuması tek başına (BASE ve kaba kural OLMADAN) bu biçimleri görür: birleşimin her
+    katmanı ayrı pinlidir — kaba kural katmanın bozulmasını örtmesin. `tirnakla-bolunmus-sozcuk`
+    (`gi''t … pu""sh`) yalnız bu katmanın gördüğü biçimdir."""
+    assert any("push" in _git_subcommands(line) for line in _logical_lines(run))
