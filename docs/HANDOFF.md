@@ -1,11 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-09-24 (oturum 9 sonu) · **Durum:** Dalga A + **Faz 6 İz B (B-1 okuma katmanı + B-2 web
-yüzeyi) `main`de** (`7033083`) — spec ve planlar kullanıcı onayı bekler (§0.7/10); **0014 canlıya UYGULANMADI**, deploy
-BAĞLI DEĞİL · **0013 API rolleri kilidi CANLIDA** (2026-09-23 21:36 UTC) · **FIFA milli arası: kulüp maçı
-2026-10-09/10'a kadar yok** (§0.3) · Plan 2 en erken 2026-10-07 · holdout açılmadı · kapı yerelde **16 PASS + adıyla 3
-SKIP** (`site-db`, `site-derleme/e2e`, `zincir`), CI'da 17 PASS + `SKIP: zincir` · kurulum `uv sync --extra scrape` +
-**Node 24.21.0 / pnpm 10.34.5** (`nvm use 24.21.0`; Node 22 ile `site-kurulum` adıyla FAIL)
+**Son güncelleme:** 2026-10-01 (oturum 9 kapanışı, taze oturum için) · **Durum:** Dalga A + Faz 6 İz B (B-1 okuma
+katmanı + B-2 web yüzeyi) `main`de, CI yeşil · **0013 CANLIDA**, **0014 yalnız depoda**, deploy BAĞLI DEĞİL ·
+milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-07** · holdout açılmadı ·
+**kullanıcının yapacakları: §0.K (tam liste)** · asistanın kullanıcısız işleri: §0.A · izlenecekler: §0.İ
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -15,7 +13,282 @@ SKIP** (`site-db`, `site-derleme/e2e`, `zincir`), CI'da 17 PASS + `SKIP: zincir`
 
 ---
 
-## 0. Sonraki oturum — buradan başla (2026-09-23, Faz 4 Plan 1 sonunda)
+## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı)
+
+Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçedir. Kullanıcının yapacakları **§0.K**'de
+(tek yer, tam liste). Asistanın kullanıcısız yapacakları **§0.A**'da. Disiplin **§0.D**'de.
+
+### 0.0 Başlatma istemi (taze oturuma yapıştır)
+> "`docs/HANDOFF.md` §0'dan devam et. Önce §0.İ izlenecekleri tarihine göre kontrol et (salt okuma). Sonra §0.A'daki
+> kullanıcısız işleri dalga dalga yürüt — ayrık dosya kümeli işler paralel ajanlarla, her ajan kendi scratch alt
+> dizininde, her dalga bağımsız inceleme ve tam kapıdan geçer. §0.K'deki kullanıcı işlerini SORMA; kullanıcı onları
+> en sonda toplu yapacak. 2026-10-07 veya sonrasıysa §0.A/1 (Plan 2 başlangıç kontrol listesi) de yürütülür."
+
+### 0.1 Durum (ölçüldü 2026-10-01, salt okuma)
+- **Dal:** `main` = `origin/main` = `aa73c0c` (son insan commit'i `3df5599`; sonrası bot zincir başı/robots commit'leri).
+  Açık worktree'ler ve birleşmiş yerel dallar duruyor (silme §0.K/S).
+- **CI:** son push (`3df5599`) yeşil — 17 PASS + `SKIP: zincir`, ~3,3 dk; `site-db` (Postgres kabı) ve 6 site adımı CI'da koşuyor.
+- **Zamanlanmış işler (son 7 gün hepsi yeşil):** `seal` 15 dk'da bir, `snapshot` 06:22, `collect-news` 2 saatte bir,
+  `collect-daily` 07:10, `sources-audit` günlük (robots yeniden doğrulandı 10-01), `shadow` (09-25, 09-29), `history`
+  (09-25, 09-29; selftest K1–K4 GEÇTİ). 0013'ten sonra hiçbir işte yetki hatası yok.
+- **Gölge:** 09-25 ve 09-29 `karar 0 · yazılan 0 · eşlenemeyen 0` — milli ara, beklenen.
+- **Veri:** `news_items` 1.679 (hepsi TR/ajansspor; ilk 09-23 canlı, geri doldurma 09-04'ten); `odds_snapshots` 5.763
+  satır, son satır 09-20 (milli ara — arıza değil); `matches`te ileri tarihli maç yok (fikstürler ~10-02'de 7 günlük
+  ufka girer); `model_predictions` 0; `jev_spend` 0 (Jev hiç çağrılmadı).
+- **Canlı veritabanı:** 0013 (API rolleri kilidi) **CANLIDA** (2026-09-23 21:36 UTC). **0014 (site okuma katmanı)
+  YALNIZ depoda** — canlıya uygulanmadı (§0.K/3). Supabase advisors: ERROR/WARN yok (INFO "RLS açık politika yok" kasıtlı).
+- **Kapı:** yerelde 16 PASS + adıyla 3 SKIP (`site-db`, `site-derleme/e2e`, `zincir`); DB bağlıyken `zincir` de PASS.
+  Komut: `export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 24.21.0; T=$(mktemp -d); TMPDIR=$T ./verify.sh > "$T/verify.log" 2>&1`
+  — sonuç LOG'dan; kurulum `uv sync --frozen --extra scrape`. Node 22 ile `site-kurulum` adıyla FAIL (kasıtlı).
+  Secret'lı kabukta koşma: `env -u DATABASE_URL -u ODDS_API_KEY -u TYPESAFE_API_KEY …` (yalnız `zincir` için DB gerekir).
+- **Holdout:** açılmadı. Plan 2 en erken 2026-10-07.
+
+### 0.2 Oturum 9'da biten (2026-09-23/24) — hepsi bağımsız inceleme + bütün-dal incelemesi + CI'dan geçti
+- **Dalga A** (plan `docs/superpowers/plans/2026-09-23-oturum9-dalga-a.md`, defter
+  `.superpowers/sdd/2026-09-23-oturum9-dalga-a/progress.md`): T1 EN alan adı koşulları raporu · T2 erişim kapısı
+  R77b'ye göre (fetcher'lar yalnız `src/football_edge/scrape.py` tek geçidinde; doğrulama çözme/proxy/adı verilmiş
+  bot/Scrapling CLI bayrakları kırmızı) · T3 Scrapling adaptörü + TFF PFDK ayrıştırıcısı (`tff-pfdk` kapalı;
+  fixture'lar kırpılmış ve takma adlı) · T4 17n/17h/16k-b · T5 100 TR haber ön-etiketi (onay §0.K/5) · **T6 0013**.
+- **İz B** (spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md`; planlar
+  `docs/superpowers/plans/2026-09-24-faz6-iz-b-{1-okuma-katmani,2-web-yuzeyi}.md`; **faz belgesi
+  `docs/phases/06-site/HANDOFF.md`** — canlıya geçiş listesi, kapının ÖLÇMEDİKLERİ B-1 1–19 + B-2, hukuk C1–C11):
+  B-1 okuma katmanı (0014, dışa aktarıcı, `verify-snapshot`, `site.yml` build/deploy/live — yalnız elle tetiklenir,
+  CI `site-db`) · B-2 web yüzeyi (`web/` Next.js 16 statik, value önerisi YOK, varsayılan noindex, TASLAK hukuk,
+  CSP hash'leri, `check-out` çıktı denetleyicisi, `site_gate.sh`, yayın bekçileri).
+- **Oturumda bulunup kapatılan gerçek sorunlar:** 6 eski tabloda RLS yoktu ve `anon` yazabiliyordu (0013) · canlıda 51
+  maç içi oran satırı türetime girebilirdi · ger.1/aut.1 aynı adlı lig → kalıcı `site_slug` · secret taraması bulduğu
+  değeri public CI loguna basıyordu (mevcut tarama dahil) → yalnız `dosya:satır` · kapı pytest'i bağlantı hatasında
+  parola basabiliyordu → `--tb=short` bekçisi · deploy secret'ı npm koduyla aynı job'daydı → ayrı `deploy` job'ı.
+- **Asistanın oturumdaki hataları (tekrarlanmasın):** paralel ajanlara ayrı scratch dizini verilmedi → kanıtlar ezildi
+  (yeniden koşuldu); bir belge push'u yerel kapı kırmızıyken gitti (`;` zincir; neden yerel ekstra eksikliği, CI
+  yeşildi) → push artık `grep -q "KAPI YEŞİL" … && git push`.
+
+### 0.İ İzlenecekler (tarih sırasıyla — taze oturum her açılışta bakar)
+1. **~2026-10-02/03 06:22 UTC `snapshot`:** fikstürler 7 günlük ufka girer, `odds_snapshots`a satır yazılmaya başlar.
+   **Olası tek yanlış exit 19** (oranı geç açılan bir lig, ötekiler boşken; RUNBOOK §3.11) — sonraki yeşil tur kapatır.
+   **10-04'ten sonra hâlâ 19 ya da 0 satır → gerçek arıza**, RUNBOOK §3.11. `matches`te ileri tarihli maç görünmeli.
+2. **2026-10-07 (salı):** Plan 2 başlangıç kontrol listesi açılır (§0.A/1). `lag_b_p99` ölçülebilir (sync-news ≥ 2 hafta).
+3. **2026-10-09 (perşembe) / 10-10 (cuma):** ilk kulüp maçları (La Liga, Süper Lig 10-09; EPL 10-10). **İlk karar günlü
+   gölge turu 10-09 cuma 12:35 UTC** (`shadow.yml`): `gölge: karar N · yazılan M · eşlenemeyen U · bayat B`; **U > 0
+   ise** adlar aynı gün/lig/konum kuralıyla `config/history_aliases.yaml`a (TAHMİN EDİLMEZ). İlk mühür (`is_closing`)
+   satırları başlamadan ≤ 20 dk önce.
+4. **10-10/11 hafta sonu sonrası:** `live parity --since 2026-10-01` (salt okuma) — ned.1/bel.1'in ilk canlı maçları ve
+   yeni takma adlar.
+5. **İlk dolu salı gölge raporu en erken 2026-10-13** (gerçekçi 10-20; sonuç football-data haftalık senkronuna bağlı).
+6. **Odds API kredi tüketimi:** maçlar başlayınca ilk hafta ölçülür (§0.K/9 kararının girdisi).
+7. **Supabase advisors** ara sıra okunur (`get_advisors security`); 0013 sonrası beklenen yalnız INFO.
+
+### 0.A Asistanın kullanıcısız işleri (öncelik sırasıyla)
+1. **Plan 2 başlangıç kontrol listesi (≥ 2026-10-07)** — Faz 4 Plan 2 (Jev sinyali) yazılmadan önce:
+   - (a) **Arşiv kapsamı ölçümü (DEFERRED 17k):** GDELT DOC API yerel ağdan 429 → runner'da tek kullanımlık dal +
+     `workflow_dispatch`, T0c `step3_coverage.py 50 50` (~2.800 sorgu, ≥ 6 sn aralık, ~4,7 saat; betikler
+     `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/t0c/`). **DİKKAT:** `Matches.csv` holdout SONUÇLARI taşır —
+     dala YALNIZ sonuç sütunları çıkarılmış kopya (tarih/lig/takım) itilir; ham dosya public depoya ASLA girmez. ≥ %30
+     ise arşiv ayağı açılır; değilse spec §7.3 yalnız-canlı yolu. Uzak geçici dalın silinmesi kullanıcı onayı (§0.K/S).
+   - (b) `lag_b_p99`: yayıncı iddiası ↔ `first_seen_at` (sync-news ≥ 2 hafta, 10-07'den itibaren).
+   - (c) Gölge raporunun ilk dolu turları (§0.İ/3–5) → canlı ΔLL SD'si → güç yeniden hesabı (spec §7.3).
+   - (d) Plan 2 brief'lerine taşınacaklar: 17c–17e (T10), 17h kırmızı takım, 17n; `tier1` zamanlanırken exit 7 = "Jev
+     kesintisi" adıyla; Plan metni Task 9 Step 8'de `min(boolean)` değil `bool_and`.
+   - Plan 2'nin kullanıcıya bağlı kapıları: §0.K/4 (EN kaynağı), §0.K/5 (kalibrasyon onayı), §0.K/6 (ücretli Jev).
+2. **İsteğe bağlı küçük işler (K2/K3, kullanıcı girdisi yok):** DEFERRED 16g DC memo anahtarı tasarımı · DEFERRED §18–§20
+   açık satırları (ör. 18g(b) bozuk DSN'de libpq parola yankısı, 19a beklenmedik istisnada exit 1, 19b
+   `sources-audit`/`full-scan` secret taraması koşmuyor + seal job `continue-on-error`, 20a–20m B-2 küçükleri) ·
+   DEFERRED 11h (Scrapling adaptörü test boşlukları) · 17h (bekçi kaçışları).
+3. **İz B'de kullanıcısız kalan yok** — 0014'ün canlıya uygulanması, deploy, alan adı, hukuk hepsi §0.K'ye bağlı.
+   Kullanıcı §0.K'yi tamamlayınca asistan `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" listesini 1→6 yürütür.
+
+### 0.D Çalışma disiplini (oturum 9'un kanıtladıkları — öncekiler §0.eski bölümlerinde aynen geçerli)
+- Alt ajanlar Opus 5.5 high (`~/.claude/settings.json`); `model` parametresi verilmez. Haiku yok.
+- **Her dispatch:** "HİÇBİR ŞEY SİLME" · **kendine ait scratch alt dizini, görev önekli dosya adları** (paylaşılan
+  scratchpad/`/tmp` YASAK) · rapor dosyası + kısa son mesaj · holdout AÇMA · canlı DB'ye bağlanma/.env okuma yok
+  (gerekmedikçe) · kendi kap öneki (`scripts/sandbox_db.sh`; başkasının kabına dokunma).
+- **İnceleme kalıbı:** inceleyici plana bayt eşliğini betikle doğrular, `git archive` kopyasında BAĞIMSIZ mutasyon
+  koşar (`PYTHONDONTWRITEBYTECODE=1`), kendi saldırgan sondalarını dener. Her düzeltme turu kapsamlı yeniden
+  inceleme; görev başına ≤ 5 tur; her iz için bütün-dal incelemesi + TEK düzeltme dalgası + tek yeniden inceleme.
+  Minor'lar deftere; "MERGE ÖNCESİ" işaretliler bütün-dal düzeltmesine.
+- **Kapı:** her commit'ten sonra tam kapı (`T=$(mktemp -d)`, TMPDIR depo DIŞINDA — içindeyse iki B-1 testi kırmızı,
+  DEFERRED 20l); push `grep -q "KAPI YEŞİL" <log> && git fetch && git merge --no-ff origin/main … && git push`
+  zinciriyle; `main`e `--no-ff`; taze klon kapısı; CI yeşil. **CI `cancel-in-progress`:** koşan CI'ı izlerken yeni
+  push yapma (iptal eder).
+- **Canlı DB'ye yazım:** önce aynı SQL `begin … rollback` kuru koşusu (sonuç `raise exception` JSON'unda), sessiz
+  aralıkta (mühür :00/:15/:30/:45 dışı, `gh run list --status in_progress` boş), sonra `apply_migration` (metin bayt
+  bayt aynı, sha256 deftere), sonra salt okuma doğrulaması + advisors + bir sonraki mühür turunun yeşili.
+- **Ücret/harcama açan commit'i asistan yapamaz** (bellek `credit-activation-commit-blocked`): değişiklik hazırlanır,
+  kapı koşulur, kullanıcıya tek satırlık `git commit` verilir; birleştirme/push asistanda.
+- **İzin sınıflandırıcısı reddederse** (ör. Supabase REST'e publishable anahtarla GET) ısrar edilmez, kullanıcıya
+  §0.K'ye yazılır.
+- SDD defterleri gitignored: `.superpowers/sdd/<plan>/progress.md` — her kararın ("Ruling:") gerekçesi ve "yanlışsa
+  maliyeti" orada. Kalıcı tutulan kullanıcı dosyaları: `.superpowers/sdd/_kalici/` (kalibrasyon onayı, hukuk taslakları).
+
+### 0.K KULLANICININ YAPACAKLARI — tam liste (kullanıcı "en sonda toplu" yapacak; asistan SORMAZ)
+Her madde: **Ne** · **Neden** · **Nerede** · **Nasıl** · **Sonra asistan** · **Bloklar**. Sıra önerisi: önce K/S
+(temizlik, 10 dk) ve K/13–14 (güvenlik ayarları, 10 dk); sonra kararlar; en son hukuk ve para.
+
+**K/1 — Marka adı.** Ne: sitenin adı (çalışma adı `football-edge`). Neden: alan adı, `Organization` JSON-LD, hukuk
+metinleri, sayfa başlıkları ondan türer; şu an yer tutucu `[site-name]`. Nasıl: adı yaz. Sonra asistan: yer
+tutucuları tek yerden (web yapılandırması) değiştirir, kapı + `check-out`. Bloklar: AK3, deploy, indeksleme.
+
+**K/2 — Alan adı + Netlify hesabı.** Ne: alan adını satın al (ödeme sende; kayıt yeri Cloudflare Registrar /
+Namecheap / Netlify — Netlify DNS'e bağlanabilen herhangi biri); **yalnız bu siteyi barındıracak ayrı bir Netlify
+hesabı/ekibi** aç (neden: Netlify kişisel erişim tokenı site başına kısıtlanamaz, hesabın bütün sitelerine yetkilidir —
+AK18). Nasıl: Netlify'da boş site oluştur; Site ID'yi ve bir kişisel erişim tokenını K/14'teki secret'lara sen ekle
+(asistan token görmez). Sonra asistan: `SITE_URL` yer tutucusunu (`https://example.invalid`) gerçek alan adıyla
+değiştirir, DNS/site ayarlarını Netlify araçlarıyla kurar (sen giriş yaptıktan sonra), yayın bekçileri (`site_publish.py`)
+bunu bekler — yer tutucu adresle kasıtlı olarak kırmızı. Bloklar: AK4, ilk yayın, site haritası/hreflang mutlak adresleri.
+
+**K/3 — 0014'ün canlıya uygulanması (halka açık okuma katmanı, AK6).** Ne: siteye açılacak görünümleri onayla:
+öneri spec §4.3 listesi (`site` şeması yayımlanabilir; `site_input` ve `site_audit` YAYIMLANMAZ). Neden: 0014 canlıya
+ancak onayla uygulanır. Nerede: `db/migrations/0014_site_read.sql`, spec §4. Nasıl: "AK6 = §4.3 listesi, uygula" de.
+Sonra asistan: `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" 2. adım (ROLLBACK provası → `apply_migration` `postgres`
+rolüyle → katalog testleri canlıya salt okuma → advisors). Bloklar: ilk gerçek dışa aktarım.
+
+**K/4 — Haber kaynağı politikası.** Girdi belgeleri: `docs/reports/2026-09-23-kaynak-kosullari.md` (oturum 9'da
+genişletildi) ve `docs/reports/2026-09-23-ek-kaynaklar.md`. Karar verilecekler:
+- (a) **EN — GDELT ayağı hangi politikayla, ya da hiç?** Ölçüm: önerilen izin listesi GDELT'in İngilizce futbol
+  başlıklarında fiilen boş (sessiz pay %3,0: yalnız dailytrust, el-balad); en sık 15 alan adının 12'si yasaklıyor (AOL,
+  thehardtackle ticari yeniden kullanım; Newsquest veritabanı/ticari). Raporun 3 "sessiz" yayıncısı (independent,
+  standard, sportsmole) GDELT örnekleminde **0 isabet**.
+- (b) **CaughtOffside/JustArsenal (Rocket Sports)** arama dışı her otomatik erişimi lisanssız sayıp makale başına
+  **£500** talep eden bir "Search Only" sözleşmesi yayımlıyor. Koşul okuması bu iki siteye robots izinli **3 istek**
+  attı (rapor yöntem bölümünde). Avukat sorusu (K/7'ye eklendi). Karar: bu alan adları kesin dışarıda mı?
+- (c) **Ücretli kaynaklar:** SportMonks Starter (€29/ay, yapılandırılmış sakat/cezalı; 14 günlük deneme = hesap
+  açmak, SENDE) · X API resmî kulüp hesapları için (~$60/ay tahmin). Hangileri?
+- (d) **TR:** ajansspor (zaten toplanıyor) + Fotomaç/A Spor RSS + TFF PFDK (K/12'ye bağlı) + Galatasaray RSS — hangileri?
+- (e) **ajansspor 17l:** sözleşme sayfası robots'ta kapalı (okunamadı); robots `Content-Signal: ai-input=yes,
+  ai-train=no`. Seçenek: bunu yeterli say (öneri: Jev'e gövde vermek "input"tur, eğitim değil) ya da yayıncıya sor
+  (dış iletişim — sen yaparsın ya da asistana açık onay verirsin).
+- Sonra asistan: seçilen kaynakları `sources.yaml`a `enabled: true` ile, robots anlık görüntüsü + koşul kanıtıyla
+  açar; Scrapling adaptörü üzerinden toplayıcı yazar. Bloklar: EN dil kalibrasyonu (K/5b), Plan 2 kademe 2.
+
+**K/5 — Dil kalibrasyonu etiket onayı (Plan 2 T3 bunu bekler).**
+- Dosya: **`.superpowers/sdd/_kalici/kalibrasyon-onay/tr.review.md`** (gitignored; kopyası SDD dizininde de var).
+  100 madde: önce **6 uyuşmazlık**, sonra **29 sınırda**, sonra 65 net madde. Her satırda `[ ]` onay kutusu.
+- Önce **dosyanın başındaki açık soru:** "yaklaşan maç" **(A) haberin yayımlandığı ana göre mi** (öneri — Jev'e tarih
+  gitmez, üretimde haber yayın anında kullanılır, ölçüm tekrarlanabilir kalır) **(B) bugüne göre mi**. (B) seçilirse
+  oynanmış maça bağlı `true` satırlar (1065, 422, 902, 187, 145, 572, 227, 791, 950, 1193) `false` olur.
+- **`team` yazımı:** dosyada Odds API yazımı ("Fenerbahce", "Besiktas JK"); `data/calibration/README.md` örnekleri
+  "Fenerbahçe". Jev'e `club` olarak bu dize gider — hangisi?
+- Nasıl: kutuları işaretle, değiştirdiğin `relevant` değerlerini yaz, adını yaz (README: etiketleyenin adı
+  `data/calibration/tr.meta.json`a girer). Sonra asistan: onaylı etiketleri `data/calibration/tr.jsonl`a (ham başlık
+  telifi sorusu K/7'de — gerekirse yalnız id+etiket) aktarır, T3 ölçümünü (ücretli Jev, K/6) hazırlar.
+- Sınırlar (dosyada yazılı): 71/100 dört büyük kulüp; kulüp adı geçmeyen ama ilgili başlıklar atlandı; sınıflar
+  dengesiz (27 true/73 false); haber gövdeleri boş (yalnız başlık).
+- **K/5b — EN etiketleri yok:** `news_items`ta İngilizce haber yok; K/4 (EN kaynağı) kararından sonra hazırlanır.
+
+**K/6 — Ücretli Jev harcamasını açan commit + Plan 2 maliyet ölçümü onayı.** Ne: Jev (TypeSafe) ilk ücretli çağrısı.
+Neden: auto-mode harcama açan commit'i asistana yaptırmaz (bellek `credit-activation-commit-blocked`). Nasıl: asistan
+değişikliği hazırlar ve kapıyı koşar, sana **tek satırlık `git commit` komutu** verir; sen çalıştırırsın. Tavan:
+`MONTHLY_CAP_USD = 25.0` (`src/football_edge/jev_budget.py`), aşılırsa kesinti. `TYPESAFE_API_KEY` zaten secret ve
+`.env`te (2026-09-23). Bloklar: K/5 ölçümü, Plan 2 kademe 1–2.
+
+**K/7 — Hukuk (yayından ÖNCE, avukatla).** Avukata götürülecek paket:
+- Taslak metinler: **`.superpowers/sdd/_kalici/hukuk-taslak-metin/`** (8 dosya: en/tr × terms, privacy, cookies,
+  responsible-gambling; düz metin). Sitede "TASLAK — avukat onayı bekler" işaretli, noindex, site haritası dışında.
+- Sorular (öncelik sırası):
+  1. **Sakatlık bilgisi = sağlık verisi (KVKK md. 6 / GDPR md. 9)** — kaynaktan bağımsız, bütün projeyi ilgilendirir;
+     takım düzeyinde toplulaştırma yeterli mi? Haber hattı (`news_items`, 0012) başlık ve gövde saklıyor.
+  2. Türkiye'de bahisle ilgili içerik/yönlendirme riski (site value önerisi yayımlamıyor; yalnız piyasa olasılıkları
+     ve kapanış sicili).
+  3. KVKK aydınlatma metni öğeleri (veri sorumlusu, amaç, haklar — taslakta yok), "kesinlikle gerekli yerel depolama"
+     sınıflaması (18+ onayı `localStorage`da `fe-age-18`), barındırıcının (Netlify) çerez/IP log davranışı.
+  4. football-data.co.uk'tan **yazılı izin** (spec §10/2; ticari lansmandan önce).
+  5. Başlık telifi (NLA v Meltwater; AB TDM istisnası itirazla kapanır) ve yayıncı ToS'larının aracı (GDELT/Google
+     News) üzerinden bizi bağlayıp bağlamadığı; **Rocket Sports £500/makale "Search Only" sözleşmesi** (K/4b).
+  6. TFF koşulları (K/12).
+  7. B-2 incelemesinin **C1–C11** soruları: `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" (sorumlu bahis dili,
+     yardım hattı ad/numaraları — doğrulanacak, "yardım ülkende mevcut" ifadesi vb.).
+- Sonra asistan: avukatın düzeltmelerini metinlere işler, TASLAK işaretini kaldırır (kapı bekçisi var), AK13'ü kapatır.
+  Bloklar: indekslemeye açma (AK14), TR dili yayını.
+
+**K/8 — Holdout 2. açılışı için açık "evet"** (Plan 2 T11 — çok sonra; ön kayıt ve kırmızı takımdan sonra sorulur.
+Şimdi bir şey gerekmez).
+
+**K/9 — İsteğe bağlı: Odds API planı.** Maçlar 10-09'da başlayınca ilk haftanın kredi tüketimi ölçülür (§0.İ/6);
+aylık kredi yetmezse plan yükseltme (ödeme sende).
+
+**K/10 — İz B onayları (spec + AK'lar).** Spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md` §16 tablosu;
+her satırda öneri yazılı. "Önerilerle onay" demen yeterli; farklı istediklerini yaz:
+AK1 mimari A (Actions'ta salt okuma rolüyle statik üretim) · **AK2 spec onayı (sicil boş durum metni §6.2 dahil)** ·
+AK3 = K/1 · AK4 = K/2 · AK5 diller en+tr · AK6 = K/3 · AK7 kapandı (0013) · AK8 maç sayfası yalnız vig'siz olasılık ·
+AK9 kamu doğrulaması şimdi (a) çıpalar+baş+hash · AK10 skor yok · AK11 gölge seri sitede yok · AK12 analitik yok ·
+AK13 = K/7 · AK14 indeksleme AK3/AK4/AK13'ten sonra · AK15 yeniden derleme günlük + saatlik mühür sonrası (yeni
+migration gerekir) · AK16 Netlify CLI · **AK17 The Odds API koşulları türetilmiş olasılık yayımı açısından okunmadı**
+(asistan salt okuma araştırması yapabilir — "yap" demen yeter; AK8/AK9/AK20/AK21'i etkiler) · AK18 = K/14 · AK19 CSP
+hash'leri (uygulandı; `_headers` ~176 + 379 × sayfa bayt) · AK20 slug kalıcılığı (b) (uygulandı) · AK21 toplu indirme
+yok, yalnız hash · AK22 tabandan beri her maç. Ayrıca planların yürütüldüğünü onayla (yöntem: subagent-driven —
+yapıldı). Bekleyen metin düzeltmeleri AK2 ile: DEFERRED 20g (en boş sicil "to be registered in advance"), 20i.
+
+**K/12 — TFF koşulları** (`https://www.tff.org/Default.aspx?pageID=179`): "ticari amaçlarla kullanılamaz", kaynak
+gösterilmeden kopyalanamaz. Etkiler: **açık `tff` kaynağı** (hakem atamaları, günlük toplanıyor) ve kapalı `tff-pfdk`.
+Karar: (a) `tff`yi kapat · (b) ticari lansmana kadar sürdür, lansmandan önce izin iste · (c) avukata sor (K/7/6).
+Ayrıca `tests/fixtures/tff/` tam sayfa kopyaları (hakem adları, public repo) — kırpılsın mı (asistan yapar, öneri: evet).
+
+**K/13 — Supabase panelinde pg_net kontrolü (güvenlik, 5 dk).** Ölçüm (2026-09-24, canlı, salt okuma):
+`anon`/`authenticated`/`service_role` rollerinin `net` şemasında USAGE, `net.http_request_queue` SELECT/INSERT,
+`net._http_response` SELECT ve `net.http_post` EXECUTE yetkisi var (veren `supabase_admin`; `postgres` geri alamaz —
+kapta ölçüldü). Kuyruk pg_cron dispatch'lerinin Bearer GitHub token'ını taşır. Dışarıdan erişim **yalnız PostgREST
+`net` şemasını açarsa** mümkün. Nasıl: Supabase Dashboard → proje `aaxadphezxavohkhqdrf` → **Project Settings → Data API (eski arayüzde "API") →
+"Exposed schemas"**: listede yalnız `public` (ve `graphql_public`) olmalı; **`net` OLMAMALI** (varsa çıkar).
+(Asistanın bunu REST'ten yoklaması izin sınıflandırıcısınca reddedildi.) Ayrıca `site_reader`a LOGIN vermeden önce
+bu artık riski açıkça kabul et (faz HANDOFF "Canlıya geçiş" adım 3). Sonra asistan: canlıda `site_reader` yetkilerini
+yeniden ölçer.
+
+**K/14 — GitHub depo ayarları (site yayını, AK18; 10 dk).** Depo `popiliadam/football-edge` → Settings:
+1. **Environments → `production` oluştur → Deployment branches: yalnız `main`.**
+2. Bu ortamın secret'ları (repo düzeyinde DEĞİL): `NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID` (K/2'den),
+   `SITE_DATABASE_URL` (K/15'ten). Neden ortam kapsamlı: depo düzeyi secret'ı her dalın workflow'u okuyabilir.
+3. Asistan bundan sonra `site.yml`in `build` işine `environment: production` ekler (bugün yok; ortam secret'ı aksi
+   hâlde `build`e görünmez → exit 20) ve testle sabitler.
+`site.yml` YALNIZ elle tetiklenir; **K/2, K/3, K/13, K/14, K/15 bitmeden tetikleme.**
+
+**K/15 — `site_reader` parolası (0014 canlıya uygulandıktan sonra).** Nasıl: Supabase SQL düzenleyicisinde DEĞİL,
+istemci tarafı SCRAM ile: `psql "<postgres bağlantı dizesi>"` → `\password site_reader` (parola sunucu loguna düz
+metin düşmez; `ALTER ROLE … PASSWORD '…'` KULLANMA — DDL loglanırsa düz metin kalır). Sonra `site_reader`a `LOGIN`
+(asistan migration ile; parolayı görmez). Bağlantı dizesi Supavisor biçiminde (`site_reader.aaxadphezxavohkhqdrf`,
+session pooler 5432) → `SITE_DATABASE_URL` ortam secret'ı (K/14). Asistan: pooler üzerinden rol GUC'lerinin
+uygulandığını ölçer (faz HANDOFF adım 5).
+
+**K/S — Silme onayları (temizlik; asistan senin "sil" onayınla yapar ya da komutları sen çalıştırırsın).**
+Hepsi `main`de birleşmiş ya da yeniden üretilebilir; **kalıcı tutulanlar `.superpowers/sdd/_kalici/` (silinmez).**
+1. **Worktree'ler + dalları (hepsi `main`de):** `.worktrees/wt-izb-{b1,b1-t4,b1-t8,b2}`,
+   `.worktrees/wt-s9-{a1,borc,integ,izb,rls,scrapling-clean}` ve dallar `feat/izb-b1`, `feat/izb-b1-t4`,
+   `feat/izb-b1-t8`, `feat/izb-b2`, `docs/s9-en-alan-adlari`, `docs/s9-iz-b-tasarim`, `feat/s9-borc`,
+   `feat/s9-rls`, `feat/s9-scrapling-clean`, `integ/s9-dalga-a`. Eski: `faz-0-kayit-altyapisi`, `faz-1-toplayicilar`
+   (ikisi de `main`de birleşmiş).
+2. **`feat/s9-scrapling` dalı + `.worktrees/wt-s9-scrapling` — ÖNCELİKLİ:** `922a445` gerçek kişi adlı PFDK
+   fixture'larını taşıyor; hiç push edilmedi, `main`de yok. Silinmesi önerilir (`git branch -D` gerekir — birleşmemiş görünür).
+3. **SDD scratch'leri (~34 GB):** `.superpowers/sdd/2026-09-23-oturum9-dalga-a/` (7,3 GB),
+   `.superpowers/sdd/2026-09-24-faz6-iz-b-1-okuma-katmani/` (13 GB), `.superpowers/sdd/2026-09-24-faz6-iz-b-2-web-yuzeyi/`
+   (14 GB). İçlerindeki `progress.md` defterleri kararların tam kaydıdır — silmeden önce istersen yalnız
+   `progress.md` + `*-review.md` + `*-report.md` dosyalarını `_kalici/defterler/` altına taşıtabilirsin (öneri).
+4. **Durdurulmuş Docker kapları (47):** `docker ps -a` → adları `izb-`, `b1r-`, `b1rr-`, `t6r1-` ile başlayanlar
+   (oturum 9 kum havuzları). `football-edge-sandbox-{applied,empty}` `scripts/sandbox_db.sh`in varsayılan kaplarıdır —
+   silinebilir, betik yeniden kurar. Komut (kendi kapların için): `docker rm $(docker ps -aq --filter name=^izb-)` vb.
+5. **`/tmp/b2fake`** (B-2 plan yazarının atığı).
+6. Faz 4 T0c runner ölçümü yapılırsa (§0.A/1a) **uzak geçici dal** silinmesi.
+
+### 0.R Senin adına verilen kararlar — gözden geçir (tam liste ve "yanlışsa maliyeti" defterlerde)
+- 0013'ü canlıya uyguladım (yalnız yetki geri alır; tek satır `grant` ile geri döner).
+- İz B'yi spec onayını beklemeden yerelde yaptım (deploy yok, 0014 canlıda yok).
+- Dalga A/1 ölçümünü runner yerine yerelde koştum (holdout sonuçlu `Matches.csv` public depoya itilmesin diye).
+- T2 erişim kapısı: R77b'nin değişmeyen sınırları (CAPTCHA çözücüler, Cloudflare atlatıcıları, IP/UA döndürme) yasak
+  kaldı; Scrapling fetcher'ları yalnız `scrape.py` tek geçidinde.
+- Scrapling tarayıcı taşıyıcıları (dynamic/stealthy) gerçek tarayıcıyla ölçülene kadar kapalı (DEFERRED 11g).
+- `scrape` ekstrası yalnız CI'da kurulur (zamanlanmış işler hafif).
+- Gerçek adlı PFDK commit'i `main`e hiç sokulmadı (dal yeniden kuruldu).
+- Deploy ayrı job'da; `slugs` bekçisi build'de, `live` bekçisi üçüncü job'da.
+- `check-out`a Türkçe bahis tavsiyesi sözcükleri (değer bahsi/valör/banko/tavsiye/kupon/iddaa) — sorumluluk reddi
+  cümleleri tam cümle izinli.
+- Site Node adımları `env -i` izin listesiyle (yerel secret'lar `next build`e geçmez).
+- Tabandan önce gözlenmiş oran (canlıda 0 satır) dışa aktarımı düşürür — kod değişmedi, "ölçülmeyenler"de.
+- Defterler: `.superpowers/sdd/2026-09-23-oturum9-dalga-a/progress.md`,
+  `…/2026-09-24-faz6-iz-b-1-okuma-katmani/progress.md`, `…/2026-09-24-faz6-iz-b-2-web-yuzeyi/progress.md`
+  (`grep '^Ruling'`).
+
+> **Numara eşlemesi:** eski §0.7 maddeleri (aşağıdaki tarihçe ve `docs/phases/06-site/HANDOFF.md` "§0.7" atıfları)
+> burada aynı numarayla K/1–K/15'tir (K/11 silme listesi → K/S). Yeni madde yok sayılmadı; eskiler güncellendi.
+
+## 0.eski2 Oturum 9 ve Faz 4 Plan 1 (2026-09-23/24 — tarihçe; güncel liste yukarıda §0.K)
 
 **Faz 4 Plan 1 bitti.** Tasarım `docs/superpowers/specs/2026-09-23-faz4-jev-sinyal-design.md` (R157–R172), plan
 `docs/superpowers/plans/2026-09-23-faz4-plan1-dalga0-1.md`, T0c raporu `docs/reports/2026-09-23-faz4-arsiv-spike.md`,
@@ -471,6 +744,8 @@ kanaryası; K4 fiyat sütunu kontrolü · R121 — F3/F5 ertelendi, F4 kabul.
 ---
 
 ## 1. Senin yapacağın şeyler
+
+> **Tarihçe (Faz 1 dönemi).** Güncel ve tam kullanıcı listesi: **§0.K**.
 
 **1. Tetikler canlı — yapman gereken bir şey yok.** `seal` (15 dakikada bir) ve `snapshot`
 (06:22 UTC) Supabase pg_cron'dan `workflow_dispatch` ile tetikleniyor (0003/0004, RUNBOOK §3);
