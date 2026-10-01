@@ -6,6 +6,7 @@ from typing import Any
 
 import psycopg
 
+from football_edge.dsn_hygiene import dsn_well_formed, masked
 from football_edge.leagues import League
 from football_edge.ledger import GENESIS, canonical_timestamp, chain
 from football_edge.odds_api import PriceRow
@@ -63,16 +64,33 @@ INSERT_SNAPSHOTS = f"""
 """
 
 
+_MALFORMED_DSN = (
+    "bağlantı dizesi ayrıştırılamadı ya da bozuk (yüzde kodlaması, eksik '=', bilinmeyen seçenek, "
+    "parolada kodlanmamış '@', sayı olmayan port, geçersiz seçenek değeri…); libpq metni parolayı "
+    "taşıyabileceği için basılmadı"
+)
+
+
 def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     resolved = dsn or os.getenv("DATABASE_URL")
     if not resolved:
         raise RuntimeError("DATABASE_URL tanımlı değil")
-    # Oturum saat dilimi UTC'ye sabitlenir: zincir hash'i zaman damgasının
-    # metin hâlini kapsıyor, oturum TZ'si değişirse geri okumada zincir kırılır.
-    # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
-    # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
-    # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
-    return psycopg.connect(resolved, options="-c timezone=UTC")
+    # Bozuk DSN (DEFERRED 18g b, `dsn_hygiene`): (A) bağlanmadan önce biçim denetimi, (B)
+    # bağlanırken yükselen psycopg hatasında DSN'den gelen tırnaklı parçalar maskelenir. İkisinde de
+    # hata `except` DIŞINDA yükselir: `except` içinde `from None` yalnız gösterimi bastırır,
+    # `__context__` libpq metnini yine taşırdı. Sınıf korunur; çağıranlar değişmez.
+    if not dsn_well_formed(resolved):
+        raise psycopg.ProgrammingError(_MALFORMED_DSN) from None
+    try:
+        # Oturum saat dilimi UTC'ye sabitlenir: zincir hash'i zaman damgasının
+        # metin hâlini kapsıyor, oturum TZ'si değişirse geri okumada zincir kırılır.
+        # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
+        # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
+        # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
+        return psycopg.connect(resolved, options="-c timezone=UTC")
+    except psycopg.Error as error:
+        kind, text = type(error), masked(str(error), resolved)
+    raise kind(text) from None
 
 
 def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) -> dict[str, Any]:

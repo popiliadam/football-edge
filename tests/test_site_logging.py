@@ -21,7 +21,11 @@ import pytest
 
 from football_edge import collect
 from football_edge.site import __main__ as site_main
-from football_edge.site.contract import EXIT_SITE_CONFIG, EXIT_SITE_NONDETERMINISTIC
+from football_edge.site.contract import (
+    EXIT_SITE_CONFIG,
+    EXIT_SITE_CUT,
+    EXIT_SITE_NONDETERMINISTIC,
+)
 from football_edge.site.export import ExportRefused, derive_in_subprocess
 from tests.fake_site_db import FakeSiteDb
 from tests.site_builders import EVEN, Round, anchored_repo, at, export_dump, ledger, payloads
@@ -261,3 +265,103 @@ def test_a_write_failure_is_a_named_exit_without_a_traceback(
     assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: çıktı yazılamadı (PermissionError)\n"
     assert "Traceback" not in seen.err and str(tmp_path) not in seen.out + seen.err
     assert not (tmp_path / "out").exists()
+
+
+def _export_with(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, connect: Any = lambda dsn: _Closing()
+) -> int:
+    monkeypatch.setenv(DSN_VAR, DSN)
+    monkeypatch.setenv("GITHUB_SHA", "1" * 40)
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "connect", connect)
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+    return site_main.main(["export", "--out", str(tmp_path / "out")])
+
+
+def _connect_too_early(dsn: str) -> Any:
+    raise AssertionError("yapılandırma ve şema bağlanmadan ÖNCE okunmalı")
+
+
+@pytest.mark.parametrize(
+    ("path_name", "content", "reason"),
+    [
+        ("DEVIG_CONFIG_PATH", None, "vig yöntemi okunamadı (FileNotFoundError)"),
+        ("DEVIG_CONFIG_PATH", "method: [\n", "vig yöntemi okunamadı (ParserError)"),
+        ("DEVIG_CONFIG_PATH", b"method: \xff\n", "vig yöntemi okunamadı (UnicodeDecodeError)"),
+        ("SCHEMA_PATH", None, "şema okunamadı (FileNotFoundError)"),
+        ("SCHEMA_PATH", "{bozuk", "şema okunamadı (JSONDecodeError)"),
+        ("SCHEMA_PATH", '{"type": "object"}', "şema okunamadı (SchemaError)"),
+    ],
+    ids=["devig-yok", "devig-yaml", "devig-utf8", "sema-yok", "sema-json", "sema-kural"],
+)
+def test_an_unreadable_or_malformed_config_or_schema_is_exit_20_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    path_name: str,
+    content: str | bytes | None,
+    reason: str,
+) -> None:
+    """DEFERRED 19a (düzeltme turu 1): kardeş `site_leagues.yaml` gibi exit 20 + sınıf adı.
+
+    Okumalar kaynağında sarılır ve bağlanmadan önce yapılır; `_export`ta geniş bir `ValueError`
+    kolu yok — `run_export`tan kaçan ilgisiz bir `ValueError` yapılandırma sayılmaz.
+    """
+    path = tmp_path / "ayar" / "dosya"
+    if content is not None:
+        path.parent.mkdir()
+        raw = content if isinstance(content, bytes) else content.encode("utf-8")
+        path.write_bytes(raw)
+    monkeypatch.setattr(site_main, path_name, path)
+
+    code = _export_with(monkeypatch, tmp_path, connect=_connect_too_early)
+
+    seen = capsys.readouterr()
+    assert code == EXIT_SITE_CONFIG
+    assert seen.out == f"DIŞA AKTARIM REDDEDİLDİ: {path}: {reason}\n"
+    assert "Traceback" not in seen.err
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_file_error_escaping_the_export_is_exit_20_with_the_class_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Kaynağında sarılmamış dosya hatası (artık kol): exit 20, metin (yol, parola) basılmaz."""
+
+    def denied(conn: Any, out: Path, **options: Any) -> Any:
+        raise PermissionError(13, f"izin yok {PASSWORD}", str(tmp_path))
+
+    monkeypatch.setattr(site_main, "run_export", denied)
+
+    code = _export_with(monkeypatch, tmp_path)
+
+    seen = capsys.readouterr()
+    assert code == EXIT_SITE_CONFIG
+    assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: dosya hatası (PermissionError)\n"
+    assert "Traceback" not in seen.err and PASSWORD not in seen.out + seen.err
+    assert str(tmp_path) not in seen.out + seen.err
+
+
+def test_an_unexpected_export_error_is_a_named_exit_with_the_class_and_place_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """DEFERRED 19a: öngörülmeyen istisna exit 22; sınıf adı ve en iç karenin `dosya:satır`ı.
+
+    Yer bilgisi metin değildir (değer taşımaz); herkese açık logda hata ayıklamaya yeter.
+    """
+
+    def crash(conn: Any, out: Path, **options: Any) -> Any:
+        raise ValueError(f"{PASSWORD} 4.47")
+
+    monkeypatch.setattr(site_main, "run_export", crash)
+
+    code = _export_with(monkeypatch, tmp_path)
+
+    seen = capsys.readouterr()
+    line = crash.__code__.co_firstlineno + 1
+    assert code == EXIT_SITE_CUT
+    assert seen.out == (
+        f"DIŞA AKTARIM REDDEDİLDİ: beklenmeyen hata (ValueError, test_site_logging.py:{line})\n"
+    )
+    assert "Traceback" not in seen.err and PASSWORD not in seen.out + seen.err
+    assert "4.47" not in seen.out + seen.err

@@ -384,8 +384,12 @@ def test_missing_anchor_is_reported_by_name(tmp_path: Path, capsys: Any) -> None
     assert missing_anchors(tmp_path, recorded=recorded) == ("head-2026-09-18.txt",)
 
 
-def test_missing_anchor_check_is_named_when_git_is_absent(tmp_path: Path) -> None:
+def test_missing_anchor_check_is_named_when_git_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Atlanan kontrol geçmek değildir; git yoksa None döner ve çağıran adıyla yazar."""
+    # Üst dizinlerdeki bir depo bulunmasın: TMPDIR bir git ağacındaysa da git'siz (DEFERRED 20l).
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     assert expected_anchor_names(tmp_path) is None
 
 
