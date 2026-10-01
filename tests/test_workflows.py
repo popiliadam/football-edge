@@ -570,6 +570,22 @@ def test_only_the_closing_step_may_fail_without_turning_the_run_red(path: Path) 
     assert steps[closes]["continue-on-error"] is True
 
 
+def test_no_job_that_runs_the_secret_scan_may_continue_on_error() -> None:
+    """19b: yukarıdaki test ADIMLARA bakar; `continue-on-error: true` İŞ düzeyinde olursa kırmızı
+    tarama koşuyu yeşil gösterir ve sonrasındaki `always()`/`!cancelled()` adımları (seal'da
+    `Mühür turunun sonucunu yansıt`, `ODDS_API_KEY` alan `Bekçi`) yine koşar. Taramayı taşıyan
+    hiçbir iş bunu taşımaz. `Alarm kapat`ın ADIM düzeyi `continue-on-error`ı bunun dışındadır."""
+    scanning = {
+        f"{path.name}:{name}": job
+        for path in sorted((REPO / ".github/workflows").glob("*.y*ml"))
+        for name, job in yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"].items()
+        if _index_of(job["steps"], SCAN_SCRIPT) is not None
+    }
+
+    assert scanning, "hiçbir iş taramayı koşmuyor — test kurgusu bayatlamış"
+    assert [name for name, job in scanning.items() if "continue-on-error" in job] == []
+
+
 @pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
 def test_alarm_jobs_may_write_issues_and_read_runs(path: Path) -> None:
     """Job düzeyindeki `permissions:` üst düzeyi TAMAMEN ezer, listelenmeyen izin `none` olur:
