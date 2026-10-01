@@ -283,3 +283,40 @@ def test_vitest_include_root_stays_web() -> None:
 def test_build_output_never_enters_git(path: str) -> None:
     result = subprocess.run(["git", "check-ignore", "-q", path], cwd=REPO, check=False)
     assert result.returncode == 0, f"{path} gitignore'da değil"
+
+
+# DEFERRED 21c: Next'in iç modül yolu (`next/dist/...`) genel API değildir; sürümler arasında
+# haber vermeden taşınır. Web kaynakları yalnız Next'in genel girişlerini içe aktarır.
+NEXT_INTERNAL = re.compile(
+    r"""(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)["']next/dist/""", re.M
+)
+WEB_SOURCE = re.compile(r"\.(?:[cm]?[jt]sx?)$")
+
+
+def next_internal_imports(text: str) -> list[str]:
+    """Metinde Next'in iç yoluna giden import satırları."""
+    return [line.strip() for line in text.splitlines() if NEXT_INTERNAL.search(line)]
+
+
+def test_next_internal_import_detector() -> None:
+    assert next_internal_imports('import { X } from "next/dist/client/components/a";') != []
+    assert next_internal_imports("import x from 'next/dist/a';") != []
+    assert next_internal_imports('const m = await import("next/dist/a");') != []
+    assert next_internal_imports('require("next/dist/a")') != []
+    assert next_internal_imports('import "next/dist/a";') != []
+    assert next_internal_imports('import type { NextConfig } from "next";') == []
+    assert next_internal_imports('import { notFound } from "next/navigation";') == []
+
+
+def test_web_sources_do_not_import_next_internals() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "web"], cwd=REPO, check=True, capture_output=True, text=True
+    ).stdout.split()
+    sources = [path for path in tracked if WEB_SOURCE.search(path)]
+    assert sources, "web kaynakları okunamadı"
+    found = {
+        path: hits
+        for path in sources
+        if (hits := next_internal_imports((REPO / path).read_text(encoding="utf-8")))
+    }
+    assert not found, f"Next'in iç yolu içe aktarılıyor: {found}"
