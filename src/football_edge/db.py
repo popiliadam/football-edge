@@ -63,6 +63,12 @@ INSERT_SNAPSHOTS = f"""
 """
 
 
+_MALFORMED_DSN = (
+    "bağlantı dizesi ayrıştırılamadı (yüzde kodlaması, eksik '=', bilinmeyen seçenek…); "
+    "libpq metni parolayı taşıyabileceği için basılmadı"
+)
+
+
 def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     resolved = dsn or os.getenv("DATABASE_URL")
     if not resolved:
@@ -72,7 +78,15 @@ def connect(dsn: str | None = None) -> psycopg.Connection[Any]:
     # DATABASE_URL SESSION pooler'ı göstermeli (aws-0-<bölge>.pooler.supabase.com:5432).
     # TRANSACTION pooler (6543) kullanılacaksa psycopg3'ün hazırlanmış ifadeleri
     # kapatılmalıdır (prepare_threshold=None), yoksa birkaç çağrıdan sonra bozulur.
-    return psycopg.connect(resolved, options="-c timezone=UTC")
+    try:
+        return psycopg.connect(resolved, options="-c timezone=UTC")
+    except psycopg.ProgrammingError:
+        pass
+    # Bozuk DSN (DEFERRED 18g b): libpq ayrıştırma hatası DSN'in parçasını — parolayı — tırnak
+    # içinde yankılar ve `key=value` biçiminde log redaksiyonu parolayı bilemez. Hata `except`
+    # DIŞINDA yükselir: `from None` yalnız gösterimi bastırır, `__context__` libpq metnini yine
+    # taşırdı. Sınıf aynı kalır; `psycopg.Error` yakalayan çağıranların davranışı değişmez.
+    raise psycopg.ProgrammingError(_MALFORMED_DSN) from None
 
 
 def snapshot_payload(row: PriceRow, observed_at: datetime, *, is_closing: bool) -> dict[str, Any]:
