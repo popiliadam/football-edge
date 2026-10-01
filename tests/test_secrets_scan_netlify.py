@@ -226,7 +226,9 @@ def _git_subcommands(line: str) -> list[str]:
     found = []
     for index, token in enumerate(tokens):
         if "$(" in token or "`" in token:
-            found.extend(_git_subcommands(re.split(r"\$\(|`", token, maxsplit=1)[1]))
+            inner = re.split(r"\$\(|`", token, maxsplit=1)[1]
+            # Kapanan ters tırnak sözcüğe yapışır (`push``): boşluğa çevrilir.
+            found.extend(_git_subcommands(inner.replace("`", " ")))
         elif re.search(r"\s", token):
             found.extend(_git_subcommands(token))
         if token.rsplit("/", 1)[-1] != "git":
