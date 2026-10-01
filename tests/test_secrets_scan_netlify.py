@@ -7,17 +7,21 @@ Ad=değer taraması YAML/JSON değerini, `--auth` bayrağını, küçük harfli 
 (inceleme I4); Netlify tokenı bu yüzden biçimiyle (`nfp_` + 36 alfasayısal) de aranır.
 
 Taramalar eşleşen satırı değil yalnız `dosya:satır`ı basar (yeniden inceleme N3): satır secret'ın
-kendisidir ve CI logu public. Tarama yedi workflow'un ilk adımıdır; bulursa kırmızı kalmalıdır.
+kendisidir ve CI logu public. Tarama dokuz workflow'un ilk adımlarındandır; bulursa kırmızı
+kalmalıdır.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 from tests.workflow_helpers import _steps
 
@@ -119,7 +123,58 @@ def test_every_workflow_runs_the_scan_bare_so_a_finding_stops_it() -> None:
         if "check_secrets.sh" in str(step.get("run", ""))
     ]
 
-    assert len(scans) >= 7, scans
+    assert len(scans) >= 9, scans
     assert all(
         step == {"name": "Secret taraması", "run": "./scripts/check_secrets.sh"} for step in scans
     )
+
+
+def _strings(node: Any) -> list[str]:
+    """YAML ağacındaki bütün dize değerleri. Yorumlar ayrıştırmada düşer: yalnız yorumda geçen
+    `secrets.` (ör. `ci.yml`in kapı adımı listesi) secret taşımak sayılmaz."""
+    if isinstance(node, dict):
+        return [text for value in node.values() for text in _strings(value)]
+    if isinstance(node, list):
+        return [text for value in node for text in _strings(value)]
+    return [node] if isinstance(node, str) else []
+
+
+def _reads_a_secret(document: dict[str, Any]) -> bool:
+    """`${{ … secrets.… }}` ifadesi var mı — çıplak kelime değil, ifade aranır."""
+    return any(
+        "secrets." in expression
+        for text in _strings(document)
+        for expression in re.findall(r"\$\{\{(.*?)\}\}", text, flags=re.S)
+    )
+
+
+def _may_write_contents(document: dict[str, Any]) -> bool:
+    """Workflow ya da herhangi bir iş `contents: write` (ya da `write-all`) taşıyor mu."""
+    blocks = [document.get("permissions")] + [
+        job.get("permissions") for job in document["jobs"].values()
+    ]
+    return any(
+        block == "write-all" or (isinstance(block, dict) and block.get("contents") == "write")
+        for block in blocks
+    )
+
+
+def test_every_workflow_that_reads_a_secret_or_writes_the_repo_runs_the_scan() -> None:
+    """19b: sayım tek başına yetmez — yeni bir secret'lı workflow taramasız eklenirse sayı yine
+    tutabilir. Kural ad listesiyle değil ÖZELLİKLE kurulur: `secrets.` okuyan ya da depoya yazma
+    yetkisi alan her workflow taramayı koşar (depo PUBLIC; kaçan secret geri alınamaz).
+
+    `ci.yml` kuralın dışında kalır çünkü özelliği taşımaz: secret okumaz
+    (`test_ci_reads_no_repository_secret_at_all`) ve salt okunurdur; ayrıca kapısı taramayı
+    `verify.sh`in `secrets` adımı olarak zaten koşar."""
+    covered = {}
+    for path in sorted((REPO / ".github/workflows").glob("*.y*ml")):
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if _reads_a_secret(document) or _may_write_contents(document):
+            covered[path.name] = any(
+                "check_secrets.sh" in str(step.get("run", "")) for step in _steps(path)
+            )
+
+    assert covered, "hiçbir workflow secret okumuyor ya da yazmıyor — test kurgusu bayatlamış"
+    missing = [name for name, scans in covered.items() if not scans]
+    assert missing == [], f"secret okuyan ya da yazan ama taramayı koşmayan workflow: {missing}"

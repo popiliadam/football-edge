@@ -38,6 +38,10 @@ jobs:
           # Yeniden koşturulan eski tur da ref'in BUGÜNKÜ ucunu alır; tetikleyen sha'nın bayat
           # tarihlerini tazeleyip güncel main'le çakışmaz.
           ref: ${{ github.ref }}
+      - name: Secret taraması
+        # Depo PUBLIC ve bu iş `contents: write` ile main'e commit'liyor: tarama, yazma yetkisi
+        # kullanılmadan ÖNCE koşar (DEFERRED 19b).
+        run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
