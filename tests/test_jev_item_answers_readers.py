@@ -8,15 +8,18 @@ Satırlarını süzmeden `gates_from`a veren okuyucu ayrı `GATES_READERS` küme
 sabiti kullanılan her fonksiyon `gates_from`u çağırmalıdır; `gates_from`un işareti yok saydığını
 `test_feature_tier1.py::test_gates_ignore_failure_markers` sabitler.
 
-Metin STATİK olarak kurulur (17h, son inceleme M-4/M-5): sabit, f-string, `+` birleştirme, `%` ve
-`.format` biçimleme, `psycopg.sql.SQL/Identifier/Literal` parçaları; parçadaki ad aynı modülün düz
-metin sabitine (`TABLO = "jev_item_answers"`) çözülür. Postgres tırnaksız adı küçük harfe indirdiği
-için büyük harf tablo adı da okumadır.
+Metin STATİK olarak kurulur (17h, son inceleme M-4/M-5): sabit, f-string, `+` birleştirme, `%`
+(tek/demet/sözlük) ve `.format` biçimleme, `ayırıcı.join(demet|liste)`, argümansız
+`.upper()/.lower()/.casefold()`, `psycopg.sql.SQL/Identifier/Literal` parçaları; parçadaki ad aynı
+modülün metin sabitine çözülür — sabitin kendisi de kendinden önceki sabitlerden kurulabilir
+(`TABLO = "jev_" + "item_answers"`). Postgres tırnaksız adı küçük harfe indirdiği için büyük harf
+tablo adı da okumadır.
 
 Bilinen sınırlar (bilinçli kaçışı değil kazara girişi durdurur, Faz 3 §3.1/12): başka modülden
-import edilen ya da nitelikle okunan sabit (`modul.TABLO`), fonksiyon içinde çalışma anında kurulan
-ad, `db/migrations` altındaki VIEW/fonksiyon gövdeleri ve `scripts/` taranmaz; `gates_from`a verme
-yalnız aynı fonksiyon gövdesinde aranır (fonksiyonlar arası veri akışı izlenmez).
+import edilen ya da nitelikle okunan sabit (`modul.TABLO`), başka bir sabite düz ad atamasıyla
+bağlanan sabit (`T = TABLO`), fonksiyon içinde çalışma anında kurulan ad, `db/migrations` altındaki
+VIEW/fonksiyon gövdeleri ve `scripts/` taranmaz; `gates_from`a verme yalnız aynı fonksiyon
+gövdesinde aranır (fonksiyonlar arası veri akışı izlenmez).
 """
 
 from __future__ import annotations
@@ -67,25 +70,26 @@ class Sql:
 
 # `psycopg.sql` birleştirme parçaları: argümanları metnin parçasıdır.
 _SQL_PARTS = frozenset({"SQL", "Identifier", "Literal"})
+# Argümansız harf yöntemleri (`TABLO.upper()`): adı değiştirmez, Postgres tırnaksız adı zaten
+# küçük harfe indirir.
+_CASE = frozenset({"upper", "lower", "casefold"})
 
 
 def _constants(tree: ast.Module) -> dict[str, str]:
-    """Modül düzeyinde düz metin sabitleri (`AD = "…"`): yalnız bileşik metnin PARÇASI olunca
-    çözülür — `execute(_ASKED)` gibi tek başına kullanılan ad yeni bir okuma değildir."""
+    """Modül düzeyinde metin sabitleri (`AD = "…"`, `AD = "jev_" + ON`): yalnız bileşik metnin
+    PARÇASI olunca çözülür — `execute(_ASKED)` gibi tek başına kullanılan ad yeni bir okuma
+    değildir. Sırayla statik kurulur: sabit, kendinden ÖNCE tanımlı sabitlerden de kurulabilir.
+    Ayrı bir `_Static` kullanılır; taramanın `used` kümesi bu okumadan etkilenmez."""
     found: dict[str, str] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target, value = node.targets[0], node.value
-        elif isinstance(node, ast.AnnAssign):
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
             target, value = node.target, node.value
         else:
             continue
-        if (
-            isinstance(target, ast.Name)
-            and isinstance(value, ast.Constant)
-            and isinstance(value.value, str)
-        ):
-            found[target.id] = value.value
+        if isinstance(target, ast.Name) and (text := _Static(found).text(value)) is not None:
+            found[target.id] = text
     return found
 
 
@@ -113,6 +117,12 @@ class _Static:
                 return self._joined(values, " ")
             if node.func.attr in _SQL_PARTS:
                 return self._joined(node.args, " ")
+            if node.func.attr == "join":
+                # `" ".join((…, TABLO))`: ayırıcı ve öğeler tek metin.
+                return self._joined((node.func.value, *node.args), " ")
+            if node.func.attr in _CASE and not node.args and not node.keywords:
+                piece = self._piece(node.func.value)
+                return None if piece is None else getattr(piece, node.func.attr)()
         return None
 
     def _piece(self, node: ast.AST) -> str | None:
@@ -121,8 +131,11 @@ class _Static:
             return self.names.get(node.id)
         if isinstance(node, ast.FormattedValue):
             return self._piece(node.value)
-        if isinstance(node, ast.Tuple):
+        if isinstance(node, ast.Tuple | ast.List):
             return self._joined(node.elts, " ")
+        if isinstance(node, ast.Dict):
+            # `"… %(t)s" % {"t": TABLO}`: sözlüğün değerleri metnin parçasıdır.
+            return self._joined(node.values, " ")
         return self.text(node)
 
     def _joined(self, nodes: Iterable[ast.AST], glue: str) -> str | None:
@@ -250,6 +263,11 @@ ESCAPES = {
     "artı": 'Q = "SELECT item_id FROM " + TABLO + " WHERE true"',
     "büyük-harf": 'Q = "SELECT item_id FROM JEV_ITEM_ANSWERS"',
     "psycopg-sql": 'Q = sql.SQL("SELECT * FROM {}").format(sql.Identifier("jev_item_answers"))',
+    # 2026-09-24 eklenenler (T4 incelemesi, bütün-dal triyajı).
+    "yüzde-sözlük": 'Q = "SELECT * FROM %(t)s" % {"t": TABLO}',
+    "büyük-harf-yöntem": 'Q = f"SELECT * FROM {TABLO.upper()}"',
+    "join-demet": 'Q = " ".join(("SELECT item_id FROM", TABLO))',
+    "join-liste": 'Q = " ".join(["SELECT item_id FROM", TABLO])',
 }
 
 
@@ -261,6 +279,23 @@ def _tree(tmp: Path, body: str) -> Path:
 @pytest.mark.parametrize("body", ESCAPES.values(), ids=ESCAPES.keys())
 def test_a_select_built_from_parts_is_still_a_read(tmp_path: Path, body: str) -> None:
     assert unsealed(_tree(tmp_path, body)) == ["mod.py:2 Q"]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ('TABLO = "jev_" + "item_answers"\nQ = f"SELECT * FROM {TABLO}"\n', "mod.py:2 Q"),
+        ('ON = "jev_"\nTABLO = ON + "item_answers"\nQ = f"SELECT * FROM {TABLO}"\n', "mod.py:3 Q"),
+    ],
+    ids=["birleşik-sabit", "sabitten-sabit"],
+)
+def test_a_table_name_constant_built_from_parts_still_resolves(
+    tmp_path: Path, source: str, expected: str
+) -> None:
+    """Sabitin kendisi de birleştirilmiş olabilir: modül sabitleri sırayla statik çözülür."""
+    (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+    assert unsealed(tmp_path) == [expected]
 
 
 def test_an_inline_concatenated_select_is_an_unnamed_read(tmp_path: Path) -> None:
@@ -288,6 +323,13 @@ def test_a_listed_gates_reader_that_feeds_gates_from_is_sealed(tmp_path: Path) -
     assert unsealed(root) == ["mod.py:2 _GATE_ROWS"], "listede olmayan okuyucu kırmızı"
     assert unsealed(root, READERS | NOT_READERS | GATE_READER) == []
     assert misrouted(root, GATE_READER) == []
+
+
+def test_a_gates_reader_feeding_gates_from_through_an_attribute_is_sealed(tmp_path: Path) -> None:
+    """`tier1.gates_from(...)` da `gates_from`a vermektir (17h: bu çağrı biçimi testsizdi)."""
+    body = GATE_BODY.replace("return gates_from(", "return tier1.gates_from(")
+
+    assert misrouted(_tree(tmp_path, body), GATE_READER) == []
 
 
 @pytest.mark.parametrize(
