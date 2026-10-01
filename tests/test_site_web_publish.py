@@ -239,3 +239,19 @@ def test_the_network_wrappers_pass_the_answer_through(monkeypatch: pytest.Monkey
     assert site_publish._get(f"{BASE}/data/slugs.json") == (503, "bakım")
     status, headers = site_publish._head(f"{BASE}/en/")
     assert (status, headers["x-robots-tag"]) == (503, "noindex")
+
+
+# DEFERRED 20k: `_headers`ın iki ayrıştırıcısı var — burada `parse_headers` (canlı CSP
+# karşılaştırması), TS'de `parseHeaders` (`web/scripts/checkout/checks.ts`, çıktı tarayıcısı).
+# İkisi AYNI fixture'ı okur ve aynı beklenen sonucu verir; beklenen sonuç fixture'ın yanındadır
+# (yol → küçük harfli ad → değer; TS testi kendi çıktısını aynı biçime indirger).
+# Eşi: `web/scripts/checkout/headers-fixture.test.ts`.
+HEADERS_FIXTURE = REPO / "web/fixtures/headers.fixture.txt"
+HEADERS_EXPECTED = REPO / "web/fixtures/headers.fixture.expected.json"
+
+
+def test_parse_headers_reads_the_shared_fixture_like_the_ts_parser() -> None:
+    expected = json.loads(HEADERS_EXPECTED.read_text(encoding="utf-8"))
+    parsed = site_publish.parse_headers(HEADERS_FIXTURE.read_text(encoding="utf-8"))
+
+    assert parsed == expected
