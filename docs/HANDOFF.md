@@ -51,6 +51,8 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
   sources-audit push adımı tarama başarısına bağlı (yeşil turda davranış aynı — 5.800 simüle tur). **21a–21e, 21j, 21k
   kapandı** (workflow bekçileri, sıcak başlangıç ve harman testleri, `_headers` ayrıştırıcıları, 404'te iç import yok).
   Yeni ertelenenler 21l–21n.
+- **Push sonrası (`09052d4`):** CI ve ilk `seal` yeşil; kilitli E verisinde eski/yeni kod `model-selftest` ve
+  `walkforward` çıktıları birebir (yalnız zaman damgası farklı).
 - **Güvenlik olayı (zararsız):** bir inceleyici sondasında gerçek `git -C site push` 4 kez çalıştı, chdir'de düştü;
   origin'de yeni ref yok (doğrulandı). Kural belleğe ve inceleyici talimatına girdi: sondalar sahte ikililerle.
 
@@ -120,8 +122,8 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
      kesintisi" adıyla; Plan metni Task 9 Step 8'de `min(boolean)` değil `bool_and`.
    - Plan 2'nin kullanıcıya bağlı kapıları: §0.K/4 (EN kaynağı), §0.K/5 (kalibrasyon onayı), §0.K/6 (ücretli Jev).
 2. ~~İsteğe bağlı küçük işler~~ **Oturum 10 ve 10b'de bitti (§0.2a–§0.2b).** Kalan kullanıcısız küçükler DEFERRED 21f,
-   21g, 21h, 21l–21n (hepsi tetikli, acil değil) ve 16g'nin DB'li kalanı: kilitli E verisinde `walkforward` +
-   `model-selftest` önce/sonra W1–W3 birebir (holdout yok) — Plan 2 hazırlığıyla birlikte yapılabilir.
+   21g, 21h, 21l–21n (hepsi tetikli, acil değil). 16g'nin gerçek veri eşliği de ölçüldü (2026-10-02: eski/yeni kodla
+   `model-selftest` birebir, `walkforward` satır özeti sha256 aynı).
 3. **İz B'de kullanıcısız kalan yok** — 0014'ün canlıya uygulanması, deploy, alan adı, hukuk hepsi §0.K'ye bağlı.
    Kullanıcı §0.K'yi tamamlayınca asistan `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" listesini 1→6 yürütür.
 
