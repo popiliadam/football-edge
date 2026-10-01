@@ -9,9 +9,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
-from tests.workflow_helpers import _index_of, _steps
+from tests.workflow_helpers import _index_of, _logical_lines, _steps
 
 REPO = Path(__file__).resolve().parent.parent
 CI = REPO / ".github/workflows/ci.yml"
@@ -64,23 +65,103 @@ def test_the_site_database_is_local_and_its_password_is_generated_and_masked() -
     assert "secrets." not in yaml.safe_dump(_site_db_step())
 
 
+INSPECT = re.compile(r"\bdocker\s+(?:container\s+)?inspect\b")
+LOGS = re.compile(r"\bdocker\s+(?:container\s+)?logs\b")
+
+
+# `-f`/`--format`: `-f 'x'`, `--format 'x'`, `--format='x'`.
+FORMAT = re.compile(r"\s(?:-f|--format)(?:\s|=)")
+# Şablon eylemindeki alan başvurusu: `.`, `.State.Status`, `$.Config` (önünde ad/kapanış yok).
+FIELD = re.compile(r"(?<![\w)\]])\.(?:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?")
+STATE_FIELD = re.compile(r"\.State(?:\.[A-Za-z_]\w*)+")
+
+
+def _inspect_leaks(line: str) -> list[str]:
+    """`docker inspect` satırının basabileceği yasak alanlar; boş liste = güvenli (21a).
+
+    Beyaz liste: `-f`/`--format` şablonunda yalnız `.State.<alan>`. Kök (`.` — `{{json .}}`,
+    `{{.}}`, `{{index . "Config"}}`) bütün nesneyi, `Config.Env` (kap parolası) dâhil basar;
+    çıplak `.State` de bütün durum nesnesidir. Şablonu satırda okunamayan biçim
+    (`-f "$BICIM"`) doğrulanamaz, reddedilir. Dize sabitleri alan sayılmaz."""
+    if not FORMAT.search(line):
+        return ["-f/--format yok: çıplak inspect bütün nesneyi basar"]
+    actions = re.findall(r"\{\{(.*?)\}\}", line)
+    if not actions:
+        return ["şablon satırda değil: doğrulanamaz"]
+    fields = [
+        field
+        for action in actions
+        for field in FIELD.findall(re.sub(r'"[^"]*"|`[^`]*`', "", action))
+    ]
+    return [field for field in fields if not STATE_FIELD.fullmatch(field)]
+
+
+def _inspect_lines(script: str) -> list[str]:
+    return [line for line in _logical_lines(script) if INSPECT.search(line)]
+
+
 def test_ci_never_prints_the_container_log() -> None:
     """Derinlemesine savunma: supabase/postgres imajı ilk kurulumda kap parolasını düz metin olarak
     kendi loguna yazar; `::add-mask::` tam dize eşleşmesine dayanan en iyi çaba korumasıdır. Log hiç
-    basılmaz. `inspect` yalnız `-f` biçimiyle: çıplak `inspect` `Config.Env`i (parola) basar — ve
-    `-f`/`--format` biçimi de `.Config`e uzanamaz: `{{json .Config.Env}}` aynı parolayı basar
-    (19c)."""
+    basılmaz. `inspect` yalnız `-f`/`--format` biçimiyle ve yalnız `.State.<alan>` şablonuyla:
+    çıplak `inspect`, `{{json .}}` ve `{{json .Config.Env}}` `Config.Env`i (parola) basar
+    (19c, 21a). Betik mantıksal satırlarla okunur: `\\` ile bölünmüş komut birleştirilir."""
     runs = [str(step.get("run", "")) for step in _steps(CI)]
-    inspects = [
-        line
-        for run in runs
-        for line in run.splitlines()
-        if re.search(r"docker\s+(container\s+)?inspect\b", line)
-    ]
+    inspects = [line for run in runs for line in _inspect_lines(run)]
 
-    assert not [run for run in runs if re.search(r"docker\s+(container\s+)?logs\b", run)]
-    assert inspects and all(re.search(r"\binspect\s+-f\s", line) for line in inspects), inspects
-    assert [line for line in inspects if re.search(r"\.Config\b", line)] == []
+    assert not [run for run in runs if any(LOGS.search(line) for line in _logical_lines(run))]
+    assert inspects, "ci.yml kabın durumunu hiç basmıyor — test kurgusu bayatlamış"
+    assert [line for line in inspects if _inspect_leaks(line)] == [], inspects
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "docker inspect fe-site-db",
+        "docker inspect -f '{{json .}}' fe-site-db",
+        "docker inspect --format '{{.}}' fe-site-db",
+        "docker container inspect -f '{{json .Config.Env}}' fe-site-db",
+        "docker inspect --format='{{index . \"Config\"}}' fe-site-db",
+        "docker inspect -f '{{json .State}}' fe-site-db",
+        'docker inspect -f "$BICIM" fe-site-db',
+        "docker inspect -f \\\n  '{{json .Config.Env}}' fe-site-db",
+        "docker \\\n  inspect fe-site-db",
+    ],
+    ids=[
+        "ciplak",
+        "json-kok",
+        "kok",
+        "config",
+        "index-kok",
+        "state-butun",
+        "degiskende-sablon",
+        "satir-devami-sablon",
+        "satir-devami-ciplak",
+    ],
+)
+def test_the_inspect_guard_rejects_any_template_beyond_state_fields(run: str) -> None:
+    """21a: `-f`/`--format` şablonunda yalnız `.State.<alan>` serbest (beyaz liste). Kök (`.`,
+    `json .`, `index . …`) `Config.Env`i de taşır; `\\` ile bölünmüş satır birleştirilerek
+    okunur."""
+    lines = _inspect_lines(run)
+
+    assert any(_inspect_leaks(line) for line in lines), lines
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        # ci.yml'in bugünkü satırı (kısaltılmış).
+        "docker container inspect -f 'durum={{.State.Status}} oom={{.State.OOMKilled}}' fe-site-db",
+        "docker inspect --format '{{.State.Health.Status}}' fe-site-db",
+        "docker inspect --format='{{.State.Running}}' \\\n  fe-site-db",
+    ],
+    ids=["bugunku-ci", "format-saglik", "format-esittir-devam"],
+)
+def test_the_inspect_guard_accepts_state_fields(run: str) -> None:
+    lines = _inspect_lines(run)
+
+    assert lines and [line for line in lines if _inspect_leaks(line)] == []
 
 
 def _verify_text() -> str:
