@@ -13,9 +13,19 @@ from typing import Any
 
 import pytest
 
+from football_edge.backtest.context import record_of
 from football_edge.backtest.harness import DecisionContext, Prediction, ResultRecord, replay
+from football_edge.backtest.model_config import ModelConfig
 from football_edge.backtest.timeline import decision_at
-from football_edge.backtest.walkforward import group_matches
+from football_edge.backtest.walkforward import (
+    BLEND_COMPONENTS,
+    DC,
+    ELO,
+    EVALUATION,
+    group_matches,
+    group_rows,
+)
+from football_edge.backtest.wf_eval import blended
 from football_edge.history.catalog import EXTRA, MAIN
 from football_edge.history.types import H2H, PRE_CLOSING, RESULTS, HistMatch
 from football_edge.live.context import (
@@ -30,9 +40,13 @@ from football_edge.live.context import (
     pre_prices,
     season_of,
 )
+from football_edge.live.shadow import shadow_rows
 from football_edge.live.store import load_live_matches, load_quotes
+from football_edge.live.weights import BlendWeights, weights_for
+from football_edge.market.devig import POWER
 from football_edge.model.dixon_coles import DCConfig
-from football_edge.model.elo_model import EloModel
+from football_edge.model.elo_model import EloModel, EloModelConfig
+from football_edge.model.pool import pool
 from football_edge.model.strategies import DixonColesStrategy
 from tests.backtest_builders import hist_match, quote
 from tests.model_builders import season
@@ -203,6 +217,49 @@ def test_the_same_strategy_predicts_the_same_from_both_builders() -> None:
             state = state.observe(result)
         live = state.predict(replace(decision.context, match_index=index))
         assert live is not None and live.probs == replayed[index]
+
+
+@pytest.mark.leakage
+def test_the_blend_is_the_same_from_both_builders() -> None:
+    """E2 harman ayağı (DEFERRED 21e): canlıda harman gölge satırlarından (`shadow_rows`: piyasa,
+    Elo, DC) haftalık raporda donmuş ağırlıkla kurulur (`live/report.py`: `pool` +
+    `weights_for`); tarihte walk-forward satırından (`group_rows` → `wf_eval.blended`). Aynı maç
+    için iki yolun bileşenleri ve harmanı bayt eşit. Piyasa bileşeninin paritesini (karar anı
+    fiyatı ↔ maçın kendi kapanış öncesi fiyatı, aynı vig yöntemi) yalnız bu ayak sınar. DC iki
+    ayakta da soğuk başlar (E2 ile aynı kalıp: tarih ayağında `active_from=` hedef günü)."""
+    index = _targets()[40]
+    target = GROUP[index]
+    config = ModelConfig(
+        "x", "c", "l", POWER, EloModelConfig(), DCConfig(min_matches=40), 1, 0.02, ()
+    )
+    weights = (0.5, 0.3, 0.2)
+    frozen = BlendWeights("e", "l", "c", BLEND_COMPONENTS, (1.0, 0.0, 0.0), {"E0": weights}, ())
+
+    rows = shadow_rows(
+        _batch(target), config=config, rating_groups=GROUPS, config_sha256="e", git_sha="f"
+    )
+    live = {row.strategy: row.probs for row in rows}
+    strategies = {
+        ELO: EloModel(config=config.elo, groups=GROUPS),
+        DC: DixonColesStrategy(
+            config=config.dixon_coles,
+            groups=GROUPS,
+            active_from=target.date,
+            cadence_days=config.cadence_days,
+        ),
+    }
+    (historical,) = (
+        row
+        for row in group_rows(
+            GROUP, KINDS, strategies, method=config.method, zoning=lambda m, k: EVALUATION
+        )
+        if row.key == record_of(target).key
+    )
+    ((_, replayed),) = blended([historical], {(historical.key.league, historical.season): weights})
+
+    assert set(live) == set(BLEND_COMPONENTS)
+    assert live == dict(historical.components)
+    assert pool([live[name] for name in BLEND_COMPONENTS], weights_for(frozen, "E0")) == replayed
 
 
 def test_snapshots_after_the_decision_and_incomplete_books_are_ignored() -> None:
