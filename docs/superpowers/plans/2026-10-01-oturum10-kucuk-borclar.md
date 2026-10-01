@@ -102,3 +102,13 @@ worktree'sinde (`.worktrees/wt-s10-tN`, dal `feat/s10-tN`), sonra `integ/s10` da
 - [ ] `src/football_edge/model/strategies.py` DC memo'sunu oku; B1 senaryosunu (aynı nesne başka maç kümesine oynatılırsa fitleri taşır) bir sentetik koşuyla scratch'te ölç (kod değişikliği commit'lenmez).
 - [ ] Seçenekleri karşılaştır: (a) "`at`ten önceki gözlem sayısı" anahtarı + sıralı parça yapısı, (b) maç kümesinin kimliği (hash) ile memo'yu nesneye bağlama, (c) her oynatmada yeni nesne zorunluluğu (bekçiyle). Her biri için maliyet, mühürlü Faz 3 sonuçlarının bayt eşliğine etkisi, test planı.
 - [ ] Öneri + uygulama ne zaman (Faz 4 model değişikliğiyle). Kod commit'i YOK.
+
+### Task 7: E2 parite testinin DC ayağı hiçbir şey ölçmüyor (Task 6 yan bulgusu)
+
+**Files:** Modify `tests/test_context_parity.py` (yalnız test; `src/` değişmez).
+
+- [ ] Sorun (T6 incelemesinde doğrulandı): `tests/test_context_parity.py:181-191` E2'nin DC ayağında canlı tahmin memo isabetidir — canlı akış boş, gol çevrilmiş ya da kesik olsa da test yeşil. Taze nesneyle doğru akışta fark ~3,19e-06 (sıcak/soğuk başlangıç) ve mevcut `approx` toleransını aşar.
+- [ ] Düzeltme: canlı ayağı memo'dan bağımsız kur (taze strateji nesnesi). Karşılaştırmayı tolerans gevşeterek DEĞİL, aynı başlangıç koşuluyla yap: iki ayağı da taze nesneyle (soğuk başlangıç) üret ve bayt/`approx` eşitliğini ölç; sıcak başlangıçla karşılaştırma gerekiyorsa farkın kaynağını docstring'de yaz. Tolerans büyütmek yasak (kapı gevşetme).
+- [ ] Kanıt: canlı akışı boşaltan, golü çeviren ve kesen üç mutasyon artık kırmızı; düzeltilmemiş testte üçü de yeşildi (önce göster).
+- [ ] Tasarım notu `docs/superpowers/specs/2026-10-01-dc-memo-anahtari.md` (T6, dal `feat/s10-t6`) bu testi E2 satırında anar — okumak serbest, YAZMA.
+- [ ] Tam kapı; commit.
