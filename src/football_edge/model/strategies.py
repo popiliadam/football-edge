@@ -12,6 +12,13 @@ başka kümenin fit'ini (isabet) ya da sıcak başlangıcını (ıska) verirdi. 
 akışla mühürlenir; isabette girdinin, ıskada `latest`in mührü şimdiki akışın öneki değilse
 `MemoReuseError`. Bekçi yalnız yükseltir: anahtar, fit ve `start` aynen — aynı soyda akış yalnız
 uzar, bekçi tetiklenemez. Her oynatmaya yeni nesne kurulur (üretim yolları zaten öyle).
+
+Bilinen sınır (tasarım kuralı, bilerek sıkılaştırılmadı): bekçi ÖNEK denetler. İkinci küme ilk
+kümeyi aynen içerip akışın yalnız SONUNA kayıt eklerse (ör. son karardan önce bilinen ek bir sonuç)
+mühür önek kalır ve son anahtar(lar)ın isabeti eski fit'i sessizce verir; ek kayıt ortadaki bir
+karardan önce gelirse bir sonraki anahtarda düşer. "Önekten sonraki kayıtlar `day ≥ at`" gibi bir
+sıkılaştırma kadans 7'deki meşru büyümeyi ve tarih ↔ başlama kayık satırları yanlış pozitife
+çevirebilir; ölçülmeden yapılmaz (inceleme U1 r1 M2).
 """
 
 from __future__ import annotations
@@ -63,7 +70,8 @@ def _extends(sealed: Chunks, current: Chunks, verified: dict[int, tuple[Chunk, C
 
     Parça sınırları konumdan gelir (`_append` hep son parçayı doldurur): mühürlü i. parça şimdiki
     i. parçanın başı olmalı. Aynı soyda dolu parçalar aynı nesnedir (`is`); son parça kayıtları
-    aynı nesneler olduğundan dilim karşılaştırması da kısadır."""
+    aynı nesneler olduğundan dilim karşılaştırması da kısadır. Yalnız önek: sona eklenmiş kayıt
+    reddedilmez (modül docstring'indeki bilinen sınır)."""
     if len(current) < len(sealed):
         return False
     for old, new in zip(sealed, current, strict=False):

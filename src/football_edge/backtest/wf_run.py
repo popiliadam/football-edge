@@ -50,7 +50,13 @@ def model_strategies(
     rating_groups: Mapping[str, str],
     config: ModelConfig,
 ) -> Mapping[str, Strategy]:
-    """Elo, Dixon-Coles 1X2 ve Ü/A; iki DC aynı memo'yu paylaşır (aynı veri, aynı fit)."""
+    """Elo, Dixon-Coles 1X2 ve Ü/A; iki DC aynı memo'yu paylaşır (aynı veri, aynı fit).
+
+    Paylaşım yalnız iki DC AYNI anahtar dizisini gördüğü için güvenlidir: aynı maç dizisi, aynı
+    `active_from`, aynı `cadence_days` → Ü/A'nın her `params` çağrısı 1X2'nin isabetidir. Biri
+    ayrı `active_from`/kadans alırsa Ü/A'nın ilk ıskası memo soy bekçisinde `MemoReuseError`
+    olur (`latest`in mührü 1X2'nin bütün akışıdır; `model/strategies.py`) — final-eval'de bu,
+    holdout'u yakan bir istisnadır. Ayrı ayar gerekiyorsa memo paylaşılmaz."""
     h2h = DixonColesStrategy(
         config=config.dixon_coles,
         groups=rating_groups,

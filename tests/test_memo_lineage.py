@@ -3,9 +3,10 @@
 Tasarım: `docs/superpowers/specs/2026-10-01-dc-memo-anahtari.md` §3 (c), §5. Memo anahtarı
 (grup, fit günü) aynen kalır; her girdi fit anındaki gözlem akışıyla mühürlenir. Bekçi isabette
 girdinin, ıskada `memo.latest`in mührünü okur: mühür şimdiki akışın öneki değilse
-`MemoReuseError`. Aynı nesne ikinci bir maç kümesine oynatılınca sessizce eski fit'i ya da yabancı
-soydan sıcak başlangıcı taşımaz, adıyla düşer. Bekçi yalnız yükseltir: anahtar, fit ve `start`
-değişmez. Veri SENTETİK.
+`MemoReuseError`. Aynı nesne, mühürlü akışın öneki OLMADIĞI ikinci bir maç kümesine oynatılınca
+sessizce eski fit'i ya da yabancı soydan sıcak başlangıcı taşımaz, adıyla düşer. Bilinen sınır
+(`strategies.py` docstring'i): ilk kümeyi aynen içerip yalnız SONA kayıt ekleyen küme öneki korur.
+Bekçi yalnız yükseltir: anahtar, fit ve `start` değişmez. Veri SENTETİK.
 """
 
 from __future__ import annotations
@@ -28,6 +29,10 @@ CONFIG = DCConfig(xi=0.002, ridge=0.01, min_matches=40)
 ACTIVE = date(2020, 7, 1)
 HISTORY = main_history(2019, 2023)
 DROPPED = "2223"
+# I1 (inceleme r1): fark yalnız DOLU (eski) parçada — fit penceresindeki düzeltilmiş eski sezon.
+LONG = main_history(2011, 2023)
+LONG_ACTIVE = date(2016, 7, 1)
+CORRECTED = "1415"
 
 
 def _strategy(**kwargs: Any) -> DixonColesStrategy:
@@ -60,7 +65,7 @@ def _dropped() -> tuple[HistMatch, ...]:
     return tuple(match for match in HISTORY if match.season != DROPPED)
 
 
-def _flipped() -> tuple[HistMatch, ...]:
+def _flipped(history: Sequence[HistMatch] = HISTORY, code: str = DROPPED) -> tuple[HistMatch, ...]:
     """B1': gözlem SAYISI aynı, İÇERİK farklı — bir sezonun golleri ev↔deplasman çevrilir."""
     return tuple(
         replace(
@@ -69,10 +74,17 @@ def _flipped() -> tuple[HistMatch, ...]:
             away_goals=match.home_goals,
             result={"H": "A", "A": "H"}.get(match.result, match.result),
         )
-        if match.season == DROPPED
+        if match.season == code
         else match
-        for match in HISTORY
+        for match in history
     )
+
+
+def _corrected_old_season() -> tuple[HistMatch, ...]:
+    """2014/15'in golleri düzeltilmiş (çevrilmiş) küme: `active_from` 2016'dan önce, fit penceresi
+    içinde. İkinci oynatmanın ilk `params`ı bir isabettir; akış > 256 kayıt, fark 0. (dolu)
+    parçada, son parça aynı — yalnız son parçayı karşılaştıran bekçi 448/448 eski fit'i taşırdı."""
+    return _flipped(LONG, CORRECTED)
 
 
 def _shifted() -> tuple[HistMatch, ...]:
@@ -88,24 +100,61 @@ def _shifted() -> tuple[HistMatch, ...]:
 
 
 @pytest.mark.parametrize(
-    ("second", "path", "day"),
+    ("first", "active", "second", "path", "day"),
     [
-        pytest.param(_dropped, "isabet", "2023-08-04", id="B1-sezon-cikarildi"),
-        pytest.param(_flipped, "isabet", "2022-08-12", id="B1'-goller-cevrildi"),
-        pytest.param(_shifted, "ıska", "2020-08-04", id="1b-uc-gun-kaydirildi"),
+        pytest.param(HISTORY, ACTIVE, _dropped, "isabet", "2023-08-04", id="B1-sezon-cikarildi"),
+        pytest.param(HISTORY, ACTIVE, _flipped, "isabet", "2022-08-12", id="B1'-goller-cevrildi"),
+        pytest.param(HISTORY, ACTIVE, _shifted, "ıska", "2020-08-04", id="1b-uc-gun-kaydirildi"),
+        pytest.param(
+            LONG,
+            LONG_ACTIVE,
+            _corrected_old_season,
+            "isabet",
+            "2016-08-05",
+            id="I1-eski-sezon-dolu-parcada",
+        ),
     ],
 )
 def test_a_strategy_replayed_on_a_second_match_set_is_refused(
-    second: Any, path: str, day: str
+    first: Sequence[HistMatch], active: date, second: Any, path: str, day: str
 ) -> None:
-    """§5/1, 1b, 2: aynı kök nesne ikinci kümeye verilince bekçi ilk isabette ya da ilk ıskada
-    adıyla düşer. Bekçisiz kod B1'de 2023/24'ün 56/56 tahminini tam kümeninkiyle BİREBİR
-    döndürürdü; +3 günde fit'ler yabancı soydan (ya da soğuk) başlardı."""
-    reused = _strategy()
-    _probs(HISTORY, reused)
+    """§5/1, 1b, 2: aynı kök nesne, mühürlü akışın öneki olmayan ikinci kümeye verilince bekçi ilk
+    isabette ya da ilk ıskada adıyla düşer. Bekçisiz kod B1'de 2023/24'ün 56/56 tahminini tam
+    kümeninkiyle BİREBİR döndürürdü; +3 günde fit'ler yabancı soydan (ya da soğuk) başlardı."""
+    reused = DixonColesStrategy(config=CONFIG, active_from=active)
+    _probs(first, reused)
 
     with pytest.raises(MemoReuseError, match=f"{path}.*{day}"):
         _probs(second(), reused)
+
+
+def _chunk(goals: int) -> tuple[GoalRecord, ...]:
+    return tuple(
+        GoalRecord("Alfa", "Beta", goals, 0, date(2020, 1, 1) + timedelta(days=day))
+        for day in range(model_strategies.CHUNK)
+    )
+
+
+def test_a_shorter_stream_is_not_extended_by_its_seal() -> None:
+    """M1 (inceleme r1): akış tam parça sınırında biter, mühür bir kısmi parça daha taşır →
+    önek değil (uzunluk denetimi)."""
+    full = _chunk(1)
+    extra = (GoalRecord("Gama", "Delta", 2, 2, date(2021, 1, 1)),)
+
+    assert model_strategies._extends((full, extra), (full,), {}) is False
+    assert model_strategies._extends((full,), (full, extra), {}) is True
+
+
+def test_a_verified_chunk_is_rechecked_against_a_different_sealed_chunk() -> None:
+    """M1: `verified` önbelleği (yeni, mühürlü) ÇİFTİNİ tutar; aynı yeni parça içerikçe farklı
+    başka bir mühürlü parçayla karşılaştırılınca önbellek isabet saymaz."""
+    sealed, other = _chunk(1), _chunk(3)
+    current = tuple(list(sealed))  # içerikçe eşit, başka nesne
+    verified: dict[int, Any] = {}
+
+    assert current is not sealed
+    assert model_strategies._extends((sealed,), (current,), verified) is True
+    assert model_strategies._extends((other,), (current,), verified) is False
 
 
 def test_the_refusal_names_the_cause_in_turkish() -> None:
