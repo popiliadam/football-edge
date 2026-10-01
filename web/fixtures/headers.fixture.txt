@@ -1,5 +1,7 @@
+# yorum: /yorum-yol-degil/
   X-Sahipsiz: yol-yok
 /*
+  # girintili yorum: baslik-degil
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
@@ -15,3 +17,9 @@
 /en/
   Cache-Control: no-store
 /bos/
+#/yorum-bitisik/
+/cok/
+  Cache-Control: max-age=0
+  cache-control: no-cache
+	# sekmeli yorum: yine-yorum
+  CACHE-CONTROL: no-store

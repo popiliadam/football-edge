@@ -13,5 +13,8 @@
   "/tr/": {
     "content-security-policy": "default-src 'self'; script-src 'self'"
   },
-  "/bos/": {}
+  "/bos/": {},
+  "/cok/": {
+    "cache-control": "max-age=0,no-cache,no-store"
+  }
 }

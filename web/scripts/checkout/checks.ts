@@ -498,11 +498,14 @@ export function checkData(
 }
 
 // Aynı yol iki blokta geçerse başlıklar BİRLEŞİR (üzerine yazılmaz): yinelenen CSP görünür kalır.
+// `#` ile başlayan satır (girintili olanı da) yorumdur — Netlify belgesi, DEFERRED 21d. Aynı adlı
+// başlıkların HEPSİ sırasıyla tutulur; Netlify onları tek başlıkta virgülle birleştirir (eşi
+// `scripts/site_publish.py::parse_headers` birleşik değeri verir; ortak fixture ikisini eşitler).
 export function parseHeaders(text: string): Headers {
   const headers: Headers = new Map();
   let current: string | undefined;
   for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
     if (!/^\s/.test(line)) {
       current = line.trim();
       if (!headers.has(current)) headers.set(current, []);

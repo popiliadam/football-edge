@@ -104,16 +104,23 @@ def first_token(text: str) -> str:
 
 
 def parse_headers(text: str) -> dict[str, dict[str, str]]:
+    """`_headers` → yol → küçük harfli ad → Netlify'ın SUNDUĞU değer (DEFERRED 21d).
+
+    Netlify belgesi (docs.netlify.com/manage/routing/headers): `#` ile başlayan satır yorumdur
+    (girintili olanı da); aynı adlı başlıklar tek başlıkta virgülle birleşir (RFC 7230 §3.2.2).
+    Eşi: TS `web/scripts/checkout/checks.ts::parseHeaders`; ortak fixture `web/fixtures/`.
+    """
     blocks: dict[str, dict[str, str]] = {}
     current: dict[str, str] | None = None
     for line in text.splitlines():
-        if not line.strip():
+        if not line.strip() or line.strip().startswith("#"):
             continue
         if not line[0].isspace():
             current = blocks.setdefault(line.strip(), {})
         elif current is not None:
             name, _, value = line.strip().partition(":")
-            current[name.strip().lower()] = value.strip()
+            key, value = name.strip().lower(), value.strip()
+            current[key] = f"{current[key]},{value}" if key in current else value
     return blocks
 
 
