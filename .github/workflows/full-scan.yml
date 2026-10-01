@@ -33,6 +33,10 @@ jobs:
           fetch-depth: 0
           # Yalnız yerel `git log` okunur, push yok: token `.git/config`te kalmasın.
           persist-credentials: false
+      - name: Secret taraması
+        # Depo PUBLIC ve bu iş `DATABASE_URL` alıyor: tarama, secret'lı adımdan ÖNCE koşar
+        # (DEFERRED 19b).
+        run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"

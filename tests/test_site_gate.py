@@ -67,7 +67,9 @@ def test_the_site_database_is_local_and_its_password_is_generated_and_masked() -
 def test_ci_never_prints_the_container_log() -> None:
     """Derinlemesine savunma: supabase/postgres imajı ilk kurulumda kap parolasını düz metin olarak
     kendi loguna yazar; `::add-mask::` tam dize eşleşmesine dayanan en iyi çaba korumasıdır. Log hiç
-    basılmaz. `inspect` yalnız `-f` biçimiyle: çıplak `inspect` `Config.Env`i (parola) basar."""
+    basılmaz. `inspect` yalnız `-f` biçimiyle: çıplak `inspect` `Config.Env`i (parola) basar — ve
+    `-f`/`--format` biçimi de `.Config`e uzanamaz: `{{json .Config.Env}}` aynı parolayı basar
+    (19c)."""
     runs = [str(step.get("run", "")) for step in _steps(CI)]
     inspects = [
         line
@@ -78,6 +80,7 @@ def test_ci_never_prints_the_container_log() -> None:
 
     assert not [run for run in runs if re.search(r"docker\s+(container\s+)?logs\b", run)]
     assert inspects and all(re.search(r"\binspect\s+-f\s", line) for line in inspects), inspects
+    assert [line for line in inspects if re.search(r"\.Config\b", line)] == []
 
 
 def _verify_text() -> str:

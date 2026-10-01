@@ -66,9 +66,9 @@ FORBIDDEN_KEYS = frozenset(
 )
 
 # Çıkış kodları: collect 2–8 ve 19, backtest/market/live/jev 9–18 (tests/test_jev_budget.py).
-EXIT_SITE_CONFIG = 20  # SITE_DATABASE_URL yok, --out boş değil, git SHA okunamadı
+EXIT_SITE_CONFIG = 20  # SITE_DATABASE_URL yok, --out boş değil, git SHA ya da dosya okunamadı
 EXIT_SITE_CHAIN = 21  # çıpa ya da zincir doğrulanamadı; indirgeme de kırmızıdır
-EXIT_SITE_CUT = 22  # kesim, görünüm, taban ya da sicil tutarsız
+EXIT_SITE_CUT = 22  # kesim, görünüm, taban ya da sicil tutarsız; export'ta beklenmeyen istisna
 EXIT_SITE_NONDETERMINISTIC = 23  # ikinci türetim farklı content_sha256 üretti ya da düştü
 EXIT_SITE_INVALID = 24  # verify-snapshot kırmızı
 

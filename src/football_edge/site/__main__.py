@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import sys
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
@@ -54,6 +55,19 @@ def _schema() -> dict[str, Any]:
     return schema
 
 
+def _export_schema() -> dict[str, Any]:
+    """`_export`in şeması: okunamaz ya da kural dışıysa exit 20 (DEFERRED 19a); yalnız sınıf adı.
+
+    Sarma yalnız burada: `verify-snapshot` (`_content_errors`) `OSError`u kendi satırıyla adlar.
+    """
+    try:
+        return _schema()
+    except (OSError, ValueError) as error:  # JSONDecodeError, UnicodeDecodeError, SchemaError
+        raise ExportRefused(
+            EXIT_SITE_CONFIG, f"{SCHEMA_PATH}: şema okunamadı ({type(error).__name__})"
+        ) from None
+
+
 def _git_sha() -> str:
     found = os.environ.get("GITHUB_SHA", "")
     if not found:
@@ -75,6 +89,7 @@ def _export(out_dir: Path) -> int:
         return EXIT_SITE_CONFIG
     try:
         method = devig_method(DEVIG_CONFIG_PATH)
+        schema = _export_schema()  # bağlanmadan ÖNCE: bozuk şema DB'ye dokunmadan düşer
         git_sha = _git_sha()
         league_slugs = site_league_slugs(SITE_LEAGUES_PATH)
         with connect(dsn) as conn:
@@ -84,7 +99,7 @@ def _export(out_dir: Path) -> int:
                 generated_at=datetime.now(UTC),
                 git_sha=git_sha,
                 method=method,
-                schema=_schema(),
+                schema=schema,
                 league_slugs=league_slugs,
             )
     except ExportRefused as refused:
@@ -94,6 +109,16 @@ def _export(out_dir: Path) -> int:
         # Metin basılmaz: libpq hatası adresin (parolanın) parçasını taşıyabilir. Yalnız sınıf adı.
         sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası ({type(error).__name__})\n")
         return EXIT_SITE_CONFIG
+    except OSError as error:
+        # Kaynağında sarılmamış dosya hatası (DEFERRED 19a artık kolu): ortam sınıfı, exit 20.
+        # Metin yolu ve çalışma ortamının parçasını taşır; yalnız sınıf adı basılır.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: dosya hatası ({type(error).__name__})\n")
+        return EXIT_SITE_CONFIG
+    except Exception as error:
+        # `run_export`ın öngörmediği sınıf (`snapshot_errors`/`derive`, DEFERRED 19a): traceback'le
+        # exit 1 yerine `derive-stdin`deki gibi exit 22; metni bir fiyat taşıyabilir, basılmaz.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: beklenmeyen hata ({_where(error)})\n")
+        return EXIT_SITE_CUT
     LOGGER.info(
         "anlık görüntü yazıldı: maç=%d lig=%d takım=%d satır=%d last_id=%d "
         "content_sha256=%s dosya_sha256=%s",
@@ -106,6 +131,14 @@ def _export(out_dir: Path) -> int:
         summary.file_sha256,
     )
     return 0
+
+
+def _where(error: Exception) -> str:
+    """Sınıf adı ve en iç karenin `dosya:satır`ı — metin, kaynak satırı ve yerel değer YOK."""
+    frames = traceback.extract_tb(error.__traceback__)
+    if not frames:
+        return type(error).__name__
+    return f"{type(error).__name__}, {Path(frames[-1].filename).name}:{frames[-1].lineno}"
 
 
 def _derive_stdin() -> int:

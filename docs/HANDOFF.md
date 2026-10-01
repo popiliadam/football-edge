@@ -1,6 +1,6 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-01 (oturum 9 kapanışı, taze oturum için) · **Durum:** Dalga A + Faz 6 İz B (B-1 okuma
+**Son güncelleme:** 2026-10-01 (oturum 10 kapanışı — küçük borçlar §0.A/2 bitti) · **Durum:** Dalga A + Faz 6 İz B (B-1 okuma
 katmanı + B-2 web yüzeyi) `main`de, CI yeşil · **0013 CANLIDA**, **0014 yalnız depoda**, deploy BAĞLI DEĞİL ·
 milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-07** · holdout açılmadı ·
 **kullanıcının yapacakları: §0.K (tam liste)** · asistanın kullanıcısız işleri: §0.A · izlenecekler: §0.İ
@@ -13,7 +13,7 @@ milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-0
 
 ---
 
-## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı)
+## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı; oturum 10 eki §0.2a)
 
 Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçedir. Kullanıcının yapacakları **§0.K**'de
 (tek yer, tam liste). Asistanın kullanıcısız yapacakları **§0.A**'da. Disiplin **§0.D**'de.
@@ -43,6 +43,19 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
   Secret'lı kabukta koşma: `env -u DATABASE_URL -u ODDS_API_KEY -u TYPESAFE_API_KEY …` (yalnız `zincir` için DB gerekir).
 - **Holdout:** açılmadı. Plan 2 en erken 2026-10-07.
 
+### 0.2a Oturum 10'da biten (2026-10-01) — görev incelemesi + bütün-dal incelemesi + tek düzeltme dalgası + tam kapı
+- Plan `docs/superpowers/plans/2026-10-01-oturum10-kucuk-borclar.md` (defter `.superpowers/sdd/2026-10-01-oturum10-kucuk-borclar/progress.md`,
+  gitignored). Yedi görev paralel worktree'lerde (`.worktrees/wt-s10-t1…t7`, `wt-s10-fix`), `integ/s10` üzerinden `main`e.
+- **Kapanan DEFERRED:** 11a, 11h (N7 eşdeğer DEĞİLMİŞ — test eklendi), 17h, **18g(b)** (`db.connect` iki katmanlı DSN hijyeni:
+  `src/football_edge/dsn_hygiene.py` — bağlanmadan önce biçim + bağlanırken maske; 4 düzeltme turunda 6 yeni sızıntı biçimi
+  bulundu ve kapandı, 18 libpq seçeneği), 19a (yapılandırma hatası exit 20, beklenmeyen 22), 19c, 20a, 20d, 20f (404 `lang`,
+  nav adları), 20k, 20l, 20m. **Kısmen:** 19b (iki workflow'a tarama + özellik/sıra bekçileri; kırmızı taramadan sonra
+  `!cancelled()` adımları hâlâ koşar). **Tasarım:** 16g (`docs/superpowers/specs/2026-10-01-dc-memo-anahtari.md`, öneri (c)
+  soy bekçisi; uygulama Faz 4 model değişikliğiyle). **Yan bulgu kapandı:** E2 parite testinin DC ayağı hiçbir şey ölçmüyordu
+  (memo isabeti) — T7. Yeni ertelenenler **DEFERRED §21** (21a–21k).
+- **Canlı/zamanlanmış işlere etkisi:** `db.connect` her zamanlanmış işin yolunda. Yerel `.env` `DATABASE_URL` yeni biçim
+  denetiminden geçiyor (yalnız bool ölçüldü); GitHub secret'ı push sonrası ilk `seal` turuyla doğrulanır (§0.İ/0).
+
 ### 0.2 Oturum 9'da biten (2026-09-23/24) — hepsi bağımsız inceleme + bütün-dal incelemesi + CI'dan geçti
 - **Dalga A** (plan `docs/superpowers/plans/2026-09-23-oturum9-dalga-a.md`, defter
   `.superpowers/sdd/2026-09-23-oturum9-dalga-a/progress.md`): T1 EN alan adı koşulları raporu · T2 erişim kapısı
@@ -64,6 +77,9 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
   yeşildi) → push artık `grep -q "KAPI YEŞİL" … && git push`.
 
 ### 0.İ İzlenecekler (tarih sırasıyla — taze oturum her açılışta bakar)
+0. **Oturum 10 push'undan hemen sonra:** ilk `seal` turu yeşil olmalı (yeni `dsn_hygiene` biçim denetimi GitHub
+   `DATABASE_URL` secret'ını reddederse exit ≠ 0 — o zaman birleştirme commit'i geri alınır, secret biçimi ölçülür);
+   ilk `ci.yml` pytest adımı yeşil olmalı (DEFERRED 21i: runner libpq sürümü ölçülmedi).
 1. **~2026-10-02/03 06:22 UTC `snapshot`:** fikstürler 7 günlük ufka girer, `odds_snapshots`a satır yazılmaya başlar.
    **Olası tek yanlış exit 19** (oranı geç açılan bir lig, ötekiler boşken; RUNBOOK §3.11) — sonraki yeşil tur kapatır.
    **10-04'ten sonra hâlâ 19 ya da 0 satır → gerçek arıza**, RUNBOOK §3.11. `matches`te ileri tarihli maç görünmeli.
@@ -90,10 +106,8 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
    - (d) Plan 2 brief'lerine taşınacaklar: 17c–17e (T10), 17h kırmızı takım, 17n; `tier1` zamanlanırken exit 7 = "Jev
      kesintisi" adıyla; Plan metni Task 9 Step 8'de `min(boolean)` değil `bool_and`.
    - Plan 2'nin kullanıcıya bağlı kapıları: §0.K/4 (EN kaynağı), §0.K/5 (kalibrasyon onayı), §0.K/6 (ücretli Jev).
-2. **İsteğe bağlı küçük işler (K2/K3, kullanıcı girdisi yok):** DEFERRED 16g DC memo anahtarı tasarımı · DEFERRED §18–§20
-   açık satırları (ör. 18g(b) bozuk DSN'de libpq parola yankısı, 19a beklenmedik istisnada exit 1, 19b
-   `sources-audit`/`full-scan` secret taraması koşmuyor + seal job `continue-on-error`, 20a–20m B-2 küçükleri) ·
-   DEFERRED 11h (Scrapling adaptörü test boşlukları) · 17h (bekçi kaçışları).
+2. ~~İsteğe bağlı küçük işler~~ **Oturum 10'da bitti (§0.2a).** Kalan kullanıcısız küçükler DEFERRED §21 (21a–21k),
+   19b kalanı ve 16g (c) uygulaması (Faz 4 `model/strategies.py` değişikliğiyle) — hiçbiri acil değil.
 3. **İz B'de kullanıcısız kalan yok** — 0014'ün canlıya uygulanması, deploy, alan adı, hukuk hepsi §0.K'ye bağlı.
    Kullanıcı §0.K'yi tamamlayınca asistan `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" listesini 1→6 yürütür.
 
@@ -265,6 +279,9 @@ Hepsi `main`de birleşmiş ya da yeniden üretilebilir; **kalıcı tutulanlar `.
    (oturum 9 kum havuzları). `football-edge-sandbox-{applied,empty}` `scripts/sandbox_db.sh`in varsayılan kaplarıdır —
    silinebilir, betik yeniden kurar. Komut (kendi kapların için): `docker rm $(docker ps -aq --filter name=^izb-)` vb.
 5. **`/tmp/b2fake`** (B-2 plan yazarının atığı).
+7. **Oturum 10 (hepsi `main`de):** worktree'ler `.worktrees/wt-s10-{t1,t2,t3,t4,t5,t6,t7,fix}` ve dallar `feat/s10-t1…t7`,
+   `feat/s10-fix`, `integ/s10`; SDD çalışma alanı `.superpowers/sdd/2026-10-01-oturum10-kucuk-borclar/` (defter + inceleme
+   raporları + sondalar; istersen `progress.md`, `*-review*.md`, `*-report.md`, `final-review.md` → `_kalici/defterler/`).
 6. Faz 4 T0c runner ölçümü yapılırsa (§0.A/1a) **uzak geçici dal** silinmesi.
 
 ### 0.R Senin adına verilen kararlar — gözden geçir (tam liste ve "yanlışsa maliyeti" defterlerde)

@@ -13,6 +13,7 @@ import {
   checkCsp,
   checkData,
   checkFields,
+  checkFrameworkLang,
   checkHeaderBlocks,
   checkHreflang,
   checkIndexing,
@@ -135,6 +136,7 @@ function frameworkFindings(site: Site, out: string): string[] {
     const robots = tags(html, "meta").find((meta) => meta.name === "robots")?.content ?? "";
     return [
       ...(robots.split(/[\s,]+/).includes("noindex") ? [] : [`/${file}: noindex yok`]),
+      ...checkFrameworkLang(`/${file}`, html),
       ...textFindings(`/${file}`, html, site),
       ...frameworkNumberFindings(`/${file}`, html),
     ];

@@ -44,7 +44,7 @@ export default async function LegalPage({ params }: Params) {
   ];
   return (
     <main data-fe-page={`legal:${doc}`}>
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{t(lang, `legal.${doc}`)}</h1>
       <p className={styles.draft}>{t(lang, "legal.draft")}</p>
       <Content />

@@ -40,7 +40,7 @@ export default async function TrackRecordPage({ params }: Params) {
   );
   return (
     <main data-fe-page="track-record">
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{t(lang, "record.title")}</h1>
       <p>
         {t(lang, "record.published")}:{" "}

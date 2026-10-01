@@ -177,7 +177,11 @@ def test_no_anchor_is_red_not_skipped(tmp_path: Path) -> None:
     _refused(_db(), tmp_path, EXIT_SITE_CHAIN, "çıpasız yayın yok", anchor_dir=empty)
 
 
-def test_an_unreadable_git_history_is_red_not_skipped(tmp_path: Path) -> None:
+def test_an_unreadable_git_history_is_red_not_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Üst dizinlerdeki bir depo bulunmasın: TMPDIR bir git ağacındaysa da git'siz (DEFERRED 20l).
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     loose = tmp_path / "loose" / "ledger"
     loose.mkdir(parents=True)
     row = ROWS[9]

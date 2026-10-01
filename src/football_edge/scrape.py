@@ -276,6 +276,8 @@ def _retry_after_seconds(value: str, now: datetime) -> float | None:
         # `-0000` bölgesi naive döner (stdlib): UTC sayılır (inceleme Critical 1).
         aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
         return max(0.0, (aware - now).total_seconds())
+    # Taşan yıl/saat/bölge 3.11'de OverflowError atar (testli). IndexError/TypeError 3.11'de
+    # atılmaz: savunma, testsiz (eşdeğer mutant, DEFERRED 11h).
     except (TypeError, ValueError, OverflowError, IndexError):
         return None
 
