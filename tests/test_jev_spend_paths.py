@@ -161,8 +161,12 @@ def test_calibrate_without_a_key_exits_by_name_before_touching_the_database(
 
 # ── Kaynak kuralı: `TypeSafeJev` yalnız `BudgetedJev` içinden çağrılır ──────────────────────
 # Takma ad (`TypeSafeJev as X`) de çağrı yeridir; sarmalayıcı, ilk parametresini sarmadan önce
-# çıplak kullanamaz (17h). Bilinen sınır (kazara girişi durdurur, bilinçli kaçışı değil): dize
-# ile erişim (`getattr(jev, "TypeSafeJev")`, `globals()[…]`) görünmez.
+# ya da sonra çıplak kullanamaz (17h). Bilinen sınır (kazara girişi durdurur, bilinçli kaçışı
+# değil): dize ile erişim (`getattr(jev, "TypeSafeJev")`, `globals()[…]`) görünmez.
+# Bilinen yanlış pozitif (güvenli yön): sarmalayıcının ilk parametresinin sarma dışındaki HER
+# okunuşu sarmalayıcılığı düşürür — yeniden atama sonrası okuma (`jev = BudgetedJev(jev, …);
+# return jev`) ve `if jev is None: raise …` denetimi dahil. Sarılmışı yeni bir ada bağla, denetimi
+# çağıran tarafta yap.
 
 
 def _name(node: ast.expr) -> str | None:
@@ -371,6 +375,18 @@ def main(defter):
     return sar(TypeSafeJev(), defter)
 """
 
+_WRAPPER_BARE_AFTER = """
+from football_edge.jev import TypeSafeJev
+
+def sar(jev, defter):
+    b = BudgetedJev(jev, defter, cap_usd=25.0, estimate_usd=0.01, clock=None)
+    jev.ask_choice("soru", ["a", "b"])
+    return b
+
+def main(defter):
+    return sar(TypeSafeJev(), defter)
+"""
+
 
 @pytest.mark.parametrize(
     ("source", "expected"),
@@ -379,8 +395,15 @@ def main(defter):
         (_ALIASED_WRAPPED, [("m.py:6", True)]),
         (_BOUND_BARE_FIRST, [("m.py:6", False)]),
         (_WRAPPER_BARE_FIRST, [("m.py:9", False)]),
+        (_WRAPPER_BARE_AFTER, [("m.py:10", False)]),
     ],
-    ids=["takma-ad-çıplak", "takma-ad-sarılı", "bağlı-önce-çıplak", "sarmalayıcı-önce-çıplak"],
+    ids=[
+        "takma-ad-çıplak",
+        "takma-ad-sarılı",
+        "bağlı-önce-çıplak",
+        "sarmalayıcı-önce-çıplak",
+        "sarmalayıcı-sonra-çıplak",
+    ],
 )
 def test_an_alias_or_a_bare_use_before_wrapping_is_red(
     source: str, expected: list[tuple[str, bool]]

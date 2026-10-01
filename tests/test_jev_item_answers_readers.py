@@ -12,14 +12,15 @@ Metin STATİK olarak kurulur (17h, son inceleme M-4/M-5): sabit, f-string, `+` b
 (tek/demet/sözlük) ve `.format` biçimleme, `ayırıcı.join(demet|liste)`, argümansız
 `.upper()/.lower()/.casefold()`, `psycopg.sql.SQL/Identifier/Literal` parçaları; parçadaki ad aynı
 modülün metin sabitine çözülür — sabitin kendisi de kendinden önceki sabitlerden kurulabilir
-(`TABLO = "jev_" + "item_answers"`). Postgres tırnaksız adı küçük harfe indirdiği için büyük harf
-tablo adı da okumadır.
+(`TABLO = "jev_" + "item_answers"`, `T = TABLO`, `PARCA = ("SELECT …", TABLO)`). Postgres tırnaksız
+adı küçük harfe indirdiği için büyük harf tablo adı da okumadır.
 
 Bilinen sınırlar (bilinçli kaçışı değil kazara girişi durdurur, Faz 3 §3.1/12): başka modülden
-import edilen ya da nitelikle okunan sabit (`modul.TABLO`), başka bir sabite düz ad atamasıyla
-bağlanan sabit (`T = TABLO`), fonksiyon içinde çalışma anında kurulan ad, `db/migrations` altındaki
-VIEW/fonksiyon gövdeleri ve `scripts/` taranmaz; `gates_from`a verme yalnız aynı fonksiyon
-gövdesinde aranır (fonksiyonlar arası veri akışı izlenmez).
+import edilen ya da nitelikle okunan sabit (`modul.TABLO`), fonksiyon içinde çalışma anında kurulan
+ad, sözlük yerine `dict(...)` çağrısı (`"… %(t)s" % dict(t=TABLO)`), argümansız harf yöntemleri
+dışındaki dize yöntemleri (`TABLO.strip()`, `.replace(…)`), `db/migrations` altındaki VIEW/fonksiyon
+gövdeleri ve `scripts/` taranmaz; `gates_from`a verme yalnız aynı fonksiyon gövdesinde aranır
+(fonksiyonlar arası veri akışı izlenmez).
 """
 
 from __future__ import annotations
@@ -76,9 +77,10 @@ _CASE = frozenset({"upper", "lower", "casefold"})
 
 
 def _constants(tree: ast.Module) -> dict[str, str]:
-    """Modül düzeyinde metin sabitleri (`AD = "…"`, `AD = "jev_" + ON`): yalnız bileşik metnin
-    PARÇASI olunca çözülür — `execute(_ASKED)` gibi tek başına kullanılan ad yeni bir okuma
-    değildir. Sırayla statik kurulur: sabit, kendinden ÖNCE tanımlı sabitlerden de kurulabilir.
+    """Modül düzeyinde metin sabitleri (`AD = "…"`, `AD = "jev_" + ON`, `T = TABLO`, metin
+    demeti): yalnız bileşik metnin PARÇASI olunca çözülür — `execute(_ASKED)` gibi tek başına
+    kullanılan ad yeni bir okuma değildir. Sırayla statik kurulur: sabit, kendinden ÖNCE tanımlı
+    sabitlerden de kurulabilir.
     Ayrı bir `_Static` kullanılır; taramanın `used` kümesi bu okumadan etkilenmez."""
     found: dict[str, str] = {}
     for node in tree.body:
@@ -88,7 +90,7 @@ def _constants(tree: ast.Module) -> dict[str, str]:
             target, value = node.target, node.value
         else:
             continue
-        if isinstance(target, ast.Name) and (text := _Static(found).text(value)) is not None:
+        if isinstance(target, ast.Name) and (text := _Static(found)._piece(value)) is not None:
             found[target.id] = text
     return found
 
@@ -286,8 +288,10 @@ def test_a_select_built_from_parts_is_still_a_read(tmp_path: Path, body: str) ->
     [
         ('TABLO = "jev_" + "item_answers"\nQ = f"SELECT * FROM {TABLO}"\n', "mod.py:2 Q"),
         ('ON = "jev_"\nTABLO = ON + "item_answers"\nQ = f"SELECT * FROM {TABLO}"\n', "mod.py:3 Q"),
+        (TABLE_LINE + 'T = TABLO\nQ = f"SELECT * FROM {T}"\n', "mod.py:3 Q"),
+        (TABLE_LINE + 'PARCA = ("SELECT item_id FROM", TABLO)\nQ = "".join(PARCA)\n', "mod.py:3 Q"),
     ],
-    ids=["birleşik-sabit", "sabitten-sabit"],
+    ids=["birleşik-sabit", "sabitten-sabit", "düz-ad", "join-sabit-demet"],
 )
 def test_a_table_name_constant_built_from_parts_still_resolves(
     tmp_path: Path, source: str, expected: str

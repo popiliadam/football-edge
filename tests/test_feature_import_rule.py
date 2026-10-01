@@ -15,7 +15,8 @@ yerel ada bağlama (`m = football_edge.live; m.store`) ve `getattr(football_edge
 yoldan da girmediği ölçülür. Yasaklı modülün kardeşine tam adıyla ulaşmak
 (`from football_edge.live import context`) serbesttir.
 Bilinen sınırlar: hesaplanmış dize (`"football_edge.live." + "store"`) ve üst paketi dizeyle alıp
-öznitelikle inmek (`import_module("football_edge.live").store`) ya da dunder üzerinden inmek
+öznitelikle inmek (`import_module("football_edge.live").store`,
+`sys.modules["football_edge.live"].store`) ya da dunder üzerinden inmek
 (`football_edge.live.__dict__["store"]`) (1)'de görünmez; (2) bunları yalnız import anında çalışan
 kodda yakalar — fonksiyon içindeki bu biçimler iki katmanda da görünmez.
 """
