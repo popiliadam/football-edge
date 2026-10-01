@@ -80,6 +80,8 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
 0. **Oturum 10 push'undan hemen sonra:** ilk `seal` turu yeşil olmalı (yeni `dsn_hygiene` biçim denetimi GitHub
    `DATABASE_URL` secret'ını reddederse exit ≠ 0 — o zaman birleştirme commit'i geri alınır, secret biçimi ölçülür);
    ilk `ci.yml` pytest adımı yeşil olmalı (DEFERRED 21i: runner libpq sürümü ölçülmedi).
+   **→ YAPILDI 2026-10-01:** `833fe48` CI yeşil, 18:15 UTC `seal` yeşil (yeni biçim denetimi canlı secret'ı kabul etti);
+   yerelden salt okuma `verify-chain` yeni `connect` yolundan `SAĞLAM`.
 1. **~2026-10-02/03 06:22 UTC `snapshot`:** fikstürler 7 günlük ufka girer, `odds_snapshots`a satır yazılmaya başlar.
    **Olası tek yanlış exit 19** (oranı geç açılan bir lig, ötekiler boşken; RUNBOOK §3.11) — sonraki yeşil tur kapatır.
    **10-04'ten sonra hâlâ 19 ya da 0 satır → gerçek arıza**, RUNBOOK §3.11. `matches`te ileri tarihli maç görünmeli.
