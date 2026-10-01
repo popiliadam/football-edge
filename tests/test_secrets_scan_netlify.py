@@ -429,7 +429,10 @@ def test_the_scan_runs_before_the_first_secret_or_push_of_its_job() -> None:
     satır 2). Taramasız ama secret okuyan iş taramalı bir işin başarısını bekler (`site.yml`
     `deploy` → `build`); iş düzeyi `if: always()` taşıyan iş beklemiş sayılmaz (21k).
 
-    Ölçmediği: betiğin dışından gelen push (`"$GIT" push`, `gh api`, üçüncü taraf eylem),
+    Ölçmediği: betiğin dışından gelen push (`"$GIT" push`, `gh api`, üçüncü taraf eylem);
+    alt komutu ya da `git` adı BAŞKA satırda kurulan push — bekçi satır temellidir (N-16):
+    dizi argümanı (`args=(⏎ push …⏎)` + `git -C site "${args[@]}"`), iki satırda `alt=push` +
+    `git -C site $alt`, çok satırlı `$(…)`, parçalı ad (`"$(printf gi)t" -C site push`);
     `run:` dışındaki secret kullanımı yalnız `${{ }}` ifadesiyle görülür; `if:`e secret
     GitHub'ın kendisi tarafından yasaktır."""
     checked, broken = _order_violations(_workflows())
@@ -533,6 +536,10 @@ ORDER_RED_R1 = {
     "takma-ad": _one({"run": "git -c alias.yolla=push yolla origin HEAD"}, SCAN_STEP),
     "degiskende-alt-komut": _one({"run": "alt=push; git -C site $alt origin HEAD"}, SCAN_STEP),
     "xargs-ile": _one({"run": "echo push | xargs git -C site"}, SCAN_STEP),
+    # Düzeltme turu 4 (N-14): tırnakla bölünmüş sözcüğü ne BASE ne kaba kural görür — yalnız kabuk
+    # okuması. Vaka, `_pushes`in o katmanı birleşimde TUTTUĞUNU pinler (yalnız-kabuk testi
+    # `_git_subcommands`ı doğrudan çağırır, bağlantıyı ölçmez).
+    "tirnakla-bolunmus-sozcuk": _one({"run": "gi''t -C site pu\"\"sh"}, SCAN_STEP),
     # I-3: taramasız bir işi beklemek korumaz.
     "needs-taramasiz-is": {
         "sentetik.yml": {

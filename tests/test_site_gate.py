@@ -170,7 +170,13 @@ def test_ci_never_prints_the_container_log() -> None:
     kendi loguna yazar; `::add-mask::` tam dize eşleşmesine dayanan en iyi çaba korumasıdır. Log hiç
     basılmaz. `inspect` yalnız `-f`/`--format` biçimiyle ve yalnız `.State.<alan>` şablonuyla:
     çıplak `inspect`, `{{json .}}` ve `{{json .Config.Env}}` `Config.Env`i (parola) basar
-    (19c, 21a). Betik mantıksal satırlarla okunur: `\\` ile bölünmüş komut birleştirilir."""
+    (19c, 21a). Betik mantıksal satırlarla okunur: `\\` ile bölünmüş komut birleştirilir.
+
+    Ölçmediği (N-15): seçimde kabuk okuması katmanı yok — tırnakla ya da `\\` ile bölünmüş alt
+    komut (`docker ins''pect x`, `docker in\\spect x`) ve çok satırlı `$(…)` (`docker $(⏎echo
+    inspect⏎) x`) satırı seçtirmez. Kaba `docker`+`inspect` denetimi yalnız satırda HİÇ okunan
+    inspect yokken çalışır: aynı satırda geçerli bir inspect varsa ikinci, okunamayan inspect
+    (`… && docker $'inspect' x`, `k=inspect; docker $k x`) kaçar. Hepsi kasıtlı gizleme ister."""
     runs = [str(step.get("run", "")) for step in _steps(CI)]
     inspects = [line for run in runs for line in _inspect_lines(run)]
 
