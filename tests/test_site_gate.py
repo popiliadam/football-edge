@@ -7,6 +7,7 @@ Metin ve ayrıştırılmış YAML okunur; kabın gerçekten kalktığını CI ko
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -69,31 +70,69 @@ INSPECT = re.compile(r"\bdocker\s+(?:container\s+)?inspect\b")
 LOGS = re.compile(r"\bdocker\s+(?:container\s+)?logs\b")
 
 
-# `-f`/`--format`: `-f 'x'`, `--format 'x'`, `--format='x'`.
-FORMAT = re.compile(r"\s(?:-f|--format)(?:\s|=)")
-# Şablon eylemindeki alan başvurusu: `.`, `.State.Status`, `$.Config` (önünde ad/kapanış yok).
-FIELD = re.compile(r"(?<![\w)\]])\.(?:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?")
-STATE_FIELD = re.compile(r"\.State(?:\.[A-Za-z_]\w*)+")
+# Şablonun TEK izinli eylem biçimi (gerçek beyaz liste, eylem başına tam eşleşme):
+# `{{.State.X}}`, `{{$.State.X.Y}}`, `{{json .State.X}}`, `{{printf "%s" .State.X}}`.
+# Kök (`.`, `$`), `index`, `range`, boru, değişken — geri kalan her şey kırmızı.
+STATE_ACTION = re.compile(r'\s*(?:json\s+|printf\s+"[^"{}]*"\s+)?\$?\.State(?:\.[A-Za-z_]\w*)+\s*')
+# Komut ayırıcı token'ları (`&&`, `||`, `;`, `|`, `&`, parantez); yönlendirme (`2>&1`) değil.
+SEPARATOR = frozenset(";&|()")
+
+
+def _commands(line: str) -> list[list[str]] | None:
+    """Mantıksal satırın kabuk komutları (sözcük listeleri); bölünemezse `None`."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    commands: list[list[str]] = [[]]
+    for token in tokens:
+        if set(token) <= SEPARATOR:
+            commands.append([])
+        else:
+            commands[-1].append(token)
+    return [command for command in commands if command]
+
+
+def _template(command: list[str]) -> str | None:
+    """`-f x`, `--format x`, `--format=x` ya da `-fx` biçiminin şablonu; yoksa `None`."""
+    for index, word in enumerate(command):
+        if word in ("-f", "--format") and index + 1 < len(command):
+            return command[index + 1]
+        if word.startswith("--format="):
+            return word.split("=", 1)[1]
+        if word.startswith("-f") and not word.startswith("--") and len(word) > 2:
+            return word[2:]
+    return None
+
+
+def _template_leaks(template: str | None) -> list[str]:
+    if template is None:
+        return ["-f/--format yok: çıplak inspect bütün nesneyi basar"]
+    actions = re.findall(r"\{\{(.*?)\}\}", template)
+    outside = re.sub(r"\{\{.*?\}\}", "", template)
+    if not actions or "$" in outside or "`" in outside:
+        return [f"şablon doğrulanamaz: {template!r}"]
+    return [action for action in actions if not STATE_ACTION.fullmatch(action)]
 
 
 def _inspect_leaks(line: str) -> list[str]:
-    """`docker inspect` satırının basabileceği yasak alanlar; boş liste = güvenli (21a).
+    """`docker inspect` satırının basabileceği yasak içerik; boş liste = güvenli (21a).
 
-    Beyaz liste: `-f`/`--format` şablonunda yalnız `.State.<alan>`. Kök (`.` — `{{json .}}`,
-    `{{.}}`, `{{index . "Config"}}`) bütün nesneyi, `Config.Env` (kap parolası) dâhil basar;
-    çıplak `.State` de bütün durum nesnesidir. Şablonu satırda okunamayan biçim
-    (`-f "$BICIM"`) doğrulanamaz, reddedilir. Dize sabitleri alan sayılmaz."""
-    if not FORMAT.search(line):
-        return ["-f/--format yok: çıplak inspect bütün nesneyi basar"]
-    actions = re.findall(r"\{\{(.*?)\}\}", line)
-    if not actions:
-        return ["şablon satırda değil: doğrulanamaz"]
-    fields = [
-        field
-        for action in actions
-        for field in FIELD.findall(re.sub(r'"[^"]*"|`[^`]*`', "", action))
-    ]
-    return [field for field in fields if not STATE_FIELD.fullmatch(field)]
+    Beyaz liste, eylem başına: yalnız `.State.<alan>` (önünde `$`, `json` ya da `printf "…"`
+    olabilir). Kök — `.` ya da `$` (`{{json .}}`, `{{.}}`, `{{json $}}`, `{{index . "Config"}}`,
+    `{{range … := $}}`) — bütün nesneyi, `Config.Env` (kap parolası) dâhil basar; çıplak
+    `.State` de bütün durum nesnesidir. Satırdaki HER `docker inspect` komutu ayrı denetlenir
+    (`a && docker inspect x` ikincisini de, I-2); ham metindeki inspect sayısı okunabilen
+    komut sayısını aşarsa (tırnak, `$(…)` içinde) satır doğrulanamaz, reddedilir."""
+    commands = _commands(line)
+    if commands is None:
+        return ["satır kabuk sözcüklerine bölünemiyor: doğrulanamaz"]
+    inspects = [command for command in commands if INSPECT.search(" ".join(command))]
+    if len(inspects) != len(INSPECT.findall(line)):
+        return ["inspect komutu kabuk düzeyinde okunamıyor (tırnak ya da `$(…)` içinde)"]
+    return [leak for command in inspects for leak in _template_leaks(_template(command))]
 
 
 def _inspect_lines(script: str) -> list[str]:
@@ -126,6 +165,18 @@ def test_ci_never_prints_the_container_log() -> None:
         'docker inspect -f "$BICIM" fe-site-db',
         "docker inspect -f \\\n  '{{json .Config.Env}}' fe-site-db",
         "docker \\\n  inspect fe-site-db",
+        # Düzeltme turu 1 (I-2): Go şablonunun kök değişkeni `$` bütün nesnedir.
+        "docker inspect -f '{{json $}}' fe-site-db",
+        "docker inspect -f '{{$}}' fe-site-db",
+        "docker inspect -f '{{printf \"%v\" $}}' fe-site-db",
+        "docker inspect -f '{{range $k, $v := $}}{{$k}}{{end}}' fe-site-db",
+        # Aynı mantıksal satırda ikinci, çıplak inspect — düz ya da `\` ile bölünmüş.
+        "docker inspect -f '{{.State.Status}}' a && docker inspect fe-site-db",
+        "docker inspect -f '{{.State.Status}}' a \\\n  && docker inspect fe-site-db",
+        "docker inspect -f '{{.State.Status}}' a; docker container inspect fe-site-db",
+        'echo "$(docker inspect fe-site-db)"',
+        "docker inspect -f '{{.State.Status}}' \"$(docker inspect fe-site-db)\"",
+        'docker inspect -f "{{.State.Status}}$EK" fe-site-db',
     ],
     ids=[
         "ciplak",
@@ -137,6 +188,16 @@ def test_ci_never_prints_the_container_log() -> None:
         "degiskende-sablon",
         "satir-devami-sablon",
         "satir-devami-ciplak",
+        "json-dolar",
+        "dolar",
+        "printf-dolar",
+        "range-dolar",
+        "zincirli-ciplak",
+        "zincirli-devam-ciplak",
+        "noktali-virgul-ciplak",
+        "komut-ikamesi-ciplak",
+        "ic-ice-ikame",
+        "sablona-degisken-eki",
     ],
 )
 def test_the_inspect_guard_rejects_any_template_beyond_state_fields(run: str) -> None:
@@ -155,8 +216,18 @@ def test_the_inspect_guard_rejects_any_template_beyond_state_fields(run: str) ->
         "docker container inspect -f 'durum={{.State.Status}} oom={{.State.OOMKilled}}' fe-site-db",
         "docker inspect --format '{{.State.Health.Status}}' fe-site-db",
         "docker inspect --format='{{.State.Running}}' \\\n  fe-site-db",
+        "docker inspect -f '{{json .State.Health.Status}} {{$.State.Pid}}' fe-site-db",
+        "docker inspect -f '{{printf \"%s\" .State.Status}}' fe-site-db 2>&1 | tee durum.txt",
+        "docker inspect -f '{{.State.Status}}' a && docker inspect -f '{{.State.Pid}}' b",
     ],
-    ids=["bugunku-ci", "format-saglik", "format-esittir-devam"],
+    ids=[
+        "bugunku-ci",
+        "format-saglik",
+        "format-esittir-devam",
+        "json-ve-dolar-state",
+        "printf-boru",
+        "zincirli-iki-state",
+    ],
 )
 def test_the_inspect_guard_accepts_state_fields(run: str) -> None:
     lines = _inspect_lines(run)

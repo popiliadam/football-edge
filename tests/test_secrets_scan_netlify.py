@@ -149,7 +149,13 @@ def _reads_a_secret(node: Any) -> bool:
     Harf duyarsız (21k): GitHub'ın ifade ayrıştırıcısı bağlam ve fonksiyon adlarını
     `StringComparer.OrdinalIgnoreCase` sözlüklerinde arar (actions/runner
     `ExpressionParser.cs`: `ExtensionNamedValues`, `ExtensionFunctions`); `Secrets.X` ve
-    `SECRETS['X']` aynı secret'ı okur."""
+    `SECRETS['X']` aynı secret'ı okur.
+
+    Yalnız `secrets` BAĞLAMI sayılır: `${{ github.token }}` ile `${{ secrets.GITHUB_TOKEN }}` aynı
+    iş token'ıdır, ama ikincisi bu bekçide secret sayılır (M-4). Alarm adımlarının taramaya
+    bağlanmaması `github.token` yazımına dayanır. `secrets.GITHUB_TOKEN`a geçen alarm adımı
+    bağlama bekçisinde kırmızı verir; çare `github.token`a dönmektir, alarmı taramaya bağlamak
+    DEĞİL — kırmızı tarama tam da alarmın açılması gereken turdur."""
     return any(
         re.search(r"\bsecrets\b", expression, flags=re.I)
         for text in _strings(node)
@@ -195,17 +201,22 @@ SCAN = "check_secrets.sh"
 GIT_VALUE_OPTIONS = frozenset(
     {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
 )
-# Örtük `success()`i ezen durum fonksiyonları: biri `if:`te geçen adım ya da iş, önceki bir adım
-# (ya da `needs` edilen iş) kırmızıyken de koşabilir. Bağlam ve fonksiyon adları GitHub
-# ifadelerinde harf duyarsızdır (`_reads_a_secret`in notu) — `Always()` de sayılır.
-OVERRIDES_SUCCESS = re.compile(r"\b(?:always|cancelled|failure)\s*\(\s*\)", re.I)
+# Durum fonksiyonları. GitHub, `if:`te HERHANGİ biri geçiyorsa örtük `success() &&`i eklemez
+# ("A default status check of success() is applied unless you include one of these functions"):
+# `!success()` ve `success() || …` de kırmızı bir adımdan sonra koşabilir. Bağlam ve fonksiyon
+# adları harf duyarsızdır (`_reads_a_secret`in notu) — `Always()` de sayılır.
+STATUS_FUNCTION = re.compile(r"\b(?:success|always|cancelled|failure)\s*\(\s*\)", re.I)
+# BASE'in push regex'i (oturum 10): ham metinde `git [-c x]… push`; tırnaklı dizeyi de görür
+# (`bash -c 'git push'`, `eval`, `ssh host '… git push'`). Kabuk okumasıyla BİRLEŞİMİ alınır.
+BASE_GIT_PUSH = re.compile(r"\bgit\b(?:\s+-c\s+\S+)*\s+push\b")
 
 
 def _git_subcommands(line: str) -> list[str]:
     """Satırdaki her `git` çağrısının alt komutu. Kabuk sözcüklerine bölünür (tırnaklı değer
-    tek sözcük) ve genel seçenekler atlanır; `$(…)`/`` `…` `` içindeki komut da okunur.
-    Kapanmamış tırnakla satır bölünemezse kaba okumaya düşer (`git` … `push` = push): yanlış
-    pozitif gürültülüdür, kaçırılan push sessiz."""
+    tek sözcük) ve genel seçenekler atlanır. Boşluk taşıyan sözcük (tırnaklı komut dizesi:
+    `bash -c '…'`, `eval '…'`, `ssh host '…'`) ve `$(…)`/`` `…` `` içindeki komut da ayrıca
+    okunur. Kapanmamış tırnakla satır bölünemezse kaba okumaya düşer (`git` … `push` = push):
+    yanlış pozitif gürültülüdür, kaçırılan push sessiz."""
     lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
     try:
@@ -216,6 +227,8 @@ def _git_subcommands(line: str) -> list[str]:
     for index, token in enumerate(tokens):
         if "$(" in token or "`" in token:
             found.extend(_git_subcommands(re.split(r"\$\(|`", token, maxsplit=1)[1]))
+        elif re.search(r"\s", token):
+            found.extend(_git_subcommands(token))
         if token.rsplit("/", 1)[-1] != "git":
             continue
         cursor = index + 1
@@ -227,10 +240,15 @@ def _git_subcommands(line: str) -> list[str]:
 
 
 def _pushes(step: dict[str, Any]) -> bool:
-    """Adımın betiği `git … push` koşuyor mu; `\\` ile bölünmüş satır birleştirilerek okunur."""
-    return any(
-        "push" in _git_subcommands(line) for line in _logical_lines(str(step.get("run", "")))
-    )
+    """Adımın betiği `git … push` koşuyor mu; `\\` ile bölünmüş satır birleştirilerek okunur.
+    Kabuk okuması ile BASE regex'inin birleşimi: BASE'in gördüğü her biçim görülmeye devam eder
+    (I-1). Yalnız yorum satırı (`# git push`) koşmaz, sayılmaz."""
+    lines = [
+        line
+        for line in _logical_lines(str(step.get("run", "")))
+        if not line.lstrip().startswith("#")
+    ]
+    return any(BASE_GIT_PUSH.search(line) or "push" in _git_subcommands(line) for line in lines)
 
 
 def _exposes(step: dict[str, Any]) -> bool:
@@ -281,12 +299,23 @@ def _bound(condition: str, term: str) -> bool:
     return term.lower() in [part.lower() for part in _conjuncts(condition)]
 
 
+def _overrides_success(condition: str) -> bool:
+    """Koşul örtük `success()`i eziyor mu: bir durum fonksiyonu geçiyor ve bu, üst düzey tek
+    `success()` terimi değil. `success() && x` ezmez; `!success()`, `success() || x`,
+    `always()`, `!cancelled()`, `failure()` ezer (M-1)."""
+    found = STATUS_FUNCTION.findall(condition)
+    if not found:
+        return False
+    plain = [" ".join(part.split()).lower() for part in _conjuncts(condition)]
+    return not (len(found) == 1 and "success()" in plain)
+
+
 def _waits_for(job: dict[str, Any], need: str) -> bool:
     """İş, `need` başarısız olunca atlanıyor mu: `if:`i örtük `success()`i ezmiyorsa evet
     (başarısız ya da atlanmış `needs` işi atlatır); eziyorsa ancak
     `needs.<need>.result == 'success'` üst düzey bir terimse."""
     condition = str(job.get("if", ""))
-    return not OVERRIDES_SUCCESS.search(condition) or _bound(
+    return not _overrides_success(condition) or _bound(
         condition, f"needs.{need}.result == 'success'"
     )
 
@@ -343,7 +372,8 @@ def _order_violations(workflows: dict[str, dict[str, Any]]) -> tuple[list[str], 
 
 def _unbound_after_scan(workflows: dict[str, dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(denetlenen adımlar, ihlaller). Taramayı taşıyan işte taramadan SONRA gelen ve `if:`i
-    örtük `success()`i ezen (`always()`, `!cancelled()`, `failure()`) her adım, secret okuyorsa
+    örtük `success()`i ezen (`always()`, `!cancelled()`, `failure()`, `!success()`) her adım,
+    secret okuyorsa
     (iş düzeyi `env:` dâhil) ya da push'luyorsa `steps.<tarama id>.outcome == 'success'`
     terimini üst düzey `&&` ile taşır. `outcome`: `continue-on-error` uygulanmadan önceki sonuç."""
     checked, broken = [], []
@@ -358,7 +388,7 @@ def _unbound_after_scan(workflows: dict[str, dict[str, Any]]) -> tuple[list[str]
             job_level = _job_level_secret(job)
             for index, step in enumerate(steps[scan + 1 :], start=scan + 1):
                 condition = str(step.get("if", ""))
-                if not OVERRIDES_SUCCESS.search(condition) or not (job_level or _exposes(step)):
+                if not _overrides_success(condition) or not (job_level or _exposes(step)):
                     continue
                 where = f"{file}:{name} adım {index} ({step.get('name', '?')})"
                 checked.append(where)
@@ -447,6 +477,32 @@ ORDER_RED = {
     },
 }
 
+ORDER_RED_R1 = {
+    # Düzeltme turu 1 (I-1): tırnaklı komut dizesindeki push BASE regex'inde yakalanıyordu.
+    "bash-c-tirnakli": _one({"run": "bash -c 'git push origin HEAD'"}, SCAN_STEP),
+    "eval-tirnakli": _one({"run": "eval 'git push origin HEAD'"}, SCAN_STEP),
+    "ssh-uzak-komut": _one({"run": "ssh host 'cd repo && git push'"}, SCAN_STEP),
+    "kapanmamis-tirnak": _one({"run": 'git -C alt push "yarim'}, SCAN_STEP),
+    # BASE'in hiç görmediği biçim: tırnaklı dizede `-C` (yalnız kabuk okuması yakalar).
+    "bash-c-git-C": _one({"run": "bash -c 'git -C alt push'"}, SCAN_STEP),
+    # Ters tırnak sözcüğe yapışır (`` `git ``): yalnız ikame dalı ayırır.
+    "ters-tirnak-ikamesi": _one({"run": 'cikti="`git -C alt push`"'}, SCAN_STEP),
+    # I-3: taramasız bir işi beklemek korumaz.
+    "needs-taramasiz-is": {
+        "sentetik.yml": {
+            "jobs": {
+                "lint": {"steps": [{"run": "ruff check"}]},
+                "deploy": {"needs": "lint", "steps": [SECRET_STEP]},
+            }
+        }
+    },
+    # M-1: `success()` de bir durum fonksiyonu; üst düzey tek terim değilse örtük success() yok.
+    "is-not-success-needs": _chain(
+        deploy={"needs": "build", "if": "${{ !success() }}", "steps": [SECRET_STEP]}
+    ),
+}
+ORDER_RED = {**ORDER_RED, **ORDER_RED_R1}
+
 ORDER_CLEAN = {
     "bugunku-bot-push": _one(
         SCAN_STEP, {"run": "until git -c http.version=HTTP/1.1 push origin HEAD; do"}
@@ -469,6 +525,17 @@ ORDER_CLEAN = {
     ),
 }
 
+ORDER_CLEAN = {
+    **ORDER_CLEAN,
+    "is-acik-success-needs": _chain(
+        deploy={
+            "needs": "build",
+            "if": "success() && github.ref == 'refs/heads/main'",
+            "steps": [SECRET_STEP],
+        }
+    ),
+}
+
 BINDING_RED = {
     "always-secret": _one(SCAN_STEP, {**SECRET_STEP, "if": "always()"}),
     "not-cancelled-push": _one(
@@ -485,6 +552,14 @@ BINDING_RED = {
     ),
     "is-env-always": _one(
         SCAN_STEP, {"if": "always()", "run": "echo"}, env={"PAT": "${{ secrets.PAT }}"}
+    ),
+}
+
+BINDING_RED = {
+    **BINDING_RED,
+    "not-success-secret": _one(SCAN_STEP, {**SECRET_STEP, "if": "${{ !success() }}"}),
+    "success-veya-secret": _one(
+        SCAN_STEP, {**SECRET_STEP, "if": "success() || github.event_name == 'schedule'"}
     ),
 }
 
@@ -516,6 +591,20 @@ BINDING_CLEAN = {
 }
 
 
+BINDING_CLEAN = {
+    **BINDING_CLEAN,
+    # `&&`ın içindeki parantezli `||` üst düzey değildir: bağ yine üst düzey bir terim.
+    "parantezli-durum": _one(
+        SCAN_STEP, {**SECRET_STEP, "if": f"(failure() || cancelled()) && {BOUND}"}
+    ),
+    # GitHub dizeleri harf duyarsız karşılaştırır.
+    "buyuk-harf-deger": _one(
+        SCAN_STEP, {**SECRET_STEP, "if": "always() && steps.secret_scan.outcome == 'Success'"}
+    ),
+    "acik-success": _one(SCAN_STEP, {**SECRET_STEP, "if": "success() && github.ref == 'x'"}),
+}
+
+
 @pytest.mark.parametrize("workflows", ORDER_RED.values(), ids=ORDER_RED.keys())
 def test_the_order_guard_sees_every_escape_shape(workflows: dict[str, Any]) -> None:
     _, broken = _order_violations(workflows)
@@ -542,3 +631,22 @@ def test_the_binding_guard_stays_quiet_on_safe_shapes(workflows: dict[str, Any])
     _, broken = _unbound_after_scan(workflows)
 
     assert broken == []
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "git push origin HEAD",
+        "until git -c http.version=HTTP/1.1 push origin HEAD; do",
+        "bash -c 'git push origin HEAD'",
+        "eval 'git push origin HEAD'",
+        "ssh host 'cd repo && git push'",
+        'durum="git push reddedildi"',
+    ],
+    ids=["duz", "bot", "bash-c", "eval", "ssh", "atama-icinde"],
+)
+def test_push_detection_covers_everything_the_base_regex_saw(run: str) -> None:
+    """I-1: kabuk okuması BASE regex'inin (oturum 10) gördüğü hiçbir biçimi kaçırmaz — ikisinin
+    birleşimi alınır. Son vaka push değildir: birleşimin bedeli olan gürültü, sessiz kaçış değil."""
+    assert BASE_GIT_PUSH.search(run), "vaka BASE'in gördüğü biçim değil — kurgu bayat"
+    assert _pushes({"run": run})
