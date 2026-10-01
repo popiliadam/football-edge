@@ -265,6 +265,10 @@ session pooler 5432) → `SITE_DATABASE_URL` ortam secret'ı (K/14). Asistan: po
 uygulandığını ölçer (faz HANDOFF adım 5).
 
 **K/S — Silme onayları (temizlik; asistan senin "sil" onayınla yapar ya da komutları sen çalıştırırsın).**
+> **YAPILDI 2026-10-01 (kullanıcı onayıyla):** 1–5 ve 7 — 19 worktree, 23 yerel dal (`feat/s9-scrapling` dahil), ~41 GB SDD
+> scratch (defterler + inceleme/rapor dosyaları `.superpowers/sdd/_kalici/defterler/` altında), 46 kap, `/tmp/b2fake`.
+> Dokunulmayanlar: `t6-rls-{pre,sandbox,pg}`, `rev8-pg`, `rev9-pg` kapları (listede ve defterde yok — büyük olasılıkla
+> oturum 8/9 kum havuzu; onay verirsen silinir) ve uzak dal `origin/faz-0-kayit-altyapisi` (birleşmiş; uzak silme ayrı onay).
 Hepsi `main`de birleşmiş ya da yeniden üretilebilir; **kalıcı tutulanlar `.superpowers/sdd/_kalici/` (silinmez).**
 1. **Worktree'ler + dalları (hepsi `main`de):** `.worktrees/wt-izb-{b1,b1-t4,b1-t8,b2}`,
    `.worktrees/wt-s9-{a1,borc,integ,izb,rls,scrapling-clean}` ve dallar `feat/izb-b1`, `feat/izb-b1-t4`,
