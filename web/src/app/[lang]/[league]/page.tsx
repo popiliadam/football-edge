@@ -40,7 +40,7 @@ export default async function LeaguePage({ params }: Params) {
   const distribution = league.move_distribution;
   return (
     <main data-fe-page={`league:${league.id}`}>
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{league.name}</h1>
       <dl>
         <dt>{t(lang, "league.country")}</dt>

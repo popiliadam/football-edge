@@ -10,6 +10,7 @@ import {
   checkA11y,
   checkCsp,
   checkFields,
+  checkFrameworkLang,
   checkHeaderBlocks,
   checkIndexing,
   checkJsonLd,
@@ -332,6 +333,31 @@ describe("(8) erişilebilirlik ve §9 JSON-LD", () => {
   it("lang uyuşmazlığı, iki h1, başlık atlaması, <main> yokluğu kırmızı", () => {
     const findings = checkA11y(matchPage, '<html lang="tr"><h1>a</h1><h1>b</h1><h3>c</h3>');
     expect(findings).toHaveLength(4);
+  });
+
+  // DEFERRED 20f: her <nav> adlı, adlar sayfa içinde ayrık (üst menü ≠ sayfa yolu ≠ yasal).
+  it("adsız ya da aynı adlı <nav> kırmızı", () => {
+    const base = '<html lang="en"><h1>a</h1><main></main>';
+    const nav = (label?: string) =>
+      label === undefined ? "<nav></nav>" : `<nav aria-label="${label}"></nav>`;
+    expect(checkA11y(matchPage, base + nav("Main menu") + nav("Breadcrumb"))).toEqual([]);
+    expect(checkA11y(matchPage, base + nav("Home") + nav("Home"))).toEqual([
+      `${matchPage.path}: iki <nav> aynı adı taşıyor ("Home")`,
+    ]);
+    expect(checkA11y(matchPage, base + nav() + nav(" "))).toEqual([
+      `${matchPage.path}: adsız <nav>`,
+      `${matchPage.path}: adsız <nav>`,
+    ]);
+  });
+
+  it("Next'in 404 sayfasında <html lang> varsayılan dil değilse kırmızı", () => {
+    expect(checkFrameworkLang("/404.html", '<html lang="en"><body></body></html>')).toEqual([]);
+    expect(checkFrameworkLang("/404.html", "<html><body></body></html>")).toEqual([
+      '/404.html: <html lang=""> ≠ en',
+    ]);
+    expect(checkFrameworkLang("/404.html", '<html lang="tr">')).toEqual([
+      '/404.html: <html lang="tr"> ≠ en',
+    ]);
   });
 
   it("iki JSON-LD bloğu ya da yanlış tür kırmızı", () => {

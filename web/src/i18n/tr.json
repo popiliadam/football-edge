@@ -1,6 +1,8 @@
 {
   "nav.home": "Ana sayfa",
   "nav.trackRecord": "Sicil",
+  "nav.main": "Ana menü",
+  "nav.breadcrumb": "Gezinti yolu",
   "nav.legal": "Yasal",
   "age.title": "Bu site yalnız yetişkinler (18+) içindir.",
   "age.body": "İçerik bahis piyasalarıyla ilgilidir. Lütfen 18 yaşından büyük olduğunuzu onaylayın.",

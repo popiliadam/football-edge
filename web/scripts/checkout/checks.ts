@@ -397,10 +397,33 @@ export function checkHeaderBlocks(headers: Headers, builtPaths: readonly string[
 }
 
 // (8) basit erişilebilirlik.
+function htmlLang(html: string): string {
+  return /<html\b[^>]*\blang="([^"]*)"/.exec(html)?.[1] ?? "";
+}
+
+// DEFERRED 20f: Next'in 404 sayfaları (`app/global-not-found.tsx`) tek dosyadır, her dile sunulur;
+// dili varsayılan dildir.
+export function checkFrameworkLang(where: string, html: string): string[] {
+  const lang = htmlLang(html);
+  return lang === DEFAULT_LANG ? [] : [`${where}: <html lang="${lang}"> ≠ ${DEFAULT_LANG}`];
+}
+
+// DEFERRED 20f: birden çok gezinme bölgesi ancak adlarıyla ayırt edilir (üst menü, sayfa yolu,
+// yasal); adsız ya da aynı adlı `<nav>` ekran okuyucuda iki aynı "gezinme" olarak görünür.
+function navFindings(path: string, html: string): string[] {
+  const names = tags(html, "nav").map((nav) => (nav["aria-label"] ?? "").trim());
+  const findings = names.filter((name) => name === "").map(() => `${path}: adsız <nav>`);
+  const named = names.filter((name) => name !== "");
+  for (const name of new Set(named.filter((each, index) => named.indexOf(each) !== index))) {
+    findings.push(`${path}: iki <nav> aynı adı taşıyor ("${name}")`);
+  }
+  return findings;
+}
+
 export function checkA11y(page: ExpectedPage, html: string): string[] {
   const findings: string[] = [];
-  const lang = /<html\b[^>]*\blang="([^"]*)"/.exec(html)?.[1];
-  if (lang !== page.lang) findings.push(`${page.path}: <html lang="${lang ?? ""}"> ≠ ${page.lang}`);
+  const lang = htmlLang(html);
+  if (lang !== page.lang) findings.push(`${page.path}: <html lang="${lang}"> ≠ ${page.lang}`);
   const levels = headingLevels(html);
   if (levels.filter((level) => level === 1).length !== 1) {
     findings.push(`${page.path}: tek <h1> yok`);
@@ -414,6 +437,7 @@ export function checkA11y(page: ExpectedPage, html: string): string[] {
   if (tags(html, "img").some((img) => img.alt === undefined)) {
     findings.push(`${page.path}: alt'sız <img>`);
   }
+  findings.push(...navFindings(page.path, html));
   return findings;
 }
 

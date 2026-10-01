@@ -49,7 +49,7 @@ export default async function TeamPage({ params }: Params) {
   ];
   return (
     <main data-fe-page={`team:${teamKey(team.league_id, team.slug)}`}>
-      <Breadcrumbs crumbs={crumbs} label={t(lang, "nav.home")} />
+      <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{team.name}</h1>
       <dl>
         <dt>{t(lang, "team.league")}</dt>
