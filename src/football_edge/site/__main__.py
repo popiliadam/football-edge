@@ -94,6 +94,16 @@ def _export(out_dir: Path) -> int:
         # Metin basılmaz: libpq hatası adresin (parolanın) parçasını taşıyabilir. Yalnız sınıf adı.
         sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: veritabanı hatası ({type(error).__name__})\n")
         return EXIT_SITE_CONFIG
+    except OSError as error:
+        # `devig_method`/`_schema()` okuması (DEFERRED 19a): ortam/yapılandırma sınıfı, exit 20.
+        # Metin yol ve dolayısıyla çalışma ortamının parçasını taşır; yalnız sınıf adı basılır.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: dosya hatası ({type(error).__name__})\n")
+        return EXIT_SITE_CONFIG
+    except Exception as error:
+        # `run_export`ın öngörmediği sınıf (`snapshot_errors`/`derive`, DEFERRED 19a): traceback'le
+        # exit 1 yerine `derive-stdin`deki gibi exit 22; metni bir fiyat taşıyabilir, basılmaz.
+        sys.stdout.write(f"DIŞA AKTARIM REDDEDİLDİ: beklenmeyen hata ({type(error).__name__})\n")
+        return EXIT_SITE_CUT
     LOGGER.info(
         "anlık görüntü yazıldı: maç=%d lig=%d takım=%d satır=%d last_id=%d "
         "content_sha256=%s dosya_sha256=%s",

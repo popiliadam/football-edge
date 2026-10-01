@@ -21,7 +21,11 @@ import pytest
 
 from football_edge import collect
 from football_edge.site import __main__ as site_main
-from football_edge.site.contract import EXIT_SITE_CONFIG, EXIT_SITE_NONDETERMINISTIC
+from football_edge.site.contract import (
+    EXIT_SITE_CONFIG,
+    EXIT_SITE_CUT,
+    EXIT_SITE_NONDETERMINISTIC,
+)
 from football_edge.site.export import ExportRefused, derive_in_subprocess
 from tests.fake_site_db import FakeSiteDb
 from tests.site_builders import EVEN, Round, anchored_repo, at, export_dump, ledger, payloads
@@ -261,3 +265,51 @@ def test_a_write_failure_is_a_named_exit_without_a_traceback(
     assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: çıktı yazılamadı (PermissionError)\n"
     assert "Traceback" not in seen.err and str(tmp_path) not in seen.out + seen.err
     assert not (tmp_path / "out").exists()
+
+
+def _export_with(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> int:
+    monkeypatch.setenv(DSN_VAR, DSN)
+    monkeypatch.setenv("GITHUB_SHA", "1" * 40)
+    monkeypatch.chdir(REPO)
+    monkeypatch.setattr(site_main, "connect", lambda dsn: _Closing())
+    monkeypatch.setattr(site_main, "configure_logging", lambda: None)
+    return site_main.main(["export", "--out", str(tmp_path / "out")])
+
+
+@pytest.mark.parametrize("path_name", ["DEVIG_CONFIG_PATH", "SCHEMA_PATH"])
+def test_an_unreadable_config_or_schema_is_a_named_exit_with_the_class_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    path_name: str,
+) -> None:
+    """DEFERRED 19a: `devig_method`/`_schema()` OSError.u exit 1 + traceback değil, 20 + adı."""
+    missing = tmp_path / f"yok-{PASSWORD}" / "dosya.yaml"
+    monkeypatch.setattr(site_main, path_name, missing)
+
+    code = _export_with(monkeypatch, tmp_path)
+
+    seen = capsys.readouterr()
+    assert code == EXIT_SITE_CONFIG
+    assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: dosya hatası (FileNotFoundError)\n"
+    assert "Traceback" not in seen.err and PASSWORD not in seen.out + seen.err
+    assert not (tmp_path / "out").exists()
+
+
+def test_an_unexpected_export_error_is_a_named_exit_with_the_class_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """DEFERRED 19a: `run_export`ın öngörülmeyen istisnası exit 22 + yalnız sınıf adı."""
+
+    def crash(conn: Any, out: Path, **options: Any) -> Any:
+        raise KeyError(f"{PASSWORD} 4.47")
+
+    monkeypatch.setattr(site_main, "run_export", crash)
+
+    code = _export_with(monkeypatch, tmp_path)
+
+    seen = capsys.readouterr()
+    assert code == EXIT_SITE_CUT
+    assert seen.out == "DIŞA AKTARIM REDDEDİLDİ: beklenmeyen hata (KeyError)\n"
+    assert "Traceback" not in seen.err and PASSWORD not in seen.out + seen.err
+    assert "4.47" not in seen.out + seen.err
