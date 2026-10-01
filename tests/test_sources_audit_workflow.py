@@ -121,12 +121,17 @@ def test_drift_step_runs_even_after_a_red_offline_contract() -> None:
 
 def test_commit_step_follows_the_drift_step_even_when_it_is_red_and_only_on_main() -> None:
     """Sapan bir kaynak turu kırmızı yapar; aynı kalanların tazelenen tarihi yine yazılmalı.
-    Başka bir dala elle tetiklenen tur ise ne main'e ne o dala bot commit'i atar."""
+    Başka bir dala elle tetiklenen tur ise ne main'e ne o dala bot commit'i atar. Kırmızı secret
+    taramasından sonra push yok (19b): terim yalnız tarama kırmızıyken yanlıştır."""
     drift = _index_of(DRIFT)
     commit = _index_of(COMMIT_MESSAGE)
 
     assert drift < commit
-    assert _conjuncts(_steps()[commit]) == {"!cancelled()", "github.ref == 'refs/heads/main'"}
+    assert _conjuncts(_steps()[commit]) == {
+        "!cancelled()",
+        "steps.secret_scan.outcome == 'success'",
+        "github.ref == 'refs/heads/main'",
+    }
 
 
 def test_commit_step_commits_only_the_registry_under_the_bot_identity() -> None:

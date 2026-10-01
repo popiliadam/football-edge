@@ -46,6 +46,9 @@ jobs:
         # Depo PUBLIC: commit'e kaçan bir secret insan kontrol noktası olmadan anında
         # halka açılır ve geri alınamaz. Bu iş ayrıca `contents: write` taşıyor ve
         # depoya commit atıyor — tarama, yazma yetkisi kullanılmadan ÖNCE koşar.
+        # Kırmızıysa sonraki adımlar örtük `success()` ile atlanır; `!cancelled()` ile yine
+        # koşan secret'lı adım (Bekçi) `steps.secret_scan.outcome`a bağlıdır (DEFERRED 19b).
+        id: secret_scan
         run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
@@ -130,7 +133,9 @@ jobs:
         # sonraki yeşil turu alarmı geri alırdı. Yalnız GitHub API hatasında düşer.
         # `!cancelled()`: ölü dispatch'in seyrek turları çoğunlukla zaten kırmızıdır (kaçan
         # mühür) ve örtük `success()` bekçiyi tam o turlarda atlardı. Mühürden SONRA koşar.
-        if: ${{ !cancelled() && github.event_name == 'schedule' }}
+        # Secret (`ODDS_API_KEY`) okur: kırmızı secret taramasından sonra koşmaz (19b); yeşil
+        # taramada terim doğrudur, bekçinin davranışı değişmez.
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && github.event_name == 'schedule' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}

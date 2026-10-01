@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any
 import pytest
 import yaml
 
-from tests.workflow_helpers import _index_of, _steps
+from tests.workflow_helpers import _index_of, _logical_lines, _steps
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "scripts/check_secrets.sh"
@@ -115,7 +116,9 @@ def test_a_scan_that_cannot_run_is_red_by_name(tmp_path: Path) -> None:
 
 def test_every_workflow_runs_the_scan_bare_so_a_finding_stops_it() -> None:
     """Tarama zamanlanmış workflow'ların (seal, snapshot, …) erken adımıdır: `if`,
-    `continue-on-error`, `shell` ya da `||` olmadan — bulgu adımı ve koşuyu kırmızı yapar."""
+    `continue-on-error`, `shell` ya da `||` olmadan — bulgu adımı ve koşuyu kırmızı yapar.
+    Tek izinli ek `id: secret_scan`: taramadan sonra `always()`/`!cancelled()` ile koşan secret'lı
+    ya da push'lu adım ona bağlanır (19b kalanı)."""
     scans = [
         step
         for path in sorted((REPO / ".github/workflows").glob("*.y*ml"))
@@ -124,9 +127,8 @@ def test_every_workflow_runs_the_scan_bare_so_a_finding_stops_it() -> None:
     ]
 
     assert len(scans) >= 9, scans
-    assert all(
-        step == {"name": "Secret taraması", "run": "./scripts/check_secrets.sh"} for step in scans
-    )
+    bare = {"name": "Secret taraması", "run": "./scripts/check_secrets.sh"}
+    assert all(step in (bare, {**bare, "id": "secret_scan"}) for step in scans), scans
 
 
 def _strings(node: Any) -> list[str]:
@@ -142,9 +144,14 @@ def _strings(node: Any) -> list[str]:
 def _reads_a_secret(node: Any) -> bool:
     """`${{ … secrets … }}` ifadesi var mı — çıplak kelime değil, ifade aranır. Bağlamın her
     biçimi sayılır: noktalı (`secrets.X`), indeksli (`secrets['X']`) ve bütün bağlam
-    (`toJSON(secrets)`, bütün secret'lar)."""
+    (`toJSON(secrets)`, bütün secret'lar).
+
+    Harf duyarsız (21k): GitHub'ın ifade ayrıştırıcısı bağlam ve fonksiyon adlarını
+    `StringComparer.OrdinalIgnoreCase` sözlüklerinde arar (actions/runner
+    `ExpressionParser.cs`: `ExtensionNamedValues`, `ExtensionFunctions`); `Secrets.X` ve
+    `SECRETS['X']` aynı secret'ı okur."""
     return any(
-        re.search(r"\bsecrets\b", expression)
+        re.search(r"\bsecrets\b", expression, flags=re.I)
         for text in _strings(node)
         for expression in re.findall(r"\$\{\{(.*?)\}\}", text, flags=re.S)
     )
@@ -183,12 +190,64 @@ def test_every_workflow_that_reads_a_secret_or_writes_the_repo_runs_the_scan() -
 
 
 SCAN = "check_secrets.sh"
-GIT_PUSH = re.compile(r"\bgit\b(?:\s+-c\s+\S+)*\s+push\b")
+# Değer alan genel git seçenekleri: alt komut değerden SONRA gelir (`git -C alt push`,
+# `git -c "user.name=fe bot" push`). `--git-dir=x` gibi tek parçalı biçim tek token'dır.
+GIT_VALUE_OPTIONS = frozenset(
+    {"-c", "-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"}
+)
+# Örtük `success()`i ezen durum fonksiyonları: biri `if:`te geçen adım ya da iş, önceki bir adım
+# (ya da `needs` edilen iş) kırmızıyken de koşabilir. Bağlam ve fonksiyon adları GitHub
+# ifadelerinde harf duyarsızdır (`_reads_a_secret`in notu) — `Always()` de sayılır.
+OVERRIDES_SUCCESS = re.compile(r"\b(?:always|cancelled|failure)\s*\(\s*\)", re.I)
+
+
+def _git_subcommands(line: str) -> list[str]:
+    """Satırdaki her `git` çağrısının alt komutu. Kabuk sözcüklerine bölünür (tırnaklı değer
+    tek sözcük) ve genel seçenekler atlanır; `$(…)`/`` `…` `` içindeki komut da okunur.
+    Kapanmamış tırnakla satır bölünemezse kaba okumaya düşer (`git` … `push` = push): yanlış
+    pozitif gürültülüdür, kaçırılan push sessiz."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return ["push"] if re.search(r"\bgit\b.*\bpush\b", line) else []
+    found = []
+    for index, token in enumerate(tokens):
+        if "$(" in token or "`" in token:
+            found.extend(_git_subcommands(re.split(r"\$\(|`", token, maxsplit=1)[1]))
+        if token.rsplit("/", 1)[-1] != "git":
+            continue
+        cursor = index + 1
+        while cursor < len(tokens) and tokens[cursor].startswith("-"):
+            cursor += 2 if tokens[cursor] in GIT_VALUE_OPTIONS else 1
+        if cursor < len(tokens):
+            found.append(tokens[cursor])
+    return found
+
+
+def _pushes(step: dict[str, Any]) -> bool:
+    """Adımın betiği `git … push` koşuyor mu; `\\` ile bölünmüş satır birleştirilerek okunur."""
+    return any(
+        "push" in _git_subcommands(line) for line in _logical_lines(str(step.get("run", "")))
+    )
 
 
 def _exposes(step: dict[str, Any]) -> bool:
-    """Adım secret okuyor ya da depoya push'luyor mu (`git -c … push` de sayılır)."""
-    return _reads_a_secret(step) or GIT_PUSH.search(str(step.get("run", ""))) is not None
+    """Adım secret okuyor ya da depoya push'luyor mu."""
+    return _reads_a_secret(step) or _pushes(step)
+
+
+def _job_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """İşin adımları; yeniden kullanılabilir workflow çağrısında (`uses:`) adım yoktur."""
+    return list(job.get("steps") or [])
+
+
+def _job_level_secret(job: dict[str, Any]) -> bool:
+    """İş düzeyinde secret: `env:` (taramadan ÖNCEKİ adımlar dâhil her adıma açılır),
+    `container`/`services` kimlik bilgisi ve yeniden kullanılabilir workflow çağrısının
+    `secrets:`i — `secrets: inherit` ifade taşımaz, anahtarın kendisi sayılır."""
+    return "secrets" in job or _reads_a_secret({k: v for k, v in job.items() if k != "steps"})
 
 
 def _needs(job: dict[str, Any]) -> set[str]:
@@ -196,31 +255,290 @@ def _needs(job: dict[str, Any]) -> set[str]:
     return {needs} if isinstance(needs, str) else set(needs)
 
 
+def _conjuncts(condition: str) -> list[str]:
+    """`if:` ifadesinin üst düzey `&&` terimleri (boşluk sadeleşmiş). Üst düzeyde `||` varsa
+    boş liste: o zaman hiçbir terim tek başına koşulu bağlamaz."""
+    text = condition.strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2]
+    parts, depth, start, index = [], 0, 0, 0
+    while index < len(text):
+        if text[index] in "()":
+            depth += 1 if text[index] == "(" else -1
+        elif depth == 0 and text.startswith("||", index):
+            return []
+        elif depth == 0 and text.startswith("&&", index):
+            parts.append(text[start:index])
+            start = index + 2
+        index += 1
+    parts.append(text[start:])
+    return [" ".join(part.split()) for part in parts]
+
+
+def _bound(condition: str, term: str) -> bool:
+    """`term` koşulun üst düzey bir `&&` terimi mi. Harf duyarsız: GitHub dizeleri ve bağlam
+    adlarını harf duyarsız karşılaştırır."""
+    return term.lower() in [part.lower() for part in _conjuncts(condition)]
+
+
+def _waits_for(job: dict[str, Any], need: str) -> bool:
+    """İş, `need` başarısız olunca atlanıyor mu: `if:`i örtük `success()`i ezmiyorsa evet
+    (başarısız ya da atlanmış `needs` işi atlatır); eziyorsa ancak
+    `needs.<need>.result == 'success'` üst düzey bir terimse."""
+    condition = str(job.get("if", ""))
+    return not OVERRIDES_SUCCESS.search(condition) or _bound(
+        condition, f"needs.{need}.result == 'success'"
+    )
+
+
+def _guarded_jobs(jobs: dict[str, dict[str, Any]]) -> set[str]:
+    """Kırmızı taramada secret'a ulaşamayan işler: taramayı kendisi koşan iş (tarama çıplak,
+    bulguda iş düşer) ve böyle bir işin başarısını DOĞRUDAN ya da zincirle bekleyen iş
+    (`notify` → `deploy` → `build`)."""
+    guarded = {name for name, job in jobs.items() if _index_of(_job_steps(job), SCAN) is not None}
+    while True:
+        joined = {
+            name
+            for name, job in jobs.items()
+            if name not in guarded
+            and any(need in guarded and _waits_for(job, need) for need in _needs(job))
+        }
+        if not joined:
+            return guarded
+        guarded = guarded | joined
+
+
+def _workflows() -> dict[str, dict[str, Any]]:
+    return {
+        path.name: yaml.safe_load(path.read_text(encoding="utf-8"))
+        for path in sorted((REPO / ".github/workflows").glob("*.y*ml"))
+    }
+
+
+def _order_violations(workflows: dict[str, dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """(denetlenen işler, ihlaller). Secret okuyan ya da push'layan her iş: taramayı ilk maruz
+    adımdan ÖNCE koşar ya da taramalı bir işin başarısını bekler. İş düzeyi secret taramalı
+    işte her zaman ihlaldir — taramadan önceki adımlara da açılır."""
+    checked, broken = [], []
+    for file, document in workflows.items():
+        jobs = document["jobs"]
+        guarded = _guarded_jobs(jobs)
+        for name, job in jobs.items():
+            steps = _job_steps(job)
+            exposed = [index for index, step in enumerate(steps) if _exposes(step)]
+            job_level = _job_level_secret(job)
+            if not exposed and not job_level:
+                continue
+            where = f"{file}:{name}"
+            checked.append(where)
+            scan = _index_of(steps, SCAN)
+            if scan is None and name not in guarded:
+                broken.append(f"{where}: tarama yok, taramalı bir işin başarısını da beklemiyor")
+            elif scan is not None and job_level:
+                broken.append(f"{where}: iş düzeyi secret taramadan önceki adımlara da açılır")
+            elif scan is not None and scan > exposed[0]:
+                broken.append(f"{where}: tarama adım {scan}, ilk secret/push adım {exposed[0]}")
+    return checked, broken
+
+
+def _unbound_after_scan(workflows: dict[str, dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """(denetlenen adımlar, ihlaller). Taramayı taşıyan işte taramadan SONRA gelen ve `if:`i
+    örtük `success()`i ezen (`always()`, `!cancelled()`, `failure()`) her adım, secret okuyorsa
+    (iş düzeyi `env:` dâhil) ya da push'luyorsa `steps.<tarama id>.outcome == 'success'`
+    terimini üst düzey `&&` ile taşır. `outcome`: `continue-on-error` uygulanmadan önceki sonuç."""
+    checked, broken = [], []
+    for file, document in workflows.items():
+        for name, job in document["jobs"].items():
+            steps = _job_steps(job)
+            scan = _index_of(steps, SCAN)
+            if scan is None:
+                continue
+            scan_id = steps[scan].get("id")
+            term = f"steps.{scan_id or '<id>'}.outcome == 'success'"
+            job_level = _job_level_secret(job)
+            for index, step in enumerate(steps[scan + 1 :], start=scan + 1):
+                condition = str(step.get("if", ""))
+                if not OVERRIDES_SUCCESS.search(condition) or not (job_level or _exposes(step)):
+                    continue
+                where = f"{file}:{name} adım {index} ({step.get('name', '?')})"
+                checked.append(where)
+                if scan_id is None or not _bound(condition, term):
+                    broken.append(
+                        f"{where}: `{condition}` kırmızı taramadan sonra da koşar — "
+                        f"taramaya `id` ver ve `{term}` ile bağla"
+                    )
+    return checked, broken
+
+
 def test_the_scan_runs_before_the_first_secret_or_push_of_its_job() -> None:
     """19b(1) SIRASI: tarama, taşıyan her işte secret okuyan ilk adımdan ve ilk `git push`tan
     ÖNCE koşar — sonraya taşınan tarama secret'ı ya da main'e yazmayı korumaz (son inceleme
-    satır 2: `full-scan`de secret'lı adımdan, `sources-audit`te push adımından sonraya taşımak
-    yeşil kalıyordu). Taramasız ama secret okuyan iş taramalı bir işe `needs` ile bağlıdır
-    (`site.yml` `deploy` → `build`).
+    satır 2). Taramasız ama secret okuyan iş taramalı bir işin başarısını bekler (`site.yml`
+    `deploy` → `build`); iş düzeyi `if: always()` taşıyan iş beklemiş sayılmaz (21k).
 
-    Ölçmediği: iş düzeyi `env:`deki secret ve `if: always()`/`!cancelled()` adımlarının
-    kırmızı taramadan sonra yine koşması (DEFERRED 19b kalanı)."""
-    checked, broken = [], []
-    for path in sorted((REPO / ".github/workflows").glob("*.y*ml")):
-        jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
-        scanning = {name for name, job in jobs.items() if _index_of(job["steps"], SCAN) is not None}
-        for name, job in jobs.items():
-            steps = job["steps"]
-            exposed = [index for index, step in enumerate(steps) if _exposes(step)]
-            if not exposed:
-                continue
-            where = f"{path.name}:{name}"
-            checked.append(where)
-            scan = _index_of(steps, SCAN)
-            if scan is None and not _needs(job) & scanning:
-                broken.append(f"{where}: tarama yok, taramalı işe `needs` da yok")
-            elif scan is not None and scan > exposed[0]:
-                broken.append(f"{where}: tarama adım {scan}, ilk secret/push adım {exposed[0]}")
+    Ölçmediği: betiğin dışından gelen push (`"$GIT" push`, `gh api`, üçüncü taraf eylem),
+    `run:` dışındaki secret kullanımı yalnız `${{ }}` ifadesiyle görülür; `if:`e secret
+    GitHub'ın kendisi tarafından yasaktır."""
+    checked, broken = _order_violations(_workflows())
 
     assert checked, "hiçbir iş secret okumuyor ya da push'lamıyor — test kurgusu bayatlamış"
     assert broken == [], broken
+
+
+def test_after_a_red_scan_no_step_that_reads_a_secret_or_pushes_runs() -> None:
+    """19b kalanı (son inceleme F1): sıra tek başına yetmez — `always()`/`!cancelled()`/`failure()`
+    koşullu adım kırmızı taramadan SONRA da koşar. Bugün iki tane: seal `Bekçi` (`ODDS_API_KEY`)
+    ve sources-audit `Tazelenen tarihleri commit'le` (`git push`). İkisi de taramanın başarısına
+    bağlı; yeşil turda terim doğrudur ve davranış değişmez. Secret okumayan adımlar (alarm,
+    `Mühür turunun sonucunu yansıt`, robots ölçümü) bağlanmaz: kırmızı turu görünür kılarlar."""
+    checked, broken = _unbound_after_scan(_workflows())
+
+    assert checked, "taramadan sonra koşulu örtük `success()`i ezen maruz adım yok — kurgu bayat"
+    assert broken == [], broken
+
+
+# ── Bekçilerin kendisi: sentetik workflow'lar ─────────────────────────────────────────────
+# Gerçek dokuz workflow bugün temiz; bekçinin KAÇIŞ biçimlerini görüp görmediği ancak sentetik
+# girdiyle ölçülür (DEFERRED 21k: eski bekçi bu biçimlerin hepsinde yeşil kalıyordu).
+
+SCAN_STEP = {"name": "Secret taraması", "id": "secret_scan", "run": "./scripts/check_secrets.sh"}
+SECRET_STEP = {"env": {"PAT": "${{ secrets.PAT }}"}, "run": "./yayinla"}
+BOUND = "steps.secret_scan.outcome == 'success'"
+
+
+def _one(*steps: dict[str, Any], **keys: Any) -> dict[str, Any]:
+    """Tek işli sentetik workflow."""
+    return {"sentetik.yml": {"jobs": {"is": {**keys, "steps": list(steps)}}}}
+
+
+def _chain(**jobs: dict[str, Any]) -> dict[str, Any]:
+    """Taramalı `build` işi + verilen işler."""
+    return {"sentetik.yml": {"jobs": {"build": {"steps": [SCAN_STEP, SECRET_STEP]}, **jobs}}}
+
+
+ORDER_RED = {
+    "git-c-tirnakli-deger": _one({"run": 'git -c "user.name=fe bot" push origin HEAD'}, SCAN_STEP),
+    "git-C-dizin": _one({"run": "git -C alt push"}, SCAN_STEP),
+    "git-satir-devami": _one({"run": "git \\\n  push origin HEAD"}, SCAN_STEP),
+    "git-komut-ikamesi": _one({"run": 'cikti="$(git -C alt push 2>&1)"'}, SCAN_STEP),
+    "buyuk-harf-Secrets": _one({"env": {"PAT": "${{ Secrets.PAT }}"}, "run": "x"}, SCAN_STEP),
+    "buyuk-harf-SECRETS-indeks": _one(
+        {"env": {"PAT": "${{ SECRETS['PAT'] }}"}, "run": "x"}, SCAN_STEP
+    ),
+    "is-env-taramali-is": _one(SCAN_STEP, {"run": "x"}, env={"PAT": "${{ secrets.PAT }}"}),
+    "is-env-taramasiz-is": _one({"run": "x"}, env={"PAT": "${{ secrets.PAT }}"}),
+    "is-always-needs": _chain(
+        deploy={"needs": "build", "if": "${{ always() }}", "steps": [SECRET_STEP]}
+    ),
+    "is-not-cancelled-needs": _chain(
+        deploy={
+            "needs": ["build"],
+            "if": "!cancelled() && github.ref == 'refs/heads/main'",
+            "steps": [SECRET_STEP],
+        }
+    ),
+    "is-failure-needs": _chain(
+        deploy={"needs": "build", "if": "failure()", "steps": [SECRET_STEP]}
+    ),
+    "yeniden-kullanilabilir-needs-yok": {
+        "sentetik.yml": {
+            "jobs": {"cagri": {"uses": "./.github/workflows/x.yml", "secrets": "inherit"}}
+        }
+    },
+}
+
+ORDER_CLEAN = {
+    "bugunku-bot-push": _one(
+        SCAN_STEP, {"run": "until git -c http.version=HTTP/1.1 push origin HEAD; do"}
+    ),
+    "push-kelimesi-git-degil": _one({"run": 'echo "::warning::push reddedildi"'}, SCAN_STEP),
+    "git-fetch": _one({"run": "git fetch origin main"}, SCAN_STEP),
+    "zincirli-needs": _chain(
+        deploy={"needs": "build", "steps": [SECRET_STEP]},
+        notify={"needs": "deploy", "steps": [SECRET_STEP]},
+    ),
+    "is-always-bagli": _chain(
+        deploy={
+            "needs": "build",
+            "if": "${{ always() && needs.build.result == 'success' }}",
+            "steps": [SECRET_STEP],
+        }
+    ),
+    "yeniden-kullanilabilir-needs": _chain(
+        cagri={"needs": "build", "uses": "./.github/workflows/x.yml", "secrets": "inherit"}
+    ),
+}
+
+BINDING_RED = {
+    "always-secret": _one(SCAN_STEP, {**SECRET_STEP, "if": "always()"}),
+    "not-cancelled-push": _one(
+        SCAN_STEP, {"if": "${{ !cancelled() }}", "run": "git push origin HEAD"}
+    ),
+    "failure-secret": _one(SCAN_STEP, {**SECRET_STEP, "if": "failure()"}),
+    # `&&`, `||`dan sıkı bağlar: `always() || (x && bağ)` — `&&` ile bölünce bağ terim gibi görünür.
+    "ust-duzey-veya": _one(
+        SCAN_STEP, {**SECRET_STEP, "if": f"always() || github.event_name == 'schedule' && {BOUND}"}
+    ),
+    "taramanin-id-si-yok": _one(
+        {"name": "Secret taraması", "run": "./scripts/check_secrets.sh"},
+        {**SECRET_STEP, "if": f"${{{{ !cancelled() && {BOUND} }}}}"},
+    ),
+    "is-env-always": _one(
+        SCAN_STEP, {"if": "always()", "run": "echo"}, env={"PAT": "${{ secrets.PAT }}"}
+    ),
+}
+
+BINDING_CLEAN = {
+    "bagli-bekci": _one(
+        SCAN_STEP,
+        {
+            **SECRET_STEP,
+            "if": f"${{{{ !cancelled() && {BOUND} && github.event_name == 'schedule' }}}}",
+        },
+    ),
+    "ortuk-success": _one(SCAN_STEP, SECRET_STEP),
+    "secretsiz-yansitma": _one(
+        SCAN_STEP,
+        {
+            "if": "always() && steps.seal.outputs.code != '0'",
+            "env": {"SEAL_CODE": "${{ steps.seal.outputs.code }}"},
+            "run": "exit 1",
+        },
+    ),
+    "alarm-github-token": _one(
+        SCAN_STEP,
+        {
+            "if": "${{ failure() || cancelled() }}",
+            "env": {"GITHUB_TOKEN": "${{ github.token }}"},
+            "run": "x",
+        },
+    ),
+}
+
+
+@pytest.mark.parametrize("workflows", ORDER_RED.values(), ids=ORDER_RED.keys())
+def test_the_order_guard_sees_every_escape_shape(workflows: dict[str, Any]) -> None:
+    _, broken = _order_violations(workflows)
+
+    assert broken, "kaçış biçimi sıra bekçisinden yeşil geçti"
+
+
+@pytest.mark.parametrize("workflows", ORDER_CLEAN.values(), ids=ORDER_CLEAN.keys())
+def test_the_order_guard_stays_quiet_on_safe_shapes(workflows: dict[str, Any]) -> None:
+    _, broken = _order_violations(workflows)
+
+    assert broken == []
+
+
+@pytest.mark.parametrize("workflows", BINDING_RED.values(), ids=BINDING_RED.keys())
+def test_the_binding_guard_sees_a_step_that_outlives_a_red_scan(workflows: dict[str, Any]) -> None:
+    _, broken = _unbound_after_scan(workflows)
+
+    assert broken, "kırmızı taramadan sonra koşan maruz adım bekçiden yeşil geçti"
+
+
+@pytest.mark.parametrize("workflows", BINDING_CLEAN.values(), ids=BINDING_CLEAN.keys())
+def test_the_binding_guard_stays_quiet_on_safe_shapes(workflows: dict[str, Any]) -> None:
+    _, broken = _unbound_after_scan(workflows)
+
+    assert broken == []

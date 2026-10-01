@@ -34,7 +34,8 @@ def _steps(path: Path, job: str | None = None) -> list[dict[str, Any]]:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     jobs = document["jobs"]
     selected = [jobs[job]] if job is not None else list(jobs.values())
-    return [step for each in selected for step in each["steps"]]
+    # Yeniden kullanılabilir workflow çağrısı (`uses:`) adım taşımaz: `KeyError` değil, adımsız iş.
+    return [step for each in selected for step in each.get("steps") or []]
 
 
 def _index_of(steps: list[dict[str, Any]], needle: str, key: str = "run") -> int | None:
@@ -42,6 +43,12 @@ def _index_of(steps: list[dict[str, Any]], needle: str, key: str = "run") -> int
         if needle in str(step.get(key, "")):
             return index
     return None
+
+
+def _logical_lines(script: str) -> list[str]:
+    """Kabuk betiğinin MANTIKSAL satırları: `\\` ile biten satır sonrakiyle birleştirilir (kabuk
+    da öyle okur). Satır satır arayan bekçi bölünmüş komutun yarısını görür (21a, 21k)."""
+    return re.sub(r"\\\n", " ", script).splitlines()
 
 
 def _triggers(path: Path) -> dict[str, Any]:
