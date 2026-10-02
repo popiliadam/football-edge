@@ -87,6 +87,70 @@ def test_labels_round_trip(tmp_path: Path) -> None:
     assert loaded[0].relevant is True and loaded[1].relevant is False
 
 
+# Kullanıcı oturumu Adım 8 (2026-10-02): başlık telifi avukatta çözülene kadar (K/7/5) depoda
+# yalnız `id + etiket + kulüp + dil`; başlık gitignored `<dil>.titles.jsonl` yan dosyasından gelir.
+def test_titleless_labels_take_their_headline_from_the_sidecar_by_id(tmp_path: Path) -> None:
+    (tmp_path / "tr.jsonl").write_text(
+        '{"id":7,"language":"tr","team":"Galatasaray","relevant":true}\n'
+        '{"id":3,"language":"tr","team":"Fenerbahce","relevant":false}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tr.titles.jsonl").write_text(
+        '{"id":3,"title":"b","url":"v"}\n{"id":7,"title":"a","url":"u"}\n', encoding="utf-8"
+    )
+
+    loaded = load_labels(tmp_path / "tr.jsonl")
+
+    assert [(each.id, each.title, each.url, each.relevant) for each in loaded] == [
+        (7, "a", "u", True),
+        (3, "b", "v", False),
+    ]
+
+
+def test_titleless_labels_without_a_sidecar_are_refused_by_name(tmp_path: Path) -> None:
+    (tmp_path / "tr.jsonl").write_text(
+        '{"id":7,"language":"tr","team":"Galatasaray","relevant":true}\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="tr.titles.jsonl"):
+        load_labels(tmp_path / "tr.jsonl")
+
+
+def test_a_label_missing_from_the_sidecar_is_refused_by_id(tmp_path: Path) -> None:
+    (tmp_path / "tr.jsonl").write_text(
+        '{"id":7,"language":"tr","team":"Galatasaray","relevant":true}\n'
+        '{"id":9,"language":"tr","team":"Galatasaray","relevant":false}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tr.titles.jsonl").write_text('{"id":7,"title":"a","url":"u"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="9"):
+        load_labels(tmp_path / "tr.jsonl")
+
+
+REPO_CALIBRATION = Path(__file__).resolve().parent.parent / "data/calibration"
+
+
+def test_the_committed_tr_labels_are_the_approved_human_round_without_headlines() -> None:
+    """Adım 8 onayı: 100 insan onaylı etiket (27 true / 73 false), başlık ve URL depoda YOK;
+    meta etiketleyeni ADSIZ bir insan kimliğiyle (`insan-1`) ve sayılarla eşleşir."""
+    rows = [
+        json.loads(line)
+        for line in (REPO_CALIBRATION / "tr.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    meta = json.loads((REPO_CALIBRATION / "tr.meta.json").read_text(encoding="utf-8"))
+
+    assert len(rows) == 100
+    assert len({row["id"] for row in rows}) == 100
+    assert all(set(row) == {"id", "language", "team", "relevant"} for row in rows)
+    assert all(row["language"] == "tr" for row in rows)
+    assert sum(row["relevant"] for row in rows) == 27
+    assert meta["labeler"] == "insan-1"
+    assert meta["labeler_kind"] == "human"
+    assert (meta["n"], meta["true"], meta["false"]) == (100, 27, 73)
+
+
 # ---------------------------------------------------------------------------
 # run_calibration — `collect._calibrate_command`in TEK işi; `load_labels` + `score_language`
 # + `write_report` + `production_ready`nin kompozisyonu (`collect.py`yi ince tutmak için

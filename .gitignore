@@ -16,3 +16,6 @@ web/out/
 web/.snapshot/
 web/next-env.d.ts
 web/*.tsbuildinfo
+
+# Kalibrasyon başlıkları depoya girmez (telif K/7/5; kullanıcı oturumu Adım 8) — yerel yan dosya
+data/calibration/*.titles.jsonl

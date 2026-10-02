@@ -5,11 +5,11 @@ Jev'in Türkçe ve diğer dillerdeki doğruluğu HİÇ ÖLÇÜLMEMİŞTİ. Mimar
 duruyor. Yol haritası ölçmeyi Faz 1'in şartı yapıyor: kötü çıkarsa mimari çöker, o yüzden
 karar ölçüm biter bitmez verilir, Faz 1'in sonunda değil.
 
-BU DOSYA HİÇBİR DİLİ ÖLÇMEDİ. Bu ortamda `TYPESAFE_API_KEY` yok — canlı Jev çağrısı
-yapılamaz. Dil başına ~100 elle etiketlenmiş haber gerekir ve etiketler bir İNSANDAN gelir;
-etiketleri modele ürettirmek ölçümü ölçülenin kopyası yapar, hiçbir şey kanıtlamaz. Bu yüzden
-`data/calibration/tr.jsonl` şimdilik yalnız BİÇİM örnekleri taşıyor (bkz. o dizinin
-README'si) ve `config/languages.yaml`'da HER dil `production_enabled: false`.
+BU DOSYA HİÇBİR DİLİ ÖLÇMEDİ. Dil başına ~100 elle etiketlenmiş haber gerekir ve etiketler bir
+İNSANDAN gelir; etiketleri modele ürettirmek ölçümü ölçülenin kopyası yapar, hiçbir şey kanıtlamaz.
+`data/calibration/tr.jsonl` 2026-10-02'den beri İNSAN ONAYLI 100 etiket taşır (başlıksız; başlıklar
+gitignored `tr.titles.jsonl`de — bkz. o dizinin README'si). Ücretli ölçüm Plan 2 T3'te; o güne dek
+`config/languages.yaml`'da HER dil `production_enabled: false`.
 
 Yanılma YÖNÜ ayrı sayılır: yanlış pozitif (alakasız haberi alakalı sanmak) sinyali
 gürültüyle şişirir, yanlış negatif (alakalı haberi kaçırmak) sinyali kaybettirir. Tek bir
@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -41,10 +42,11 @@ _INSTRUCTIONS = (
 @dataclass(frozen=True)
 class LabelledItem:
     title: str
-    url: str
     language: str
     relevant: bool
     team: str
+    url: str = ""
+    id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -57,12 +59,34 @@ class CalibrationReport:
     mean_confidence: float
 
 
+def _jsonl(path: Path) -> tuple[dict[str, Any], ...]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return tuple(json.loads(line) for line in lines if line.strip())
+
+
+def _titles(sidecar: Path) -> dict[int, dict[str, Any]]:
+    if not sidecar.exists():
+        raise ValueError(
+            f"başlıksız etiketler için {sidecar.name} yok ({sidecar}) — başlıklar "
+            "depoda değil, gitignored yan dosyada tutulur (K/7/5)"
+        )
+    return {int(record["id"]): record for record in _jsonl(sidecar)}
+
+
 def load_labels(path: Path) -> tuple[LabelledItem, ...]:
+    """Etiketleri okur. Başlığı olmayan satır (depodaki insan turu: yalnız `id + etiket + kulüp +
+    dil`, başlık telifi K/7/5) başlığını `id` ile `<dil>.titles.jsonl` yan dosyasından alır;
+    yan dosya ya da id eksikse adıyla reddedilir — başlıksız satır sessizce atlanmaz."""
+    records = _jsonl(path)
+    needs_titles = any("title" not in record for record in records)
+    titles = _titles(path.with_name(f"{path.stem}.titles.jsonl")) if needs_titles else {}
     items: tuple[LabelledItem, ...] = ()
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        record = json.loads(line)
+    for record in records:
+        if "title" not in record:
+            found = titles.get(int(record["id"]))
+            if found is None:
+                raise ValueError(f"{path.name}: id {record['id']} başlık yan dosyasında yok")
+            record = {**record, "title": found["title"], "url": found.get("url", "")}
         items = (*items, LabelledItem(**record))
     return items
 

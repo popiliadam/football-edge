@@ -1,0 +1,15 @@
+{
+  "language": "tr",
+  "labeler": "insan-1",
+  "labeler_kind": "human",
+  "role": "proje sahibi",
+  "labeled_at": "2026-10-02",
+  "n": 100,
+  "true": 27,
+  "false": 73,
+  "time_reading": "A — 'yaklaşan maç' haberin yayımlandığı ana göre",
+  "team_spelling": "üretim yazımı: matches.home_team/away_team (The Odds API), features/tier1._state ile aynı",
+  "source": "news_items, source_id=ajansspor, yayın 2026-09-04..2026-09-23; ORDER BY id + random.Random(20260923).shuffle, ilk 199 haberden 100 madde",
+  "method": "model ön-etiketi + bağımsız 2. geçiş (uyum 94/100, Cohen kappa 0.86) + insan onayı: 6 uyuşmazlık (315, 329, 920, 1297, 1314, 1335) false; kalan 94 öneri onaylandı",
+  "headlines": "depoda yok (başlık telifi K/7/5); ölçüm yerelde data/calibration/tr.titles.jsonl (gitignored) ile koşar"
+}

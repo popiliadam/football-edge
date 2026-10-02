@@ -1,10 +1,100 @@
-{"title": "Galatasaray'da İcardi'nin sakatlığı açıklandı: 3 hafta sahalardan uzak", "url": "https://ornek.format/haber/1", "language": "tr", "team": "Galatasaray", "relevant": true}
-{"title": "Fenerbahçe'de Djiku cezalı: derbide forma giyemeyecek", "url": "https://ornek.format/haber/2", "language": "tr", "team": "Fenerbahçe", "relevant": true}
-{"title": "Beşiktaş'ta teknik direktör değişikliği kulüpçe resmen açıklandı", "url": "https://ornek.format/haber/3", "language": "tr", "team": "Beşiktaş", "relevant": true}
-{"title": "Galatasaray'ın golcüsü için Suudi Arabistan'dan 40 milyon euroluk teklif iddiası", "url": "https://ornek.format/haber/4", "language": "tr", "team": "Galatasaray", "relevant": false}
-{"title": "Fenerbahçe geçen hafta sahasında 3-1 mağlup olmuştu: maçın özeti", "url": "https://ornek.format/haber/5", "language": "tr", "team": "Fenerbahçe", "relevant": false}
-{"title": "Trabzonspor kulüp binasına yeni tesis kurdu", "url": "https://ornek.format/haber/6", "language": "tr", "team": "Galatasaray", "relevant": false}
-{"title": "Galatasaray'da sakatlıktan dönen oyuncu bugünkü antrenmana yarı temposunda katıldı", "url": "https://ornek.format/haber/7", "language": "tr", "team": "Galatasaray", "relevant": true}
-{"title": "Fenerbahçe taraftar derneği pazar günü stat önünde etkinlik düzenleyecek", "url": "https://ornek.format/haber/8", "language": "tr", "team": "Fenerbahçe", "relevant": false}
-{"title": "Beşiktaş'ın file bekçisi omuz sakatlığı nedeniyle bu hafta sonu oynayamayacak", "url": "https://ornek.format/haber/9", "language": "tr", "team": "Beşiktaş", "relevant": true}
-{"title": "Galatasaray yönetimi stadyum isim sponsorluğu anlaşmasını yeniledi", "url": "https://ornek.format/haber/10", "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 137, "language": "tr", "team": "Galatasaray", "relevant": true}
+{"id": 138, "language": "tr", "team": "Çaykur Rizespor", "relevant": false}
+{"id": 145, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 159, "language": "tr", "team": "Kocaelispor", "relevant": true}
+{"id": 187, "language": "tr", "team": "Çorum FK", "relevant": true}
+{"id": 227, "language": "tr", "team": "Galatasaray", "relevant": true}
+{"id": 243, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 282, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 283, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 306, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 313, "language": "tr", "team": "Hull City", "relevant": false}
+{"id": 314, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 315, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 318, "language": "tr", "team": "Fiorentina", "relevant": true}
+{"id": 329, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 358, "language": "tr", "team": "Alanyaspor", "relevant": false}
+{"id": 362, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 369, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 383, "language": "tr", "team": "Gazişehir Gaziantep", "relevant": false}
+{"id": 393, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 395, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 416, "language": "tr", "team": "Aston Villa", "relevant": false}
+{"id": 417, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 422, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 424, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 434, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 460, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 468, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 471, "language": "tr", "team": "Barcelona", "relevant": false}
+{"id": 479, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 484, "language": "tr", "team": "Paris Saint Germain", "relevant": false}
+{"id": 492, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 504, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 514, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 535, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 548, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 558, "language": "tr", "team": "Manchester United", "relevant": false}
+{"id": 572, "language": "tr", "team": "Barcelona", "relevant": true}
+{"id": 573, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 583, "language": "tr", "team": "Hull City", "relevant": false}
+{"id": 585, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 593, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 607, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 612, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 648, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 664, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 670, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 689, "language": "tr", "team": "Real Madrid", "relevant": false}
+{"id": 698, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 736, "language": "tr", "team": "Galatasaray", "relevant": true}
+{"id": 771, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 773, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 791, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 824, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 828, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 829, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 833, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 864, "language": "tr", "team": "Basaksehir", "relevant": true}
+{"id": 865, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 866, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 900, "language": "tr", "team": "Marseille", "relevant": false}
+{"id": 902, "language": "tr", "team": "Besiktas JK", "relevant": true}
+{"id": 904, "language": "tr", "team": "Kocaelispor", "relevant": true}
+{"id": 920, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 932, "language": "tr", "team": "Barcelona", "relevant": false}
+{"id": 938, "language": "tr", "team": "Fenerbahce", "relevant": true}
+{"id": 942, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 950, "language": "tr", "team": "Besiktas JK", "relevant": true}
+{"id": 982, "language": "tr", "team": "Barcelona", "relevant": false}
+{"id": 985, "language": "tr", "team": "TSG Hoffenheim", "relevant": false}
+{"id": 996, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 1011, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 1014, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1030, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1065, "language": "tr", "team": "Trabzonspor", "relevant": true}
+{"id": 1067, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 1076, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 1096, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 1101, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1103, "language": "tr", "team": "Barcelona", "relevant": false}
+{"id": 1107, "language": "tr", "team": "Hull City", "relevant": false}
+{"id": 1109, "language": "tr", "team": "Alanyaspor", "relevant": false}
+{"id": 1127, "language": "tr", "team": "Basaksehir", "relevant": false}
+{"id": 1167, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 1171, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 1172, "language": "tr", "team": "Fenerbahce", "relevant": false}
+{"id": 1180, "language": "tr", "team": "Liverpool", "relevant": false}
+{"id": 1192, "language": "tr", "team": "Atlético Madrid", "relevant": false}
+{"id": 1193, "language": "tr", "team": "Besiktas JK", "relevant": true}
+{"id": 1205, "language": "tr", "team": "Amed SK", "relevant": false}
+{"id": 1235, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1261, "language": "tr", "team": "Bologna", "relevant": false}
+{"id": 1283, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 1286, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 1297, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 1312, "language": "tr", "team": "Besiktas JK", "relevant": false}
+{"id": 1314, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1334, "language": "tr", "team": "Trabzonspor", "relevant": false}
+{"id": 1335, "language": "tr", "team": "Galatasaray", "relevant": false}
+{"id": 1808, "language": "tr", "team": "Manchester United", "relevant": true}
