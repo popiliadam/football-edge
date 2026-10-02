@@ -35,7 +35,7 @@ açık kararlar `AK1…`.
 | B8 | **İlk sürümlerde her sayfa `noindex`**; indekslemeye açma ayrı bayrak (`SITE_INDEXABLE`) ve AK14 onayına bağlı; `X-Robots-Tag` ve CSP derlemenin ürettiği `out/_headers`ten TEK kaynaktan gelir | Hukuk metinleri onaysızken kazara yayın bile arama motoruna girmesin; iki kaynak ayrışmasın | — |
 | B9 | **Deploy hazır, bağlı değil:** `web/netlify.toml` + `.github/workflows/site.yml` yalnız `workflow_dispatch`, secret yoksa adıyla kırmızı; zamanlama/pg_cron tetiği YOK | HANDOFF §0.6/6 | — |
 | B10 | **Site kapısı `verify.sh`in adımıdır** (tek kapı); DB davranış testleri CI'da geçici `supabase/postgres` servis kabında koşar; `CI=true` iken test veritabanı yoksa adım **FAIL** | "Kapı = CI'ın koştuğu adımlar"; görünüm testleri gerçek Postgres ister; SKIP'in CI'da sessizce yeşil olması Vaka 1 desenidir | CI süresi uzar (ölçülecek) |
-| B11 | **Eski tabloların API açığı (DEFERRED 12a) Dalga A Task 6 `0013_api_roles_lockdown.sql` ile kapanır** (RLS, `anon`/`authenticated` yetkileri ve varsayılan yetkileri geri alma, append-only üçlüde TRUNCATE bekçisi, `forbid_ledger_mutation` `search_path`); canlıya bu oturumda controller uygular. Sitenin migration'ı **0014** (gerekirse 0015) | Tek açık tek migration'da kapanır; site onu varsayar, tekrar etmez | — |
+| B11 | **Eski tabloların API açığı (DEFERRED 12a) Dalga A Task 6 `0013_api_roles_lockdown.sql` ile kapanır** (RLS, `anon`/`authenticated` yetkileri ve varsayılan yetkileri geri alma, append-only üçlüde TRUNCATE bekçisi, `forbid_ledger_mutation` `search_path`); canlıya bu oturumda controller uygular. Sitenin migration'ı **0014** (gerekirse 0015 — 0015 sonradan TFF hakem tablosuna verildi, 2026-10-02; site okuma katmanı 0014'te tamamlandı) | Tek açık tek migration'da kapanır; site onu varsayar, tekrar etmez | — |
 | B12 | **Dışa aktarım tek `REPEATABLE READ READ ONLY` işlemidir; zinciri GENESIS'ten ve bütün çıpalara karşı doğrular;** belirlenimcilik `content_sha256` (zaman damgası ve git SHA'sı hariç gövde, `ledger._canonical`) ile, ayrı alt süreçte farklı `PYTHONHASHSEED`le yapılan ikinci türetimle ölçülür; yayımlanan dosyanın tamamı ayrıca `snapshot.sha256` taşır | `matches.commence_time` her snapshot turunda UPDATE edilir (`db.upsert_matches`); defter kesimi `matches`i dondurmaz — tek işlem dondurur | Uzun işlem (saniyeler) — sorun değil |
 | B13 | **İki plan:** B-1 okuma katmanı + dışa aktarım + K1 testleri + onların CI adımı (İLK); B-2 web yüzeyi + Node kapı adımları + deploy hazırlığı (B-1'in sözleşme görevinden sonra paralel; `verify.sh`/`ci.yml`e B-1 birleştikten SONRA dokunur) (§15) | Tek plan K1 ile K3'ü aynı inceleme ağırlığına zorlar; K1 testleri B-2'yi beklememeli | — |
 
@@ -149,6 +149,7 @@ JSON'la A içinde çözülür; anon anahtarı gerekmez.
   `search_path=''` + `tg_table_name`. DEFERRED 12a bununla kapanır. Site bunu varsayar.
 - **`0014_site_read.sql`:** şemalar, rol, görünümler, yer tutucu sicil (aşağıda). Tek dosyaya sığmayan bir parça
   çıkarsa (ör. rol ile görünümler ayrı uygulanmak istenirse) 0015; plan karar verir.
+  (0015 sonradan TFF hakem tablosuna verildi, 2026-10-02; site okuma katmanı 0014'te tamamlandı.)
 
 ### 4.2 Rol, yetki ve görünüm sahipliği
 

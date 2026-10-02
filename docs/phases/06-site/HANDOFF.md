@@ -269,7 +269,7 @@ Plan: `docs/superpowers/plans/2026-10-02-tff-hakem-site.md`.
 ## Hukuk incelemesi (HANDOFF §0.7/7'ye)
 
 B-2 Task 7 incelemesinin "Content findings for lawyer review" tablosu (C1–C11; inceleme dosyası gitignored SDD
-kaydındadır). Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
+kaydındadır) ve TFF baş hakemi C12 (2026-10-02) — avukat paketi C1–C12. Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
 AK13 avukat paketine girer. Belgeler: `web/content/legal/<dil>/<belge>.tsx`.
 
 | # | yer | konu | soru |
