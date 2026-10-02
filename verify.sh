@@ -158,10 +158,10 @@ mkdir -p "$SITE_E2E_DIR"
 : > "$SITE_E2E_DIR/run-id"
 if [ -n "${SITE_TEST_DATABASE_URL:-}" ]; then
   step "site-db" bash -c '
-    EXPECTED_MIN_SITEDB=28
+    EXPECTED_MIN_SITEDB=37
     # Hem `sitedb` hem `leakage` taşıyan H1 testleri (kapanış, taban, holdout tohumları, uçtan uca)
     # `sızıntı` adımında sayılmaz: `leakage` işareti sessizce düşerse bu ikinci taban görür.
-    EXPECTED_MIN_SITEDB_LEAKAGE=4
+    EXPECTED_MIN_SITEDB_LEAKAGE=5
 
     count() {
       collect_output=$(uv run pytest tests/ -q -m "$1" --collect-only 2>&1)

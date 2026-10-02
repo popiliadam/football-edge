@@ -1,6 +1,6 @@
 """`sitedb` testlerinin veritabanı düzeni (Faz 6 İz B tasarımı §4.4/2, §4.4/4, §4.4/5).
 
-İki yer. (i) TAM SIRA, `postgres` veritabanında: 0001→0014 tek işlemde uygulanır, katalog okunur,
+İki yer. (i) TAM SIRA, `postgres` veritabanında: 0001→0015 tek işlemde uygulanır, katalog okunur,
 işlem GERİ ALINIR (`full_sequence`). (ii) DAVRANIŞ, şablonun kopyasında: `site_tpl` yalnız sitenin
 kapanışındaki ve 0013'ün dokunduğu migration'larla kurulur, her modül (ve her kurcalama varyantı)
 `CREATE DATABASE … TEMPLATE site_tpl` ile kendi kopyasını alır, sonunda `DROP … WITH (FORCE)`.
@@ -44,6 +44,7 @@ TEMPLATE_MIGRATIONS = (
     "0002_sources.sql",
     "0013_api_roles_lockdown.sql",
     "0014_site_read.sql",
+    "0015_match_officials.sql",
 )
 SKIPPED_MIGRATIONS = (
     "0003_seal_dispatch.sql",
@@ -200,7 +201,7 @@ def site_db_each(site_cluster: str) -> Iterator[str]:
 
 @pytest.fixture(scope="module")
 def full_sequence(site_cluster: str) -> Iterator[psycopg.Cursor[Any]]:
-    """(i): `postgres` veritabanında 0001→0014 tek işlemde; sonunda GERİ ALINIR.
+    """(i): `postgres` veritabanında 0001→0015 tek işlemde; sonunda GERİ ALINIR.
 
     Kum havuzu kilidi: hedefte `odds_snapshots` varsa (migration'ları uygulanmış bir kap) hiçbir
     şey uygulanmadan kırmızı. Şablon (`site_cluster`) önce kurulur: açık işlemdeki commit'lenmemiş

@@ -581,7 +581,7 @@ scripts/sandbox_db.sh stop    # kapları durdurur; `rm --yes` kaldırır
   uygulamadan kırmızı verir. Kilit testi aynı sunucuda `fe_lock_probe_<özet>` veritabanını (0001+0002
   commit'li; ad iki dosyanın özetinden) yeniden kullanır.
 - **Site testleri** (`sitedb` işareti; `test` komutu `SITE_TEST_DATABASE_URL`i BOŞ kaba çevirir): `postgres`
-  veritabanında 0001→0014'ü tek işlemde uygulayıp geri alır; ayrıca `site_tpl` şablonunu (0001, 0002, 0013, 0014) ve
+  veritabanında 0001→0015'i tek işlemde uygulayıp geri alır; ayrıca `site_tpl` şablonunu (0001, 0002, 0013, 0014, 0015) ve
   modül başına `site_t_<rastgele>` kopyalarını kurar, bitince `DROP … WITH (FORCE)` ile kaldırır (oturum başında
   bayatları da). `site_reader` rolü ve testin ona `SET` üyeliği KÜME düzeyinde kalır — yalnız bu atılabilir kapta.
 - Kaplar `football-edge.sandbox=1` etiketini taşır; betik etiketsiz aynı adlı bir kaba dokunmaz.
