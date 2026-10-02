@@ -15,6 +15,14 @@ describe("sözlükler (spec §8.3)", () => {
     );
   });
 
+  // DEFERRED 20b/20g, AK2 onayı (2026-10-02): en cümlesi de sabittir — çeviri bir vaade ("will soon
+  // beat…") ya da "ölçüt zaten kayıtlı" iddiasına ("registered in advance") kayamaz.
+  it("en boş sicil metni onaylı cümledir: ölçüt henüz kaydedilmedi", () => {
+    expect(en["record.emptyExplain"]).toBe(
+      "Our base model has not beaten the closing market, so we do not publish predictions yet. Publishing will start once a closing line value (CLV) criterion, to be registered in advance, is passed; until then the ledger keeps recording odds and closing prices.",
+    );
+  });
+
   // İki katlama (son inceleme m1): düz `toLowerCase()` "YAKINDA"yı `yakinda`ya çevirir (noktasız ı
   // kaybolur); `toLocaleLowerCase("tr")` "COMING"i `comıng`e çevirir. Her yasak ifade ikisinde de aranır.
   it("hiçbir arayüz metni 'yakında' vaadi ya da value önerisi taşımaz", () => {
