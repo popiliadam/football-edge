@@ -19,7 +19,8 @@ bir blok, TÜM liglerin bu haftaki maçlarını hakem atamalarıyla BİRLİKTE t
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,12 @@ _MATCH_ROW_CLASS = "haftaninMaclariMaclar"
 _HOME_CLASS = "haftaninMaclariMaclarEvSahibi"
 _AWAY_CLASS = "haftaninMaclariMaclarMisafir"
 _OFFICIALS_CLASS = "haftaninMaclariMaclarHakemler"
+_DATE_CLASS = "haftaninMaclariMaclarTarih"
+# Tarih hücresi ÖLÇÜLDÜ (2026-09-19 fixture'ı, 63/63 satır): "18.09.2026 Cuma 20:00" — gün.ay.yıl,
+# Türkçe gün adı, İstanbul saati (spec 2026-10-02 §3.1). Tam BİR tarih ve BİR saat okunmalı; aksi
+# satır kayıptır ve `parse_referees`in sayım bekçisine düşer (§3.2).
+_DATE = re.compile(r"(?<!\d)(\d{2})\.(\d{2})\.(\d{4})(?!\d)")
+_KICKOFF = re.compile(r"(?<![\d:])([01]\d|2[0-3]):([0-5]\d)(?![\d:])")
 
 # Görevli etiketleri ÖLÇÜLDÜ: (H) baş hakem, (Y) yardımcı hakem ×2, (D) dördüncü hakem,
 # yalnız üst ligde ayrıca (V) VAR hakemi, (A) AVAR hakemi — 63 maçtan 11'i (Süper Lig)
@@ -146,6 +153,49 @@ def _league_blocks(soup: BeautifulSoup) -> tuple[tuple[str, Tag], ...]:
     return blocks
 
 
+def _kickoff(row: Tag) -> tuple[date, str] | None:
+    """Satırın İstanbul tarihi ve `HH:MM` saati; tam bir tarih ve bir saat okunamazsa None."""
+    cell = row.find("div", class_=_DATE_CLASS)
+    if not isinstance(cell, Tag):
+        return None
+    text = _text(cell)
+    days, times = _DATE.findall(text), _KICKOFF.findall(text)
+    if len(days) != 1 or len(times) != 1:
+        return None
+    day, month, year = (int(part) for part in days[0])
+    try:
+        when = date(year, month, day)
+    except ValueError:
+        return None
+    hour, minute = times[0]
+    return when, f"{hour}:{minute}"
+
+
+def _row_observation(league: str, row: Tag, observed_at: datetime) -> Observation | None:
+    """Tam satırın gözlemi; ev, deplasman, baş hakem, tarih ya da saatten biri yoksa None."""
+    home, away = _team_name(row, _HOME_CLASS), _team_name(row, _AWAY_CLASS)
+    referee, kickoff = _head_referee(row), _kickoff(row)
+    if not (home and away and referee and kickoff):
+        return None
+    match_date, kickoff_local = kickoff
+    day = match_date.isoformat()
+    return Observation(
+        source_id=SOURCE_ID,
+        entity_kind="fixture_official",
+        # Tarihli anahtar (spec §3.1): gelecek sezonun aynı eşleşmesi bu sezonu ezemez.
+        entity_key=f"{normalise_team(home)}|{normalise_team(away)}|{day}",
+        observed_at=observed_at,
+        payload={
+            "home_team": home,
+            "away_team": away,
+            "referee": referee,
+            "league": league,
+            "match_date": day,
+            "kickoff_local": kickoff_local,
+        },
+    )
+
+
 def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observation, ...]:
     """Haftanın hakem atamalarını gözlemlere çevirir (`pageID=600`, div tabanlı düzen).
 
@@ -168,6 +218,9 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     görevlisizse ise sonuç boştur ve istisna FIRLAMAZ: hakemler her hafta maçlardan birkaç
     gün önce açıklanır, arada sayfa bütün maçları boş hücreyle taşır (ölçüldü 09-22: 63/63).
     İlk canlı tur bu durumu "sayfa şekli değişti" diye kırmızıya düşürüyordu.
+
+    Tarih ve saat de satırın parçasıdır (spec 2026-10-02 §3.2): okunamayan tarih/saat taşıyan
+    atanmış satır aynı bekçiye kayıp olarak düşer.
     """
     soup = BeautifulSoup(html_text, "html.parser")
     parsed: tuple[Observation, ...] = ()
@@ -176,28 +229,12 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     for league_name, container in _league_blocks(soup):
         for row in container.find_all("div", class_=_MATCH_ROW_CLASS):
             total_rows += 1
-            home = _team_name(row, _HOME_CLASS)
-            away = _team_name(row, _AWAY_CLASS)
-            referee = _head_referee(row)
-            if not (home and away and referee):
+            entry = _row_observation(league_name, row, observed_at)
+            if entry is None:
                 if _officials_cell_is_empty(row):
                     unassigned += 1
                 continue
-            parsed = (
-                *parsed,
-                Observation(
-                    source_id=SOURCE_ID,
-                    entity_kind="fixture_official",
-                    entity_key=f"{normalise_team(home)}|{normalise_team(away)}",
-                    observed_at=observed_at,
-                    payload={
-                        "home_team": home,
-                        "away_team": away,
-                        "referee": referee,
-                        "league": league_name,
-                    },
-                ),
-            )
+            parsed = (*parsed, entry)
     if total_rows == 0:
         raise ContractViolation(f"{SOURCE_ID}: hiç maç satırı tanınmadı — sayfa şekli değişti")
     if unassigned:
@@ -247,7 +284,7 @@ def collect_tff(
     assert_schema(
         parsed,
         source_id=SOURCE_ID,
-        required=frozenset({"home_team", "away_team", "referee"}),
+        required=frozenset({"home_team", "away_team", "referee", "match_date"}),
         minimum_rows=5,
     )
     written = write_observations(conn, parsed)

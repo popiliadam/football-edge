@@ -225,6 +225,57 @@ def test_all_officials_named_without_links_still_raises() -> None:
         parse_referees(degraded, observed_at=NOW)
 
 
+def _first_date_cell_replaced(html: str, old: str, new: str) -> str:
+    """İlk maç satırının (KASIMPAŞA – TÜMOSAN KONYASPOR, atanmış) tarih hücresinde `old` → `new`."""
+    soup = BeautifulSoup(html, "html.parser")
+    cell = soup.find("div", class_="haftaninMaclariMaclarTarih")
+    assert cell is not None
+    target = cell.find(string=lambda text: text is not None and old in text)
+    assert target is not None, old
+    target.replace_with(target.replace(old, new))
+    return str(soup)
+
+
+@pytest.mark.contract
+def test_every_row_carries_its_istanbul_date_and_kickoff() -> None:
+    """Ölçüldü (2026-09-19): tarih hücresi "18.09.2026 Cuma 20:00" — gün.ay.yıl, gün adı,
+    İstanbul saati."""
+    parsed = parse_referees(fixture_html(), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert (match.payload["match_date"], match.payload["kickoff_local"]) == ("2026-09-18", "20:00")
+    assert all(re.fullmatch(r"2026-09-(18|19|20)", e.payload["match_date"]) for e in parsed)
+    assert all(re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", e.payload["kickoff_local"]) for e in parsed)
+
+
+@pytest.mark.contract
+def test_the_entity_key_is_dated_so_next_season_cannot_overwrite_this_one() -> None:
+    parsed = parse_referees(fixture_html(), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert match.entity_key == "kasimpaşa|tümosan konyaspor|2026-09-18"
+    assert len({entry.entity_key for entry in parsed}) == len(parsed)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("18.09.2026", "18.09.26"),  # iki haneli yıl: tarih okunmaz
+        ("18.09.2026", "31.02.2026"),  # takvimde olmayan gün
+        ("20:00", "20.00"),  # saat biçimi değişti
+        ("20:00", "25:00"),  # olmayan saat
+    ],
+)
+def test_a_row_whose_date_or_kickoff_cannot_be_read_is_a_loss_not_a_skip(
+    old: str, new: str
+) -> None:
+    """Spec §3.2: tarih/saati okunamayan atanmış satır sayım bekçisine kayıp olarak düşer."""
+    degraded = _first_date_cell_replaced(fixture_html(), old, new)
+
+    with pytest.raises(ContractViolation, match="sessizce atlandı"):
+        parse_referees(degraded, observed_at=NOW)
+
+
 def test_team_normalisation_is_case_and_space_insensitive() -> None:
     """Eşleşme anahtarı normalize edilir; 'Galatasaray A.Ş.' ile 'GALATASARAY' aynı olmalı."""
     assert normalise_team("  Galatasaray A.Ş. ") == normalise_team("GALATASARAY AŞ")
