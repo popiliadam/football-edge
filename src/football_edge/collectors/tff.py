@@ -31,6 +31,7 @@ from bs4 import BeautifulSoup, Tag
 from football_edge.collector import ContractViolation, Observation, assert_schema, fetch_text
 from football_edge.naming import normalise_team
 from football_edge.observations import write_observations
+from football_edge.officials import TFF_TEAMS_PATH, link_officials, load_team_map
 from football_edge.sources import Source, enabled_sources, load_sources, robots_for
 
 LOGGER = logging.getLogger("football_edge.collectors.tff")
@@ -264,6 +265,7 @@ def collect_tff(
     sources_path: Path,
     robots_dir: Path,
     now: datetime,
+    teams_path: Path = TFF_TEAMS_PATH,
 ) -> int:
     """Bu haftanın hakem atamalarını toplar ve yazar; YENİ gözlem sayısını döner.
 
@@ -271,6 +273,10 @@ def collect_tff(
     branch'leri birleştiğinde tek seferde eklenir. `assert_fresh` BURADA ÇAĞRILMAZ
     (R23): `observed_at=now`i toplayıcının kendisi damgalıyor, bu yüzden "en yeni gözlem
     taze mi" iddiası her zaman doğru olurdu — kırılamayan bir kontrol.
+
+    Gözlemler yazılıp commit edildikten sonra AYNI `now` ile `link_officials` çağrılır (spec
+    2026-10-02 §3.3): bağlama turun ayrıştırılmış sonucundan çalışır, gözlem tablosunu okumaz.
+    Sayıları loglanır; yapılandırma ya da eşleme kırmızısı istisnadır.
     """
     source = _enabled_source(sources_path)
     parser = robots_for(source, robots_dir)
@@ -289,4 +295,15 @@ def collect_tff(
     )
     written = write_observations(conn, parsed)
     conn.commit()
+    result = link_officials(conn, parsed, team_map=load_team_map(teams_path), now=now)
+    LOGGER.info(
+        "%s: hakem bağlama — bağlanan %d, yeni yazılan %d, DB'de yok %d, alias bekleyen %d, "
+        "lig dışı %d",
+        SOURCE_ID,
+        result.linked,
+        result.written,
+        result.not_in_db,
+        result.awaiting_alias,
+        result.other_league,
+    )
     return written

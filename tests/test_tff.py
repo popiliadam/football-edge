@@ -21,14 +21,17 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 from bs4 import BeautifulSoup
 
 from football_edge.collector import ContractViolation
+from football_edge.collectors import tff
 from football_edge.collectors.tff import collect_tff, parse_referees
 from football_edge.naming import normalise_team
+from football_edge.officials import LinkResult, TeamMap
 from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import write_robots
 
@@ -281,6 +284,19 @@ def test_team_normalisation_is_case_and_space_insensitive() -> None:
     assert normalise_team("  Galatasaray A.Ş. ") == normalise_team("GALATASARAY AŞ")
 
 
+@pytest.fixture
+def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """`link_officials`in kaydedicisi: taklit DB `matches`/`match_officials` sorgularını tanımaz."""
+    calls: list[dict[str, Any]] = []
+
+    def record(conn: Any, observations: Any, *, team_map: TeamMap, now: datetime) -> LinkResult:
+        calls.append({"observations": observations, "team_map": team_map, "now": now})
+        return LinkResult(linked=9, written=3, not_in_db=1, awaiting_alias=1, other_league=53)
+
+    monkeypatch.setattr(tff, "link_officials", record)
+    return calls
+
+
 def _write_sources_yaml(tmp_path: Path) -> Path:
     path = tmp_path / "sources.yaml"
     path.write_text(
@@ -302,7 +318,9 @@ sources:
     return path
 
 
-def test_collect_tff_writes_observations_and_commits(tmp_path: Path) -> None:
+def test_collect_tff_writes_observations_and_commits(
+    tmp_path: Path, links: list[dict[str, Any]]
+) -> None:
     sources_path = _write_sources_yaml(tmp_path)
     write_robots(tmp_path, "tff", "")  # ölçülen gerçek durum: robots.txt 404 → boş anlık görüntü
 
@@ -329,7 +347,9 @@ def test_collect_tff_writes_observations_and_commits(tmp_path: Path) -> None:
     assert len(db.rows) == 62
 
 
-def test_collect_tff_second_round_is_idempotent(tmp_path: Path) -> None:
+def test_collect_tff_second_round_is_idempotent(
+    tmp_path: Path, links: list[dict[str, Any]]
+) -> None:
     """Aynı hafta iki kez toplanırsa ikinci tur 0 YENİ gözlem yazmalı (`ON CONFLICT DO
     NOTHING` — `write_observations` zaten bunu garanti ediyor; burada TFF'in bu
     garantiyi bypass ETMEDİĞİ doğrulanıyor, ör. `observed_at`i hash'e sızdırarak).
@@ -367,7 +387,7 @@ def test_collect_tff_second_round_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_collect_tff_week_with_no_assignments_writes_nothing_and_succeeds(
-    tmp_path: Path,
+    tmp_path: Path, links: list[dict[str, Any]]
 ) -> None:
     """`assert_schema(minimum_rows=5)` atanmamış haftayı YENİDEN kırmızıya çevirmemeli:
     `parse_referees` boş sonucu yalnız her satır meşru olarak görevlisizken döner.
@@ -396,3 +416,34 @@ def test_collect_tff_week_with_no_assignments_writes_nothing_and_succeeds(
 
     assert written == 0
     assert db.rows == []
+    assert links == [], "atanmamış haftada bağlama çağrılmaz"
+
+
+def test_collect_tff_links_this_rounds_parse_with_the_same_now(
+    tmp_path: Path, links: list[dict[str, Any]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Spec §3.3: bağlama gözlem tablosundan OKUMAZ — turun ayrıştırılmış sonucu ve AYNI `now`."""
+    caplog.set_level(logging.INFO, logger="football_edge.collectors.tff")
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "tff", "")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=fixture_html().encode("windows-1254"),
+            headers={"content-type": "text/html; charset=windows-1254"},
+        )
+
+    collect_tff(
+        FakeObservationDb(),  # type: ignore[arg-type]
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    (call,) = links
+    assert call["now"] == NOW
+    assert call["observations"] == parse_referees(fixture_html(), observed_at=NOW)
+    assert call["team_map"].league_id == "tur.1"
+    assert "bağlanan 9, yeni yazılan 3, DB'de yok 1, alias bekleyen 1, lig dışı 53" in caplog.text
