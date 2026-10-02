@@ -520,6 +520,13 @@ ancak onayla uygulanır. Nerede: `db/migrations/0014_site_read.sql`, spec §4. N
 Sonra asistan: `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" 2. adım (ROLLBACK provası → `apply_migration` `postgres`
 rolüyle → katalog testleri canlıya salt okuma → advisors). Bloklar: ilk gerçek dışa aktarım.
 
+> **KARAR VERİLDİ (2026-10-02, kullanıcı oturumu Adım 7):** (a) EN = Sports Mole + Independent + Evening Standard +
+> GFFN + Football Oranje RSS (koşullu: ticari olmayan iç kullanım; lansmandan önce avukat/yazılı izin) + GDELT
+> (atıf) + Wikidata — BBC/Sky/ESPN/90min/F365/Mirror/Daily Mail YASAK (yapay zekâ girdisi yasak;
+> `docs/reports/2026-10-02-en-haber-kaynaklari.md`); (b) CaughtOffside/JustArsenal dışarıda; (c) SportMonks 14 gün
+> deneme Plan 2 başında (hesap kullanıcıda), X API hayır; (d) TR = ajansspor + Fotomaç RSS + A Spor RSS; (e) ajansspor
+> `ai-input=yes` yeterli. Toplayıcılar Plan 2 kademe 2.
+
 **K/4 — Haber kaynağı politikası.** Girdi belgeleri: `docs/reports/2026-09-23-kaynak-kosullari.md` (oturum 9'da
 genişletildi) ve `docs/reports/2026-09-23-ek-kaynaklar.md`. Karar verilecekler:
 - (a) **EN — GDELT ayağı hangi politikayla, ya da hiç?** Ölçüm: önerilen izin listesi GDELT'in İngilizce futbol
@@ -552,6 +559,9 @@ genişletildi) ve `docs/reports/2026-09-23-ek-kaynaklar.md`. Karar verilecekler:
 - Sınırlar (dosyada yazılı): 71/100 dört büyük kulüp; kulüp adı geçmeyen ama ilgili başlıklar atlandı; sınıflar
   dengesiz (27 true/73 false); haber gövdeleri boş (yalnız başlık).
 - **K/5b — EN etiketleri yok:** `news_items`ta İngilizce haber yok; K/4 (EN kaynağı) kararından sonra hazırlanır.
+
+> **KARAR VERİLDİ (2026-10-02, Adım 9):** ücretli ölçüm onaylı, `MONTHLY_CAP_USD = 25` (tahmin ~1 $ = 100 × 0,01).
+> Ücret açan commit Plan 2 T3'te — asistan yapamaz, kullanıcıya tek satır verilir.
 
 **K/6 — Ücretli Jev harcamasını açan commit + Plan 2 maliyet ölçümü onayı.** Ne: Jev (TypeSafe) ilk ücretli çağrısı.
 Neden: auto-mode harcama açan commit'i asistana yaptırmaz (bellek `credit-activation-commit-blocked`). Nasıl: asistan
