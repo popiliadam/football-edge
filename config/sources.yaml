@@ -73,6 +73,9 @@ sources:
       (R7: beyan = gerçek istek). tests/test_sources.py'deki bağlayıcı test yalnız öbür yönü
       korur (her fetch edilen yol beyanlı). PFDK (spec §3.1 satır 81, plan Task 6 başlığı) HİÇ
       uygulanmadı → HANDOFF §3 madde 30 / DEFERRED §9.
+      2026-10-02 kullanıcı kararı: Süper Lig maç sayfasında TFF baş hakemi (kaynak gösterimiyle)
+      gösterilir — yerelde, yayından önce avukat (C12); Kullanım Şartları pageID=179: ticari
+      olmayan kullanım + kaynak gösterimi.
 
   - id: tff-pfdk
     base_url: https://www.tff.org

@@ -47,7 +47,7 @@ zincirinin her adımı ayrıca sorulur. Bu kural kodda zorlanır, prose'da deği
 | `publish-head` | Zincirin o anki başını `ledger/` altına yazar; baş o gün değişmediyse dosyaya dokunmaz (`zincir başı değişmedi`). |
 | `sources-audit` | Kaynak kayıt defterini robots anlık görüntülerine karşı ÇEVRİMDIŞI denetler. |
 | `fetch-footystats` | 6 ligin maç-başına xG/xGA tablosunu toplar. |
-| `fetch-tff` | TFF'den **bu haftanın** hakem atamalarını toplar (windows-1254). |
+| `fetch-tff` | TFF'den **bu haftanın** hakem atamalarını toplar (windows-1254) ve Süper Lig atamalarını `match_officials`e bağlar (0015). |
 | `fetch-news` | Etkin haber adaptörlerini koşturur (bugün: Ajansspor sitemap). |
 | `fetch-venues` | Stadyum koordinatı (Wikidata REST) + maç saati havası (Open-Meteo). |
 | `fetch-results` | Tamamlanmış maç skorlarını yazar (The Odds API `/scores` — **kredi harcar**). |

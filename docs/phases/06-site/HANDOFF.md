@@ -119,6 +119,9 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
    eklenmemiş, `security_invoker` uyarısı yok).
    **0015 (TFF baş hakemi, 2026-10-02):** 0014'ten SONRA aynı kuralla; `site_reader`a `LOGIN` veren migration
    **0016** olur (`docs/HANDOFF.md` §0.4 Adım 12/14).
+   **Birleştirme sırası (2026-10-02, son inceleme C1):** `tff-hakem` dalı (TFF baş hakemi, 0015) `main`e ANCAK
+   0014 VE 0015 canlıya uygulandıktan sonra birleştirilir; önce birleştirilirse `collect-daily` (`fetch-tff`) ilk
+   Süper Lig eşleşmesinde `match_officials` yok diye exit 7 verir.
 3. **`site_reader`a `LOGIN` verilmeden ÖNCE — pg_net artık riski (kullanıcı kararı, bilerek verilir):**
    - Canlıda `site_reader`ın etkin yetkileri salt okuma sorgusuyla yeniden ölçülür, pg_net'in `net` şeması dâhil
      (şema USAGE'ı; `net.*` tablo, dizi ve fonksiyon yetkileri). Kapta ölçülen kabul listesi:
