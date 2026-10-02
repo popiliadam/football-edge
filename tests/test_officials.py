@@ -88,6 +88,14 @@ def test_only_the_mens_top_league_block_is_processed(label: str, expected: bool)
     assert load_team_map(TEAMS_YAML).matches_league(label) is expected
 
 
+def test_the_searched_phrase_is_folded_like_the_label() -> None:
+    """Son inceleme M2: YAML'daki ifade büyük harfli `İ` taşırsa da etiketle aynı katlamadan geçer;
+    yalnız `casefold` onu `i̇` yapar ve her Süper Lig bloğu sessizce lig dışı sayılırdı."""
+    team_map = TeamMap(league_label_contains="SÜPER LİG", league_id="tur.1", teams={})
+
+    assert team_map.matches_league("Trendyol Süper Lig Adnan Süvari Sezonu") is True
+
+
 @pytest.mark.parametrize(
     ("text", "needle"),
     [
@@ -105,6 +113,11 @@ def test_only_the_mens_top_league_block_is_processed(label: str, expected: bool)
         (
             'league_label_contains: "Süper Lig"\nleague_id: tur.1\nteams: {galatasaray: ""}\n',
             "null ya da boş olmayan metin",
+        ),
+        (
+            'league_label_contains: "Süper Lig"\nleague_id: tur.1\n'
+            'teams: {galatasaray: " Galatasaray"}\n',
+            "baş/son boşluk",
         ),
     ],
 )
@@ -288,3 +301,58 @@ def test_review_focus_reversed_home_and_away_is_not_linked_but_warned(
 
     assert (plan.links, plan.not_in_db) == ((), 1)
     assert "ters ev/deplasman" in caplog.text
+
+
+# ── Son inceleme I1: bağlanamayan satır ve lig etiketi sessiz kalmaz ─────────────────────────
+
+
+def test_an_awaiting_alias_row_is_warned_by_name_and_date(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="football_edge.officials")
+    plan_links([_assign("KASIMPAŞA A.Ş.", "BEŞİKTAŞ A.Ş.", "2026-09-19")], [], MAP)
+
+    (line,) = [r.getMessage() for r in caplog.records if "alias bekleyen" in r.getMessage()]
+    assert "KASIMPAŞA A.Ş." in line and "BEŞİKTAŞ A.Ş." in line and "2026-09-19" in line
+
+
+def test_a_row_missing_from_the_db_is_warned_by_name_and_date(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="football_edge.officials")
+    plan_links([_assign(*TS_GS, "2026-09-19")], [], MAP)
+
+    (line,) = [r.getMessage() for r in caplog.records if "DB'de yok" in r.getMessage()]
+    assert "TRABZONSPOR A.Ş." in line and "GALATASARAY A.Ş." in line and "2026-09-19" in line
+
+
+@pytest.mark.parametrize(
+    "league", ["Trendyol Süper Ligi 2027-28", "TRENDYOL SÜPER LİGİ", "Kadın Futbol Süper Ligi"]
+)
+def test_a_near_miss_label_without_any_super_lig_block_is_warned(
+    caplog: pytest.LogCaptureFixture, league: str
+) -> None:
+    """Süper Lig bloğu hiç eşleşmezken etiketi ifadeyi alt dize olarak taşıyan blok: TFF etiketi
+    değiştirmiş olabilir — sayaç `other_league`a düşer ve hafta sessizce boş geçerdi."""
+    caplog.set_level(logging.WARNING, logger="football_edge.officials")
+    plan = plan_links([_assign(*TS_GS, "2026-09-19", league=league)], [], MAP)
+
+    assert plan.other_league == 1
+    assert f"lig etiketi değişmiş olabilir: {league}" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [_assign(*TS_GS, "2026-09-19", league="Trendyol 1. Lig")],
+        [
+            _assign(*TS_GS, "2026-09-19"),
+            _assign(*TS_GS, "2026-09-19", league="Kadın Futbol Süper Ligi"),
+        ],
+    ],
+)
+def test_no_label_warning_when_a_block_matched_or_none_is_near(
+    caplog: pytest.LogCaptureFixture, rows: list[Assignment]
+) -> None:
+    caplog.set_level(logging.WARNING, logger="football_edge.officials")
+    plan_links(rows, [], MAP)
+
+    assert "lig etiketi" not in caplog.text

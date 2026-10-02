@@ -61,13 +61,19 @@ class TeamMap:
 
     def matches_league(self, label: str) -> bool:
         """Etiket `league_label_contains`ı TAM ifade olarak taşır ("Süper Ligi" eşleşmez) ve
-        kadın/genç ligi bloğu değildir (controller düzeltmesi C1). `İ` önce `i`ye katlanır: yalnız
-        `casefold` onu `i̇` yapar ve büyük harfli "SÜPER LİG" sessizce lig dışı kalırdı."""
-        folded = label.replace("İ", "i").casefold()
+        kadın/genç ligi bloğu değildir (controller düzeltmesi C1). Etiket de aranan ifade de
+        `fold_label`dan geçer (son inceleme M2): yalnız biri katlanırsa "SÜPER LİG" yazımı sessizce
+        lig dışı kalır."""
+        folded = fold_label(label)
         if any(word in folded for word in _EXCLUDED_LEAGUE_WORDS):
             return False
-        phrase = re.escape(self.league_label_contains.casefold()) + r"(?!\w)"
+        phrase = re.escape(fold_label(self.league_label_contains)) + r"(?!\w)"
         return re.search(phrase, folded) is not None
+
+
+def fold_label(text: str) -> str:
+    """`İ` önce `i`ye katlanır: yalnız `casefold` onu `i̇` yapar ve "LİG" "lig" ile eşleşmez."""
+    return text.replace("İ", "i").casefold()
 
 
 @dataclass(frozen=True)
@@ -123,6 +129,10 @@ def _checked_teams(path: Path, teams: Mapping[Any, Any]) -> dict[str, str | None
             raise ValueError(f"{path}: anahtar normalise_team çıktısı değil: {key!r}")
         if value is not None and not (isinstance(value, str) and value.strip()):
             raise ValueError(f"{path}: {key!r} değeri null ya da boş olmayan metin olmalı")
+        if isinstance(value, str) and value != value.strip():
+            # API yazımı `matches`le birebir karşılaştırılır; görünmez boşluk her maçı `not_in_db`
+            # yapar ve kimse fark etmez (son inceleme M2).
+            raise ValueError(f"{path}: {key!r} değeri baş/son boşluk taşımamalı: {value!r}")
     return {str(key): value for key, value in teams.items()}
 
 
@@ -161,6 +171,7 @@ def plan_links(
         home, away = _api_name(item.home, item, team_map), _api_name(item.away, item, team_map)
         if home is None or away is None:
             awaiting += 1
+            _warn_unlinked("alias bekleyen", item)
             continue
         found = index.get((home, away, item.match_date), ())
         if len(found) > 1:
@@ -170,10 +181,33 @@ def plan_links(
             )
         if not found:
             not_in_db += 1
+            _warn_unlinked("DB'de yok", item)
             _warn_if_reversed(index, (home, away), item)
             continue
         links = _with_link(links, found[0], item.referee)
+    if other == len(assignments):
+        _warn_if_label_drifted(assignments, team_map)
     return LinkPlan(tuple(sorted(links.items())), not_in_db, awaiting, other)
+
+
+def _warn_unlinked(counter: str, item: Assignment) -> None:
+    """Son inceleme I1: sayaç tek başına hangi maçın düştüğünü söylemez; satır adıyla loglanır."""
+    LOGGER.warning(
+        "tff: %s – %s (%s) bağlanmadı: %s",
+        item.home,
+        item.away,
+        item.match_date.isoformat(),
+        counter,
+    )
+
+
+def _warn_if_label_drifted(assignments: Sequence[Assignment], team_map: TeamMap) -> None:
+    """Hiçbir blok lig ifadesiyle eşleşmezken ifadeyi alt dize olarak taşıyan etiket (dışlananlar
+    dahil) TFF'nin etiketi değiştirdiğine işaret olabilir; aksi hâlde hafta `other_league`a düşer
+    ve sessizce boş geçer (son inceleme I1)."""
+    phrase = fold_label(team_map.league_label_contains)
+    for label in sorted({item.league for item in assignments if phrase in fold_label(item.league)}):
+        LOGGER.warning("tff: lig etiketi değişmiş olabilir: %s", label)
 
 
 def _check_referee(item: Assignment) -> None:

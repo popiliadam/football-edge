@@ -19,7 +19,9 @@ bir blok, TÜM liglerin bu haftaki maçlarını hakem atamalarıyla BİRLİKTE t
 from __future__ import annotations
 
 import logging
+import os
 import re
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -31,7 +33,7 @@ from bs4 import BeautifulSoup, Tag
 from football_edge.collector import ContractViolation, Observation, assert_schema, fetch_text
 from football_edge.naming import normalise_team
 from football_edge.observations import write_observations
-from football_edge.officials import TFF_TEAMS_PATH, link_officials, load_team_map
+from football_edge.officials import TFF_TEAMS_PATH, LinkResult, link_officials, load_team_map
 from football_edge.sources import Source, enabled_sources, load_sources, robots_for
 
 LOGGER = logging.getLogger("football_edge.collectors.tff")
@@ -74,6 +76,10 @@ _KICKOFF = re.compile(r"(?<![\d:])([01]\d|2[0-3]):([0-5]\d)(?![\d:])")
 # bir VAR atama sinyali GERÇEKTEN VAR OLDUĞU HÂLDE metin araması onu bulamaz. Bu alan
 # şimdilik toplanmıyor (sözleşme kapsamı dışı); Task 13'te DEFERRED'a yazılır.
 _HEAD_REFEREE_PREFIX = "(H)"
+
+# Bağlanamayan satır sayaçları Actions özetinde görünsün (son inceleme I1): yalnız bu değişken
+# "true" iken stdout'a `::warning::` iş akışı komutu yazılır; yerelde günlük yeterlidir.
+_ACTIONS_ENV = "GITHUB_ACTIONS"
 
 
 def _text(node: Any) -> str:
@@ -306,4 +312,16 @@ def collect_tff(
         result.awaiting_alias,
         result.other_league,
     )
+    _annotate_unlinked(result)
     return written
+
+
+def _annotate_unlinked(result: LinkResult) -> None:
+    """Bağlanamayan Süper Lig satırı varsa Actions'ta görünür uyarı; ayrıntı WARNING günlüğünde."""
+    if os.environ.get(_ACTIONS_ENV) != "true":
+        return
+    if result.not_in_db or result.awaiting_alias:
+        sys.stdout.write(
+            f"::warning::{SOURCE_ID}: hakemi bağlanamayan Süper Lig maçı — DB'de yok "
+            f"{result.not_in_db}, alias bekleyen {result.awaiting_alias} (ayrıntı günlükte)\n"
+        )
