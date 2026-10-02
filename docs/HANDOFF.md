@@ -250,7 +250,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
 
 #### FAZ 4 — Canlı veritabanı: okuma katmanı (~40 dk)
 
-**Adım 12 — 0014'ü canlıya uygula (K/3, 15 dk; asistan yapar, sen onaylarsın).**
+**Adım 12 — 0014'ü, ardından 0015'i canlıya uygula (K/3, 25 dk; asistan yapar, sen onaylarsın).**
 - Söyleyeceği: *"AK6 = §4.3 listesi, 0014'ü uygula."*
 - Asistan (`docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" adım 2): sessiz aralık (:00/:15/:30/:45 dışı,
   `gh run list --status in_progress` boş) → `db/migrations/0014_site_read.sql` metni bayt bayt, sha256 deftere →
@@ -259,6 +259,11 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
   salt okuma (`tests/test_site_views_db.py` vb. RUNBOOK §2.5 komutuyla, `--tb=short`) → `get_advisors security` +
   `performance` → bir sonraki `seal` turu yeşil.
 - Bitti: advisors'ta yeni ERROR/WARN yok; `site` şeması görünümleri canlıda; seal yeşil.
+- **0015 (TFF baş hakemi, `db/migrations/0015_match_officials.sql`; `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md` §5):** 0014 bittikten SONRA
+  aynı kuralla — sessiz aralık, bayt bayt metin + sha256 deftere, `begin … rollback` provası, `apply_migration`
+  `postgres` rolüyle, katalog testleri salt okuma, advisors, sonraki seal turu yeşil. Söyleyeceği:
+  *"0015'i uygula."* Bitti: `public.match_officials` (RLS açık, politikasız) ve `site.match_officials`
+  canlıda; sonraki `collect-daily` logunda `hakem bağlama` satırı.
 
 **Adım 13 — `site_reader` artık riskini kabul (K/13 ikinci yarı, 5 dk; açık karar).**
 - Asistan: canlıda `site_reader` etkin yetkilerini salt okuma sorgusuyla ölçer (`net` şeması dahil) ve
@@ -281,7 +286,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
   4. psql içinde: `\password site_reader` → parolayı iki kez yapıştır (ekranda görünmez) → `\q`.
      (`ALTER ROLE … PASSWORD` KULLANMA — DDL loglanırsa düz metin kalır.)
   5. Söyleyeceği: *"site_reader parolası ayarlandı."*
-- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0015_site_reader_login.sql`; test + kum havuzu + Adım 12'deki
+- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0016_site_reader_login.sql` — 0015 TFF hakem tablosudur; test + kum havuzu + Adım 12'deki
   canlı yazım kuralı) → uygular → doğrular (`rolcanlogin = true`, diğer yetkiler değişmedi).
 - Kullanıcı (devam):
   6. `SITE_DATABASE_URL`yi kur: `postgresql://site_reader.aaxadphezxavohkhqdrf:<hex-parola>@<pooler host>:5432/postgres?sslmode=require`
