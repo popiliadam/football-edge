@@ -1,9 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-01 (oturum 10 kapanışı — küçük borçlar §0.A/2 bitti) · **Durum:** Dalga A + Faz 6 İz B (B-1 okuma
-katmanı + B-2 web yüzeyi) `main`de, CI yeşil · **0013 CANLIDA**, **0014 yalnız depoda**, deploy BAĞLI DEĞİL ·
-milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-07** · holdout açılmadı ·
-**kullanıcının yapacakları: §0.K (tam liste)** · asistanın kullanıcısız işleri: §0.A · izlenecekler: §0.İ
+**Son güncelleme:** 2026-10-02 (oturum 10b kapanışı) · **Sıradaki oturum: KULLANICI OTURUMU (§0)** — kullanıcının
+bütün işleri (§0.önceki/0.K) asistan rehberliğinde adım adım, tek oturumda · **Durum:** asistanın kullanıcısız işi yok;
+`main` = `dcf8648`, CI yeşil · **0013 CANLIDA**, **0014 yalnız depoda**, deploy BAĞLI DEĞİL · ilk kulüp maçları
+**2026-10-09/10** · Plan 2 en erken **2026-10-07** · holdout açılmadı
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -13,12 +13,348 @@ milli ara: ilk kulüp maçları **2026-10-09/10** · Plan 2 en erken **2026-10-0
 
 ---
 
-## 0. Sonraki oturum — BURADAN BAŞLA (yazıldı 2026-10-01, oturum 9 kapanışı; oturum 10/10b ekleri §0.2a–§0.2b)
+## 0. KULLANICI OTURUMU — BURADAN BAŞLA (yazıldı 2026-10-02, oturum 10b kapanışı)
+
+Bu oturumun amacı: **kullanıcının yapması gereken her şeyi (§0.K) tek oturumda, asistan adım adım yönlendirerek
+bitirmek.** Asistanın kullanıcısız işi kalmadı (oturum 10/10b hepsini kapattı — §0.önceki/0.2a–0.2b). Aşağıdaki
+yol haritası sıralıdır; her adım bir öncekinin çıktısına dayanabilir. Ayrıntılı gerekçeler §0.önceki/0.K'dedir
+(K/n numaraları aynı). Tahmini toplam süre: **3–4 saat** (hukuk görüşmesi hariç — o oturum dışında).
+
+### 0.0 Başlatma istemi (taze oturuma yapıştır)
+> "`docs/HANDOFF.md` §0 KULLANICI OTURUMU'ndan başla. Önce §0.3 açılış kontrollerini yap (salt okuma, bana 5 satır
+> özet). Sonra §0.4 yol haritasını Adım 1'den başlayarak yürüt: her adımda bana ne yapacağımı tıklama tıklama anlat,
+> benim 'tamam'ımı bekle, sonra kendi kısmını yap ve doğrula, ilerlemeyi deftere yaz, bir sonraki adıma geç.
+> Kararlarda önerini söyle; secret'ları asla sohbete yazdırma."
+
+### 0.1 Durum (ölçüldü 2026-10-02, salt okuma)
+- **Dal:** `main` = `origin/main` = `dcf8648`; yerelde yalnız `main`, worktree yok (K/S temizliği yapıldı).
+- **CI ve zamanlanmış işler yeşil** (son 40 koşuda kırmızı yok). Yeni kodla `seal` (`09052d4`) yeşil.
+- **Kapı:** 16 PASS + adıyla 3 SKIP (`site-db`, `site-derleme/e2e`, `zincir`); komut §0.önceki/0.1. pytest ~3750.
+- **Canlı DB:** 0013 canlıda, **0014 YALNIZ depoda**. Supabase advisors yalnız INFO. `site_reader` rolü yok (0014 kurar).
+- **Site:** `web/site.config.ts` yer tutucuları: `SITE_NAME = "[site-name]"`, `SITE_URL = "https://example.invalid"`,
+  `LEDGER_HISTORY_URL = "https://example.invalid/ledger"`. `site.yml` hiç koşmadı (yalnız elle tetiklenir).
+  `deploy` işinde `environment: production` VAR, `build` işinde YOK (Adım 3'te eklenir).
+- **Holdout:** açılmadı. Maçlar: ilk kulüp maçları 10-09/10; fikstürler ~10-02/03'te `snapshot` ufkuna girer.
+- **Araç:** `psql` PATH'te değil; kurulu: `/opt/homebrew/opt/libpq/bin/psql` (Adım 14'te bu yol kullanılır).
+
+### 0.2 Asistan için oturum kuralları (bu oturuma özel — §0.önceki/0.D da geçerli)
+1. **Tek adım, tek seferde.** Her adımda: (a) neden şimdi, (b) kullanıcının yapacakları numaralı tıklama listesi, (c)
+   kullanıcının bana söyleyeceği tam cümle, (d) "bitti" ölçütü. Kullanıcı "tamam" demeden asistan kendi kısmına geçmez.
+2. **Secret'lar sohbete girmez:** token, parola, bağlantı dizesi kullanıcı tarafından doğrudan GitHub/Supabase
+   arayüzüne ya da kullanıcının KENDİ terminaline yazılır. Asistan terminal panelini (`read_terminal`) parola girilen
+   adımlarda OKUMAZ. Kullanıcı yanlışlıkla yapıştırırsa: hemen "o değeri döndür (rotate)" de, adımı tekrarlat.
+3. **Kararlarda öneri ver** (bellek `user-delegates-to-recommendation`): seçenekleri kısa yaz, önerini ilk sıraya koy.
+   "En iyi senaryo / senin önerin" cevabı = öneriyle devam; ama para, hukuk, dış iletişim ve geri alınamaz adımlar
+   için kullanıcının AÇIK "evet"i şart.
+4. **İlerleme defteri:** `.superpowers/sdd/_kalici/kullanici-oturumu/ilerleme.md` (gitignored, kalıcı). Her adım
+   bitince bir satır: `Adım N: bitti — <karar/çıktı> — <commit varsa>`. Bağlam sıkışırsa defter + `git log` esastır.
+5. **Kod değişiklikleri:** her biri test + mutasyon kanıtı + tam kapı + commit + `git fetch && git merge --no-ff
+   origin/main` + `grep -q "KAPI YEŞİL" <log> && git push`; CI koşarken yeni push yapma. Kod değişikliği küçükse
+   asistan kendisi yapar; 50 satırı aşan ya da güvenlik sınırına dokunan değişiklik için bir bağımsız inceleme ajanı
+   (general-purpose, sahte ikililer kuralı — bellek `probes-fake-binaries`).
+6. **Canlı DB yazımı:** §0.önceki/0.D "Canlı DB'ye yazım" kuralı aynen (sessiz aralık, ROLLBACK provası, metin bayt
+   bayt, sha256 deftere, sonra salt okuma doğrulaması + advisors + sonraki mühür turunun yeşili).
+7. **Ücret açan commit'i asistan yapamaz** (bellek `credit-activation-commit-blocked`): kullanıcıya tek satır verilir.
+8. **Bağlam %95'e gelirse** (bellek `handoff-before-compaction`): koşan adımı bitir, defteri ve bu §0'ı güncelle,
+   commit/push, yeni oturumda kaldığı adımdan devam.
+
+### 0.3 Açılış kontrolleri (asistan, ~5 dk, salt okuma — kullanıcıya 5 satır özet)
+1. `git fetch && git status -sb && git log --oneline -3` — `main` temiz mi, bot commit'leri dışında yeni bir şey var mı.
+2. `gh run list --limit 30` — kırmızı koşu var mı (varsa önce o; RUNBOOK).
+3. **§0.İ/1 (10-02/03 `snapshot`):** son `snapshot` logunda `yazılan satır` > 0 mı, lig başına `ufuktaki fikstür`.
+   Exit 19 tek seferse beklenen (RUNBOOK §3.11); 10-04'ten sonra hâlâ 0 ise arıza.
+4. Supabase advisors (`get_advisors security`) — yalnız INFO beklenir.
+5. İlerleme defteri varsa oku, kaldığı adımdan devam; yoksa oluştur (ilk satır: tarih + `main` SHA'sı).
+
+### 0.4 Yol haritası — adım adım
+
+Sıra mantığı: önce **ücretsiz ve geri alınabilir** işler (temizlik, güvenlik ayarı, kararlar), sonra **para ve
+hesaplar**, sonra **canlı veritabanı**, en son **ilk derleme** ve **hukuk paketi**. Hukuk onayı gelmeden site
+YAYIMLANMAZ (K/7: "yayından ÖNCE avukat") — bu oturumun son hâli "yayına hazır, avukat bekleniyor"dur.
+
+---
+
+#### FAZ 1 — Temizlik ve güvenlik ayarları (~20 dk, ücretsiz)
+
+**Adım 1 — Kalan silmeler (K/S kalanı, 2 dk).**
+- Kullanıcı: yalnız onay. Söyleyeceği: *"t6-rls ve rev kaplarını ve uzak faz-0 dalını sil."* (İstemezse: "dokunma".)
+- Asistan: `docker ps -a` ile `t6-rls-pre`, `t6-rls-sandbox`, `t6-rls-pg`, `rev8-pg`, `rev9-pg` adlarını ve
+  durumlarını (Exited) gösterir, tek tek `docker rm <ad>`; uzak dal için `git merge-base --is-ancestor
+  origin/faz-0-kayit-altyapisi main` (birleşmiş olmalı) sonra `git push origin --delete faz-0-kayit-altyapisi`
+  (outward işlem — onay kapısı soracak, kullanıcı onaylar). Tag `archive/measure-r104-width`e DOKUNMA.
+- Bitti: `docker ps -a | grep -E '^(t6-rls|rev[89])'` boş; `git ls-remote origin` yalnız `main` + tag.
+
+**Adım 2 — Supabase "Exposed schemas" kontrolü (K/13 birinci yarı, 5 dk).**
+- Neden: pg_net'in `net` şeması API'ye açıksa anon anahtarla dışarıdan GitHub tokenlı kuyruk okunabilir.
+- Kullanıcı:
+  1. https://supabase.com/dashboard → giriş → proje **`aaxadphezxavohkhqdrf`**.
+  2. Sol alt **Project Settings** (dişli) → **Data API** (eski arayüzde "API").
+  3. **"Exposed schemas"** alanına bak. Olması gereken: `public`, `graphql_public`. **`net` varsa** yanındaki ×'e bas
+     → **Save**. (`site`, `site_input`, `site_audit` da OLMAMALI.)
+  4. Aynı sayfada "Extra search path" alanını da oku (değiştirme).
+- Söyleyeceği: *"Exposed schemas: <gördüğün liste>. Extra search path: <liste>. net yoktu / vardı, kaldırdım."*
+- Asistan: deftere yazar. `net` vardıysa olay olarak §0.R'ye not düşer (ne zamandır açıktı bilinmez — GitHub
+  tokenının döndürülmesini önerir: Adım 2b).
+- **Adım 2b (yalnız `net` açıktıysa):** pg_cron dispatch'lerinin kullandığı GitHub tokenını döndür — asistan
+  RUNBOOK'tan tokenın adını/yerini bulur ve kullanıcıya GitHub → Settings → Developer settings → tokens yolunu tarif eder.
+
+**Adım 3 — GitHub `production` ortamı (K/14 birinci yarı, 5 dk).**
+- Neden: site secret'ları yalnız `main` dalından ve ortam kapsamlı okunmalı; ayrıca "Required reviewers" ile her
+  yayından önce senin onayın istenir — avukat gelmeden yanlışlıkla yayın olmaz.
+- Kullanıcı:
+  1. https://github.com/popiliadam/football-edge → **Settings** → sol menü **Environments**.
+  2. `production` varsa tıkla; yoksa **New environment** → ad: `production` → **Configure environment**.
+  3. **Deployment branches and tags** → **Selected branches and tags** → **Add deployment branch or tag rule** →
+     `main` → **Add rule**.
+  4. **Required reviewers** kutusunu işaretle → kendini (`popiliadam`) ekle → **Save protection rules**.
+     (Öneri: işaretle. Etki: `site.yml`in her işi senin "Approve" tıklamanı bekler.)
+  5. Henüz secret EKLEME (Adım 11 ve 14'te).
+- Söyleyeceği: *"production ortamı hazır: dal kuralı main, required reviewer ben."*
+- Asistan: `site.yml` `build` işine `environment: production` ekler (bugün yok; yoksa ortam secret'ı build'e görünmez
+  → exit 20). `tests/test_site_workflow.py`ye "build ve deploy aynı ortamı kullanır" testi + mutasyon (satırı sil →
+  kırmızı); tam kapı; commit `ci: site build işi production ortamında`; push; CI yeşil.
+- Bitti: CI yeşil; testte iki iş de `environment: production`.
+
+---
+
+#### FAZ 2 — Kararlar (~60–90 dk, yalnız konuşma; para yok)
+
+**Adım 4 — İz B onayları (K/10, 10 dk).**
+- Asistan önce spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md` §16 tablosunu 22 satırlık kısa liste
+  olarak gösterir (her satır: soru · öneri · etkisi). Öneriler: AK1 A · AK2 spec onayı (sicil boş metni §6.2) ·
+  AK5 en+tr · AK6 §4.3 listesi · AK8 (a) vig'siz olasılık · AK9 (a) · AK10 skor yok · AK11 hayır · AK12 analitik
+  yok · AK14 AK3/AK4/AK13'ten sonra · AK15 günlük + saatlik mühür sonrası · AK16 CLI · AK19/AK20 uygulandı ·
+  AK21 yalnız hash · AK22 tabandan beri hepsi.
+- Kullanıcı söyleyeceği: *"Önerilerle onay"* ya da farklı istediği satırlar. **AK17 için:** *"AK17 araştırmasını yap."*
+- Asistan:
+  - Onayı deftere ve spec §16'ya "Onaylandı 2026-10-xx (kullanıcı)" olarak işler (commit `docs:`).
+  - AK2 ile bağlı metin düzeltmelerini uygular: DEFERRED 20b (en `record.emptyExplain` sabitlenir), 20g ("to be
+    registered in advance"), 20e (yerel saat diliminin adı) — her biri test + kapı.
+  - **AK17:** The Odds API Terms of Service + kabul edilebilir kullanım sayfasını salt okuma okur (WebFetch;
+    yalnız okuma, form yok), "türetilmiş olasılığı halka açık sitede yayımlamak" açısından özet raporu
+    `docs/reports/2026-10-xx-odds-api-kosullari.md`ye yazar, 3 satır sonuç söyler. Yasak çıkarsa AK8/AK9/AK21
+    yeniden kullanıcıya sorulur (öneri: kaynak adı gösterilmeden yalnız toplulaştırılmış olasılık, ya da yazılı izin).
+- Bitti: spec onay satırı commit'li; AK17 raporu commit'li ve kararı deftere yazılı.
+
+**Adım 5 — Marka adı (K/1, 10 dk).**
+- Kullanıcı: sitenin adını seçer. Asistan isterse 5 öneri sunar (kısa, .com alınabilirliği Adım 10'da denetlenir;
+  "bahis/bet/iddaa" sözcüğü İÇERMEMELİ — TR riski K/7/2).
+- Söyleyeceği: *"Marka adı: <Ad>."* (Alan adı farklı olacaksa onu da.)
+- Asistan: `web/site.config.ts` `SITE_NAME`; yasal taslaklardaki `[site-name]` yer tutucuları
+  (`.superpowers/sdd/_kalici/hukuk-taslak-metin/` + `web/content/` altındaki karşılıkları — `grep -rn "\[site-name\]"`);
+  `Organization` JSON-LD; sayfa başlıkları. Testler + `check-out` + tam kapı; commit `feat: marka adı`.
+- Bitti: `grep -rn "\[site-name\]" web/ docs/` → 0 (taslak dizini hariç değil: o da güncellenir).
+
+**Adım 6 — TFF koşulları (K/12, 5 dk).**
+- Seçenekler: (a) `tff` kaynağını kapat · (b) ticari lansmana kadar sürdür, lansmandan önce TFF'den izin iste ·
+  **(c) avukata sor, o zamana kadar yalnız iç kullanım (sitede gösterilmez) — ÖNERİ**. Ayrıca
+  `tests/fixtures/tff/` tam sayfa kopyalarının kırpılması: **öneri evet**.
+- Söyleyeceği: *"TFF: (c). Fixture'ları kırp."*
+- Asistan: kararı `sources.yaml` yorumuna/kaynak politikası notuna yazar; fixture kırpma (hakem adları dahil gerçek
+  kişi adları takma adla; testler aynı davranışı ölçmeli) — test + kapı + commit. Avukat sorusu Adım 16 paketine.
+
+**Adım 7 — Haber kaynağı politikası (K/4, 15 dk).** Girdi: `docs/reports/2026-09-23-kaynak-kosullari.md`,
+`docs/reports/2026-09-23-ek-kaynaklar.md` — asistan her alt soru için 3 satırlık özet verir.
+- (a) EN — GDELT ayağı: **öneri: şimdilik HAYIR** (izin listesi GDELT'te fiilen boş: sessiz pay %3,0; en sık 15 alan
+  adının 12'si yasaklıyor). EN kaynağı (c)'deki ücretli/resmî yoldan gelir.
+- (b) CaughtOffside/JustArsenal (Rocket Sports, £500/makale "Search Only"): **öneri: kesin dışarıda**
+  (`sources.yaml`a `enabled: false` + gerekçe; erişim kapısı bu alan adlarını reddeder).
+- (c) Ücretli: SportMonks Starter (€29/ay; 14 gün deneme = hesap açmak SENDE) · X API (~$60/ay).
+  **Öneri:** önce SportMonks 14 günlük deneme (yapılandırılmış sakat/cezalı — sağlık verisi sorusu K/7/1 avukata);
+  X API şimdilik hayır. Hesap açılırsa API anahtarı GitHub secret'ına SEN eklersin (ad asistan söyler).
+- (d) TR: ajansspor (zaten) + Fotomaç/A Spor RSS + TFF PFDK (Adım 6'ya bağlı) + Galatasaray RSS — **öneri: ajansspor +
+  Fotomaç RSS + A Spor RSS**; kulüp RSS'leri ve PFDK avukat sonrası.
+- (e) ajansspor 17l: **öneri: robots `Content-Signal: ai-input=yes, ai-train=no` yeterli say** (Jev'e başlık vermek
+  "input"tur, eğitim değil); yayıncıya yazmak dış iletişim — istersen metni asistan hazırlar, SEN gönderirsin.
+- Söyleyeceği: *"K/4: a hayır, b dışarıda, c SportMonks denemesi (hesabı ben açarım) / hayır, d <seçim>, e yeterli."*
+- Asistan: `sources.yaml`a seçilen kaynakları `enabled: true` + robots anlık görüntüsü + koşul kanıtı ile ekler (R77b
+  erişim kapısı, `scrape.py` tek geçit), toplayıcıları yazar — bu bir **kod dalgası**dır: oturum içinde vakit varsa
+  yapılır (inceleme ajanıyla), yoksa deftere "Plan 2 kademe 2'ye" yazılır. Karar her durumda deftere + §0.K/4'e işlenir.
+
+**Adım 8 — Dil kalibrasyonu etiket onayı (K/5, 45–60 dk — oturumun en uzun adımı).**
+Dosya: `.superpowers/sdd/_kalici/kalibrasyon-onay/tr.review.md` (174 satır, 100 madde). Asistan dosyayı kullanıcıyla
+birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan yazar.
+1. **Açık soru (§0 dosyada):** "yaklaşan maç" (A) yayın anına göre — **öneri (A)** — ya da (B) bugüne göre.
+   Söyleyeceği: *"A."*
+2. **`team` yazımı:** asistan önce üretimde Jev'e giden `club` dizesinin kaynağını kodda gösterir (hangi yazım
+   üretimde kullanılıyorsa kalibrasyon da onu kullanmalı — öneri bu). Söyleyeceği: *"Üretimdeki yazımı kullan."*
+3. **6 uyuşmazlık:** asistan her birini tek tek gösterir (başlık · iki öneri · gerekçe). Kullanıcı her biri için
+   *"true"* / *"false"* der.
+4. **29 sınırda madde:** 5'erli gruplar hâlinde; her grup için kullanıcı *"hepsine katılıyorum"* ya da *"N numara
+   false olsun"* der.
+5. **65 net madde:** asistan tek tabloda gösterir; kullanıcı *"hepsine katılıyorum"* ya da itirazlarını söyler.
+6. **Etiketleyen adı:** kullanıcı adını söyler (README: `data/calibration/tr.meta.json`a girer).
+7. **Başlık telifi:** K/7/5 avukatta çözülene kadar **öneri: depoya yalnız `id` + etiket + kulüp + dil**; başlık
+   metni gitignored `_kalici`de kalır (ölçüm yerelde başlıkla koşar).
+- Asistan: `data/calibration/tr.jsonl`i (bugün BİÇİM ÖRNEĞİ, 10 satır — README §"BUGÜNKÜ içeriği") onaylı 100
+  etiketle değiştirir, `tr.meta.json` yazar, README'yi günceller, `calibration.load_labels` + testler + kapı; commit.
+  Sınıf dağılımını (true/false sayısı) ve (A)/(B) seçimini meta'ya yazar.
+- Bitti: `load_labels` 100 satır okur; meta'da ad + tarih + seçimler.
+
+**Adım 9 — Ücretli Jev (K/6, 5 dk karar).**
+- Bugün ölçümü koşturan CLI YOK (`calibration.run_calibration` var, komut satırı yok — Plan 2 T3 işi). Bu yüzden:
+  **bu oturumda yalnız karar alınır**, ücret açan commit Plan 2 T3'te (≥ 10-07) yapılır.
+- Asistan söyler: tahmini maliyet (100 madde × fiyat — `jev_budget` ve TypeSafe fiyatından hesaplar), tavan
+  `MONTHLY_CAP_USD = 25.0`.
+- Söyleyeceği: *"Jev ücretli ölçümünü onaylıyorum, aylık tavan 25 $ (ya da: <tutar>)."*
+- Asistan: deftere ve §0.K/6'ya "onaylı, commit Plan 2 T3'te kullanıcıya tek satır verilecek" yazar.
+
+---
+
+#### FAZ 3 — Para ve hesaplar (~40 dk)
+
+**Adım 10 — Alan adı + ayrı Netlify hesabı (K/2, 25 dk; ödeme SENDE).**
+- Neden ayrı hesap: Netlify kişisel erişim tokenı site başına kısıtlanamaz; hesabın bütün sitelerine yetkilidir (AK18).
+- Kullanıcı:
+  1. **Yeni Netlify hesabı:** https://app.netlify.com/signup — bu siteye özel bir e-posta (ör. `+site` takma adı)
+     ile kaydol. (Mevcut Netlify hesabına yeni ekip açmak da olur ama token yine hesabın her şeyine yetkili — ayrı
+     hesap öneri.)
+  2. **Boş site oluştur:** **Add new project → Deploy manually** → masaüstünde içinde tek `index.html` ("yakında")
+     olan bir klasör sürükle. (Asistan bu dosyayı `noindex` meta'lı hazırlar ve yolunu söyler.)
+  3. **Site ID:** Project configuration → General → Project details → **Project ID** — kopyala (gizli değil ama
+     yine de doğrudan GitHub'a yapıştır).
+  4. **Token:** sağ üst avatar → **User settings → Applications → Personal access tokens → New access token** →
+     açıklama `football-edge GitHub Actions`, son kullanma 90 gün (takvime yenileme notu) → kopyala (bir kez görünür).
+  5. **Alan adı:** öneri Netlify içinden satın al (DNS otomatik): Domain management → **Add a domain → Register a new
+     domain** → Adım 5'teki ad → WHOIS gizliliği AÇIK → öde. (Başka kayıtçıdan alırsan: Namecheap — sonra Netlify
+     DNS'e nameserver yönlendirmesini asistan tarif eder. Cloudflare Registrar Cloudflare DNS'i zorunlu kılar; o
+     yolda Netlify'a CNAME kayıtları gerekir.)
+  6. HTTPS: Domain management → HTTPS → "Verify DNS / Provision certificate" (otomatik; birkaç dk–saat sürebilir).
+- Söyleyeceği: *"Netlify hazır. Alan adı: <alan>. Token ve Site ID elimde (sohbete yazmıyorum)."*
+
+**Adım 11 — Netlify secret'larını GitHub'a ekle (K/14 ikinci yarı, 5 dk).**
+- Kullanıcı: GitHub → Settings → **Environments → production → Environment secrets → Add environment secret**:
+  1. Ad `NETLIFY_AUTH_TOKEN`, değer: Adım 10/4'teki token.
+  2. Ad `NETLIFY_SITE_ID`, değer: Adım 10/3'teki ID.
+  (Repository secrets'a DEĞİL, ortam secret'ına.)
+- Söyleyeceği: *"İki Netlify secret'ı production ortamına eklendi."*
+- Asistan: `gh api repos/popiliadam/football-edge/environments/production/secrets` ile yalnız ADLARI doğrular;
+  `web/site.config.ts` `SITE_URL` ve `LEDGER_HISTORY_URL` → `https://<alan>` (ve `…/ledger`); site haritası/hreflang/
+  canonical testleri + `site_publish.py` yayın bekçileri (yer tutucuda kasıtlı kırmızıydı — artık gerçek alanla)
+  + tam kapı; commit `feat: gerçek alan adı`; push.
+- Bitti: secret adları listede; `grep -rn example.invalid web/ scripts/` → 0.
+
+---
+
+#### FAZ 4 — Canlı veritabanı: okuma katmanı (~40 dk)
+
+**Adım 12 — 0014'ü canlıya uygula (K/3, 15 dk; asistan yapar, sen onaylarsın).**
+- Söyleyeceği: *"AK6 = §4.3 listesi, 0014'ü uygula."*
+- Asistan (`docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" adım 2): sessiz aralık (:00/:15/:30/:45 dışı,
+  `gh run list --status in_progress` boş) → `db/migrations/0014_site_read.sql` metni bayt bayt, sha256 deftere →
+  aynı SQL `begin … rollback` kuru koşusu (sonuç `raise exception` JSON'unda) → `apply_migration` **`postgres` rolüyle**
+  (görünüm sahibi = tablo sahibi; aksi hâlde RLS'li tablolar görünümden hatasız 0 satır döner) → katalog testleri canlıya
+  salt okuma (`tests/test_site_views_db.py` vb. RUNBOOK §2.5 komutuyla, `--tb=short`) → `get_advisors security` +
+  `performance` → bir sonraki `seal` turu yeşil.
+- Bitti: advisors'ta yeni ERROR/WARN yok; `site` şeması görünümleri canlıda; seal yeşil.
+
+**Adım 13 — `site_reader` artık riskini kabul (K/13 ikinci yarı, 5 dk; açık karar).**
+- Asistan: canlıda `site_reader` etkin yetkilerini salt okuma sorgusuyla ölçer (`net` şeması dahil) ve
+  `tests/test_site_views_db.py` `PG_NET_RELATIONS`/`PG_NET_FUNCTIONS` kabul listesiyle karşılaştırır; liste dışı
+  yetki varsa DURUR. Sonra riski düz dille anlatır: LOGIN'li `site_reader` `net.http_post` ile DB sunucusundan dışa
+  istek atabilir ve `net.http_request_queue`yu (pg_cron'un GitHub tokenını taşır) okuyup yazabilir; bunu `postgres`
+  geri alamaz (Supabase'in `supabase_admin` yetkisi); parola yalnız GitHub `production` ortam secret'ında durur.
+- Söyleyeceği (kabul ediyorsa): *"site_reader için pg_net artık riskini bilerek kabul ediyorum."* Kabul etmiyorsa:
+  *"Kabul etmiyorum"* → site adımları burada durur; asistan alternatifi (dışa aktarımı `postgres` yerine
+  Actions'ta geçici rolle yapmak vb.) DEFERRED'a yazar.
+
+**Adım 14 — `site_reader` parolası ve `SITE_DATABASE_URL` (K/15, 15 dk).**
+- Kullanıcı (KENDİ terminalinde — Claude uygulamasının Terminal paneli olur; asistan bu sırada paneli OKUMAZ):
+  1. Parola üret (URL kodlaması gerektirmesin diye yalnız hex): `openssl rand -hex 24` → çıktıyı bir yere not et
+     (parola yöneticisi).
+  2. `postgres` olarak bağlan — en kolayı depodaki `.env`in `DATABASE_URL`si (zaten session pooler, `postgres`):
+     `cd ~/dev/football-edge && /opt/homebrew/opt/libpq/bin/psql "$(grep '^DATABASE_URL=' .env | cut -d= -f2- | tr -d '"')"`
+     (Değer ekrana basılmaz. Veritabanı parolasını SIFIRLAMA — `DATABASE_URL` secret'ı ve bütün zamanlanmış işler kırılır.)
+  3. Bağlandığını gör: istem `postgres=>` olmalı.
+  4. psql içinde: `\password site_reader` → parolayı iki kez yapıştır (ekranda görünmez) → `\q`.
+     (`ALTER ROLE … PASSWORD` KULLANMA — DDL loglanırsa düz metin kalır.)
+  5. Söyleyeceği: *"site_reader parolası ayarlandı."*
+- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0015_site_reader_login.sql`; test + kum havuzu + Adım 12'deki
+  canlı yazım kuralı) → uygular → doğrular (`rolcanlogin = true`, diğer yetkiler değişmedi).
+- Kullanıcı (devam):
+  6. `SITE_DATABASE_URL`yi kur: `postgresql://site_reader.aaxadphezxavohkhqdrf:<hex-parola>@<pooler host>:5432/postgres?sslmode=require`
+     — pooler host'unu (gizli değil) asistan `.env`deki `DATABASE_URL`den yalnız host adını ayıklayarak söyler.
+  7. GitHub → Settings → Environments → **production** → Add environment secret → ad `SITE_DATABASE_URL`, değer bu dize.
+  8. Doğrulama (KENDİ terminalinde, çıktı secret içermez):
+     `/opt/homebrew/opt/libpq/bin/psql "<SITE_DATABASE_URL>" -c "select current_user; show default_transaction_read_only; show statement_timeout;"`
+     → çıktıyı sohbete yapıştır (yalnız bu üç satır).
+- Asistan: çıktıda `site_reader` · `on` · beklenen zaman aşımı görmeli (rol GUC'leri pooler üzerinden uygulanıyor —
+  faz HANDOFF adım 5); secret adlarını `gh api` ile doğrular; deftere yazar. RUNBOOK'a parola döndürme prosedürünü ekler.
+- Bitti: üç secret production ortamında; psql çıktısı beklenen; `rolcanlogin` doğru.
+
+---
+
+#### FAZ 5 — İlk derleme (yayınsız) ve hukuk paketi (~40 dk)
+
+**Adım 15 — `site.yml` ilk derleme provası (yayın YOK).**
+- Neden: gerçek veriyle dışa aktarım + derleme + bekçiler ilk kez koşar; `deploy` işi Required reviewers yüzünden
+  onay bekler — reddedilir (avukat gelmeden yayın yok).
+- Asistan: `gh workflow run site.yml -f first_publish=true` (canlı site yok → önceki `slugs.json` yok) → kullanıcıya
+  "Actions sekmesinde `build` onay bekliyor" der.
+- Kullanıcı: GitHub → **Actions → site → koşu → Review deployments → production → Approve** (yalnız `build` için).
+  `deploy` onay istediğinde: **Reject** (ya da hiçbir şey yapma; süre dolunca düşer).
+  Söyleyeceği: *"build'i onayladım, deploy'u reddettim."*
+- Asistan: `build` logunu okur (dışa aktarım satırı: maç/lig/takım/satır sayıları, `content_sha256`), artifact'ı
+  indirir (`gh run download`), yerelde `check-out` ve yayın bekçilerini koşar, 5 örnek sayfayı tarayıcıda (yerel
+  statik sunucu) kullanıcıya gösterir.
+- Bitti: build yeşil; check-out 0 bulgu; deploy reddedildi; sayfalar gerçek veriyle görüldü.
+- **Karar noktası (kullanıcı):** avukat beklenmeden `noindex`li yayın istenirse açıkça söylemeli — **öneri: HAYIR,
+  avukat onayından sonra** (TR bahis içeriği riski K/7/2).
+
+**Adım 16 — Avukat paketi (K/7, 20 dk hazırlık; görüşme oturum dışında).**
+- Asistan: tek bir belge hazırlar (`docs/reports/2026-10-xx-avukat-paketi.md` + istenirse .docx/PDF): proje bir
+  paragrafta; soru listesi öncelik sırasıyla (K/7/1–7: sağlık verisi/KVKK md. 6, TR bahis içeriği riski, KVKK aydınlatma
+  öğeleri + `localStorage` 18+ onayı + Netlify log davranışı, football-data yazılı izin, başlık telifi + Rocket Sports
+  £500 sözleşmesi, TFF koşulları (Adım 6), B-2 C1–C11); ekler: 8 taslak metin (`_kalici/hukuk-taslak-metin/`), site
+  ekran görüntüleri (Adım 15'ten), veri akışı şeması (archify ile tek sayfa).
+- Kullanıcı: avukatı seçer, paketi SEN gönderirsin (asistan e-posta göndermez).
+  Söyleyeceği: *"Paket tamam, avukata ben gönderiyorum."*
+- Ayrıca **football-data.co.uk yazılı izin e-postası** (K/7/4): asistan kısa İngilizce taslak hazırlar, SEN gönderirsin.
+
+**Adım 17 — Oturum kapanışı (asistan, 10 dk).**
+- Bu §0'ı "kullanıcı oturumu sonucu" ile günceller: biten adımlar, alınan kararlar, kalanlar (avukat yanıtı → TASLAK
+  kaldırma + indeksleme AK14 + ilk gerçek yayın; Plan 2 ≥ 10-07; K/8 holdout 2. açılışı çok sonra; K/9 Odds API planı
+  10-09 sonrası ilk hafta kredi ölçümüyle). Defteri kapatır, commit/push, CI yeşil.
+
+### 0.5 Bu oturumda YAPILMAYACAKLAR (bilerek)
+- **İlk gerçek yayın ve indekslemeye açma** — avukat onayı (K/7, AK13/AK14) gelmeden.
+- **K/8 holdout 2. açılışı** — Plan 2 T11, ön kayıt + kırmızı takımdan sonra.
+- **K/9 Odds API plan yükseltme** — 10-09'dan sonra ilk haftanın kredi tüketimi ölçülünce (§0.önceki/0.İ/6).
+- **Ücret açan Jev commit'i** — Plan 2 T3'te (Adım 9 kararıyla).
+- **Plan 2** — en erken 2026-10-07 (§0.önceki/0.A/1).
+
+### 0.6 Adım adım hızlı tablo
+| # | Ne | Kim | Süre | Para | Bloklar |
+|---|---|---|---|---|---|
+| 1 | Kalan silmeler | sen onay · asistan | 2 dk | — | — |
+| 2 | Supabase Exposed schemas | sen | 5 dk | — | 13 |
+| 3 | GitHub production ortamı | sen · asistan site.yml | 10 dk | — | 11, 14, 15 |
+| 4 | İz B onayları + AK17 araştırması | sen karar · asistan | 10 dk | — | 15 |
+| 5 | Marka adı | sen | 10 dk | — | 10 |
+| 6 | TFF kararı | sen | 5 dk | — | 16 |
+| 7 | Haber kaynakları | sen | 15 dk | SportMonks denemesi (isteğe bağlı) | Plan 2 |
+| 8 | Kalibrasyon etiketleri | sen + asistan | 45–60 dk | — | 9, Plan 2 T3 |
+| 9 | Ücretli Jev kararı | sen | 5 dk | karar (commit sonra) | Plan 2 T3 |
+| 10 | Alan adı + ayrı Netlify | sen | 25 dk | alan adı | 11 |
+| 11 | Netlify secret'ları | sen · asistan SITE_URL | 10 dk | — | 15 |
+| 12 | 0014 canlıya | asistan (sen "uygula") | 15 dk | — | 13, 14 |
+| 13 | pg_net artık riski kabulü | sen | 5 dk | — | 14 |
+| 14 | site_reader parolası + SITE_DATABASE_URL | sen · asistan LOGIN | 15 dk | — | 15 |
+| 15 | İlk derleme provası (yayınsız) | asistan · sen onay/red | 20 dk | — | yayın |
+| 16 | Avukat paketi + football-data izni | asistan hazırlar · sen gönderirsin | 20 dk | avukat ücreti | yayın, indeksleme |
+| 17 | Kapanış | asistan | 10 dk | — | — |
+
+---
+
+## 0.önceki — Oturum 9–10b durumu ve referans bölümleri (0.İ izlenecekler, 0.A, 0.D disiplin, 0.K ayrıntılı liste)
+
+> Aşağıdaki alt bölümler (0.1–0.R) oturum 9–10b'nin durum kaydıdır. **0.İ izlenecekler, 0.D disiplin ve 0.K ayrıntılı
+> liste geçerlidir**; başlatma istemi ve yol haritası yukarıdaki KULLANICI OTURUMU'dur.
 
 Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçedir. Kullanıcının yapacakları **§0.K**'de
 (tek yer, tam liste). Asistanın kullanıcısız yapacakları **§0.A**'da. Disiplin **§0.D**'de.
 
-### 0.0 Başlatma istemi (taze oturuma yapıştır)
+### 0.0 (eski — KULLANMA; geçerli istem en üstteki §0.0) Başlatma istemi
 > "`docs/HANDOFF.md` §0'dan devam et. Önce §0.İ izlenecekleri tarihine göre kontrol et (salt okuma). Sonra §0.A'daki
 > kullanıcısız işleri dalga dalga yürüt — ayrık dosya kümeli işler paralel ajanlarla, her ajan kendi scratch alt
 > dizininde, her dalga bağımsız inceleme ve tam kapıdan geçer. §0.K'deki kullanıcı işlerini SORMA; kullanıcı onları
@@ -150,7 +486,7 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
 - SDD defterleri gitignored: `.superpowers/sdd/<plan>/progress.md` — her kararın ("Ruling:") gerekçesi ve "yanlışsa
   maliyeti" orada. Kalıcı tutulan kullanıcı dosyaları: `.superpowers/sdd/_kalici/` (kalibrasyon onayı, hukuk taslakları).
 
-### 0.K KULLANICININ YAPACAKLARI — tam liste (kullanıcı "en sonda toplu" yapacak; asistan SORMAZ)
+### 0.K KULLANICININ YAPACAKLARI — ayrıntılı referans (KULLANICI OTURUMU'nda en üstteki §0.4 sırasıyla yürütülür)
 Her madde: **Ne** · **Neden** · **Nerede** · **Nasıl** · **Sonra asistan** · **Bloklar**. Sıra önerisi: önce K/S
 (temizlik, 10 dk) ve K/13–14 (güvenlik ayarları, 10 dk); sonra kararlar; en son hukuk ve para.
 
