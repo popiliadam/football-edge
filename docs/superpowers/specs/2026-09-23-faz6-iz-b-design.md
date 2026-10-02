@@ -755,6 +755,8 @@ tests/test_site_*.py
 
 ## 16. Açık kararlar (HANDOFF §0.7'ye eklenecek)
 
+**Onaylandı 2026-10-02 (kullanıcı, kullanıcı oturumu Adım 4):** bu spec (AK2, §6.2 boş sicil metni dahil) ve aşağıdaki tablonun bütün önerileri olduğu gibi — AK1 A · AK5 en+tr · AK6 §4.3 listesi · AK8 (a) · AK9 (a) · AK10 skor yok · AK11 hayır · AK12 yok · AK14 AK3/AK4/AK13'ten sonra · AK15 günlük + saatlik mühür sonrası (bağlanınca yeni migration) · AK16 CLI · AK19 (a) · AK20 (b) · AK21 yalnız hash · AK22 tabandan beri hepsi. AK3/AK4/AK13/AK18 kendi adımlarında (HANDOFF §0.4). AK17: The Odds API koşulları okundu → `docs/reports/2026-10-02-odds-api-kosullari.md`. AK2 ile bağlı metin düzeltmeleri DEFERRED 20b/20e/20g'de kapandı.
+
 | No | Karar | Seçenekler | Öneri | Neyi bloklar |
 |---|---|---|---|---|
 | AK1 | Mimari yaklaşım | A · B · C (§3) | **A** | Her iki planın yazımı |
