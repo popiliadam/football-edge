@@ -9,7 +9,7 @@ kitaplar aynı üçlüyü taşır.
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -148,10 +148,12 @@ def export_dump(
     rounds: Sequence[Round],
     record: Sequence[tuple[Any, ...]] = (),
     method: str = "power",
+    referees: Mapping[str, str] | None = None,  # match_id → `site.match_officials` hakemi
 ) -> str:
     """Dışa aktarımın üreteceği döküm METNİ (`dump_text`), DB'siz."""
     quotes = quote_rows(rounds)
     last_id = len(quotes)
+    named = referees or {}
     return dump_text(
         config=DumpConfig(
             method, SITE_MIN_BOOKS, SITE_MIN_TEAM_MATCHES, MOVE_MIN_MATCHES, PATH_ID_LENGTH
@@ -160,7 +162,10 @@ def export_dump(
         ledger=LedgerCut(last_id, last_id, "c" * 64),
         anchor=AnchorValue("head-2026-09-21.txt", last_id, last_id, "c" * 64),
         leagues=leagues,
-        matches=[(mid, league, at(when), home, away) for mid, league, when, home, away in matches],
+        matches=[
+            (mid, league, at(when), home, away, named.get(mid))
+            for mid, league, when, home, away in matches
+        ],
         quotes=quotes,
         record=record,
     )

@@ -82,7 +82,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "league_id", "path_id", "slug", "date", "commence_time", "home", "away", "sealed", "rounds", "h2h", "move", "indexable"],
+        "required": ["id", "league_id", "path_id", "slug", "date", "commence_time", "home", "away", "referee", "sealed", "rounds", "h2h", "move", "indexable"],
         "properties": {
           "id": {"type": "string", "pattern": "^[0-9a-z]{12,64}$"},
           "league_id": {"$ref": "#/$defs/league_id"},
@@ -92,6 +92,7 @@
           "commence_time": {"$ref": "#/$defs/instant"},
           "home": {"$ref": "#/$defs/label"},
           "away": {"$ref": "#/$defs/label"},
+          "referee": {"$ref": "#/$defs/person"},
           "sealed": {"type": "boolean"},
           "rounds": {"$ref": "#/$defs/count"},
           "h2h": {
@@ -170,6 +171,7 @@
     "league_id": {"type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9]+)*$", "maxLength": 20},
     "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 80},
     "label": {"description": "Serbest metin yalnız takım, lig ve ülke adıdır (H2b).", "type": "string", "minLength": 1, "maxLength": 80},
+    "person": {"description": "Süper Lig maçında TFF'nin maç başlamadan önce açıkladığı baş hakem adı; yoksa null (H2b genişlemesi, docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md §6).", "type": ["string", "null"], "minLength": 1, "maxLength": 80},
     "points": {"description": "Yüzde puanı, 1 ondalık.", "type": "number", "minimum": -100, "maximum": 100},
     "percent": {"description": "Yüzde, 1 ondalık.", "type": "number", "minimum": 0, "maximum": 100},
     "percent2": {"description": "Yüzde, 2 ondalık.", "type": "number", "minimum": -100, "maximum": 10000},

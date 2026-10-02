@@ -512,3 +512,20 @@ def test_the_record_summary_does_not_depend_on_the_dump_row_order() -> None:
 
     assert forward["summary"]["mean_clv"] == 1.2  # (4 − 10 + 2 + 15 − 5) / 5
     assert backward == forward
+
+
+def test_a_match_carries_its_referee_or_null() -> None:
+    """Spec 2026-10-02 §6: hakem dökümden aynen; hakemsiz maç `null` (yer tutucu yok)."""
+    body = _body(ROUNDS, referees={mid(1): "Deneme Hakem"})
+
+    assert _match(body, 1)["referee"] == "Deneme Hakem"
+    assert _match(body, 2)["referee"] is None
+
+
+def test_a_referee_that_is_not_text_in_the_dump_is_a_named_error() -> None:
+    dump = export_dump(
+        leagues=[LEAGUE], matches=MATCHES, rounds=ROUNDS, referees={mid(1): "Deneme Hakem"}
+    )
+
+    with pytest.raises(ValueError, match="hakem metin değil"):
+        load_inputs(dump.replace('"Deneme Hakem"', "7"))

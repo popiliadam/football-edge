@@ -23,6 +23,8 @@ class FakeSiteDb:
     matches: Sequence[tuple[str, str, datetime, str, str]]  # id, league_id, başlama, ev, dep.
     ledger: Sequence[dict[str, Any]]  # `tests.site_builders.ledger` satırları
     record: Sequence[tuple[Any, ...]] = ()
+    # 0015 `public.match_officials` satırları: (match_id, referee, seen_at, id)
+    officials: Sequence[tuple[str, str, datetime, int]] = ()
     isolation: tuple[str, str] = ("repeatable read", "on")
     floor: datetime = PUBLIC_FLOOR
     head_rows: int | None = None  # site.ledger_head.rows'u ezmek için (sahiplik arızası)
@@ -51,6 +53,18 @@ class FakeSiteDb:
             (row for row in self.matches if row[1] in active and row[2] >= PUBLIC_FLOOR),
             key=lambda row: row[0],
         )
+
+    def site_match_officials(self) -> list[tuple[str, str]]:
+        """0015 `site.match_officials`: tabandaki maçta başlamadan ÖNCE görülen SON hakem."""
+        kickoffs = {row[0]: row[2] for row in self.site_matches()}
+        latest: dict[str, tuple[datetime, int, str]] = {}
+        for match_id, referee, seen_at, row_id in self.officials:
+            kickoff = kickoffs.get(match_id)
+            if kickoff is None or not seen_at < kickoff:
+                continue
+            if match_id not in latest or (seen_at, row_id) > latest[match_id][:2]:
+                latest[match_id] = (seen_at, row_id, referee)
+        return sorted((match_id, value[2]) for match_id, value in latest.items())
 
     def h2h_quotes(self) -> list[tuple[Any, ...]]:
         shown = {row[0] for row in self.site_matches()}
@@ -123,6 +137,8 @@ class _Cursor:
             self._result = sorted((lg[0], lg[1], lg[2]) for lg in db.leagues if lg[3])
         elif text.startswith("SELECT id, league_id, commence_time"):
             self._result = list(db.site_matches())
+        elif text.startswith("SELECT match_id, referee FROM site.match_officials"):
+            self._result = list(db.site_match_officials())
         elif "FROM site_input.h2h_quotes" in text:
             self._result = [row for row in db.h2h_quotes() if row[0] <= params[0]]
         elif text.startswith(f"SELECT {RECORD_COLUMNS[0][0]}"):

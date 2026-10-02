@@ -210,6 +210,7 @@ def _match_json(view: MatchView, inputs: ExportInputs) -> dict[str, Any]:
         "commence_time": iso_z(row.commence_time),
         "home": row.home,
         "away": row.away,
+        "referee": row.referee,
         "sealed": view.sealed,
         "rounds": view.rounds,
         "h2h": {

@@ -598,3 +598,25 @@ def test_a_view_that_returns_a_match_below_the_floor_is_red(tmp_path: Path) -> N
     db = _FloorlessViewDb(leagues=base.leagues, matches=[*base.matches, old], ledger=ROWS)
 
     _refused(db, tmp_path, EXIT_SITE_CUT, "görünüm tabandan eski")
+
+
+def test_the_export_carries_the_last_referee_seen_before_kickoff(tmp_path: Path) -> None:
+    """`site.match_officials` aynı işlemde okunur; başlama anındaki atama görünmez
+    (taklit görünüm)."""
+    db = _db(
+        officials=[
+            (M1, "Önce Hakem", at("2026-09-20T09:00:00Z"), 1),
+            (M1, "Son Hakem", at("2026-09-21T09:00:00Z"), 2),
+            (M2, "Geç Hakem", at("2026-09-23T15:00:00Z"), 3),
+        ]
+    )
+    out = _export(db, tmp_path)
+    snapshot = json.loads((out / "snapshot.json").read_text(encoding="utf-8"))
+
+    assert {match["id"]: match["referee"] for match in snapshot["matches"]} == {
+        M1: "Son Hakem",
+        M2: None,
+    }
+    assert any(
+        q.startswith("SELECT match_id, referee FROM site.match_officials") for q in db.queries
+    )

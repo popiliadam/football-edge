@@ -72,6 +72,8 @@ def test_the_fixtures_carry_every_variant_the_site_must_render() -> None:
     assert any(league["move_distribution"] is None for league in base["leagues"])
     assert any(team["indexable"] for team in base["teams"])
     assert any(not match["indexable"] for match in matches)
+    assert any(match["referee"] is None for match in matches), "hakemsiz maç yok"
+    assert any(isinstance(match["referee"], str) for match in matches), "hakemli maç yok"
 
 
 def test_value_and_analysis_slots_are_const_null_and_no_model_field_exists() -> None:
