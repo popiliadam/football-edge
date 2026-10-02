@@ -23,6 +23,12 @@ describe("sözlükler (spec §8.3)", () => {
     );
   });
 
+  // spec 2026-10-02 §6: kaynak adıyla (TFF Kullanım Şartları kaynak gösterimi, §8); tek `{name}` yuvası.
+  it("hakem satırı kaynağı adıyla taşır", () => {
+    expect(en["match.referee"]).toBe("Referee: {name} (TFF appointment)");
+    expect(tr["match.referee"]).toBe("Hakem: {name} (TFF ataması)");
+  });
+
   // İki katlama (son inceleme m1): düz `toLowerCase()` "YAKINDA"yı `yakinda`ya çevirir (noktasız ı
   // kaybolur); `toLocaleLowerCase("tr")` "COMING"i `comıng`e çevirir. Her yasak ifade ikisinde de aranır.
   it("hiçbir arayüz metni 'yakında' vaadi ya da value önerisi taşımaz", () => {

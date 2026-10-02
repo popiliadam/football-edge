@@ -1,10 +1,12 @@
 // Maç sayfası (spec §7): yalnız vig'i temizlenmiş piyasa konsensüsü, kitap SAYISI, tur
 // sayısı, hareket ve mühür durumu. Kitap adı, kitap oranı, bağlantı, skor YOK (B7, AK10).
+// Süper Lig maçında TFF baş hakemi (spec 2026-10-02): yalnız ad ve kaynak; null ise satır yok.
 import { SITE_LANGS } from "../../../../../../../site.config.ts";
 import { Breadcrumbs } from "../../../../../../components/Breadcrumbs.tsx";
 import { Flag, Num } from "../../../../../../components/Fe.tsx";
 import { JsonLdScript } from "../../../../../../components/JsonLdScript.tsx";
 import { LocalTime } from "../../../../../../components/LocalTime.tsx";
+import { RefereeLine } from "../../../../../../components/RefereeLine.tsx";
 import { RoundsTable } from "../../../../../../components/RoundsTable.tsx";
 import { AnalysisSlot, ValueBadge } from "../../../../../../components/Slots.tsx";
 import { t } from "../../../../../../i18n/dict.ts";
@@ -68,6 +70,7 @@ export default async function MatchPage({ params }: Params) {
         <a href={leaguePath(lang, league)}>{league.name}</a> · {t(lang, "match.kickoff")}:{" "}
         <LocalTime iso={match.commence_time} lang={lang} />
       </p>
+      <RefereeLine name={match.referee} lang={lang} />
       <ValueBadge value={snapshot.value_badge} />
       <h2>{t(lang, "match.consensus")}</h2>
       <RoundsTable match={match} lang={lang} />

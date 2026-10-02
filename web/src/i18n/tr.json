@@ -43,6 +43,7 @@
   "match.status": "Durum",
   "match.sealed": "Kapanış kaydedildi",
   "match.pending": "Bekleniyor",
+  "match.referee": "Hakem: {name} (TFF ataması)",
   "record.title": "Sicil",
   "record.published": "Yayınlanmış tahmin",
   "record.emptyExplain": "Temel modelimiz kapanış piyasasını geçmediği için henüz tahmin yayımlamıyoruz. Tahmin yayını, önceden kaydedilecek bir kapanış değeri (CLV) ölçütü geçildiğinde başlayacak; o güne kadar defter oranları ve kapanışları kaydetmeye devam ediyor.",
