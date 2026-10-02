@@ -32,6 +32,10 @@ concurrency:
 
 jobs:
   build:
+    # `SITE_DATABASE_URL` `production` ORTAM secret'ıdır: ortamsız iş onu boş görür ve dışa aktarım
+    # "yok" diye düşer. Ortamın `main` dal kuralı ve Required reviewers onayı derlemeyi de kapsar.
+    # Ortamdaki Netlify secret'ları burada adla anılmadığı için bu işin ortamına girmez (test sabit).
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

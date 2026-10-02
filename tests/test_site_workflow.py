@@ -218,6 +218,19 @@ def test_the_deploy_job_takes_only_the_checked_build_from_main() -> None:
     assert download < _index_of(steps, DEPLOY)  # type: ignore[operator]
 
 
+def test_build_and_deploy_share_the_production_environment() -> None:
+    """Kullanıcı oturumu Adım 3: `SITE_DATABASE_URL` `production` ORTAM secret'ıdır; ortamsız bir
+    iş onu boş görür ve dışa aktarım "yok" diye düşer. İki iş de aynı ortamdadır: ortamın `main`
+    dal kuralı ve Required reviewers onayı derlemeyi de kapsar. `live` secret'sızdır, ortamı yok."""
+    jobs = _jobs()
+
+    assert {name: job.get("environment") for name, job in jobs.items()} == {
+        "build": "production",
+        "deploy": "production",
+        "live": None,
+    }
+
+
 def _deploy_steps() -> list[dict[str, Any]]:
     token = {name: "${{ secrets." + name + " }}" for name in NETLIFY}
     return [
