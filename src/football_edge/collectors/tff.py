@@ -62,10 +62,15 @@ _AWAY_CLASS = "haftaninMaclariMaclarMisafir"
 _OFFICIALS_CLASS = "haftaninMaclariMaclarHakemler"
 _DATE_CLASS = "haftaninMaclariMaclarTarih"
 # Tarih hücresi ÖLÇÜLDÜ (2026-09-19 fixture'ı, 63/63 satır): "18.09.2026 Cuma 20:00" — gün.ay.yıl,
-# Türkçe gün adı, İstanbul saati (spec 2026-10-02 §3.1). Tam BİR tarih ve BİR saat okunmalı; aksi
-# satır kayıptır ve `parse_referees`in sayım bekçisine düşer (§3.2).
+# Türkçe gün adı, İstanbul saati (spec 2026-10-02 §3.1). Tam BİR tarih okunmalı; aksi satır kayıptır
+# ve `parse_referees`in sayım bekçisine düşer (§3.2). Saat isteğe bağlıdır: 2026-10-02 canlı ölçümde
+# 75 satırın 1'i (3. Lig) `'03.10.2026 Cumartesi'` — saat hiç yok → `kickoff_local` None. Tarih
+# çıkarıldıktan sonra kalan metinde saat-BENZERİ bir parça (`_TIME_LIKE`) varsa ama tam olarak BİR
+# geçerli `HH:MM` değilse (ör. `20.00`, `25:00`, iki saat) satır yine kayıptır: belirsizlik sessiz
+# geçmez.
 _DATE = re.compile(r"(?<!\d)(\d{2})\.(\d{2})\.(\d{4})(?!\d)")
-_KICKOFF = re.compile(r"(?<![\d:])([01]\d|2[0-3]):([0-5]\d)(?![\d:])")
+_TIME_LIKE = re.compile(r"\d+[:.]\d+")
+_KICKOFF = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
 
 # Görevli etiketleri ÖLÇÜLDÜ: (H) baş hakem, (Y) yardımcı hakem ×2, (D) dördüncü hakem,
 # yalnız üst ligde ayrıca (V) VAR hakemi, (A) AVAR hakemi — 63 maçtan 11'i (Süper Lig)
@@ -160,26 +165,32 @@ def _league_blocks(soup: BeautifulSoup) -> tuple[tuple[str, Tag], ...]:
     return blocks
 
 
-def _kickoff(row: Tag) -> tuple[date, str] | None:
-    """Satırın İstanbul tarihi ve `HH:MM` saati; tam bir tarih ve bir saat okunamazsa None."""
+def _kickoff(row: Tag) -> tuple[date, str | None] | None:
+    """Satırın İstanbul tarihi ve `HH:MM` saati (hücrede saat yoksa None); okunamazsa None.
+
+    Dış None = kayıp (tarih yok/bozuk ya da saat-benzeri ama okunamayan değer); iç None = saat yok.
+    """
     cell = row.find("div", class_=_DATE_CLASS)
     if not isinstance(cell, Tag):
         return None
     text = _text(cell)
-    days, times = _DATE.findall(text), _KICKOFF.findall(text)
-    if len(days) != 1 or len(times) != 1:
+    days = _DATE.findall(text)
+    if len(days) != 1:
         return None
     day, month, year = (int(part) for part in days[0])
     try:
         when = date(year, month, day)
     except ValueError:
         return None
-    hour, minute = times[0]
-    return when, f"{hour}:{minute}"
+    times = _TIME_LIKE.findall(_DATE.sub(" ", text))
+    if not times:
+        return when, None
+    clock = _KICKOFF.fullmatch(times[0]) if len(times) == 1 else None
+    return None if clock is None else (when, f"{clock[1]}:{clock[2]}")
 
 
 def _row_observation(league: str, row: Tag, observed_at: datetime) -> Observation | None:
-    """Tam satırın gözlemi; ev, deplasman, baş hakem, tarih ya da saatten biri yoksa None."""
+    """Tam satırın gözlemi; ev, deplasman, baş hakem ya da tarih yoksa (veya saat bozuksa) None."""
     home, away = _team_name(row, _HOME_CLASS), _team_name(row, _AWAY_CLASS)
     referee, kickoff = _head_referee(row), _kickoff(row)
     if not (home and away and referee and kickoff):
@@ -227,7 +238,8 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     İlk canlı tur bu durumu "sayfa şekli değişti" diye kırmızıya düşürüyordu.
 
     Tarih ve saat de satırın parçasıdır (spec 2026-10-02 §3.2): okunamayan tarih/saat taşıyan
-    atanmış satır aynı bekçiye kayıp olarak düşer.
+    atanmış satır aynı bekçiye kayıp olarak düşer. Hücrede HİÇ saat yoksa satır kayıp değildir,
+    `kickoff_local` None olur (bkz. `_kickoff`).
     """
     soup = BeautifulSoup(html_text, "html.parser")
     parsed: tuple[Observation, ...] = ()

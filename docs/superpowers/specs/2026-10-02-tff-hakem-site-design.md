@@ -29,7 +29,8 @@ yok); modelde hakem özelliği (Faz 3 kararı aynen); JSON-LD'de hakem (schema.o
 ## 3. Toplama (`src/football_edge/collectors/tff.py`)
 1. Her maç satırından **tarih** (`dd.mm.yyyy`) ve **saat** (`HH:MM`) okunur; yüke `match_date` (ISO `YYYY-MM-DD`) ve
    `kickoff_local` (`HH:MM`) girer. Anahtar `ev|deplasman|YYYY-MM-DD` olur (gelecek sezonun aynı eşleşmesi bu sezonu
-   ezemez). Eski anahtarlı satırlar olduğu gibi kalır (append-only); okuyan kod yok (§2).
+   ezemez). Eski anahtarlı satırlar olduğu gibi kalır (append-only); okuyan kod yok (§2). Saat hücrede yoksa
+   `kickoff_local` null (2026-10-02 canlı ölçüm: saatsiz 3. Lig satırı); saat-benzeri ama okunamayan değer kayıptır.
 2. Sayım bekçisi aynen: tarih/saati okunamayan satır "sessizce atlandı" sayılır → `ContractViolation`.
 3. `collect_tff` gözlemleri bugünkü gibi yazdıktan sonra AYNI `now` ile `link_officials` çağırır (§4). Bağlama
    gözlem tablosundan okumaz — o turun ayrıştırılmış sonucundan çalışır (I-5'ten bağımsız).

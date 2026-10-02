@@ -260,6 +260,32 @@ def test_the_entity_key_is_dated_so_next_season_cannot_overwrite_this_one() -> N
     assert len({entry.entity_key for entry in parsed}) == len(parsed)
 
 
+def _first_kickoff_span_removed(html: str) -> str:
+    """İlk maç satırının (KASIMPAŞA – TÜMOSAN KONYASPOR) tarih hücresinden saat span'ini kaldırır.
+
+    2026-10-02 canlı ölçüm: 75 satırın 1'i (Nesine 3. Lig) `'03.10.2026 Cumartesi'` — tarih var,
+    saat YOK. Canlı sayfa depoya girmez; durum Süper Lig fixture satırından türetilir.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    cell = soup.find("div", class_="haftaninMaclariMaclarTarih")
+    assert cell is not None
+    span = cell.find("span")
+    assert span is not None and span.get_text(strip=True) == "20:00"
+    span.decompose()
+    return str(soup)
+
+
+def test_a_row_without_any_kickoff_time_is_observed_with_a_null_kickoff() -> None:
+    """Saat hücrede HİÇ yoksa satır kayıp değildir: `kickoff_local` null, tarih zorunlu kalır."""
+    parsed = parse_referees(_first_kickoff_span_removed(fixture_html()), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert len(parsed) == 62
+    assert match.payload["match_date"] == "2026-09-18"
+    assert "kickoff_local" in match.payload and match.payload["kickoff_local"] is None
+    assert match.entity_key == "kasimpaşa|tümosan konyaspor|2026-09-18"
+
+
 @pytest.mark.parametrize(
     ("old", "new"),
     [
@@ -267,6 +293,7 @@ def test_the_entity_key_is_dated_so_next_season_cannot_overwrite_this_one() -> N
         ("18.09.2026", "31.02.2026"),  # takvimde olmayan gün
         ("20:00", "20.00"),  # saat biçimi değişti
         ("20:00", "25:00"),  # olmayan saat
+        ("20:00", "20:00 21:00"),  # iki saat: hangisi olduğu belirsiz
     ],
 )
 def test_a_row_whose_date_or_kickoff_cannot_be_read_is_a_loss_not_a_skip(
