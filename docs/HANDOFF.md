@@ -31,9 +31,10 @@ yol haritası sıralıdır; her adım bir öncekinin çıktısına dayanabilir. 
 - **CI ve zamanlanmış işler yeşil** (son 40 koşuda kırmızı yok). Yeni kodla `seal` (`09052d4`) yeşil.
 - **Kapı:** 16 PASS + adıyla 3 SKIP (`site-db`, `site-derleme/e2e`, `zincir`); komut §0.önceki/0.1. pytest ~3750.
 - **Canlı DB:** 0013 canlıda, **0014 YALNIZ depoda**. Supabase advisors yalnız INFO. `site_reader` rolü yok (0014 kurar).
-- **Site:** `web/site.config.ts` yer tutucuları: `SITE_NAME = "[site-name]"`, `SITE_URL = "https://example.invalid"`,
+- **Site:** `web/site.config.ts`: `SITE_NAME = "Goool"` (2026-10-02, Adım 5); yer tutucular `SITE_URL = "https://example.invalid"`,
   `LEDGER_HISTORY_URL = "https://example.invalid/ledger"`. `site.yml` hiç koşmadı (yalnız elle tetiklenir).
-  `deploy` işinde `environment: production` VAR, `build` işinde YOK (Adım 3'te eklenir).
+  `environment: production` hem `build` hem `deploy` işinde (Adım 3, `af34af2`); ortamda dal kuralı `main` +
+  Required reviewers `popiliadam` (API ölçüldü 2026-10-02).
 - **Holdout:** açılmadı. Maçlar: ilk kulüp maçları 10-09/10; fikstürler ~10-02/03'te `snapshot` ufkuna girer.
 - **Araç:** `psql` PATH'te değil; kurulu: `/opt/homebrew/opt/libpq/bin/psql` (Adım 14'te bu yol kullanılır).
 
@@ -71,6 +72,17 @@ yol haritası sıralıdır; her adım bir öncekinin çıktısına dayanabilir. 
 Sıra mantığı: önce **ücretsiz ve geri alınabilir** işler (temizlik, güvenlik ayarı, kararlar), sonra **para ve
 hesaplar**, sonra **canlı veritabanı**, en son **ilk derleme** ve **hukuk paketi**. Hukuk onayı gelmeden site
 YAYIMLANMAZ (K/7: "yayından ÖNCE avukat") — bu oturumun son hâli "yayına hazır, avukat bekleniyor"dur.
+
+> **SIRA DEĞİŞİKLİĞİ (kullanıcı kararı, 2026-10-02, Adım 5'te):** önce **yerelde tam test**, alan adı ve Netlify
+> sonra. Marka adı **Goool** (AK3, koda girdi); alan adı adayı **goool.ai** (whois 2026-10-02 boş; Netlify .ai
+> satmıyor → kayıt yeri önerisi Porkbun + Netlify DNS nameserver) — **satın alınmadı**, `SITE_URL` bilerek yer
+> tutucu kalır. Geçerli sıra: 1–9 aynen → **10–11 ERTELENDİ** (yayın aşamasına) → 12–14 aynen, tek farkla:
+> `SITE_DATABASE_URL` şimdilik GitHub'a değil depodaki gitignored **`.env`**'e (değer ekrana basılmaz; GitHub
+> secret'ı yayın aşamasında) → **15 YEREL prova** (gerçek veriyle `site export` + `verify-snapshot` + `pnpm -C web
+> run build` + `check-out` + yerel statik sunucuda tarayıcı panelinde gezinti; `site_publish.py slugs/live`
+> yer tutucuyla bilerek kırmızı — beklenen) → 16 avukat paketi (ekran görüntüleri yerel provadan) → 17 kapanış.
+> **Yayın aşaması (sonra):** goool.ai alımı → ayrı Netlify hesabı → secret'lar → `SITE_URL` → CI `site.yml` provası
+> → avukat onayıyla ilk yayın.
 
 ---
 

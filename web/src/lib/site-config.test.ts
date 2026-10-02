@@ -28,6 +28,13 @@ describe("site.config (spec §8.3, H7)", () => {
     expect(indexingEnabled({ SITE_INDEXABLE: "1" })).toBe(true);
   });
 
+  // AK3 kullanıcı kararı (kullanıcı oturumu Adım 5, 2026-10-02). Alan adı (AK4) ayrı ve sonra:
+  // SITE_URL bilerek yer tutucu kalır, yayın bekçileri onunla kırmızıdır.
+  it("marka adı kullanıcı kararıdır: Goool; alan adı henüz yer tutucu", () => {
+    expect(SITE_NAME).toBe("Goool");
+    expect(new URL(SITE_URL).hostname.endsWith(".invalid")).toBe(true);
+  });
+
   it("dil listesi yer tutucudur: en + tr (AK5 önerisi)", () => {
     expect(SITE_LANGS).toEqual(["en", "tr"]);
     expect(isLang("tr")).toBe(true);

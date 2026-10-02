@@ -1,8 +1,8 @@
-// Sitenin yer tutucu kimliği ve dil listesi — TEK kaynak (spec §8.3, AK3, AK4, AK5).
-// Marka, alan adı ve diller kullanıcı kararıdır; kodun başka hiçbir yeri bu değerleri
-// literal olarak taşımaz (src/lib/site-config.test.ts sınar).
+// Sitenin kimliği ve dil listesi — TEK kaynak (spec §8.3, AK3, AK4, AK5). Marka AK3 kararıdır
+// (2026-10-02); alan adı (AK4) henüz yer tutucu. Marka, alan adı ve diller kullanıcı kararıdır;
+// kodun başka hiçbir yeri bu değerleri literal olarak taşımaz (src/lib/site-config.test.ts sınar).
 
-export const SITE_NAME = "[site-name]";
+export const SITE_NAME = "Goool";
 export const SITE_URL = "https://example.invalid";
 // Çıpa geçmişinin herkese açık adresi (spec §6.1): depo adı da bir yayın kararıdır. Taban, deponun
 // `ledger/` DİZİNİNİN geçmişidir — sayfa ona çıplak `head-YYYY-MM-DD.txt` adını ekler (sözleşmenin çıpa
