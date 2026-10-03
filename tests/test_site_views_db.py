@@ -70,6 +70,10 @@ UNREACHABLE_RELATIONS = {
     "extensions.pg_stat_statements",
     "extensions.pg_stat_statements_info",
 }
+# Canlıda ölçüldü (2026-10-03, kullanıcı oturumu Adım 13): canlının pg_cron'u bu iki diziyi de
+# PUBLIC'e açar, kum havuzu imajı açmaz. `cron` şemasının USAGE'ı site_reader'da yok (şema testi
+# sabitler): erişilemez; ikisinde de yeşil kalsın diye yalnız izin verilir, zorunlu değildir.
+LIVE_ONLY_UNREACHABLE = {"cron.jobid_seq", "cron.runid_seq"}
 # `public`: USAGE PUBLIC'ten (sahibi pg_database_owner); içinde site_reader'ın nesne yetkisi YOK.
 # Geri almak PUBLIC'e dayanan her rolü etkiler — 0014'ün kapsamı değil (kullanıcı kararı).
 READER_SCHEMAS = {"public", "net", *SCHEMAS}
@@ -224,10 +228,11 @@ def test_api_roles_get_nothing_in_the_site_schemas(full_sequence: psycopg.Cursor
         ) == [(False,)], role
 
 
-def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
+def test_site_reader_holds_no_table_privilege_and_can_only_log_in(
     full_sequence: psycopg.Cursor[Any],
 ) -> None:
-    """Bütün şemalarda (katalog hariç), her ilişki türü, tablo ya da kolon yetkisi (I1)."""
+    """Bütün şemalarda (katalog hariç), her ilişki türü, tablo ya da kolon yetkisi (I1). LOGIN
+    0017'den (kullanıcı oturumu Adım 13 kabulü, 2026-10-03); BYPASSRLS ve INHERIT hiç yok."""
     held = {
         name
         for (name,) in _rows(
@@ -251,8 +256,9 @@ def test_site_reader_holds_no_table_privilege_and_cannot_log_in(
         "WHERE setrole = 'site_reader'::regrole AND setdatabase = 0 ORDER BY 1",
     )
 
-    assert held - SITE_VIEWS == PG_NET_RELATIONS | UNREACHABLE_RELATIONS
-    assert (login, bypass, inherit) == (False, False, False)
+    extra = held - SITE_VIEWS - PG_NET_RELATIONS
+    assert UNREACHABLE_RELATIONS <= extra <= UNREACHABLE_RELATIONS | LIVE_ONLY_UNREACHABLE
+    assert (login, bypass, inherit) == (True, False, False)
     assert settings == [("default_transaction_read_only=on",), ("statement_timeout=30s",)]
 
 

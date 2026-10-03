@@ -576,6 +576,12 @@ Süper Ligi değilse (mesaj etiketi adıyla taşır) — dışlama listesine sö
 sessizce null olur (toplu biçim kayması bekçisiz). Bugün `kickoff_local`ı okuyan kod YOK (eşleme tarihle). Ne zaman:
 `kickoff_local`ın ilk okuyucusu eklenirken — `\d+(?:[:.]\d+)+` deseni + tur başına null-saat oranı bekçisi.
 
+**9.7f — `sitedb` LOGIN testi kullanılmış kum havuzunda yanlış yeşil verebilir (2026-10-03, 0017 mutasyon kanıtı).**
+`site_reader` küme düzeyindedir; şablon kurulumu 0017'yi COMMIT'li uyguladığı için LOGIN kümede kalır ve 0017'den
+`alter role … login` silinse bile ikinci koşu yeşil kalır. CI her koşuda taze kap kurar (etkilenmez). Yerel kanıt:
+koşudan önce iki kum havuzu kabında `alter role site_reader nologin`. Ne zaman: `tests/site_db.py` oturum kurulumuna
+ilk dokunuşta — oturum başında rolün LOGIN/parola durumunu sıfırlamak.
+
 ### 9.8 Küçük artıklar
 
 | Nerede | Ne |

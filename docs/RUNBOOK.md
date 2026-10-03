@@ -552,6 +552,24 @@ boşsa bekçi bir kez kırmızı verebilir; sonraki yeşil tur alarmı kapatır 
 
 ---
 
+### 3.12 `site_reader` parolası: kurma, döndürme, acil kapatma (0017, 2026-10-03)
+
+`site_reader` LOGIN'i 0017'dendir (pg_net artık riski kullanıcıca kabul edildi — Adım 13). Parola asistana hiç
+görünmez; düz metin veritabanına ve loglarına gitmez (istemci tarafı SCRAM).
+
+- **Kurma / döndürme (kullanıcı):** kendi terminalinde `postgres` olarak bağlanıp (`.env` `DATABASE_URL`)
+  `\password site_reader`, ya da kullanıcı oturumunun gitignored yardımcı betiği
+  `uv run python .superpowers/sdd/_kalici/kullanici-oturumu/site_reader_parola.py` (48 hex parola üretir, SCRAM
+  doğrulayıcısını `ALTER ROLE … PASSWORD` ile yollar, `.env` `SITE_DATABASE_URL` satırını değiştirir; ekrana
+  yalnız "tamam" basar). `ALTER ROLE … PASSWORD '<düz metin>'` KULLANILMAZ.
+- **Sonra:** `SITE_DATABASE_URL`nin her kopyası güncellenir — `.env` ve (yayın aşamasında) GitHub `production` ortam
+  secret'ı. Doğrulama: `psql "$SITE_DATABASE_URL" -c "select current_user; show default_transaction_read_only;
+  show statement_timeout;"` → `site_reader` · `on` · `30s`.
+- **Acil kapatma (parola sızdıysa):** `alter role site_reader nologin;` (postgres) — site derlemesi exit 20 ile
+  durur, başka hiçbir iş etkilenmez; ardından döndür ve `alter role site_reader login;`.
+- **Kabuk tuzağı (2026-10-03 ölçüldü):** Claude'un `!`/Run kabuk modu her komutu AYRI kabukta koşar; komutlar arası
+  kabuk değişkeni (`P=…` → `"$P"`) taşınmaz ve boş parolalı satır yazılır. Yardımcı betik bu yüzden tek komuttur.
+
 ## 4. Migration'ları yerel kapta sınamak (kum havuzu)
 
 **Neden var.** Kapı canlı veritabanına bağlanmaz: `DATABASE_URL`li katalog testleri kapıda ve CI'da adıyla SKIP'e
