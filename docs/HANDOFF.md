@@ -302,7 +302,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
   4. psql içinde: `\password site_reader` → parolayı iki kez yapıştır (ekranda görünmez) → `\q`.
      (`ALTER ROLE … PASSWORD` KULLANMA — DDL loglanırsa düz metin kalır.)
   5. Söyleyeceği: *"site_reader parolası ayarlandı."*
-- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0016_site_reader_login.sql` — 0015 TFF hakem tablosudur; test + kum havuzu + Adım 12'deki
+- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0017_site_reader_login.sql` — 0015 TFF hakem tablosu, 0016 `site.public_floor` search_path'idir; test + kum havuzu + Adım 12'deki
   canlı yazım kuralı) → uygular → doğrular (`rolcanlogin = true`, diğer yetkiler değişmedi).
 - Kullanıcı (devam):
   6. `SITE_DATABASE_URL`yi kur: `postgresql://site_reader.aaxadphezxavohkhqdrf:<hex-parola>@<pooler host>:5432/postgres?sslmode=require`

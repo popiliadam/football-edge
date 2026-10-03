@@ -75,7 +75,7 @@ create or replace view site.match_officials with (security_barrier) as
 -- revoke API rolleri; grant select to site_reader
 ```
 - Taban (holdout) süzgeci `site.matches` join'inden gelir (H1a kapanışı: yeni temel tablo yalnız `match_officials`).
-- Sıra: 0014 → 0015 (site şeması ve `site_reader` 0014'te). Adım 14'ün LOGIN migration'ı **0016** olur.
+- Sıra: 0014 → 0015 (site şeması ve `site_reader` 0014'te). Adım 14'ün LOGIN migration'ı **0017** olur (0016 = `site.public_floor` search_path, Supabase advisors 2026-10-03).
 - Canlıya uygulama: 0014 ile aynı kural (sessiz aralık, ROLLBACK provası, bayt bayt metin + sha256 deftere,
   `postgres` rolü, advisors, sonraki mühür turu yeşil).
 
@@ -118,7 +118,7 @@ create or replace view site.match_officials with (security_barrier) as
 
 ## 10. Öz-inceleme
 - Yer tutucu yok; açık uygulama ayrıntısı: YAML'ın 18 satırı (canlı salt okuma ile plan sırasında doldurulur).
-- Tutarlılık: 0014 değişmez; 0015 0014'ten sonra; LOGIN 0016 (HANDOFF Adım 14 güncellenir).
+- Tutarlılık: 0014 değişmez; 0015 0014'ten sonra; LOGIN 0017 (0016 floor search_path; HANDOFF Adım 14 güncellenir).
 - Kapsam tek plana sığar (toplayıcı + eşleme + migration + dışa aktarım + sayfa).
 - Belirsizlik: "İstanbul takvim günü" eşlemesi bilinçli seçim (TFF tarihi yerel); saat uyuşmazlığı eşlemeyi bozmaz,
   yalnız günlük çakışma (aynı gün aynı iki takım iki kez) kırmızıdır.

@@ -175,6 +175,14 @@ def test_the_floor_is_the_python_floor(full_sequence: psycopg.Cursor[Any]) -> No
     assert _rows(full_sequence, "SELECT site.public_floor()") == [(PUBLIC_FLOOR,)]
 
 
+def test_the_floor_pins_an_empty_search_path(full_sequence: psycopg.Cursor[Any]) -> None:
+    """0016 (Supabase advisors `function_search_path_mutable`, 2026-10-03): ayar katalogdadır."""
+    assert _rows(
+        full_sequence,
+        "SELECT proconfig FROM pg_proc WHERE oid = 'site.public_floor()'::regprocedure",
+    ) == [(['search_path=""'],)]
+
+
 def test_everything_is_owned_by_postgres_and_no_view_is_invoker(
     full_sequence: psycopg.Cursor[Any],
 ) -> None:

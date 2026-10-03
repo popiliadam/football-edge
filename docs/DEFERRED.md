@@ -568,6 +568,13 @@ Süper Ligi değilse (mesaj etiketi adıyla taşır) — dışlama listesine sö
 
 **9.7d — 0015 canlıda: `service_role`un `match_officials` INSERT yetkisi bilinçli kabul (2026-10-02, G3 incelemesi).**
 0013 kararı (`service_role`e dokunulmaz); Adım 12'de advisors çıktısı okunurken deftere kabul olarak yazılır.
+**KABUL EDİLDİ (2026-10-03, Adım 12):** canlıda `service_role`un `match_officials`te 0013 varsayılan yetkileri ölçüldü
+(INSERT/SELECT/…; UPDATE/DELETE/TRUNCATE tetikleyiciyle engelli) — kullanıcı oturumu defterine kabul olarak yazıldı.
+
+**9.7e — TFF saat okuması (2026-10-03, canlı kuru koşu + yeniden inceleme).** `collectors/tff.py` `_TIME_LIKE`
+`\d+[:.]\d+` "20:00:00"/"20:00.5"i 20:00 kabul eder; "20h00" gibi biçim saat-benzeri sayılmaz ve `kickoff_local`
+sessizce null olur (toplu biçim kayması bekçisiz). Bugün `kickoff_local`ı okuyan kod YOK (eşleme tarihle). Ne zaman:
+`kickoff_local`ın ilk okuyucusu eklenirken — `\d+(?:[:.]\d+)+` deseni + tur başına null-saat oranı bekçisi.
 
 ### 9.8 Küçük artıklar
 

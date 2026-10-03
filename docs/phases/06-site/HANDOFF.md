@@ -113,12 +113,15 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
 ## Canlıya geçiş (kullanıcı onayı, §0.7 — bu dalga YAPMADI)
 
 1. 0013 canlıda + advisors temiz (controller).
-2. AK6 onayı → `0014` ROLLBACK'li prova → `apply_migration` (uygulayan rol `postgres` olmalı: görünüm sahibi = tablo
+2. **YAPILDI 2026-10-03 (kullanıcı oturumu Adım 12):** 0014 + 0015 canlıda (08:32 UTC; sha256 dosyayla birebir;
+   katalog testleri 0014 VE 0015'ten SONRA bir kez, canlı salt okuma 5/5; advisors'ın `site.public_floor`
+   `function_search_path_mutable` WARN'ı 0016 ile kapatılır). Özgün sıra (katalog testi 0014'ten hemen sonra değil,
+   ikisinden sonra — HEAD testleri 0015 nesnelerini bekler): AK6 onayı → `0014` ROLLBACK'li prova → `apply_migration` (uygulayan rol `postgres` olmalı: görünüm sahibi = tablo
    sahibi, aksi hâlde RLS'li tablolar görünümden HATASIZ 0 satır döner — §4.2) → katalog testleri gerçek DB'ye karşı
    salt okuma kipinde → Supabase advisors 0014'ten SONRA da okunur (spec §4.2; üç şema API'ye açık şemalara
    eklenmemiş, `security_invoker` uyarısı yok).
    **0015 (TFF baş hakemi, 2026-10-02):** 0014'ten SONRA aynı kuralla; `site_reader`a `LOGIN` veren migration
-   **0016** olur (`docs/HANDOFF.md` §0.4 Adım 12/14).
+   **0017** olur (0016 = `site.public_floor` search_path, Supabase advisors 2026-10-03; `docs/HANDOFF.md` §0.4 Adım 12/14).
    **Birleştirme sırası (2026-10-02, son inceleme C1):** `tff-hakem` dalı (TFF baş hakemi, 0015) `main`e ANCAK
    0014 VE 0015 canlıya uygulandıktan sonra birleştirilir; önce birleştirilirse `collect-daily` (`fetch-tff`) ilk
    Süper Lig eşleşmesinde `match_officials` yok diye exit 7 verir.
