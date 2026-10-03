@@ -29,23 +29,31 @@ yok); modelde hakem özelliği (Faz 3 kararı aynen); JSON-LD'de hakem (schema.o
 ## 3. Toplama (`src/football_edge/collectors/tff.py`)
 1. Her maç satırından **tarih** (`dd.mm.yyyy`) ve **saat** (`HH:MM`) okunur; yüke `match_date` (ISO `YYYY-MM-DD`) ve
    `kickoff_local` (`HH:MM`) girer. Anahtar `ev|deplasman|YYYY-MM-DD` olur (gelecek sezonun aynı eşleşmesi bu sezonu
-   ezemez). Eski anahtarlı satırlar olduğu gibi kalır (append-only); okuyan kod yok (§2).
+   ezemez). Eski anahtarlı satırlar olduğu gibi kalır (append-only); okuyan kod yok (§2). Saat hücrede yoksa
+   `kickoff_local` null (2026-10-02 canlı ölçüm: saatsiz 3. Lig satırı); saat-benzeri ama okunamayan değer kayıptır.
 2. Sayım bekçisi aynen: tarih/saati okunamayan satır "sessizce atlandı" sayılır → `ContractViolation`.
 3. `collect_tff` gözlemleri bugünkü gibi yazdıktan sonra AYNI `now` ile `link_officials` çağırır (§4). Bağlama
    gözlem tablosundan okumaz — o turun ayrıştırılmış sonucundan çalışır (I-5'ten bağımsız).
 
 ## 4. Eşleme ve kayıt (`src/football_edge/officials.py`, `config/tff_teams.yaml`)
-- **Lig süzgeci:** yalnız lig etiketi `config/tff_teams.yaml` `league_label_contains` ("Süper Lig") içeren bloklar;
-  hedef lig `tur.1`. Diğer bloklar sayılır, işlenmez.
+- **Lig süzgeci:** lig etiketi `config/tff_teams.yaml` `league_label_contains` ("Süper Lig") ifadesini TAM
+  ifade olarak taşıyan bloklar (plan düzeltmesi, controller düzeltmesi C1, 2026-10-02): etiket
+  `label.replace("İ", "i").casefold()` ile katlanır (büyük harfli "SÜPER LİG" de eşleşir); ifadeden sonra
+  harf/rakam gelmez (`(?!\w)` — "Süper Ligi" eşleşmez); `kadın`, `kadin`, `u19`, `u21`, `gelişim`, `gelisim`
+  sözcüklerinden birini taşıyan etiket (kadın/genç ligi) işlenmez. Hedef lig `tur.1`. Diğer bloklar sayılır,
+  işlenmez.
 - **Ad eşlemesi:** YAML `teams:` — `normalise_team(TFF adı) → API adı` (18 takım, canlı `matches`ten salt okuma ile
   kurulur; her API adı `tur.1`de gerçekten görülmüş olmalı — test). YAML'da olmayan TFF adı → `ContractViolation`
   (yapılandırma eksiği; sessiz geçmez; düzeltme: YAML'a satır).
+- **Henüz görülmemiş API yazımı (plan düzeltmesi, 2026-10-02):** YAML'da değeri `null` olan takım (API yazımı
+  canlı `matches`te henüz hiç görülmedi — uydurulmaz; bugün `kasimpaşa`, `tümosan konyaspor`) içeren maç ayrı
+  `awaiting_alias` sayacına girer (loglanır, hata değil). YAML'da HİÇ olmayan TFF adı `ContractViolation` kalır.
 - **Maç bulma:** `matches` içinde `league_id='tur.1'`, `home_team`, `away_team` eşit ve `commence_time`ın
   **Europe/Istanbul takvim günü** = `match_date`. Tam bir eşleşme → bağlanır; sıfır → "henüz DB'de yok" sayacı (oranlar
   ufka girmemiş olabilir; hata değil, loglanır); birden çok → `ContractViolation`.
 - **Değişiklik kaydı:** tablo `match_officials`a, maçın SON kayıtlı hakemi bu turunkinden farklıysa (ya da hiç yoksa)
   `(match_id, referee, seen_at=now)` eklenir. Aynıysa yazılmaz. X→Y→X üç satır olur (I-5 burada oluşmaz).
-- Dönüş: `(bağlanan, yeni yazılan, DB'de yok, lig dışı)` sayıları; `collect-daily` logu bunları basar.
+- Dönüş: `(bağlanan, yeni yazılan, DB'de yok, alias bekleyen, lig dışı)` sayıları; `collect-daily` logu bunları basar.
 
 ## 5. Veritabanı (`db/migrations/0015_match_officials.sql`; 0014'e DOKUNULMAZ)
 ```sql
@@ -74,8 +82,9 @@ create or replace view site.match_officials with (security_barrier) as
 ## 6. Site (dışa aktarım → anlık görüntü → sayfa)
 - `export.py`: `site.match_officials` aynı REPEATABLE READ işleminde okunur; `inputs.py` döküm/`MatchRow`a
   `referee: str | None`; `derive._match_json` maç nesnesine `"referee": <ad> | null`.
-- `web/contract/snapshot.schema.json`: maç öğesine zorunlu `referee` — `{"oneOf": [{"$ref": "#/$defs/person"},
-  {"type": "null"}]}`; `$defs.person` = 1–80 karakter metin. `schema_version` 1 kalır (hiç yayın yok; tek tüketici
+- `web/contract/snapshot.schema.json`: maç öğesine zorunlu `referee` — `{"$ref": "#/$defs/person"}`; `$defs.person` =
+  `{"type": ["string", "null"], "minLength": 1, "maxLength": 80}` (plan düzeltmesi: depodaki doğrulayıcı
+  `football_edge.site.schema` `oneOf` desteklemez; anlam aynı: null ya da 1–80 karakter metin). `schema_version` 1 kalır (hiç yayın yok; tek tüketici
   bizim derlememiz). TS tipleri, `web/fixtures/*.json` ve `tests/site_web_fixtures.py` üreticisi aynı anda.
 - Maç sayfası: `referee` doluysa sözlük anahtarı `match.referee` ("Referee: {name} (TFF appointment)" / "Hakem:
   {name} (TFF ataması)"); null ise satır hiç basılmaz. `check-out` ad listesi (`numbers.ts` `pageNames.match`)
@@ -95,8 +104,9 @@ create or replace view site.match_officials with (security_barrier) as
 
 ## 9. Testler (her biri mutasyon kanıtlı; tam kapı)
 1. Ayrıştırıcı: fixture'dan tarih/saat; anahtar tarihli; tarihi bozulmuş satır → `ContractViolation`.
-2. Eşleme (birim): YAML'da olmayan ad → kırmızı; lig dışı blok işlenmez; gün eşlemesi İstanbul saatine göre (UTC'de
-   gece yarısını geçen 23:30 İstanbul maçı doğru güne düşer); sıfır maç → sayaç; iki maç → kırmızı.
+2. Eşleme (birim): YAML'da olmayan ad → kırmızı; lig dışı blok işlenmez; gün eşlemesi İstanbul saatine göre (İstanbul
+   UTC+3: 01:00 İstanbul maçı = önceki UTC günü 22:00 → İstanbul gününe; 23:30 İstanbul maçı = aynı UTC günü
+   20:30 → kendi gününe; plan düzeltmesi 2026-10-02); sıfır maç → sayaç; iki maç → kırmızı.
 3. Değişiklik kaydı (DB): aynı hakem tekrar yazılmaz; X→Y→X üç satır.
 4. Görünüm (site-db): `seen_at >= commence_time` satırı görünmez; aynı maçta en son ön-başlama satırı döner;
    tabandan eski maç sızmaz; `site_reader` yalnız görünümü okur, tabloyu okuyamaz; API rolleri hiçbirini okuyamaz;

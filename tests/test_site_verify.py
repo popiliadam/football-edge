@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from football_edge import officials
 from football_edge.site import __main__ as cli
 from football_edge.site import verify
 from football_edge.site.contract import EXIT_SITE_INVALID, content_sha256
@@ -490,3 +491,44 @@ def test_the_cli_checks_the_file_hash_when_asked(tmp_path: Path) -> None:
 
     assert result.returncode == EXIT_SITE_INVALID
     assert "snapshot.sha256: dosya baytlarının sha256'sı değil" in result.stdout
+
+
+def test_the_linkers_referee_limits_are_the_snapshot_rules() -> None:
+    """Görev 4'ün yazmadan önceki bekçisi (`officials._UNSAFE`, `REFEREE_MAX`), H2c'nin
+    (`verify._MARKUP`) ve `$defs.person`ın kopyasıdır; biri değişirse öteki sessizce
+    kaymasın (ön tarama Ç8)."""
+    person = SCHEMA["$defs"]["person"]
+
+    assert officials._UNSAFE == verify._MARKUP
+    assert (person["minLength"], person["maxLength"]) == (1, officials.REFEREE_MAX)
+
+
+@pytest.mark.parametrize("text", ["http://x.invalid", "a<b", "a>b"])
+def test_a_referee_carrying_a_link_or_markup_is_red(text: str) -> None:
+    """H2c yeni alanı da tarar (verify.py değişmeden)."""
+    errors = _broken(_set("matches.0.referee", text))
+
+    assert any("$.matches[0].referee: bağlantı ya da işaretleme" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("value", "needle"),
+    [
+        ("", "1 karakterden kısa"),
+        ("x" * 81, "80 karakterden uzun"),
+        (7, "tip ['string', 'null'] bekleniyordu"),
+    ],
+)
+def test_a_referee_outside_the_person_shape_is_red(value: object, needle: str) -> None:
+    errors = _broken(_set("matches.0.referee", value))
+
+    assert any(e.startswith("$.matches[0].referee: ") and needle in e for e in errors), errors
+
+
+def test_a_match_without_the_referee_key_is_red() -> None:
+    def drop(snapshot: dict[str, Any]) -> None:
+        del snapshot["matches"][0]["referee"]
+
+    errors = _broken(drop)
+
+    assert "$.matches[0]: zorunlu 'referee' yok" in errors, errors

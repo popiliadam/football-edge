@@ -69,6 +69,7 @@ class MatchRow:
     commence_time: datetime
     home: str
     away: str
+    referee: str | None  # TFF baş hakemi (`site.match_officials`, spec 2026-10-02); yoksa None
 
 
 @dataclass(frozen=True)
@@ -197,8 +198,12 @@ def _anchor(raw: Mapping[str, Any]) -> AnchorValue:
 
 
 def _match(row: Sequence[Any]) -> MatchRow:
-    match_id, league_id, commence_time, home, away = row
-    return MatchRow(str(match_id), str(league_id), _time(commence_time), str(home), str(away))
+    match_id, league_id, commence_time, home, away, referee = row
+    if referee is not None and not isinstance(referee, str):
+        raise ValueError("dökümde hakem metin değil")
+    return MatchRow(
+        str(match_id), str(league_id), _time(commence_time), str(home), str(away), referee
+    )
 
 
 def _quote(row: Sequence[Any]) -> QuoteRow:

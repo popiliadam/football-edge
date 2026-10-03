@@ -24,10 +24,16 @@ pytestmark = pytest.mark.sitedb
 REPO = Path(__file__).resolve().parent.parent
 SCHEMAS = ("site", "site_input", "site_audit")
 API_ROLES = ("anon", "authenticated", "service_role")
-BASE_TABLES = {"public.leagues", "public.matches", "public.odds_snapshots"}
+BASE_TABLES = {
+    "public.leagues",
+    "public.matches",
+    "public.match_officials",
+    "public.odds_snapshots",
+}
 SITE_VIEWS = {
     "site.leagues",
     "site.matches",
+    "site.match_officials",
     "site.ledger_head",
     "site.record",
     "site_input.h2h_quotes",
@@ -150,10 +156,11 @@ def test_the_emptiness_lock_refuses_a_database_other_than_postgres(site_cluster:
 
 
 @pytest.mark.leakage
-def test_the_views_depend_on_exactly_the_three_ledger_tables_and_the_floor(
+def test_the_views_depend_on_exactly_the_base_tables_and_the_floor(
     full_sequence: psycopg.Cursor[Any],
 ) -> None:
-    """H1a: temel tablolar = {leagues, matches, odds_snapshots}; fonksiyonlar ⊆ {public_floor}."""
+    """H1a: temel tablolar = {leagues, matches, match_officials, odds_snapshots} (match_officials
+    2026-10-02'den beri, spec tff-hakem-site §5); fonksiyonlar ⊆ {public_floor}."""
     relations, functions = closure(full_sequence)
     tables = {name for name, kind in relations.items() if kind == "r"}
     others = {name for name, kind in relations.items() if kind != "r"}
@@ -184,7 +191,7 @@ def test_everything_is_owned_by_postgres_and_no_view_is_invoker(
         "WHERE oid = 'site.public_floor()'::regprocedure",
     )
 
-    assert len(owners) == 6 + 3
+    assert len(owners) == 7 + 4
     assert {owner for _, owner, _ in owners} == {"postgres"} and floor_owner == "postgres"
     for name, _, options in owners:
         if name not in BASE_TABLES:
@@ -338,6 +345,7 @@ SITE_TYPES = {
         ("home_team", "text"),
         ("away_team", "text"),
     ],
+    "site.match_officials": [("match_id", "text"), ("referee", "text")],
     "site.ledger_head": [("rows", "bigint"), ("last_id", "bigint"), ("head", "text")],
 }
 
@@ -442,6 +450,48 @@ def test_applying_0014_twice_is_harmless(full_sequence: psycopg.Cursor[Any]) -> 
     full_sequence.execute("ROLLBACK TO SAVEPOINT again")
 
 
+def test_applying_0015_twice_is_harmless(full_sequence: psycopg.Cursor[Any]) -> None:
+    full_sequence.execute("SAVEPOINT again_0015")
+    full_sequence.execute((REPO / "db/migrations/0015_match_officials.sql").read_text().encode())
+    columns = _rows(
+        full_sequence,
+        "SELECT attname::text FROM pg_attribute WHERE attrelid = 'site.match_officials'::regclass "
+        "AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+    )
+    full_sequence.execute("ROLLBACK TO SAVEPOINT again_0015")
+
+    assert columns == [("match_id",), ("referee",)]
+
+
+def test_the_officials_table_has_rls_without_policy_or_force_and_no_api_grant(
+    full_sequence: psycopg.Cursor[Any],
+) -> None:
+    ((rls, force),) = _rows(
+        full_sequence,
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE oid = 'public.match_officials'::regclass",
+    )
+    policies = _rows(
+        full_sequence,
+        "SELECT polname FROM pg_policy WHERE polrelid = 'public.match_officials'::regclass",
+    )
+    tables = _rows(
+        full_sequence,
+        "SELECT r FROM unnest(%s::text[]) r WHERE has_table_privilege(r, "
+        "'public.match_officials', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')",
+        (["anon", "authenticated"],),
+    )
+    sequences = _rows(
+        full_sequence,
+        "SELECT r FROM unnest(%s::text[]) r "
+        "WHERE has_sequence_privilege(r, 'public.match_officials_id_seq', 'USAGE,SELECT,UPDATE')",
+        (["anon", "authenticated"],),
+    )
+
+    assert (rls, force) == (True, False)
+    assert policies == [] and tables == [] and sequences == []
+
+
 # ── (ii) davranış, şablonun kopyasında ───────────────────────────────────────────────────────
 
 ACTIVE, PASSIVE = "tst.1", "tst.9"
@@ -450,6 +500,15 @@ EDGE = ("m-edge", "2026-07-01T23:59:59.999999Z")
 FLOOR = ("m-floor", "2026-07-02T00:00:00Z")
 LIVE = ("m-live", "2026-09-20T18:00:00Z")
 ASLEEP = ("m-passive", "2026-09-21T18:00:00Z")
+# 0015 tohumları: tablo gözlemleri, görünüm başlama ANINDAN önceki SON satırı göstermeli.
+OFFICIALS = (
+    (HOLDOUT[0], "Holdout Hakem", "2026-01-14T12:00:00Z"),  # taban altı maç: görünmez
+    (FLOOR[0], "Taban Hakem", "2026-07-01T12:00:00Z"),  # taban maçı, başlamadan önce: görünür
+    (LIVE[0], "Önce Hakem", "2026-09-18T10:00:00Z"),
+    (LIVE[0], "Son Hakem", "2026-09-19T10:00:00Z"),  # başlamadan önceki EN SON: görünür
+    (LIVE[0], "Geç Hakem", LIVE[1]),  # tam başlama anı: görünmez (seen_at < commence_time)
+    (ASLEEP[0], "Uyuyan Hakem", "2026-09-20T10:00:00Z"),  # pasif lig: görünmez
+)
 
 
 @pytest.fixture(scope="module")
@@ -476,6 +535,10 @@ def seeded(site_db: str) -> Iterator[psycopg.Cursor[Any]]:
                     "VALUES (%s, '2026-06-30T10:00:00Z', %s, 'h2h', 'Ev', 2.0, 'g', %s)",
                     (match_id, book, f"{match_id}-{book}"),
                 )
+        cur.executemany(
+            "INSERT INTO match_officials (match_id, referee, seen_at) VALUES (%s, %s, %s)",
+            OFFICIALS,
+        )
         conn.commit()
         yield cur
     conn.rollback()
@@ -531,6 +594,7 @@ def test_book_key_is_the_book_order_within_a_round_and_no_book_name_leaks(
     [
         "SELECT 1 FROM public.odds_snapshots LIMIT 1",
         "SELECT 1 FROM public.matches LIMIT 1",
+        "SELECT 1 FROM public.match_officials LIMIT 1",
         "INSERT INTO public.odds_snapshots DEFAULT VALUES",
         "INSERT INTO site.leagues (id, name, country) VALUES ('x', 'x', 'x')",
     ],
@@ -541,3 +605,44 @@ def test_site_reader_cannot_touch_a_table_or_write_through_a_view(
     """Sınır yetkidir: `default_transaction_read_only` kaza önleyicidir, SET ROLE'de etkin değil."""
     with as_reader(seeded) as cur, pytest.raises(psycopg.errors.InsufficientPrivilege):
         cur.execute(statement)
+
+
+@pytest.mark.leakage
+def test_the_officials_view_hides_holdout_and_passive_league_matches(
+    seeded: psycopg.Cursor[Any],
+) -> None:
+    with as_reader(seeded) as cur:
+        shown = {row[0] for row in _rows(cur, "SELECT match_id FROM site.match_officials")}
+
+    assert shown == {FLOOR[0], LIVE[0]}
+
+
+def test_the_officials_view_shows_the_last_referee_seen_before_kickoff(
+    seeded: psycopg.Cursor[Any],
+) -> None:
+    with as_reader(seeded) as cur:
+        rows = dict(_rows(cur, "SELECT match_id, referee FROM site.match_officials"))
+
+    assert rows == {FLOOR[0]: "Taban Hakem", LIVE[0]: "Son Hakem"}
+
+
+@pytest.mark.parametrize(
+    ("statement", "operation"),
+    [
+        ("UPDATE match_officials SET referee = 'x'", "UPDATE"),
+        ("DELETE FROM match_officials", "DELETE"),
+        ("TRUNCATE match_officials", "TRUNCATE"),
+    ],
+)
+def test_match_officials_is_append_only_even_for_the_owner(
+    seeded: psycopg.Cursor[Any], statement: str, operation: str
+) -> None:
+    seeded.execute("SAVEPOINT append_only")
+    try:
+        with pytest.raises(
+            psycopg.errors.RaiseException,
+            match=f"match_officials append-only bir defterdir; {operation}",
+        ):
+            seeded.execute(statement)
+    finally:
+        seeded.execute("ROLLBACK TO SAVEPOINT append_only")

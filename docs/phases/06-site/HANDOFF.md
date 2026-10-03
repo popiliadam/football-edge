@@ -117,6 +117,11 @@ T0 ölçümleri: `docs/phases/06-site/b1-t0-olcumler.md` (ölçen komut `scripts
    sahibi, aksi hâlde RLS'li tablolar görünümden HATASIZ 0 satır döner — §4.2) → katalog testleri gerçek DB'ye karşı
    salt okuma kipinde → Supabase advisors 0014'ten SONRA da okunur (spec §4.2; üç şema API'ye açık şemalara
    eklenmemiş, `security_invoker` uyarısı yok).
+   **0015 (TFF baş hakemi, 2026-10-02):** 0014'ten SONRA aynı kuralla; `site_reader`a `LOGIN` veren migration
+   **0016** olur (`docs/HANDOFF.md` §0.4 Adım 12/14).
+   **Birleştirme sırası (2026-10-02, son inceleme C1):** `tff-hakem` dalı (TFF baş hakemi, 0015) `main`e ANCAK
+   0014 VE 0015 canlıya uygulandıktan sonra birleştirilir; önce birleştirilirse `collect-daily` (`fetch-tff`) ilk
+   Süper Lig eşleşmesinde `match_officials` yok diye exit 7 verir.
 3. **`site_reader`a `LOGIN` verilmeden ÖNCE — pg_net artık riski (kullanıcı kararı, bilerek verilir):**
    - Canlıda `site_reader`ın etkin yetkileri salt okuma sorgusuyla yeniden ölçülür, pg_net'in `net` şeması dâhil
      (şema USAGE'ı; `net.*` tablo, dizi ve fonksiyon yetkileri). Kapta ölçülen kabul listesi:
@@ -246,10 +251,28 @@ yukarıda "Ölçmedikleri (B-2 T10)" satırındadır. Ertelenen küçük düzelt
     `pnpm install` ya da `next build` sırasında koşan bağımlılık kodu, ana checkout'ta duran repo kökündeki `.env`i
     (gitignored) diskten okuyabilir. Worktree'de ve CI'da `.env` yoktur.
 
+## Kapının ÖLÇMEDİKLERİ (TFF baş hakemi, 2026-10-02)
+
+Plan: `docs/superpowers/plans/2026-10-02-tff-hakem-site.md`.
+
+1. YAML'daki API adlarının `tur.1`de görüldüğü (`test_every_mapped_api_name_was_seen_in_tur1`) yalnız
+   veritabanı adresiyle koşar — kapıda ve CI'da adıyla SKIP.
+2. TFF tarih hücresinin şekli 2026-09-19 fixture'ından ölçüldü; TFF'nin YANLIŞ tarih basması ölçülmez.
+3. Lig süzgeci C1 ile daraltıldı (tam ifade + kadın/genç dışlama); kalan risk: TFF dışlama sözcüğü
+   taşımayan yeni bir "Süper Lig" bloğu açarsa o blok işlenir (DEFERRED 9.7b).
+4. Ters ev/deplasman yalnız uyarıdır; `collect-daily` kırmızı olmaz.
+5. Check-out derlenmiş sayfada hakem satırının VARLIĞINI/YOKLUĞUNU ölçmez (bileşen testi + ad listesi ölçer;
+   satır `data-fe` taşımaz).
+6. `verify-snapshot` hakemin yalnız `tur.1` maçında durduğunu sınamaz (tek yazar `link_officials`).
+7. Canlıya uygulama ve advisors (HANDOFF Adım 12).
+8. DB mutasyon kanıtları yalnız yerel kum havuzunda (Docker); CI yalnız yeşili ölçer.
+9. `seen_at` toplama turunun `now`udur, TFF'nin yayımladığı an değil (muhafazakâr yön).
+10. Hakem adı TFF'nin büyük harfli yazımıyla basılır; yazım düzeltmesi yok.
+
 ## Hukuk incelemesi (HANDOFF §0.7/7'ye)
 
 B-2 Task 7 incelemesinin "Content findings for lawyer review" tablosu (C1–C11; inceleme dosyası gitignored SDD
-kaydındadır). Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
+kaydındadır) ve TFF baş hakemi C12 (2026-10-02) — avukat paketi C1–C12. Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
 AK13 avukat paketine girer. Belgeler: `web/content/legal/<dil>/<belge>.tsx`.
 
 | # | yer | konu | soru |
@@ -265,3 +288,4 @@ AK13 avukat paketine girer. Belgeler: `web/content/legal/<dil>/<belge>.tsx`.
 | C9 | en terms | "Bahis sitesi fiyatlarından türetilmiş" | Veri kaynağının (The Odds API) koşullarının türetilmiş olasılığın yayınına izin verip vermediği açık (AK17, §12.4/11) |
 | C10 | en/tr privacy | Yurt dışından sunmak sınır ötesi aktarım mı | Barındırmanın yurt dışında olacağını varsayıyor; barındırıcı kararına bağlı. Soru olarak işaretli |
 | C11 | en/tr terms | "18 yaş ve üzeri yetişkinler için" | 18 eşiği ve yaş doğrulaması olmaması (§12.4/6) hedef ülkeler için yeterli mi? Her yeni dil ayrı çerçeve (§10.3) |
+| C12 | maç sayfası (Süper Lig) | TFF baş hakem adı | Hakem adı kişisel veridir (kamuya açıklanmış görev bilgisi); TFF Kullanım Şartları (pageID=179) ticari olmayan kullanım + kaynak gösterimi diyor ve sayfa "(TFF ataması)" yazıyor. Ticari bir sitede yayın KVKK ve TFF koşulları açısından uygun mu? Depodaki tam sayfa fixture'ları kırpılmadı (spec 2026-10-02 §8) |

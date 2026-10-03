@@ -21,14 +21,17 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 from bs4 import BeautifulSoup
 
 from football_edge.collector import ContractViolation
+from football_edge.collectors import tff
 from football_edge.collectors.tff import collect_tff, parse_referees
 from football_edge.naming import normalise_team
+from football_edge.officials import LinkResult, TeamMap
 from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import write_robots
 
@@ -225,9 +228,100 @@ def test_all_officials_named_without_links_still_raises() -> None:
         parse_referees(degraded, observed_at=NOW)
 
 
+def _first_date_cell_replaced(html: str, old: str, new: str) -> str:
+    """İlk maç satırının (KASIMPAŞA – TÜMOSAN KONYASPOR, atanmış) tarih hücresinde `old` → `new`."""
+    soup = BeautifulSoup(html, "html.parser")
+    cell = soup.find("div", class_="haftaninMaclariMaclarTarih")
+    assert cell is not None
+    target = cell.find(string=lambda text: text is not None and old in text)
+    assert target is not None, old
+    target.replace_with(target.replace(old, new))
+    return str(soup)
+
+
+@pytest.mark.contract
+def test_every_row_carries_its_istanbul_date_and_kickoff() -> None:
+    """Ölçüldü (2026-09-19): tarih hücresi "18.09.2026 Cuma 20:00" — gün.ay.yıl, gün adı,
+    İstanbul saati."""
+    parsed = parse_referees(fixture_html(), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert (match.payload["match_date"], match.payload["kickoff_local"]) == ("2026-09-18", "20:00")
+    assert all(re.fullmatch(r"2026-09-(18|19|20)", e.payload["match_date"]) for e in parsed)
+    assert all(re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", e.payload["kickoff_local"]) for e in parsed)
+
+
+@pytest.mark.contract
+def test_the_entity_key_is_dated_so_next_season_cannot_overwrite_this_one() -> None:
+    parsed = parse_referees(fixture_html(), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert match.entity_key == "kasimpaşa|tümosan konyaspor|2026-09-18"
+    assert len({entry.entity_key for entry in parsed}) == len(parsed)
+
+
+def _first_kickoff_span_removed(html: str) -> str:
+    """İlk maç satırının (KASIMPAŞA – TÜMOSAN KONYASPOR) tarih hücresinden saat span'ini kaldırır.
+
+    2026-10-02 canlı ölçüm: 75 satırın 1'i (Nesine 3. Lig) `'03.10.2026 Cumartesi'` — tarih var,
+    saat YOK. Canlı sayfa depoya girmez; durum Süper Lig fixture satırından türetilir.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    cell = soup.find("div", class_="haftaninMaclariMaclarTarih")
+    assert cell is not None
+    span = cell.find("span")
+    assert span is not None and span.get_text(strip=True) == "20:00"
+    span.decompose()
+    return str(soup)
+
+
+def test_a_row_without_any_kickoff_time_is_observed_with_a_null_kickoff() -> None:
+    """Saat hücrede HİÇ yoksa satır kayıp değildir: `kickoff_local` null, tarih zorunlu kalır."""
+    parsed = parse_referees(_first_kickoff_span_removed(fixture_html()), observed_at=NOW)
+    match = next(entry for entry in parsed if entry.payload["home_team"] == "KASIMPAŞA A.Ş.")
+
+    assert len(parsed) == 62
+    assert match.payload["match_date"] == "2026-09-18"
+    assert "kickoff_local" in match.payload and match.payload["kickoff_local"] is None
+    assert match.entity_key == "kasimpaşa|tümosan konyaspor|2026-09-18"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("18.09.2026", "18.09.26"),  # iki haneli yıl: tarih okunmaz
+        ("18.09.2026", "31.02.2026"),  # takvimde olmayan gün
+        ("20:00", "20.00"),  # saat biçimi değişti
+        ("20:00", "25:00"),  # olmayan saat
+        ("20:00", "20:00 21:00"),  # iki saat: hangisi olduğu belirsiz
+    ],
+)
+def test_a_row_whose_date_or_kickoff_cannot_be_read_is_a_loss_not_a_skip(
+    old: str, new: str
+) -> None:
+    """Spec §3.2: tarih/saati okunamayan atanmış satır sayım bekçisine kayıp olarak düşer."""
+    degraded = _first_date_cell_replaced(fixture_html(), old, new)
+
+    with pytest.raises(ContractViolation, match="sessizce atlandı"):
+        parse_referees(degraded, observed_at=NOW)
+
+
 def test_team_normalisation_is_case_and_space_insensitive() -> None:
     """Eşleşme anahtarı normalize edilir; 'Galatasaray A.Ş.' ile 'GALATASARAY' aynı olmalı."""
     assert normalise_team("  Galatasaray A.Ş. ") == normalise_team("GALATASARAY AŞ")
+
+
+@pytest.fixture
+def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """`link_officials`in kaydedicisi: taklit DB `matches`/`match_officials` sorgularını tanımaz."""
+    calls: list[dict[str, Any]] = []
+
+    def record(conn: Any, observations: Any, *, team_map: TeamMap, now: datetime) -> LinkResult:
+        calls.append({"observations": observations, "team_map": team_map, "now": now})
+        return LinkResult(linked=9, written=3, not_in_db=1, awaiting_alias=1, other_league=53)
+
+    monkeypatch.setattr(tff, "link_officials", record)
+    return calls
 
 
 def _write_sources_yaml(tmp_path: Path) -> Path:
@@ -251,7 +345,9 @@ sources:
     return path
 
 
-def test_collect_tff_writes_observations_and_commits(tmp_path: Path) -> None:
+def test_collect_tff_writes_observations_and_commits(
+    tmp_path: Path, links: list[dict[str, Any]]
+) -> None:
     sources_path = _write_sources_yaml(tmp_path)
     write_robots(tmp_path, "tff", "")  # ölçülen gerçek durum: robots.txt 404 → boş anlık görüntü
 
@@ -278,7 +374,9 @@ def test_collect_tff_writes_observations_and_commits(tmp_path: Path) -> None:
     assert len(db.rows) == 62
 
 
-def test_collect_tff_second_round_is_idempotent(tmp_path: Path) -> None:
+def test_collect_tff_second_round_is_idempotent(
+    tmp_path: Path, links: list[dict[str, Any]]
+) -> None:
     """Aynı hafta iki kez toplanırsa ikinci tur 0 YENİ gözlem yazmalı (`ON CONFLICT DO
     NOTHING` — `write_observations` zaten bunu garanti ediyor; burada TFF'in bu
     garantiyi bypass ETMEDİĞİ doğrulanıyor, ör. `observed_at`i hash'e sızdırarak).
@@ -316,7 +414,7 @@ def test_collect_tff_second_round_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_collect_tff_week_with_no_assignments_writes_nothing_and_succeeds(
-    tmp_path: Path,
+    tmp_path: Path, links: list[dict[str, Any]]
 ) -> None:
     """`assert_schema(minimum_rows=5)` atanmamış haftayı YENİDEN kırmızıya çevirmemeli:
     `parse_referees` boş sonucu yalnız her satır meşru olarak görevlisizken döner.
@@ -345,3 +443,97 @@ def test_collect_tff_week_with_no_assignments_writes_nothing_and_succeeds(
 
     assert written == 0
     assert db.rows == []
+    assert links == [], "atanmamış haftada bağlama çağrılmaz"
+
+
+def test_collect_tff_links_this_rounds_parse_with_the_same_now(
+    tmp_path: Path, links: list[dict[str, Any]], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Spec §3.3: bağlama gözlem tablosundan OKUMAZ — turun ayrıştırılmış sonucu ve AYNI `now`."""
+    caplog.set_level(logging.INFO, logger="football_edge.collectors.tff")
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "tff", "")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=fixture_html().encode("windows-1254"),
+            headers={"content-type": "text/html; charset=windows-1254"},
+        )
+
+    collect_tff(
+        FakeObservationDb(),  # type: ignore[arg-type]
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+    (call,) = links
+    assert call["now"] == NOW
+    assert call["observations"] == parse_referees(fixture_html(), observed_at=NOW)
+    assert call["team_map"].league_id == "tur.1"
+    assert "bağlanan 9, yeni yazılan 3, DB'de yok 1, alias bekleyen 1, lig dışı 53" in caplog.text
+
+
+# ── Son inceleme I1: bağlanamayan sayaçlar Actions'ta görünür ────────────────────────────────
+
+
+def _collect_fixture_round(tmp_path: Path) -> int:
+    sources_path = _write_sources_yaml(tmp_path)
+    write_robots(tmp_path, "tff", "")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=fixture_html().encode("windows-1254"),
+            headers={"content-type": "text/html; charset=windows-1254"},
+        )
+
+    return collect_tff(
+        FakeObservationDb(),  # type: ignore[arg-type]
+        httpx.Client(transport=httpx.MockTransport(handler)),
+        sources_path=sources_path,
+        robots_dir=tmp_path,
+        now=NOW,
+    )
+
+
+def test_unlinked_counters_are_an_actions_warning_under_github_actions(
+    tmp_path: Path,
+    links: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    assert _collect_fixture_round(tmp_path) == 62
+    (line,) = [x for x in capsys.readouterr().out.splitlines() if x.startswith("::warning::")]
+    assert "DB'de yok 1" in line and "alias bekleyen 1" in line
+
+
+def test_no_actions_warning_outside_github_actions(
+    tmp_path: Path,
+    links: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    _collect_fixture_round(tmp_path)
+
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_no_actions_warning_when_every_super_lig_row_is_linked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def all_linked(conn: Any, observations: Any, *, team_map: TeamMap, now: datetime) -> LinkResult:
+        return LinkResult(linked=9, written=9, not_in_db=0, awaiting_alias=0, other_league=53)
+
+    monkeypatch.setattr(tff, "link_officials", all_linked)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    _collect_fixture_round(tmp_path)
+
+    assert "::warning::" not in capsys.readouterr().out

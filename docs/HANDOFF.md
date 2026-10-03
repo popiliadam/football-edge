@@ -84,6 +84,10 @@ YAYIMLANMAZ (K/7: "yayından ÖNCE avukat") — bu oturumun son hâli "yayına h
 > **Yayın aşaması (sonra):** goool.ai alımı → ayrı Netlify hesabı → secret'lar → `SITE_URL` → CI `site.yml` provası
 > → avukat onayıyla ilk yayın.
 
+> **BİRLEŞTİRME SIRASI (2026-10-02, son inceleme C1):** `tff-hakem` dalı (TFF baş hakemi, 0015) `main`e ANCAK
+> Adım 12'de 0014 VE 0015 canlıya uygulandıktan sonra birleştirilir. Önce birleştirilirse `collect-daily`
+> (`fetch-tff`) ilk Süper Lig eşleşmesinde `match_officials` yok diye exit 7 verir.
+
 ---
 
 #### FAZ 1 — Temizlik ve güvenlik ayarları (~20 dk, ücretsiz)
@@ -158,12 +162,20 @@ YAYIMLANMAZ (K/7: "yayından ÖNCE avukat") — bu oturumun son hâli "yayına h
 - Bitti: `grep -rn "\[site-name\]" web/ docs/` → 0 (taslak dizini hariç değil: o da güncellenir).
 
 **Adım 6 — TFF koşulları (K/12, 5 dk).**
+
+> **KARAR VERİLDİ (2026-10-02, kullanıcı oturumu Adım 6):** `tff` iç kullanım sürer VE Süper Lig maç sayfasında
+> TFF baş hakemi gösterilir (spec `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md`, 0015); yerelde serbest, YAYINDAN
+> ÖNCE avukat (C12). `tests/fixtures/tff/` tam sayfa kopyaları kullanıcı kararıyla KIRPILMADI (öneri kırpmaydı;
+> public depoda hakem adları kalır — avukat paketine not).
+
 - Seçenekler: (a) `tff` kaynağını kapat · (b) ticari lansmana kadar sürdür, lansmandan önce TFF'den izin iste ·
   **(c) avukata sor, o zamana kadar yalnız iç kullanım (sitede gösterilmez) — ÖNERİ**. Ayrıca
   `tests/fixtures/tff/` tam sayfa kopyalarının kırpılması: **öneri evet**.
-- Söyleyeceği: *"TFF: (c). Fixture'ları kırp."*
-- Asistan: kararı `sources.yaml` yorumuna/kaynak politikası notuna yazar; fixture kırpma (hakem adları dahil gerçek
-  kişi adları takma adla; testler aynı davranışı ölçmeli) — test + kapı + commit. Avukat sorusu Adım 16 paketine.
+- ~~Söyleyeceği: *"TFF: (c). Fixture'ları kırp."*~~ (GEÇERSİZ: kullanıcı kararı yukarıda — tff sitede gösterilir,
+  fixture'lar KIRPILMADI)
+- (GEÇERSİZ: kullanıcı kararı yukarıda — fixture kırpma YAPILMAZ; `sources.yaml` notu 2026-10-02'de yazıldı)
+  ~~Asistan: kararı `sources.yaml` yorumuna/kaynak politikası notuna yazar; fixture kırpma (hakem adları dahil gerçek
+  kişi adları takma adla; testler aynı davranışı ölçmeli) — test + kapı + commit. Avukat sorusu Adım 16 paketine.~~
 
 **Adım 7 — Haber kaynağı politikası (K/4, 15 dk).** Girdi: `docs/reports/2026-09-23-kaynak-kosullari.md`,
 `docs/reports/2026-09-23-ek-kaynaklar.md` — asistan her alt soru için 3 satırlık özet verir.
@@ -248,17 +260,26 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
 
 ---
 
-#### FAZ 4 — Canlı veritabanı: okuma katmanı (~40 dk)
+#### FAZ 4 — Canlı veritabanı: okuma katmanı (~50 dk)
 
-**Adım 12 — 0014'ü canlıya uygula (K/3, 15 dk; asistan yapar, sen onaylarsın).**
+**Adım 12 — 0014'ü, ardından 0015'i canlıya uygula (K/3, 25 dk; asistan yapar, sen onaylarsın).**
 - Söyleyeceği: *"AK6 = §4.3 listesi, 0014'ü uygula."*
 - Asistan (`docs/phases/06-site/HANDOFF.md` "Canlıya geçiş" adım 2): sessiz aralık (:00/:15/:30/:45 dışı,
   `gh run list --status in_progress` boş) → `db/migrations/0014_site_read.sql` metni bayt bayt, sha256 deftere →
   aynı SQL `begin … rollback` kuru koşusu (sonuç `raise exception` JSON'unda) → `apply_migration` **`postgres` rolüyle**
-  (görünüm sahibi = tablo sahibi; aksi hâlde RLS'li tablolar görünümden hatasız 0 satır döner) → katalog testleri canlıya
-  salt okuma (`tests/test_site_views_db.py` vb. RUNBOOK §2.5 komutuyla, `--tb=short`) → `get_advisors security` +
-  `performance` → bir sonraki `seal` turu yeşil.
+  (görünüm sahibi = tablo sahibi; aksi hâlde RLS'li tablolar görünümden hatasız 0 satır döner) → `get_advisors security` +
+  `performance` → bir sonraki `seal` turu yeşil. Katalog testleri BURADA KOŞULMAZ (aşağıdaki SIRA notu).
 - Bitti: advisors'ta yeni ERROR/WARN yok; `site` şeması görünümleri canlıda; seal yeşil.
+- **0015 (TFF baş hakemi, `db/migrations/0015_match_officials.sql`; `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md` §5):** 0014 bittikten SONRA
+  aynı kuralla — sessiz aralık, bayt bayt metin + sha256 deftere, `begin … rollback` provası, `apply_migration`
+  `postgres` rolüyle, advisors (okunurken DEFERRED 9.7d kabulü — `service_role`un
+  `match_officials` INSERT yetkisi — deftere), sonraki seal turu yeşil. Söyleyeceği:
+  *"0015'i uygula."* Bitti: `public.match_officials` (RLS açık, politikasız) ve `site.match_officials`
+  canlıda; sonraki `collect-daily` logunda `hakem bağlama` satırı.
+- **SIRA (son inceleme M4, 2026-10-02):** katalog testleri canlıya salt okuma (`tests/test_site_views_db.py` vb.
+  RUNBOOK §2.5 komutuyla, `--tb=short`) 0014 VE 0015'in İKİSİ uygulandıktan SONRA **bir kez** koşulur: HEAD'deki
+  testler 0015 nesnelerini (`site.match_officials` vb.) bekler — yalnız 0014 sonrası koşulursa kırmızı verir ve bu
+  kırmızı 0014'ün arızası değildir.
 
 **Adım 13 — `site_reader` artık riskini kabul (K/13 ikinci yarı, 5 dk; açık karar).**
 - Asistan: canlıda `site_reader` etkin yetkilerini salt okuma sorgusuyla ölçer (`net` şeması dahil) ve
@@ -281,7 +302,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
   4. psql içinde: `\password site_reader` → parolayı iki kez yapıştır (ekranda görünmez) → `\q`.
      (`ALTER ROLE … PASSWORD` KULLANMA — DDL loglanırsa düz metin kalır.)
   5. Söyleyeceği: *"site_reader parolası ayarlandı."*
-- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0015_site_reader_login.sql`; test + kum havuzu + Adım 12'deki
+- Asistan: `site_reader`a `LOGIN` veren küçük migration (`0016_site_reader_login.sql` — 0015 TFF hakem tablosudur; test + kum havuzu + Adım 12'deki
   canlı yazım kuralı) → uygular → doğrular (`rolcanlogin = true`, diğer yetkiler değişmedi).
 - Kullanıcı (devam):
   6. `SITE_DATABASE_URL`yi kur: `postgresql://site_reader.aaxadphezxavohkhqdrf:<hex-parola>@<pooler host>:5432/postgres?sslmode=require`
@@ -317,7 +338,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
 - Asistan: tek bir belge hazırlar (`docs/reports/2026-10-xx-avukat-paketi.md` + istenirse .docx/PDF): proje bir
   paragrafta; soru listesi öncelik sırasıyla (K/7/1–7: sağlık verisi/KVKK md. 6, TR bahis içeriği riski, KVKK aydınlatma
   öğeleri + `localStorage` 18+ onayı + Netlify log davranışı, football-data yazılı izin, başlık telifi + Rocket Sports
-  £500 sözleşmesi, TFF koşulları (Adım 6), B-2 C1–C11); ekler: 8 taslak metin (`_kalici/hukuk-taslak-metin/`), site
+  £500 sözleşmesi, TFF koşulları (Adım 6), hakem adı yayımı / KVKK + TFF koşulları (C12), B-2 C1–C12); ekler: 8 taslak metin (`_kalici/hukuk-taslak-metin/`), site
   ekran görüntüleri (Adım 15'ten), veri akışı şeması (archify ile tek sayfa).
 - Kullanıcı: avukatı seçer, paketi SEN gönderirsin (asistan e-posta göndermez).
   Söyleyeceği: *"Paket tamam, avukata ben gönderiyorum."*
@@ -349,7 +370,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
 | 9 | Ücretli Jev kararı | sen | 5 dk | karar (commit sonra) | Plan 2 T3 |
 | 10 | Alan adı + ayrı Netlify | sen | 25 dk | alan adı | 11 |
 | 11 | Netlify secret'ları | sen · asistan SITE_URL | 10 dk | — | 15 |
-| 12 | 0014 canlıya | asistan (sen "uygula") | 15 dk | — | 13, 14 |
+| 12 | 0014 + 0015 canlıya | asistan (sen "uygula") | 25 dk | — | 13, 14 |
 | 13 | pg_net artık riski kabulü | sen | 5 dk | — | 14 |
 | 14 | site_reader parolası + SITE_DATABASE_URL | sen · asistan LOGIN | 15 dk | — | 15 |
 | 15 | İlk derleme provası (yayınsız) | asistan · sen onay/red | 20 dk | — | yayın |
@@ -425,7 +446,7 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
   fixture'lar kırpılmış ve takma adlı) · T4 17n/17h/16k-b · T5 100 TR haber ön-etiketi (onay §0.K/5) · **T6 0013**.
 - **İz B** (spec `docs/superpowers/specs/2026-09-23-faz6-iz-b-design.md`; planlar
   `docs/superpowers/plans/2026-09-24-faz6-iz-b-{1-okuma-katmani,2-web-yuzeyi}.md`; **faz belgesi
-  `docs/phases/06-site/HANDOFF.md`** — canlıya geçiş listesi, kapının ÖLÇMEDİKLERİ B-1 1–19 + B-2, hukuk C1–C11):
+  `docs/phases/06-site/HANDOFF.md`** — canlıya geçiş listesi, kapının ÖLÇMEDİKLERİ B-1 1–19 + B-2, hukuk C1–C12):
   B-1 okuma katmanı (0014, dışa aktarıcı, `verify-snapshot`, `site.yml` build/deploy/live — yalnız elle tetiklenir,
   CI `site-db`) · B-2 web yüzeyi (`web/` Next.js 16 statik, value önerisi YOK, varsayılan noindex, TASLAK hukuk,
   CSP hash'leri, `check-out` çıktı denetleyicisi, `site_gate.sh`, yayın bekçileri).
@@ -583,7 +604,7 @@ değişikliği hazırlar ve kapıyı koşar, sana **tek satırlık `git commit` 
   5. Başlık telifi (NLA v Meltwater; AB TDM istisnası itirazla kapanır) ve yayıncı ToS'larının aracı (GDELT/Google
      News) üzerinden bizi bağlayıp bağlamadığı; **Rocket Sports £500/makale "Search Only" sözleşmesi** (K/4b).
   6. TFF koşulları (K/12).
-  7. B-2 incelemesinin **C1–C11** soruları: `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" (sorumlu bahis dili,
+  7. B-2 incelemesinin ve TFF baş hakeminin **C1–C12** soruları: `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" (sorumlu bahis dili,
      yardım hattı ad/numaraları — doğrulanacak, "yardım ülkende mevcut" ifadesi vb.).
 - Sonra asistan: avukatın düzeltmelerini metinlere işler, TASLAK işaretini kaldırır (kapı bekçisi var), AK13'ü kapatır.
   Bloklar: indekslemeye açma (AK14), TR dili yayını.
@@ -606,10 +627,16 @@ hash'leri (uygulandı; `_headers` ~176 + 379 × sayfa bayt) · AK20 slug kalıc�
 yok, yalnız hash · AK22 tabandan beri her maç. Ayrıca planların yürütüldüğünü onayla (yöntem: subagent-driven —
 yapıldı). Bekleyen metin düzeltmeleri AK2 ile: DEFERRED 20g (en boş sicil "to be registered in advance"), 20i.
 
+> **KARAR VERİLDİ (2026-10-02, kullanıcı oturumu Adım 6):** `tff` iç kullanım sürer VE Süper Lig maç sayfasında
+> TFF baş hakemi gösterilir (spec `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md`, 0015); yerelde serbest, YAYINDAN
+> ÖNCE avukat (C12). `tests/fixtures/tff/` tam sayfa kopyaları kullanıcı kararıyla KIRPILMADI (öneri kırpmaydı;
+> public depoda hakem adları kalır — avukat paketine not).
+
 **K/12 — TFF koşulları** (`https://www.tff.org/Default.aspx?pageID=179`): "ticari amaçlarla kullanılamaz", kaynak
 gösterilmeden kopyalanamaz. Etkiler: **açık `tff` kaynağı** (hakem atamaları, günlük toplanıyor) ve kapalı `tff-pfdk`.
 Karar: (a) `tff`yi kapat · (b) ticari lansmana kadar sürdür, lansmandan önce izin iste · (c) avukata sor (K/7/6).
 Ayrıca `tests/fixtures/tff/` tam sayfa kopyaları (hakem adları, public repo) — kırpılsın mı (asistan yapar, öneri: evet).
+→ **KARAR VERİLDİ 2026-10-02: KIRPILMADI (Adım 6)** — yukarıdaki KARAR bloğu; açık soru kapandı.
 
 **K/13 — Supabase panelinde pg_net kontrolü (güvenlik, 5 dk).** Ölçüm (2026-09-24, canlı, salt okuma):
 `anon`/`authenticated`/`service_role` rollerinin `net` şemasında USAGE, `net.http_request_queue` SELECT/INSERT,
@@ -720,7 +747,7 @@ Plan `docs/superpowers/plans/2026-09-23-oturum9-dalga-a.md` (T1–T6). Her göre
   incelemesi, planın kodu tek ağaçta kurulup koşuldu) · yürütme SDD: B-1 T0–T9 (K1), B-2 T0–T10; her görev bağımsız
   inceleme (mutasyonlu, `git archive` kopyası) + düzeltme turları + her iz için bütün-dal incelemesi ve tek düzeltme
   dalgası. **Faz belgesi (canlıya geçiş kontrol listesi, kapının ÖLÇMEDİKLERİ B-1 1–19 ve B-2, hukuk soruları
-  C1–C11): `docs/phases/06-site/HANDOFF.md`.** SDD defterleri (gitignored): `.superpowers/sdd/2026-09-24-faz6-iz-b-{1,2}-…/progress.md`.
+  C1–C12): `docs/phases/06-site/HANDOFF.md`.** SDD defterleri (gitignored): `.superpowers/sdd/2026-09-24-faz6-iz-b-{1,2}-…/progress.md`.
   - **B-1:** 0014 (`site_reader`, `site`/`site_input`/`site_audit`) yalnız depoda ve kapta test edildi; dışa aktarıcı
     (REPEATABLE READ, zincir GENESIS'ten, her çıpa, ikinci türetim alt süreçte, atomik yazım, çıkış 20–24),
     `verify-snapshot`, `config/site_leagues.yaml`, `site.yml` (build/deploy/live üç iş; YALNIZ elle tetiklenir;
@@ -911,7 +938,8 @@ hazır olur.
    durdurulmuş ama silinmemiş kum havuzu kapları (`izb-*`, `izb-b1t*`, `izb-b2*`, `t6r-*` önekli — `docker ps -a`).
 12. **TFF koşulları** (`pageID=179`): bilgi "ticari amaçlarla kullanılamaz", kaynak gösterilmeden kopyalanamaz.
    Açık `tff` kaynağını (hakem atamaları, günlük) ve kapalı `tff-pfdk`yi etkiler. Ayrıca `tests/fixtures/tff/` tam
-   sayfa kopyaları (hakem adları) public repoda — kırpılsın mı?
+   sayfa kopyaları (hakem adları) public repoda — kırpılsın mı? → **KARAR VERİLDİ 2026-10-02: KIRPILMADI (Adım 6)** — kullanıcı kararı; avukat
+   paketine not (C12).
 13. **pg_net (canlıda ölçüldü, 2026-09-24):** `anon`/`authenticated`/`service_role` `net` şemasında USAGE, kuyrukta
    SELECT/INSERT ve `net.http_post` EXECUTE taşıyor (yetkiyi `supabase_admin` vermiş; `postgres` geri alamaz — kapta
    ölçüldü). Dışarıdan erişim yalnız PostgREST `net`i açarsa mümkün: **Supabase panelinde "Exposed schemas" listesinde
@@ -920,7 +948,7 @@ hazır olur.
 14. **Site yayını için GitHub ayarları (AK18):** `production` ortamını `main` dalına sınırla; `NETLIFY_AUTH_TOKEN`,
    `NETLIFY_SITE_ID` ve `SITE_DATABASE_URL` ortam kapsamlı secret olsun (`build` işi için de ortam gerekir). Bunlar,
    alan adı (AK4) ve 0014'ün canlıya uygulanması onaylanmadan `site.yml` TETİKLENMEZ.
-15. **Hukuk soruları C1–C11** (B-2 T7 incelemesi): `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" — §0.7/7'nin
+15. **Hukuk soruları C1–C12** (B-2 T7 incelemesi; C12 TFF baş hakemi, 2026-10-02): `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi" — §0.7/7'nin
    parçası (KVKK aydınlatma metni öğeleri, "kesinlikle gerekli yerel depolama" sınıflaması, sorumlu bahis dili,
    yardım hattı adları/numaraları, barındırıcının çerez/log davranışı).
 ### 0.5 Çalışma disiplini (Faz 3 §0.5 aynen geçerli; bu oturumun ekledikleri)

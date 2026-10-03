@@ -8,7 +8,8 @@ Kapsanan durumlar (spec §6.4/1): dolu ve boş sicil · eşik altı açılış t
 mühürsüz maç (`closing: null`) · tek turlu maç (sıfır hareket, `0.0`) · tam sayı değerli
 ondalık (`40.0`) · negatif hareket · HTML'de kaçış isteyen adlar (`&`, `'`) · Türkçe harfler ·
 çıpa geride (dolu) ve çıpa eşit (boş) · dışa aktarım anından önce ve sonra başlayan maçlar ·
-dolu (`xla.1`, 5 hareketli mühürlü maç) ve boş (`xlb.1`) hareket dağılımı.
+dolu (`xla.1`, 5 hareketli mühürlü maç) ve boş (`xlb.1`) hareket dağılımı · hakemli (iki maç) ve
+hakemsiz maç (spec 2026-10-02 §6).
 
 Türetilmiş alanlar dışa aktarıcının (B-1 `derive`) kurallarıyla tutarlıdır: hareket = uç −
 açılış, iki uç görünürse (tek turda açılış = son → sıfır üçlü); dağılım = mühürlü, ≥ 2 turlu,
@@ -76,6 +77,7 @@ def _match(number: int, league: str, when: str, home: str, away: str, **rest: An
         "commence_time": when,
         "home": home_name,
         "away": away_name,
+        "referee": rest.get("referee"),
         "sealed": rest["sealed"],
         "rounds": rest["rounds"],
         "h2h": h2h,
@@ -107,6 +109,7 @@ def _matches() -> list[Json]:
             closing=close1,
             move=_triple(2.6, -1.1, -1.5),
             indexable=True,
+            referee="Deniz Örnek",
         ),
         # Açılış turunda 2 kitap: eşik altı → null; hareket de açılışsız → null.
         _match(
@@ -138,6 +141,7 @@ def _matches() -> list[Json]:
             closing=None,
             move=_triple(0.0, 0.0, 0.0),
             indexable=False,
+            referee="Ayşe Yılmaz",
         ),
         _match(
             4,

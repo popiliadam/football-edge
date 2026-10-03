@@ -43,6 +43,7 @@
   "match.status": "Status",
   "match.sealed": "Closing recorded",
   "match.pending": "Pending",
+  "match.referee": "Referee: {name} (TFF appointment)",
   "record.title": "Track record",
   "record.published": "Published predictions",
   "record.emptyExplain": "Our base model has not beaten the closing market, so we do not publish predictions yet. Publishing will start once a closing line value (CLV) criterion, to be registered in advance, is passed; until then the ledger keeps recording odds and closing prices.",

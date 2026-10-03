@@ -1,0 +1,28 @@
+# TFF "Haftanın Maçları" (pageID=600) takım adı → The Odds API yazımı (spec 2026-10-02-tff-hakem-site-design §4).
+#
+# Anahtar: normalise_team(TFF adı) — tests/test_officials.py anahtarın kendi çıktısı olduğunu sınar.
+# Değer: bu sezon `matches`te (league_id = tur.1) GÖRÜLEN API adı. null = API yazımı henüz hiç görülmedi;
+# UYDURULMAZ — o takımın maçı `awaiting_alias` sayılır (loglanır, hata değil). YAML'da HİÇ olmayan TFF adı
+# `ContractViolation`dır: düzeltme bu dosyaya satır. Kaynak: canlı DB salt okuma, 2026-10-02.
+# Eklenen her API adı `test_every_mapped_api_name_was_seen_in_tur1` ile (veritabanı adresiyle) doğrulanır.
+league_label_contains: "Süper Lig"
+league_id: tur.1
+teams:
+  "amed sportif faaliyetler": "Amed SK"  # AMED SPORTİF FAALİYETLER
+  "arca çorum": "Çorum FK"  # ARCA ÇORUM FK
+  "beşiktaş": "Besiktas JK"  # BEŞİKTAŞ A.Ş.
+  "çaykur rizespor": "Çaykur Rizespor"  # ÇAYKUR RİZESPOR A.Ş.
+  "corendon alanyaspor": "Alanyaspor"  # CORENDON ALANYASPOR
+  "erzurumspor": "Erzurum BB"  # ERZURUMSPOR FK
+  "eyüpspor": "Eyüpspor"  # EYÜPSPOR
+  "fenerbahçe": "Fenerbahce"  # FENERBAHÇE A.Ş.
+  "galatasaray": "Galatasaray"  # GALATASARAY A.Ş.
+  "gaziantep kulübü": "Gazişehir Gaziantep"  # GAZİANTEP FUTBOL KULÜBÜ A.Ş.
+  "gençlerbirliği": "Genclerbirligi SK"  # GENÇLERBİRLİĞİ
+  "göztepe": "Goztepe"  # GÖZTEPE A.Ş.
+  "istanbul başakşehir": "Basaksehir"  # İSTANBUL BAŞAKŞEHİR FK
+  "kocaelispor": "Kocaelispor"  # KOCAELİSPOR
+  "samsunspor": "Samsunspor"  # SAMSUNSPOR A.Ş.
+  "trabzonspor": "Trabzonspor"  # TRABZONSPOR A.Ş.
+  "kasimpaşa": null  # KASIMPAŞA A.Ş. — API yazımı henüz görülmedi (DEFERRED 9.7a)
+  "tümosan konyaspor": null  # TÜMOSAN KONYASPOR — API yazımı henüz görülmedi (DEFERRED 9.7a)

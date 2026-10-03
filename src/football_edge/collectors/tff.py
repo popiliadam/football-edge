@@ -19,7 +19,10 @@ bir blok, TÜM liglerin bu haftaki maçlarını hakem atamalarıyla BİRLİKTE t
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import os
+import re
+import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,7 @@ from bs4 import BeautifulSoup, Tag
 from football_edge.collector import ContractViolation, Observation, assert_schema, fetch_text
 from football_edge.naming import normalise_team
 from football_edge.observations import write_observations
+from football_edge.officials import TFF_TEAMS_PATH, LinkResult, link_officials, load_team_map
 from football_edge.sources import Source, enabled_sources, load_sources, robots_for
 
 LOGGER = logging.getLogger("football_edge.collectors.tff")
@@ -56,6 +60,17 @@ _MATCH_ROW_CLASS = "haftaninMaclariMaclar"
 _HOME_CLASS = "haftaninMaclariMaclarEvSahibi"
 _AWAY_CLASS = "haftaninMaclariMaclarMisafir"
 _OFFICIALS_CLASS = "haftaninMaclariMaclarHakemler"
+_DATE_CLASS = "haftaninMaclariMaclarTarih"
+# Tarih hücresi ÖLÇÜLDÜ (2026-09-19 fixture'ı, 63/63 satır): "18.09.2026 Cuma 20:00" — gün.ay.yıl,
+# Türkçe gün adı, İstanbul saati (spec 2026-10-02 §3.1). Tam BİR tarih okunmalı; aksi satır kayıptır
+# ve `parse_referees`in sayım bekçisine düşer (§3.2). Saat isteğe bağlıdır: 2026-10-02 canlı ölçümde
+# 75 satırın 1'i (3. Lig) `'03.10.2026 Cumartesi'` — saat hiç yok → `kickoff_local` None. Tarih
+# çıkarıldıktan sonra kalan metinde saat-BENZERİ bir parça (`_TIME_LIKE`) varsa ama tam olarak BİR
+# geçerli `HH:MM` değilse (ör. `20.00`, `25:00`, iki saat) satır yine kayıptır: belirsizlik sessiz
+# geçmez.
+_DATE = re.compile(r"(?<!\d)(\d{2})\.(\d{2})\.(\d{4})(?!\d)")
+_TIME_LIKE = re.compile(r"\d+[:.]\d+")
+_KICKOFF = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
 
 # Görevli etiketleri ÖLÇÜLDÜ: (H) baş hakem, (Y) yardımcı hakem ×2, (D) dördüncü hakem,
 # yalnız üst ligde ayrıca (V) VAR hakemi, (A) AVAR hakemi — 63 maçtan 11'i (Süper Lig)
@@ -66,6 +81,10 @@ _OFFICIALS_CLASS = "haftaninMaclariMaclarHakemler"
 # bir VAR atama sinyali GERÇEKTEN VAR OLDUĞU HÂLDE metin araması onu bulamaz. Bu alan
 # şimdilik toplanmıyor (sözleşme kapsamı dışı); Task 13'te DEFERRED'a yazılır.
 _HEAD_REFEREE_PREFIX = "(H)"
+
+# Bağlanamayan satır sayaçları Actions özetinde görünsün (son inceleme I1): yalnız bu değişken
+# "true" iken stdout'a `::warning::` iş akışı komutu yazılır; yerelde günlük yeterlidir.
+_ACTIONS_ENV = "GITHUB_ACTIONS"
 
 
 def _text(node: Any) -> str:
@@ -146,6 +165,55 @@ def _league_blocks(soup: BeautifulSoup) -> tuple[tuple[str, Tag], ...]:
     return blocks
 
 
+def _kickoff(row: Tag) -> tuple[date, str | None] | None:
+    """Satırın İstanbul tarihi ve `HH:MM` saati (hücrede saat yoksa None); okunamazsa None.
+
+    Dış None = kayıp (tarih yok/bozuk ya da saat-benzeri ama okunamayan değer); iç None = saat yok.
+    """
+    cell = row.find("div", class_=_DATE_CLASS)
+    if not isinstance(cell, Tag):
+        return None
+    text = _text(cell)
+    days = _DATE.findall(text)
+    if len(days) != 1:
+        return None
+    day, month, year = (int(part) for part in days[0])
+    try:
+        when = date(year, month, day)
+    except ValueError:
+        return None
+    times = _TIME_LIKE.findall(_DATE.sub(" ", text))
+    if not times:
+        return when, None
+    clock = _KICKOFF.fullmatch(times[0]) if len(times) == 1 else None
+    return None if clock is None else (when, f"{clock[1]}:{clock[2]}")
+
+
+def _row_observation(league: str, row: Tag, observed_at: datetime) -> Observation | None:
+    """Tam satırın gözlemi; ev, deplasman, baş hakem ya da tarih yoksa (veya saat bozuksa) None."""
+    home, away = _team_name(row, _HOME_CLASS), _team_name(row, _AWAY_CLASS)
+    referee, kickoff = _head_referee(row), _kickoff(row)
+    if not (home and away and referee and kickoff):
+        return None
+    match_date, kickoff_local = kickoff
+    day = match_date.isoformat()
+    return Observation(
+        source_id=SOURCE_ID,
+        entity_kind="fixture_official",
+        # Tarihli anahtar (spec §3.1): gelecek sezonun aynı eşleşmesi bu sezonu ezemez.
+        entity_key=f"{normalise_team(home)}|{normalise_team(away)}|{day}",
+        observed_at=observed_at,
+        payload={
+            "home_team": home,
+            "away_team": away,
+            "referee": referee,
+            "league": league,
+            "match_date": day,
+            "kickoff_local": kickoff_local,
+        },
+    )
+
+
 def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observation, ...]:
     """Haftanın hakem atamalarını gözlemlere çevirir (`pageID=600`, div tabanlı düzen).
 
@@ -168,6 +236,10 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     görevlisizse ise sonuç boştur ve istisna FIRLAMAZ: hakemler her hafta maçlardan birkaç
     gün önce açıklanır, arada sayfa bütün maçları boş hücreyle taşır (ölçüldü 09-22: 63/63).
     İlk canlı tur bu durumu "sayfa şekli değişti" diye kırmızıya düşürüyordu.
+
+    Tarih ve saat de satırın parçasıdır (spec 2026-10-02 §3.2): okunamayan tarih/saat taşıyan
+    atanmış satır aynı bekçiye kayıp olarak düşer. Hücrede HİÇ saat yoksa satır kayıp değildir,
+    `kickoff_local` None olur (bkz. `_kickoff`).
     """
     soup = BeautifulSoup(html_text, "html.parser")
     parsed: tuple[Observation, ...] = ()
@@ -176,28 +248,12 @@ def parse_referees(html_text: str, *, observed_at: datetime) -> tuple[Observatio
     for league_name, container in _league_blocks(soup):
         for row in container.find_all("div", class_=_MATCH_ROW_CLASS):
             total_rows += 1
-            home = _team_name(row, _HOME_CLASS)
-            away = _team_name(row, _AWAY_CLASS)
-            referee = _head_referee(row)
-            if not (home and away and referee):
+            entry = _row_observation(league_name, row, observed_at)
+            if entry is None:
                 if _officials_cell_is_empty(row):
                     unassigned += 1
                 continue
-            parsed = (
-                *parsed,
-                Observation(
-                    source_id=SOURCE_ID,
-                    entity_kind="fixture_official",
-                    entity_key=f"{normalise_team(home)}|{normalise_team(away)}",
-                    observed_at=observed_at,
-                    payload={
-                        "home_team": home,
-                        "away_team": away,
-                        "referee": referee,
-                        "league": league_name,
-                    },
-                ),
-            )
+            parsed = (*parsed, entry)
     if total_rows == 0:
         raise ContractViolation(f"{SOURCE_ID}: hiç maç satırı tanınmadı — sayfa şekli değişti")
     if unassigned:
@@ -227,6 +283,7 @@ def collect_tff(
     sources_path: Path,
     robots_dir: Path,
     now: datetime,
+    teams_path: Path = TFF_TEAMS_PATH,
 ) -> int:
     """Bu haftanın hakem atamalarını toplar ve yazar; YENİ gözlem sayısını döner.
 
@@ -234,6 +291,10 @@ def collect_tff(
     branch'leri birleştiğinde tek seferde eklenir. `assert_fresh` BURADA ÇAĞRILMAZ
     (R23): `observed_at=now`i toplayıcının kendisi damgalıyor, bu yüzden "en yeni gözlem
     taze mi" iddiası her zaman doğru olurdu — kırılamayan bir kontrol.
+
+    Gözlemler yazılıp commit edildikten sonra AYNI `now` ile `link_officials` çağrılır (spec
+    2026-10-02 §3.3): bağlama turun ayrıştırılmış sonucundan çalışır, gözlem tablosunu okumaz.
+    Sayıları loglanır; yapılandırma ya da eşleme kırmızısı istisnadır.
     """
     source = _enabled_source(sources_path)
     parser = robots_for(source, robots_dir)
@@ -247,9 +308,32 @@ def collect_tff(
     assert_schema(
         parsed,
         source_id=SOURCE_ID,
-        required=frozenset({"home_team", "away_team", "referee"}),
+        required=frozenset({"home_team", "away_team", "referee", "match_date"}),
         minimum_rows=5,
     )
     written = write_observations(conn, parsed)
     conn.commit()
+    result = link_officials(conn, parsed, team_map=load_team_map(teams_path), now=now)
+    LOGGER.info(
+        "%s: hakem bağlama — bağlanan %d, yeni yazılan %d, DB'de yok %d, alias bekleyen %d, "
+        "lig dışı %d",
+        SOURCE_ID,
+        result.linked,
+        result.written,
+        result.not_in_db,
+        result.awaiting_alias,
+        result.other_league,
+    )
+    _annotate_unlinked(result)
     return written
+
+
+def _annotate_unlinked(result: LinkResult) -> None:
+    """Bağlanamayan Süper Lig satırı varsa Actions'ta görünür uyarı; ayrıntı WARNING günlüğünde."""
+    if os.environ.get(_ACTIONS_ENV) != "true":
+        return
+    if result.not_in_db or result.awaiting_alias:
+        sys.stdout.write(
+            f"::warning::{SOURCE_ID}: hakemi bağlanamayan Süper Lig maçı — DB'de yok "
+            f"{result.not_in_db}, alias bekleyen {result.awaiting_alias} (ayrıntı günlükte)\n"
+        )

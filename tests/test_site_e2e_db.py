@@ -62,6 +62,13 @@ MATCHES = [
     (ASLEEP, "e2e.9", "2026-09-21T18:00:00Z", "Uyku A", "Uyku B"),
     (FLOOR, "e2e.1", "2026-07-02T00:00:00Z", "Taban A", "Taban B"),
 ]
+# 0015 tohumları (spec 2026-10-02): M1'in ataması başlamadan önce (görünür), M2'ninki başlama ANINDA
+# (görünmez → null), holdout maçınınki taban altında (görünmez).
+OFFICIALS = (
+    (M1, "Deneme Hakem", "2026-09-21T09:00:00Z"),
+    (M2, "Geç Hakem", "2026-09-23T15:00:00Z"),
+    (HOLDOUT, "Eski Hakem", "2026-01-14T09:00:00Z"),
+)
 ROUNDS = [
     Round(HOLDOUT, "2026-01-14T10:00:00Z", "Eski A", "Eski B", [EVEN] * 3),  # satır 1–9
     Round(EDGE, "2026-06-30T10:00:00Z", "Kenar A", "Kenar B", [EVEN] * 3),  # 10–18
@@ -106,6 +113,7 @@ EXPECTED_MATCHES = [
         "commence_time": "2026-07-02T00:00:00Z",
         "home": "Taban A",
         "away": "Taban B",
+        "referee": None,
         "sealed": True,
         "rounds": 1,
         "h2h": {"opening": AT_FLOOR, "latest": AT_FLOOR, "closing": AT_FLOOR},
@@ -121,6 +129,7 @@ EXPECTED_MATCHES = [
         "commence_time": "2026-09-22T14:00:00Z",
         "home": "Alfa Spor",
         "away": "Beta FK",
+        "referee": "Deneme Hakem",
         "sealed": True,
         "rounds": 3,
         "h2h": {
@@ -144,6 +153,7 @@ EXPECTED_MATCHES = [
         "commence_time": "2026-09-23T15:00:00Z",
         "home": "Gamma United",
         "away": "Alfa Spor",
+        "referee": None,
         "sealed": False,
         "rounds": 2,
         "h2h": {
@@ -171,6 +181,7 @@ EXPECTED_MATCHES = [
         "commence_time": "2026-09-24T16:00:00Z",
         "home": "Delta Şehir",
         "away": "Beta FK",
+        "referee": None,
         "sealed": False,
         "rounds": 1,
         "h2h": {"opening": None, "latest": None, "closing": None},
@@ -216,6 +227,10 @@ def _seed(url: str, rows: tuple[dict[str, Any], ...]) -> None:
             "INSERT INTO matches (id, league_id, commence_time, home_team, away_team) "
             "VALUES (%s, %s, %s, %s, %s)",
             MATCHES,
+        )
+        cur.executemany(
+            "INSERT INTO match_officials (match_id, referee, seen_at) VALUES (%s, %s, %s)",
+            OFFICIALS,
         )
         start = 0
         for position, burned in sorted(BURNED.items()):

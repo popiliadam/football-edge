@@ -32,7 +32,7 @@ Spec'ten (değerler aynen; her görevin gereksinimine örtük olarak dahildir):
 - Yük: `match_date` (ISO `YYYY-MM-DD`) ve `kickoff_local` (`HH:MM`, İstanbul); anahtar `ev|deplasman|YYYY-MM-DD`; eski anahtarlı satırlara dokunulmaz (§3.1).
 - "tarih/saati okunamayan satır "sessizce atlandı" sayılır → `ContractViolation`" (§3.2).
 - `collect_tff` gözlemleri yazdıktan sonra AYNI `now` ile `link_officials` çağırır; bağlama gözlem tablosundan OKUMAZ (§3.3).
-- Lig süzgeci: `config/tff_teams.yaml` `league_label_contains: "Süper Lig"`; hedef lig `league_id: tur.1`; diğer bloklar sayılır, işlenmez (§4).
+- Lig süzgeci: `config/tff_teams.yaml` `league_label_contains: "Süper Lig"` etikette TAM ifade olarak (`(?!\w)` — "Süper Ligi" eşleşmez), etiket `label.replace("İ", "i").casefold()` ile katlanmış, kadın/genç dışlama sözcüğü (`kadın`, `kadin`, `u19`, `u21`, `gelişim`, `gelisim`) taşımadan geçmeli — `TeamMap.matches_league` (controller düzeltmesi C1; spec §4'e Görev 1 Step 1 işler); hedef lig `league_id: tur.1`; diğer bloklar sayılır, işlenmez (§4).
 - Ad eşlemesi: YAML `teams:` anahtarı `normalise_team(TFF adı)`, değer API adı ya da `null`; YAML'da HİÇ olmayan TFF adı → `ContractViolation`; değeri `null` olan takım içeren maç → `awaiting_alias` sayacı (loglanır, hata değil) (§4 + plan düzeltmesi).
 - Maç bulma: `matches.league_id='tur.1'`, `home_team`, `away_team` eşit ve `commence_time`ın **Europe/Istanbul takvim günü** = `match_date`; tek eşleşme → bağlanır; sıfır → "DB'de yok" sayacı; birden çok → `ContractViolation` (§4).
 - Değişiklik kaydı: maçın SON kayıtlı hakemi bu turunkinden farklıysa (ya da hiç yoksa) `(match_id, referee, seen_at=now)` eklenir; aynıysa yazılmaz; X→Y→X üç satır (§4).
@@ -71,6 +71,10 @@ Proje süreci (HANDOFF/bellek; her görevde):
 - **MUTASYON KALIBI** (her "Mutasyon kanıtı" adımı bu dört satırı koşar; F/OLD/NEW/test komutu adımda yazılıdır):
   yedekle → OLD'u (dosyada TAM BİR KEZ geçmeli) NEW'le değiştir → testi koş (beklenen `exit=1`, adı geçen test kırmızı) →
   yedeği geri koy → `cmp` sessizse geri konmuştur. `rm`, `git checkout -- <yol>`, `git restore` KULLANILMAZ.
+- **Satır numaraları YAKLAŞIKTIR** (`dosya:NN-MM`): plan yazımındaki tabana (`00582bf`) göre ölçüldü; önceki
+  görevlerin eklemeleri onları kaydırır (ör. Görev 4'teki `tff.py`/`test_tff.py` numaraları Görev 2 ÖNCESİdir).
+  Esas olan metin çapasıdır (adımda alıntılanan satır, sembol ya da `count == 1` ile aranan OLD metni); numara ile
+  çapa ayrışırsa çapaya göre çalışılır.
 - Immutability: paylaşılan/girdi objesi mutate edilmez (yerel liste/dict doldurmak serbest). Fonksiyonlar < 50 satır.
 - `git add` dosya ADIYLA (`-A`/`.` yok). Commit: `<type>: <açıklama>` (type ∈ feat, fix, refactor, docs, test, chore, perf, ci),
   boş satır, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -85,14 +89,19 @@ Proje süreci (HANDOFF/bellek; her görevde):
 Spec'in ima ettiği ama görev testlerinin kendiliğinden kapsamayacağı, kullanıcıyı en olası ısıracak beş girdi; her
 birinin testi sahibi görevin adımındadır:
 
-1. **Adında "Süper Lig" geçen başka bir TFF bloğu** (ör. "Turkcell Kadın Futbol Süper Ligi"): alt dize süzgecinden
-   geçer, takım adları YAML'da yoktur → `ContractViolation` mesajı lig ETİKETİNİ ve TFF adını taşımalı ki düzeltme
-   (YAML'a satır mı, süzgeç mi) ilk bakışta görülsün; sessiz bağlama yok (Görev 4, `test_review_focus_an_unknown_team_in_another_super_lig_block_is_red_with_its_label`).
+1. **Adında "Süper Lig" geçen başka bir TFF bloğu** (ör. "Turkcell Kadın Futbol Süper Ligi"): C1 süzgeci (tam
+   ifade + kadın/genç dışlama + `İ` katlaması) onu LİG DIŞI sayar, işlemez — YAML'da OLAN bir adla (kadın takımı
+   "GALATASARAY A.Ş.") aynı gün aynı rakiple oynansa bile erkek maçına bağlanmaz; `lig dışı` sayacına girer ve
+   `collect-daily` logunda görünür (Görev 4, `test_review_focus_another_super_lig_block_is_counted_not_processed`;
+   süzgecin kendisi Görev 1, `test_only_the_mens_top_league_block_is_processed`). Dışlama sözcüğü taşımayan yeni bir
+   "Süper Lig" bloğu yine işlenir: YAML'da olmayan adı `ContractViolation`dır ve mesaj lig ETİKETİNİ taşır (kalan
+   risk: "Kapının ölçmedikleri" (c)).
 2. **Aynı maç turda iki kez** (sayfa iki blokta ya da yinelenen satır): aynı hakemle tek bağlantı; farklı hakemle
    `ContractViolation` — hangi atamanın gerçek olduğu tahmin edilmez (Görev 4, iki `test_review_focus_the_same_match_*`).
 3. **Yayımlanamayan hakem metni** (> 80 karakter, `<`, `>`, `http`): DB'nin `check`i ya da `verify-snapshot`in H2c'si
    ona ilk kez dışa aktarımda takılırsa BÜTÜN site dışa aktarımı durur; bağlayıcı bunu yazmadan önce adıyla kırmızı
-   yapar (Görev 4, `test_review_focus_an_unpublishable_referee_text_is_red_before_the_db`).
+   yapar (Görev 4, `test_review_focus_an_unpublishable_referee_text_is_red_before_the_db`; bağlayıcının sınırı H2c ve
+   `$defs.person` ile Görev 5 `test_the_linkers_referee_limits_are_the_snapshot_rules`te bağlı).
 4. **Ev/deplasman TFF ile API arasında ters**: tahminle bağlanmaz (yanlış hakemden kötü), "DB'de yok" sayılır, ama her
    hafta sessizce kaybolmasın diye adlarıyla UYARI loglanır (Görev 4, `test_review_focus_reversed_home_and_away_is_not_linked_but_warned`).
 5. **`referee` anahtarı olmayan bayat anlık görüntü** (eski dışa aktarım, yeniden üretilmemiş fixture): sayfa hakem
@@ -101,8 +110,9 @@ birinin testi sahibi görevin adımındadır:
 **Kapının ölçmedikleri (bu plan; Görev 7 faz HANDOFF'una yazar):** (a) YAML'daki API adlarının `tur.1`de gerçekten
 görüldüğü (`test_every_mapped_api_name_was_seen_in_tur1`) yalnız veritabanı adresiyle koşar — kapıda ve CI'da adıyla
 SKIP; (b) TFF tarih hücresinin şekli 2026-09-19 fixture'ından ölçüldü — TFF'nin YANLIŞ tarih basması ölçülmez;
-(c) `league_label_contains` alt dizedir: başka bir "Süper Lig" bloğunda YAML'da OLAN bir adla (ör. kadın takımı
-"GALATASARAY A.Ş.") aynı gün aynı rakiple oynanan maç yanlış maça bağlanabilir; (d) ters ev/deplasman yalnız uyarıdır,
+(c) lig süzgeci C1 ile daraltıldı (tam ifade + kadın/genç dışlama); kalan risk: TFF dışlama sözcüğü taşımayan yeni
+bir "Süper Lig" bloğu açarsa o blok işlenir ve YAML'da OLAN bir adla aynı gün aynı rakiple oynanan maç yanlış maça
+bağlanabilir (YAML'da olmayan ad kırmızıdır, sessiz değil); (d) ters ev/deplasman yalnız uyarıdır,
 `collect-daily` kırmızı olmaz; (e) check-out derlenmiş sayfada hakem satırının VARLIĞINI/YOKLUĞUNU ölçmez (bileşen
 birim testi + ad listesi ölçer; satır `data-fe` taşımaz); (f) `verify-snapshot` hakemin yalnız `tur.1` maçında
 durduğunu sınamaz (tek yazar `link_officials` yalnız `tur.1`e yazar); (g) canlıya uygulama ve advisors (HANDOFF Adım 12);
@@ -112,41 +122,58 @@ turunun `now`udur, TFF'nin atamayı yayımladığı an değil — tur maçtan so
 
 ---
 
-## Controller düzeltmesi C1 (2026-10-02, plan incelemesi) — lig süzgeci daraltıldı
+## Controller düzeltmesi C1 (2026-10-02, plan incelemesi; ön tarama Ç1–Ç11 ile güncellendi) — lig süzgeci daraltıldı
 
-Taslaktaki `league_label_contains in label` alt dize karşılaştırması "Kadın Futbol Süper **Ligi**" bloğunu da
-işlerdi (kadın takımı "GALATASARAY A.Ş." YAML'da OLAN bir adla aynı gün aynı rakiple oynarsa yanlış maça bağlanırdı).
-Bu plan boyunca süzgeç `TeamMap.matches_league(label)`tir (yukarıdaki kod bloklarında uygulandı):
-- ifade TAM eşleşir: `re.escape("süper lig") + r"(?!\w)"`, `casefold` üzerinde — "Süper Ligi" eşleşmez;
+Taslaktaki alt dize karşılaştırması (etikette `league_label_contains` ARANMASI) "Kadın Futbol Süper **Ligi**"
+bloğunu da işlerdi (kadın takımı "GALATASARAY A.Ş." YAML'da OLAN bir adla aynı gün aynı rakiple oynarsa yanlış maça
+bağlanırdı). Bu plan boyunca süzgeç `TeamMap.matches_league(label)`tir; aşağıdaki kod bloklarında (Görev 1 Step 6 ve
+Görev 4 Step 5'in `officials.py`si — iki blokta AYNI metin) uygulandı:
+- etiket katlanır: `label.replace("İ", "i").casefold()` — yalnız `casefold` büyük `İ`yi `i̇`ye (i + U+0307) çevirir
+  ve büyük harfli "TRENDYOL SÜPER LİG" etiketi sessizce "lig dışı" olurdu (spec §1 "sessiz kayıp yok");
+- ifade TAM eşleşir: `re.escape(self.league_label_contains.casefold()) + r"(?!\w)"` — "Süper Ligi" eşleşmez;
 - `officials.py` modül sabiti `_EXCLUDED_LEAGUE_WORDS = ("kadın", "kadin", "u19", "u21", "gelişim", "gelisim")`
-  içeren etiket işlenmez; `officials.py` başında `import re` gerekir.
-- **Görev 1'e test eklenir** (`tests/test_officials.py`, `load_team_map(TEAMS_YAML)` ile):
+  (`TeamMap`ten önce) sözcüklerinden birini taşıyan etiket işlenmez; `officials.py` başında `import re` vardır.
+- Spec §4'e Görev 1 Step 1'in 5. düzenlemesi işler (spec bağlayıcıdır).
+- **Görev 1 testi** (`tests/test_officials.py`, Görev 1 Step 3'ün kod bloğunda AYNI metinle; `load_team_map(TEAMS_YAML)`):
   ```python
   @pytest.mark.parametrize(
       ("label", "expected"),
       [
           ("Trendyol Süper Lig Adnan Süvari Sezonu", True),
+          ("TRENDYOL SÜPER LİG", True),
           ("Kadın Futbol Süper Ligi", False),
-          ("KADIN FUTBOL SÜPER LİGİ", False),
+          ("Kadın Futbol Süper Lig", False),
+          ("KADIN FUTBOL SÜPER LIG", False),
           ("Süper Lig U19 Gelişim Ligi", False),
+          ("Süper Ligi Play-off", False),
           ("Trendyol 1. Lig", False),
       ],
   )
   def test_only_the_mens_top_league_block_is_processed(label: str, expected: bool) -> None:
+      """Controller düzeltmesi C1: tam ifade, `İ` katlaması, kadın/genç dışlama."""
       assert load_team_map(TEAMS_YAML).matches_league(label) is expected
   ```
-  Mutasyon: `(?!\w)` kaldırılırsa "Kadın Futbol Süper Ligi" satırı dışlama listesi yüzünden yine False kalır —
-  bu yüzden İKİ ayrı mutasyon koşulur: (a) `_EXCLUDED_LEAGUE_WORDS = ()` → "Kadın…" satırları kırmızı;
-  (b) hem dışlama boş hem `(?!\w)` yok → "Süper Lig U19…" dışında da kırmızı; (c) `(?!\w)` yok ve dışlama
-  dolu → yeni bir parametre `("Süper Ligi Play-off", False)` kırmızı — bu parametreyi de listeye ekle.
-- Görev 7'de DEFERRED 9.7b metni "alt dize" değil "C1 ile daraltıldı (tam ifade + kadın/genç dışlama); kalan risk:
-  TFF dışlama sözcüğü taşımayan yeni bir 'Süper Lig' bloğu açarsa" olarak yazılır; Review Focus (c) aynı anlamda.
+- **Ölçüm** (plan düzeltmesinde `matches_league` gövdesi ayrı betikte KOŞULDU, 2026-10-02): asıl kodda sekiz
+  parametrenin sekizi beklenen sonucu verir. Mutasyonlar (Görev 1 Step 8 (c)–(e), her biri TEK değişiklik):
+
+  | Mutasyon | Kırmızı parametreler (gerçek) | Yeşil kalan |
+  |---|---|---|
+  | (c) `_EXCLUDED_LEAGUE_WORDS = ()` | "Kadın Futbol Süper Lig", "KADIN FUTBOL SÜPER LIG", "Süper Lig U19 Gelişim Ligi" → 3 failed | 5 — "Kadın Futbol Süper Ligi" `(?!\w)` yüzünden False kalır |
+  | (d) `(?!\w)` kaldırılır | "Süper Ligi Play-off" → 1 failed | 7 — "Kadın Futbol Süper Ligi" dışlama yüzünden False kalır |
+  | (e) `.replace("İ", "i")` kaldırılır | "TRENDYOL SÜPER LİG" → 1 failed | 7 |
+
+  "Kadın Futbol Süper Ligi" İKİ kuralla korunur; tek mutasyon onu kırmızı yapmaz (bilinçli: ikisi de ayrı
+  parametreyle kanıtlanır). "KADIN FUTBOL SÜPER LIG" (ASCII `I`) `casefold` ile "kadin" olur → `kadin` sözcüğünü,
+  "Kadın Futbol Süper Lig" `kadın`ı kanıtlar.
+- Görev 7'de DEFERRED 9.7b ve faz HANDOFF "ölçmedikleri" 3. maddesi "alt dize" değil "C1 ile daraltıldı (tam ifade +
+  kadın/genç dışlama); kalan risk: TFF dışlama sözcüğü taşımayan yeni bir 'Süper Lig' bloğu açarsa" anlamıyla
+  yazılır; bu planın "Kapının ölçmedikleri" (c) ve Review Focus 1 aynı anlamda.
 
 ## Dosya yapısı
 
 | Dosya | Durum | Sorumluluk |
 |---|---|---|
-| `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md` | Değişir (G1) | §4 `awaiting_alias` + dönüş sayıları; §6 `oneOf` → `type` listesi; §9/2 gün örneği |
+| `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md` | Değişir (G1) | §4 lig süzgeci (C1: tam ifade + kadın/genç dışlama + `İ` katlaması), `awaiting_alias` + dönüş sayıları; §6 `oneOf` → `type` listesi; §9/2 gün örneği |
 | `config/tff_teams.yaml` | Yeni (G1) | TFF adı (normalise) → API adı | null; lig etiketi ve hedef lig |
 | `src/football_edge/officials.py` | Yeni (G1), büyür (G4) | YAML yükleyici; saf eşleme (`plan_links`); DB okuma/yazma (`find_candidates`, `link_officials`) |
 | `tests/test_officials.py` | Yeni (G1), büyür (G4) | YAML biçimi, fixture kapsamı, canlı ad testi (SKIP'li); eşleme birim testleri |
@@ -186,7 +213,7 @@ tüketir) → G6 (G5'in tipini tüketir) → G7. Önerilen sıradan sapma yok; t
 ### Task 1: Spec düzeltmesi, `config/tff_teams.yaml` ve yükleyicisi
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md:40-48` (§4), `:77-78` (§6), `:98-99` (§9/2)
+- Modify: `docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md:38-48` (§4 lig süzgeci ve eşleme), `:77-78` (§6), `:98-99` (§9/2)
 - Create: `config/tff_teams.yaml`
 - Create: `src/football_edge/officials.py`
 - Test (Create): `tests/test_officials.py`
@@ -197,15 +224,20 @@ tüketir) → G6 (G5'in tipini tüketir) → G7. Önerilen sıradan sapma yok; t
   `football_edge.db.connect(dsn: str | None = None) -> psycopg.Connection[Any]`.
 - Produces: `football_edge.officials.TFF_TEAMS_PATH: Path` (= `Path("config/tff_teams.yaml")`);
   `@dataclass(frozen=True) class TeamMap(league_label_contains: str, league_id: str, teams: Mapping[str, str | None])`;
+  `TeamMap.matches_league(label: str) -> bool` (etiket `league_label_contains`ı `İ`→`i` katlamasıyla TAM ifade
+  olarak taşır ve kadın/genç dışlama sözcüğü taşımaz — controller düzeltmesi C1; Görev 4 `plan_links` ve
+  `link_officials` bunu çağırır);
   `load_team_map(path: Path = TFF_TEAMS_PATH) -> TeamMap` (biçim dışı → `ValueError`).
 
-- [ ] **Step 1: Spec'i düzelt (üç yer)**
+- [ ] **Step 1: Spec'i düzelt (beş düzenleme)**
 
 Gerekçe: (i) kullanıcı kararı — `null` değerli takım `awaiting_alias`; (ii) depodaki şema doğrulayıcısı
 (`src/football_edge/site/schema.py` `SUPPORTED`) `oneOf` desteklemez, bilinmeyen anahtar kelime `SchemaError`dır —
 aynı anlam `type: ["string", "null"]` ile kurulur (B-1'in `round`u `["object", "null"]` aynı deseni kullanır);
 (iii) İstanbul UTC+3'tür: 23:30 İstanbul UTC'de gece yarısını GEÇMEZ (20:30 UTC); ayrışma 00:00–02:59 İstanbul
-başlamalarındadır.
+başlamalarındadır; (iv) controller düzeltmesi C1 — §4'ün "içeren" süzgeci "Kadın Futbol Süper Ligi"ni de işlerdi;
+spec bağlayıcı olduğu için daraltılmış kural (tam ifade + kadın/genç dışlama + `İ` katlaması) spec'e yazılır (ilk
+düzenleme; hedef metin spec'te tam bir kez geçer — plan düzeltmesinde ölçüldü).
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 uv run python - <<'PY'
@@ -214,6 +246,16 @@ from pathlib import Path
 path = Path("docs/superpowers/specs/2026-10-02-tff-hakem-site-design.md")
 text = path.read_text(encoding="utf-8")
 edits = [
+    (
+        "- **Lig süzgeci:** yalnız lig etiketi `config/tff_teams.yaml` `league_label_contains` (\"Süper Lig\") içeren bloklar;\n"
+        "  hedef lig `tur.1`. Diğer bloklar sayılır, işlenmez.\n",
+        "- **Lig süzgeci:** lig etiketi `config/tff_teams.yaml` `league_label_contains` (\"Süper Lig\") ifadesini TAM\n"
+        "  ifade olarak taşıyan bloklar (plan düzeltmesi, controller düzeltmesi C1, 2026-10-02): etiket\n"
+        "  `label.replace(\"İ\", \"i\").casefold()` ile katlanır (büyük harfli \"SÜPER LİG\" de eşleşir); ifadeden sonra\n"
+        "  harf/rakam gelmez (`(?!\\w)` — \"Süper Ligi\" eşleşmez); `kadın`, `kadin`, `u19`, `u21`, `gelişim`, `gelisim`\n"
+        "  sözcüklerinden birini taşıyan etiket (kadın/genç ligi) işlenmez. Hedef lig `tur.1`. Diğer bloklar sayılır,\n"
+        "  işlenmez.\n",
+    ),
     (
         "  (yapılandırma eksiği; sessiz geçmez; düzeltme: YAML'a satır).\n",
         "  (yapılandırma eksiği; sessiz geçmez; düzeltme: YAML'a satır).\n"
@@ -332,6 +374,24 @@ def test_every_super_lig_name_in_the_tff_fixture_has_an_entry() -> None:
 
 
 @pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Trendyol Süper Lig Adnan Süvari Sezonu", True),
+        ("TRENDYOL SÜPER LİG", True),
+        ("Kadın Futbol Süper Ligi", False),
+        ("Kadın Futbol Süper Lig", False),
+        ("KADIN FUTBOL SÜPER LIG", False),
+        ("Süper Lig U19 Gelişim Ligi", False),
+        ("Süper Ligi Play-off", False),
+        ("Trendyol 1. Lig", False),
+    ],
+)
+def test_only_the_mens_top_league_block_is_processed(label: str, expected: bool) -> None:
+    """Controller düzeltmesi C1: tam ifade, `İ` katlaması, kadın/genç dışlama."""
+    assert load_team_map(TEAMS_YAML).matches_league(label) is expected
+
+
+@pytest.mark.parametrize(
     ("text", "needle"),
     [
         ("league_id: tur.1\nteams: {galatasaray: Galatasaray}\n", "üst anahtarlar"),
@@ -432,6 +492,7 @@ adı)`, değer bu sezon `matches`te (`league_id = tur.1`) GÖRÜLEN The Odds API
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -443,18 +504,21 @@ from football_edge.naming import normalise_team
 
 TFF_TEAMS_PATH = Path("config/tff_teams.yaml")
 _TOP_KEYS = frozenset({"league_label_contains", "league_id", "teams"})
+# Controller düzeltmesi C1: bu sözcüklerden birini taşıyan etiket kadın/genç ligidir, işlenmez.
+_EXCLUDED_LEAGUE_WORDS = ("kadın", "kadin", "u19", "u21", "gelişim", "gelisim")
 
 
 @dataclass(frozen=True)
 class TeamMap:
-    league_label_contains: str  # bu metni İÇEREN TFF lig bloğu işlenir
+    league_label_contains: str  # bu ifadeyi TAM ifade olarak TAŞIYAN TFF lig bloğu işlenir (C1)
     league_id: str  # `matches.league_id` hedefi
     teams: Mapping[str, str | None]  # normalise_team(TFF adı) → API adı | None
 
     def matches_league(self, label: str) -> bool:
         """Etiket `league_label_contains`ı TAM ifade olarak taşır ("Süper Ligi" eşleşmez) ve
-        kadın/genç ligi bloğu değildir (controller düzeltmesi C1)."""
-        folded = label.casefold()
+        kadın/genç ligi bloğu değildir (controller düzeltmesi C1). `İ` önce `i`ye katlanır: yalnız
+        `casefold` onu `i̇` yapar ve büyük harfli "SÜPER LİG" sessizce lig dışı kalırdı."""
+        folded = label.replace("İ", "i").casefold()
         if any(word in folded for word in _EXCLUDED_LEAGUE_WORDS):
             return False
         phrase = re.escape(self.league_label_contains.casefold()) + r"(?!\w)"
@@ -486,10 +550,11 @@ def _checked_teams(path: Path, teams: Mapping[Any, Any]) -> dict[str, str | None
 - [ ] **Step 7: Koş — yeşil**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_officials.py -q -rs`
-Expected: `8 passed, 1 skipped`; SKIP satırı `SKIP: canlı ad doğrulaması (DATABASE_URL yok)`.
+Expected: `16 passed, 1 skipped` (eighteen 1 + every_key 1 + fixture 1 + C1 lig süzgeci 8 parametre + malformed
+5 parametre = 16; canlı ad testi SKIP); SKIP satırı `SKIP: canlı ad doğrulaması (DATABASE_URL yok)`.
 Sonra: `uv run mypy src scripts` → `Success`; `uv run ruff check src tests scripts` → temiz.
 
-- [ ] **Step 8: Mutasyon kanıtı (iki)**
+- [ ] **Step 8: Mutasyon kanıtı (beş)**
 
 (a) Anahtar kuralı:
 ```bash
@@ -509,6 +574,40 @@ PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_officials.py -q -k "fixture o
 cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
 ```
 Expected: `exit=1`, iki test kırmızı (`eighteen` 17 ≠ 18; `fixture` `['göztepe']` eksik); `GERI-KONDU`.
+
+(c)–(e) Lig süzgeci (controller düzeltmesi C1; beklentiler plan düzeltmesinde `matches_league` gövdesi koşularak
+ölçüldü — C1 bölümündeki tablo). Her biri TEK değişikliktir; dosya her birinden sonra geri konur.
+
+(c) Kadın/genç dışlama listesi boşalırsa:
+```bash
+F=src/football_edge/officials.py; B=$(mktemp -d); cp "$F" "$B/orig"
+PYTHONDONTWRITEBYTECODE=1 uv run python -c 'import pathlib,sys;p=pathlib.Path(sys.argv[1]);t=p.read_text(encoding="utf-8");assert t.count(sys.argv[2])==1,"OLD tekil değil";p.write_text(t.replace(sys.argv[2],sys.argv[3]),encoding="utf-8")' "$F" '_EXCLUDED_LEAGUE_WORDS = ("kadın", "kadin", "u19", "u21", "gelişim", "gelisim")' '_EXCLUDED_LEAGUE_WORDS: tuple[str, ...] = ()'
+PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_officials.py -q -k mens_top_league; echo "exit=$?"
+cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
+```
+Expected: `exit=1`, `3 failed, 5 passed, 9 deselected`; kırmızılar "Kadın Futbol Süper Lig", "KADIN FUTBOL SÜPER LIG", "Süper Lig U19
+Gelişim Ligi" parametreleri (pytest kimliklerinde Türkçe harfler kaçışlı görünür: `Kad\u0131n Futbol S\xfcper Lig-False`). "Kadın
+Futbol Süper Ligi" YEŞİL kalır (`(?!\w)` onu ayrıca durdurur); `GERI-KONDU`.
+
+(d) Tam ifade sınırı `(?!\w)` kalkarsa:
+```bash
+F=src/football_edge/officials.py; B=$(mktemp -d); cp "$F" "$B/orig"
+PYTHONDONTWRITEBYTECODE=1 uv run python -c 'import pathlib,sys;p=pathlib.Path(sys.argv[1]);t=p.read_text(encoding="utf-8");assert t.count(sys.argv[2])==1,"OLD tekil değil";p.write_text(t.replace(sys.argv[2],sys.argv[3]),encoding="utf-8")' "$F" ' + r"(?!\w)"' ''
+PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_officials.py -q -k mens_top_league; echo "exit=$?"
+cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
+```
+Expected: `exit=1`, `1 failed, 7 passed, 9 deselected`; kırmızı yalnız "Süper Ligi Play-off" (dışlama sözcüğü yok, `(?!\w)`
+olmadan "süper lig" + "i" eşleşir). "Kadın Futbol Süper Ligi" YEŞİL kalır (dışlama listesi durdurur); `GERI-KONDU`.
+
+(e) `İ` katlaması kalkarsa:
+```bash
+F=src/football_edge/officials.py; B=$(mktemp -d); cp "$F" "$B/orig"
+PYTHONDONTWRITEBYTECODE=1 uv run python -c 'import pathlib,sys;p=pathlib.Path(sys.argv[1]);t=p.read_text(encoding="utf-8");assert t.count(sys.argv[2])==1,"OLD tekil değil";p.write_text(t.replace(sys.argv[2],sys.argv[3]),encoding="utf-8")' "$F" 'folded = label.replace("İ", "i").casefold()' 'folded = label.casefold()'
+PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_officials.py -q -k mens_top_league; echo "exit=$?"
+cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
+```
+Expected: `exit=1`, `1 failed, 7 passed, 9 deselected`; kırmızı yalnız "TRENDYOL SÜPER LİG" (`casefold` → `süper li̇g`, ifade
+eşleşmez → büyük harfli erkek ligi sessizce "lig dışı" olurdu); `GERI-KONDU`.
 
 - [ ] **Step 9: (İsteğe bağlı, controller — canlı salt okuma izni varsa) canlı ad testi**
 
@@ -601,7 +700,10 @@ def test_a_row_whose_date_or_kickoff_cannot_be_read_is_a_loss_not_a_skip(old: st
 - [ ] **Step 2: Koş — kırmızı**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_tff.py -q -k "istanbul_date or dated or cannot_be_read"`
-Expected: `KeyError: 'match_date'` (iki test) ve `DID NOT RAISE <class 'football_edge.collector.ContractViolation'>` (dört parametre).
+Expected: `test_every_row_carries_its_istanbul_date_and_kickoff` → `KeyError: 'match_date'`;
+`test_the_entity_key_is_dated_so_next_season_cannot_overwrite_this_one` → `AssertionError` (anahtar hâlâ tarihsiz
+`'kasimpaşa|tümosan konyaspor'`; yük okunmaz, KeyError DEĞİL); `test_a_row_whose_date_or_kickoff_cannot_be_read_…`
+→ `DID NOT RAISE <class 'football_edge.collector.ContractViolation'>` (dört parametre).
 
 - [ ] **Step 3: En küçük uygulama — `src/football_edge/collectors/tff.py`**
 
@@ -1152,15 +1254,15 @@ Expected: `FAIL:` yok; üç adlı SKIP; `KAPI YEŞİL`. (İnceleme: kabuk taşı
 
 **Files:**
 - Modify: `src/football_edge/officials.py` (Görev 1'in dosyası — aşağıdaki TAM içerikle değiştirilir)
-- Modify: `src/football_edge/collectors/tff.py:30-33` (import), `:223-255` (`collect_tff`)
+- Modify: `src/football_edge/collectors/tff.py` import bloğu (G2 öncesi `:30-33`; G2'den sonra yaklaşık `:32-35` — çapa: `from football_edge.observations import write_observations`), `collect_tff` (G2 öncesi `:223-255`; G2 ekledikçe kayar — çapa: `def collect_tff(`)
 - Modify (test): `tests/test_officials.py` (import bloğu + dosya sonuna testler)
-- Modify (test): `tests/test_tff.py:18-33` (import), `:254-347` (üç toplama testi `links` fixture'ı alır) + yeni test
+- Modify (test): `tests/test_tff.py:18-33` (import; G2 import bloğuna dokunmaz), üç toplama testi (G2 öncesi `:254-347`; G2'nin ~50 satırlık eklemesinden sonra kayar — çapa: `def test_collect_tff_`) `links` fixture'ı alır + yeni test
 - Create (test): `tests/test_site_officials_db.py`
 - Modify: `verify.sh:161` (`EXPECTED_MIN_SITEDB=37` → `40`)
 - Modify: `scripts/sandbox_db.sh` `DEFAULT_TESTS` (`tests/test_site_officials_db.py` eklenir)
 
 **Interfaces:**
-- Consumes: Görev 1 `TeamMap`, `load_team_map`, `TFF_TEAMS_PATH`; Görev 2 yükü (`payload["match_date"]` ISO); Görev 3 tablosu `match_officials(match_id, referee, seen_at)`; `ContractViolation`, `Observation`, `normalise_team`.
+- Consumes: Görev 1 `TeamMap` (+ `TeamMap.matches_league`, C1), `load_team_map`, `TFF_TEAMS_PATH`; Görev 2 yükü (`payload["match_date"]` ISO); Görev 3 tablosu `match_officials(match_id, referee, seen_at)`; `ContractViolation`, `Observation`, `normalise_team`.
 - Produces (hepsi `football_edge.officials`):
   - `ISTANBUL: ZoneInfo`, `REFEREE_MAX = 80`
   - `@dataclass(frozen=True) Assignment(league: str, home: str, away: str, referee: str, match_date: date)`
@@ -1313,11 +1415,14 @@ def test_the_fixture_round_with_the_committed_yaml_is_red_nowhere() -> None:
 # ── Review Focus ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_review_focus_an_unknown_team_in_another_super_lig_block_is_red_with_its_label() -> None:
+def test_review_focus_another_super_lig_block_is_counted_not_processed() -> None:
+    """Controller düzeltmesi C1: kadın ligi bloğu YAML'da OLAN adlarla aynı gün aynı rakiple
+    oynasa bile erkek maçına bağlanmaz — lig dışı sayılır, işlenmez."""
     women = "Turkcell Kadın Futbol Süper Ligi"
+    games = [_game("m1", "Trabzonspor", "Galatasaray", "2026-09-19T17:00:00+00:00")]
+    plan = plan_links([_assign(*TS_GS, "2026-09-19", league=women)], games, MAP)
 
-    with pytest.raises(ContractViolation, match=women):
-        plan_links([_assign("ABB FOMGET GSK", "GALATASARAY A.Ş.", "2026-09-19", league=women)], [], MAP)
+    assert (plan.links, plan.other_league) == ((), 1)
 
 
 def test_review_focus_the_same_match_twice_with_one_referee_links_once() -> None:
@@ -1376,7 +1481,7 @@ from football_edge.officials import LinkResult, TeamMap
 from tests.fake_obs_db import FakeObservationDb
 from tests.fake_sources import write_robots
 ```
-`_write_sources_yaml`dan (`:233`) önce fixture:
+`def _write_sources_yaml(`dan önce (G2 öncesi `:233`; G2'den sonra kayar — çapa esastır) fixture:
 ```python
 @pytest.fixture
 def links(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -1564,6 +1669,7 @@ tarihinin Europe/Istanbul takvim günüyle bulunur; saat uyuşmazlığı eşleme
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -1587,6 +1693,8 @@ ISTANBUL = ZoneInfo("Europe/Istanbul")
 REFEREE_MAX = 80
 _UNSAFE = ("http", "<", ">")
 _TOP_KEYS = frozenset({"league_label_contains", "league_id", "teams"})
+# Controller düzeltmesi C1: bu sözcüklerden birini taşıyan etiket kadın/genç ligidir, işlenmez.
+_EXCLUDED_LEAGUE_WORDS = ("kadın", "kadin", "u19", "u21", "gelişim", "gelisim")
 
 _CANDIDATES = (
     "SELECT id, home_team, away_team, commence_time FROM matches "
@@ -1603,14 +1711,15 @@ _Key = tuple[str, str, date]  # (API ev adı, API deplasman adı, İstanbul gün
 
 @dataclass(frozen=True)
 class TeamMap:
-    league_label_contains: str  # bu metni İÇEREN TFF lig bloğu işlenir
+    league_label_contains: str  # bu ifadeyi TAM ifade olarak TAŞIYAN TFF lig bloğu işlenir (C1)
     league_id: str  # `matches.league_id` hedefi
     teams: Mapping[str, str | None]  # normalise_team(TFF adı) → API adı | None
 
     def matches_league(self, label: str) -> bool:
         """Etiket `league_label_contains`ı TAM ifade olarak taşır ("Süper Ligi" eşleşmez) ve
-        kadın/genç ligi bloğu değildir (controller düzeltmesi C1)."""
-        folded = label.casefold()
+        kadın/genç ligi bloğu değildir (controller düzeltmesi C1). `İ` önce `i`ye katlanır: yalnız
+        `casefold` onu `i̇` yapar ve büyük harfli "SÜPER LİG" sessizce lig dışı kalırdı."""
+        folded = label.replace("İ", "i").casefold()
         if any(word in folded for word in _EXCLUDED_LEAGUE_WORDS):
             return False
         phrase = re.escape(self.league_label_contains.casefold()) + r"(?!\w)"
@@ -1813,9 +1922,7 @@ def link_officials(
 ) -> LinkResult:
     """Turun ayrıştırılmış sonucunu bağlar ve değişeni `match_officials`e yazar; commit eder."""
     assignments = tuple(assignment_of(entry) for entry in observations)
-    days = sorted(
-        {item.match_date for item in assignments if team_map.matches_league(item.league)}
-    )
+    days = sorted({item.match_date for item in assignments if team_map.matches_league(item.league)})
     plan = plan_links(assignments, find_candidates(conn, team_map.league_id, days), team_map)
     latest = _latest_referees(conn, [match_id for match_id, _ in plan.links])
     rows = pending_writes(plan.links, latest, now)
@@ -1828,11 +1935,11 @@ def link_officials(
     )
 ```
 
-`src/football_edge/collectors/tff.py` — import bloğuna (`:30-33`, `observations` satırından önce):
+`src/football_edge/collectors/tff.py` — import bloğuna (G2 öncesi `:30-33`, yaklaşık; çapa: `from football_edge.observations import write_observations` satırından önce):
 ```python
 from football_edge.officials import TFF_TEAMS_PATH, link_officials, load_team_map
 ```
-`collect_tff` (`:223-255`) şöyle olur (docstring'in sonuna bir paragraf: "Gözlemler yazılıp commit edildikten
+`collect_tff` (G2 öncesi `:223-255`, yaklaşık; çapa: `def collect_tff(`dan fonksiyon sonuna) şöyle olur (docstring'in sonuna bir paragraf: "Gözlemler yazılıp commit edildikten
 sonra AYNI `now` ile `link_officials` çağrılır (spec 2026-10-02 §3.3): bağlama turun ayrıştırılmış sonucundan
 çalışır, gözlem tablosunu okumaz. Sayıları loglanır; yapılandırma ya da eşleme kırmızısı istisnadır."):
 ```python
@@ -1966,19 +2073,19 @@ commit'te kırar — ayrı görevlere bölünemez.
 
 **Files:**
 - Modify: `src/football_edge/site/inputs.py:65-71` (`MatchRow`), `:199-201` (`_match`)
-- Modify: `src/football_edge/site/export.py:72-80` (`_OFFICIALS`), `:332-358` (`_dump`)
-- Modify: `src/football_edge/site/derive.py:210-211` (`_match_json`)
+- Modify: `src/football_edge/site/export.py:77-80` (altına `_OFFICIALS`), `:325-360` (`_dump`)
+- Modify: `src/football_edge/site/derive.py:212` (`_match_json`, `"away": row.away,` satırının altı)
 - Modify: `web/contract/snapshot.schema.json:85`, `:94`, `:172`
 - Modify: `web/src/lib/snapshot-types.ts:61-75`
 - Modify: `tests/site_web_fixtures.py:7-11`, `:66-84`, `:97-141` → yeniden üret `web/fixtures/snapshot.fixture.web-full.json`, `web/fixtures/snapshot.fixture.web-empty.json`
 - Modify (betik): `web/fixtures/snapshot.fixture.json`, `web/fixtures/snapshot.fixture-record.json`
 - Modify: `tests/fake_site_db.py:20-35`, `:48-53` (altına yöntem), `:124-129` (dal)
 - Modify: `tests/site_builders.py:11-12` (import), `:144-166` (`export_dump`)
-- Test: `tests/test_site_derive.py`, `tests/test_site_export.py`, `tests/test_site_verify.py` (dosya sonlarına), `tests/test_site_contract.py:58-75`, `tests/test_site_e2e_db.py:55-63`, `:99-197`, `:208-216`
+- Test: `tests/test_site_derive.py`, `tests/test_site_export.py` (dosya sonlarına), `tests/test_site_verify.py` (`:19` import + dosya sonuna; Görev 4 ↔ H2c/şema eşlik testi dahil), `tests/test_site_contract.py:58-75`, `tests/test_site_e2e_db.py:56-64`, `:99-197`, `:208-216`
 - `verify.py`, `contract.py`, `__main__.py`, `schema.py`: değişmez (H2c her dizeyi zaten tarar — test aşağıda kanıtlar).
 
 **Interfaces:**
-- Consumes: Görev 3 `site.match_officials(match_id text, referee text)`.
+- Consumes: Görev 3 `site.match_officials(match_id text, referee text)`; Görev 4 `football_edge.officials._UNSAFE`, `REFEREE_MAX` (eşlik testi); `football_edge.site.verify._MARKUP`.
 - Produces: `MatchRow(id, league_id, commence_time, home, away, referee: str | None)`; döküm maç satırı 6 kolon `[id, league_id, commence_time, home, away, referee|null]` (`DUMP_VERSION` 1 kalır: döküm diske yazılmaz, iki türetim aynı commit'in kodudur); anlık görüntü maç nesnesi `"referee": str | null` (zorunlu); `$defs.person`; TS `Match.referee: string | null`; `FakeSiteDb.officials: Sequence[tuple[str, str, datetime, int]]` (match_id, referee, seen_at, id); `export_dump(..., referees: Mapping[str, str] | None = None)`.
 
 - [ ] **Step 1: Başarısız testleri yaz**
@@ -2021,8 +2128,23 @@ def test_the_export_carries_the_last_referee_seen_before_kickoff(tmp_path: Path)
     }
     assert any(q.startswith("SELECT match_id, referee FROM site.match_officials") for q in db.queries)
 ```
-`tests/test_site_verify.py` sonuna:
+`tests/test_site_verify.py` — import bloğunda `from football_edge.site import __main__ as cli` satırının (`:19`)
+ÖNÜNE (isort sırası: `football_edge` < `football_edge.site`):
 ```python
+from football_edge import officials
+```
+Dosya sonuna:
+```python
+def test_the_linkers_referee_limits_are_the_snapshot_rules() -> None:
+    """Görev 4'ün yazmadan önceki bekçisi (`officials._UNSAFE`, `REFEREE_MAX`), H2c'nin
+    (`verify._MARKUP`) ve `$defs.person`ın kopyasıdır; biri değişirse öteki sessizce
+    kaymasın (ön tarama Ç8)."""
+    person = SCHEMA["$defs"]["person"]
+
+    assert officials._UNSAFE == verify._MARKUP
+    assert (person["minLength"], person["maxLength"]) == (1, officials.REFEREE_MAX)
+
+
 @pytest.mark.parametrize("text", ["http://x.invalid", "a<b", "a>b"])
 def test_a_referee_carrying_a_link_or_markup_is_red(text: str) -> None:
     """H2c yeni alanı da tarar (verify.py değişmeden)."""
@@ -2062,7 +2184,7 @@ def test_a_match_without_the_referee_key_is_red() -> None:
 - [ ] **Step 2: Koş — kırmızı**
 
 Run: `PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_site_derive.py tests/test_site_export.py tests/test_site_verify.py tests/test_site_contract.py -q -k "referee or every_variant"`
-Expected: `TypeError: export_dump() got an unexpected keyword argument 'referees'` (derive), `TypeError: … unexpected keyword argument 'officials'` (export), verify H2c/biçim testleri `AssertionError` (alan şemada yok: hata yolu `<bilinmeyen anahtar #…>`, iletiler `bilinmeyen anahtar`), `drop` testi ve contract varyant testi `KeyError: 'referee'`.
+Expected: `TypeError: export_dump() got an unexpected keyword argument 'referees'` (derive), `TypeError: … unexpected keyword argument 'officials'` (export), verify H2c/biçim testleri `AssertionError` (alan şemada yok: hata yolu `<bilinmeyen anahtar #…>`, iletiler `bilinmeyen anahtar`), eşlik testi `test_the_linkers_referee_limits_are_the_snapshot_rules` `KeyError: 'person'` (şemada `$defs.person` henüz yok), `drop` testi ve contract varyant testi `KeyError: 'referee'`.
 
 - [ ] **Step 3: En küçük uygulama — Python**
 
@@ -2092,7 +2214,7 @@ def _match(row: Sequence[Any]) -> MatchRow:
 # Spec 2026-10-02 §5–6: maç başına başlamadan önce görülen SON atama (görünüm süzer).
 _OFFICIALS = "SELECT match_id, referee FROM site.match_officials ORDER BY match_id"
 ```
-`_dump` (`:325-360`) şöyle olur:
+`_dump` (`:325-360`, yaklaşık; çapa: `def _dump(`dan fonksiyon sonuna) şöyle olur:
 ```python
 def _dump(
     conn: psycopg.Connection[Any],
@@ -2132,7 +2254,7 @@ def _dump(
         record=record,
     )
 ```
-`src/football_edge/site/derive.py` `_match_json` — `"away": row.away,` satırının (`:211`) altına:
+`src/football_edge/site/derive.py` `_match_json` — `"away": row.away,` satırının (`:212`, yaklaşık) altına:
 ```python
         "referee": row.referee,
 ```
@@ -2265,7 +2387,7 @@ Expected: `web/fixtures/snapshot.fixture.web-full.json`, `web/fixtures/snapshot.
 
 - [ ] **Step 6: En küçük uygulama — uçtan uca test (`tests/test_site_e2e_db.py`)**
 
-`MATCHES` listesinin (`:55-63`) altına:
+`MATCHES` listesinin (`:56-64`, yaklaşık; çapa: `MATCHES = [`) altına:
 ```python
 # 0015 tohumları (spec 2026-10-02): M1'in ataması başlamadan önce (görünür), M2'ninki başlama ANINDA
 # (görünmez → null), holdout maçınınki taban altında (görünmez).
@@ -2310,7 +2432,7 @@ Run: `export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 24.21.0; pnpm -C
 Expected: tip hatası yok; bütün vitest testleri geçer.
 Kum havuzu: `FE_SANDBOX_PREFIX=fe-tff-hakem FE_SANDBOX_PORT=55620 scripts/sandbox_db.sh test tests/test_site_e2e_db.py` → geçer (Docker yoksa adıyla).
 
-- [ ] **Step 8: Mutasyon kanıtı (üç)**
+- [ ] **Step 8: Mutasyon kanıtı (dört)**
 
 (a) Dışa aktarım hakemi düşürürse:
 ```bash
@@ -2339,6 +2461,15 @@ PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_site_verify.py -q -k without_
 cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
 ```
 Expected: `exit=1`; `GERI-KONDU`.
+
+(d) Bağlayıcının sınırı şemadan ayrışırsa (eşlik testi, Ç8):
+```bash
+F=src/football_edge/officials.py; B=$(mktemp -d); cp "$F" "$B/orig"
+PYTHONDONTWRITEBYTECODE=1 uv run python -c 'import pathlib,sys;p=pathlib.Path(sys.argv[1]);t=p.read_text(encoding="utf-8");assert t.count(sys.argv[2])==1,"OLD tekil değil";p.write_text(t.replace(sys.argv[2],sys.argv[3]),encoding="utf-8")' "$F" '_UNSAFE = ("http", "<", ">")' '_UNSAFE = ("http", "<")'
+PYTHONDONTWRITEBYTECODE=1 uv run pytest tests/test_site_verify.py -q -k linkers_referee_limits; echo "exit=$?"
+cp "$B/orig" "$F"; cmp "$B/orig" "$F" && echo GERI-KONDU
+```
+Expected: `exit=1` (`officials._UNSAFE == verify._MARKUP` kırmızı); `GERI-KONDU`.
 
 - [ ] **Step 9: Commit**
 
@@ -2669,12 +2800,14 @@ edits = {
             "ve sayfada hakem satırı çıkmaz. Düzeltme: takımın ilk `tur.1` maçı `matches`e girince adı ölçerek YAML'a yaz,\n"
             "`test_every_mapped_api_name_was_seen_in_tur1`i veritabanı adresiyle koş. Ne zaman: `collect-daily` logunda\n"
             "`alias bekleyen` > 0 görüldüğünde.\n\n"
-            "**9.7b — Lig süzgeci alt dizedir (2026-10-02).** `league_label_contains: \"Süper Lig\"` adında \"Süper Lig\"\n"
-            "geçen BAŞKA bir bloğu da (ör. \"Turkcell Kadın Futbol Süper Ligi\") işler: YAML'da olmayan ad kırmızıdır\n"
-            "(sessiz değil, `collect-daily` düşer), ama YAML'da OLAN bir adla aynı gün aynı rakiple oynanan maç yanlış\n"
-            "maça bağlanabilir. Bugün ölçülen sayfada (2026-09-19) böyle blok yok. Ne zaman: `pageID=600`de ilk kez\n"
-            "ikinci bir \"Süper Lig\" etiketi görüldüğünde (kırmızı mesaj etiketi adıyla taşır) — süzgeç tam etiket\n"
-            "ya da dışlama listesiyle daraltılır (kullanıcı kararı).\n",
+            "**9.7b — Lig süzgeci C1 ile daraltıldı; kalan risk (2026-10-02).** `league_label_contains: \"Süper Lig\"`\n"
+            "etikette TAM ifade olarak aranır (`(?!\\w)` — \"Süper Ligi\" eşleşmez), etiket `İ`→`i` ile katlanır ve\n"
+            "`kadın`/`kadin`/`u19`/`u21`/`gelişim`/`gelisim` sözcüğü taşıyan blok işlenmez (plan, controller düzeltmesi\n"
+            "C1: tam ifade + kadın/genç dışlama). Kalan risk: TFF dışlama sözcüğü taşımayan yeni bir \"Süper Lig\" bloğu\n"
+            "açarsa o blok işlenir — YAML'da olmayan ad kırmızıdır (sessiz değil, `collect-daily` düşer), ama YAML'da OLAN\n"
+            "bir adla aynı gün aynı rakiple oynanan maç yanlış maça bağlanabilir. Bugün ölçülen sayfada (2026-09-19) böyle\n"
+            "blok yok. Ne zaman: `collect-daily` YAML'da olmayan bir adla kırmızı düşer ve mesajdaki lig etiketi erkekler\n"
+            "Süper Ligi değilse (mesaj etiketi adıyla taşır) — dışlama listesine sözcük eklenir (kullanıcı kararı).\n",
         ),
     ],
     "docs/HANDOFF.md": [
@@ -2711,7 +2844,8 @@ edits = {
             "1. YAML'daki API adlarının `tur.1`de görüldüğü (`test_every_mapped_api_name_was_seen_in_tur1`) yalnız\n"
             "   veritabanı adresiyle koşar — kapıda ve CI'da adıyla SKIP.\n"
             "2. TFF tarih hücresinin şekli 2026-09-19 fixture'ından ölçüldü; TFF'nin YANLIŞ tarih basması ölçülmez.\n"
-            "3. `league_label_contains` alt dizedir (DEFERRED 9.7b).\n"
+            "3. Lig süzgeci C1 ile daraltıldı (tam ifade + kadın/genç dışlama); kalan risk: TFF dışlama sözcüğü\n"
+            "   taşımayan yeni bir \"Süper Lig\" bloğu açarsa o blok işlenir (DEFERRED 9.7b).\n"
             "4. Ters ev/deplasman yalnız uyarıdır; `collect-daily` kırmızı olmaz.\n"
             "5. Check-out derlenmiş sayfada hakem satırının VARLIĞINI/YOKLUĞUNU ölçmez (bileşen testi + ad listesi ölçer;\n"
             "   satır `data-fe` taşımaz).\n"

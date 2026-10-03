@@ -67,6 +67,7 @@ export type Match = {
   commence_time: string;
   home: string;
   away: string;
+  referee: string | null;
   sealed: boolean;
   rounds: number;
   h2h: H2h;

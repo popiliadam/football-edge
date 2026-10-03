@@ -78,6 +78,8 @@ _RECORD = (
     f"SELECT {', '.join(name for name, _ in RECORD_COLUMNS)} FROM site.record "
     "ORDER BY publication_id"
 )
+# Spec 2026-10-02 §5–6: maç başına başlamadan önce görülen SON atama (görünüm süzer).
+_OFFICIALS = "SELECT match_id, referee FROM site.match_officials ORDER BY match_id"
 
 
 class ExportRefused(RuntimeError):
@@ -334,6 +336,7 @@ def _dump(
         matches = _all(cur, _MATCHES)
         quotes = _all(cur, _QUOTES, (cut.last_id,))
         record = _all(cur, _RECORD)
+        referees = {str(row[0]): str(row[1]) for row in _all(cur, _OFFICIALS)}
     quoted = {row[1] for row in quotes}
     shown = [row for row in matches if row[0] in quoted]
     if anchor.rows > 0 and not shown:
@@ -354,7 +357,7 @@ def _dump(
         ledger=cut,
         anchor=AnchorValue(anchor.path.name, anchor.rows, anchor.last_id, anchor.head),
         leagues=[(*row, league_slugs[str(row[0])]) for row in leagues],
-        matches=matches,
+        matches=[(*row, referees.get(str(row[0]))) for row in matches],
         quotes=quotes,
         record=record,
     )

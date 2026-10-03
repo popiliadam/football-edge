@@ -89,8 +89,9 @@ step "kaynak-politikası" env PYTHONPATH= uv run python -m football_edge.collect
 # büyütülmez, bkz. yukarıdaki "DÜZELTİLMİŞ SÜRÜM" notu — kırma/geri-yükleme kanıtı bu
 # görevin raporundadır (task-M-report.md, "EXPECTED_MIN_CONTRACT break-and-restore proof").
 # Oturum 9 Task 3 (2026-09-23): PFDK'nın yedi `contract` testiyle `--collect-only` 18 → 25 ölçüldü.
+# 2026-10-02 (TFF baş hakemi, tarih testleri): `--collect-only` 25 → 27 ölçüldü.
 step "veri-sözleşmesi" bash -c '
-  EXPECTED_MIN_CONTRACT=25
+  EXPECTED_MIN_CONTRACT=27
 
   collect_output=$(uv run pytest tests/ -q -m contract --collect-only 2>&1)
   collect_code=$?
@@ -123,8 +124,9 @@ step "veri-sözleşmesi" bash -c '
 # Sabit yalnız ölçülerek büyütülür (Task 5, Task 12).
 # `sitedb` işaretli sızıntı testleri (holdout tohumları, bağımlılık kapanışı) `site-db` adımında
 # koşar ve orada sayılır: her test kapıda tam bir kez koşar.
+# 2026-10-02 hakem as-of testiyle 442 → 450 (`--collect-only` ile ölçüldü, son inceleme M1).
 step "sızıntı" bash -c '
-  EXPECTED_MIN_LEAKAGE=442
+  EXPECTED_MIN_LEAKAGE=450
 
   collect_output=$(uv run pytest tests/ -q -m "leakage and not sitedb" --collect-only 2>&1)
   collect_code=$?
@@ -158,10 +160,10 @@ mkdir -p "$SITE_E2E_DIR"
 : > "$SITE_E2E_DIR/run-id"
 if [ -n "${SITE_TEST_DATABASE_URL:-}" ]; then
   step "site-db" bash -c '
-    EXPECTED_MIN_SITEDB=28
+    EXPECTED_MIN_SITEDB=40
     # Hem `sitedb` hem `leakage` taşıyan H1 testleri (kapanış, taban, holdout tohumları, uçtan uca)
     # `sızıntı` adımında sayılmaz: `leakage` işareti sessizce düşerse bu ikinci taban görür.
-    EXPECTED_MIN_SITEDB_LEAKAGE=4
+    EXPECTED_MIN_SITEDB_LEAKAGE=5
 
     count() {
       collect_output=$(uv run pytest tests/ -q -m "$1" --collect-only 2>&1)

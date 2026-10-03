@@ -98,6 +98,15 @@ function label(row: Json, key: string, at: string): void {
   if (typeof value !== "string" || value === "") fail(`${at}.${key} metin değil`);
 }
 
+// Hakem alanı ZORUNLUDUR: null ya da boş olmayan metin. Anahtarı taşımayan bayat bir anlık görüntü
+// hakem satırını sessizce düşürürdü (spec 2026-10-02 §6, Review Focus 5).
+function referee(row: Json, at: string): void {
+  const value = row.referee;
+  if (value !== null && (typeof value !== "string" || value === "")) {
+    fail(`${at}.referee metin ya da null değil`);
+  }
+}
+
 function segment(row: Json, key: string, pattern: RegExp, at: string): void {
   const value = row[key];
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -119,6 +128,7 @@ function checkShape(root: unknown): Snapshot {
   });
   objects(root.matches, "matches").forEach((match, index) => {
     for (const key of ["id", "league_id", "home", "away"]) label(match, key, `matches[${index}]`);
+    referee(match, `matches[${index}]`);
     segment(match, "path_id", PATH_ID, `matches[${index}]`);
     segment(match, "slug", MATCH_SLUG, `matches[${index}]`);
   });

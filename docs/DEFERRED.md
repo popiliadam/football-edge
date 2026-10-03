@@ -502,6 +502,9 @@ Bugün etki sıfır (tek okuyucu `mapping.resolve_source_aliases`), ama Faz 2 bu
 yeni"sini güncel durum sanmamalı. **Düzeltme migrasyon ister:** anahtar başına SON hash'e karşı
 tekilleştir. Son incelemenin önerisi: 9.4a'yla (`probabilities`i saklamak da migrasyon) birlikte
 karar verilsin. Sınırlama `latest_observations` docstring'inde ve HANDOFF §3.9/31'de yazılı.
+**TFF hakem yolu bu sınırdan etkilenmez (2026-10-02):** `officials.link_officials` turun ayrıştırılmış
+sonucundan çalışır, gözlem tablosunu okumaz; `match_officials` değişiklik kaydı X→Y→X'i üç satır yazar
+(`tests/test_site_officials_db.py`). 9.6e'nin kendisi (`latest_observations`) açık kalır.
 
 **9.6f — `match_results`in içerik tekilleştirmesi yok (son inceleme M-7).** Birincil anahtar
 `(match_id, observed_at)` ve her koşu kendi `now`unu basıyor; `daysFrom=3` tamamlanmış bir maçı
@@ -543,6 +546,28 @@ kararları" bekliyor ve plan Task 6'nın başlığı onu adlandırıyor; ama top
 yok, veri yok. `pageID=246` beyanlıydı ama hiç fetch edilmiyordu ve son incelemede kaldırıldı —
 PFDK sayfası olduğu bile doğrulanmadı (Task 6 raporu "muhtemelen PFDK" diyor). Bir PFDK
 toplayıcısı yeni bir iştir, sayfa şekli ölçülerek başlar. HANDOFF §3.9/30.
+
+**9.7a — İki Süper Lig takımının API yazımı henüz görülmedi (2026-10-02).** `config/tff_teams.yaml`de
+`kasimpaşa` ve `tümosan konyaspor` `null`: The Odds API'nin bu sezon `tur.1`de onları hangi adla yazdığı
+canlı `matches`te hiç görülmedi; ad UYDURULMAZ. Bu iki takımın maçları `awaiting_alias` sayılır (hata değil)
+ve sayfada hakem satırı çıkmaz. Düzeltme: takımın ilk `tur.1` maçı `matches`e girince adı ölçerek YAML'a yaz,
+`test_every_mapped_api_name_was_seen_in_tur1`i veritabanı adresiyle koş. Ne zaman: `collect-daily` logunda
+`alias bekleyen` > 0 görüldüğünde.
+
+**9.7b — Lig süzgeci C1 ile daraltıldı; kalan risk (2026-10-02).** `league_label_contains: "Süper Lig"`
+etikette TAM ifade olarak aranır (`(?!\w)` — "Süper Ligi" eşleşmez), etiket `İ`→`i` ile katlanır ve
+`kadın`/`kadin`/`u19`/`u21`/`gelişim`/`gelisim` sözcüğü taşıyan blok işlenmez (plan, controller düzeltmesi
+C1: tam ifade + kadın/genç dışlama). Kalan risk: TFF dışlama sözcüğü taşımayan yeni bir "Süper Lig" bloğu
+açarsa o blok işlenir — YAML'da olmayan ad kırmızıdır (sessiz değil, `collect-daily` düşer), ama YAML'da OLAN
+bir adla aynı gün aynı rakiple oynanan maç yanlış maça bağlanabilir. Bugün ölçülen sayfada (2026-09-19) böyle
+blok yok. Ne zaman: `collect-daily` YAML'da olmayan bir adla kırmızı düşer ve mesajdaki lig etiketi erkekler
+Süper Ligi değilse (mesaj etiketi adıyla taşır) — dışlama listesine sözcük eklenir (kullanıcı kararı).
+
+**9.7c — `officials.link_officials` oku→karşılaştır→yaz kilitsiz (2026-10-02, G4 incelemesi).** CI dışında elle
+`fetch-tff` ile eşzamanlı koşu aynı hakemi iki kez yazabilir (görünüm etkilenmez); çözüm `pg_advisory_xact_lock`.
+
+**9.7d — 0015 canlıda: `service_role`un `match_officials` INSERT yetkisi bilinçli kabul (2026-10-02, G3 incelemesi).**
+0013 kararı (`service_role`e dokunulmaz); Adım 12'de advisors çıktısı okunurken deftere kabul olarak yazılır.
 
 ### 9.8 Küçük artıklar
 

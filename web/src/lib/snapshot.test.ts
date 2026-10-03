@@ -60,6 +60,9 @@ describe("parseSnapshot — yönlendirmenin dayandığı değişmezler", () => {
     ["record yok", ["record"], undefined],
     ["record.entries dizi değil", ["record", "entries"], null],
     ["sicil girdisi nesne değil", ["record", "entries", 0], "x"],
+    ["hakem anahtarı yok (bayat anlık görüntü)", ["matches", 0, "referee"], undefined],
+    ["hakem boş metin", ["matches", 0, "referee"], ""],
+    ["hakem sayı", ["matches", 0, "referee"], 7],
   ] as const)("%s → SnapshotError", (_, path, value) => {
     expect(() => parseSnapshot(withChange(path, value))).toThrow(SnapshotError);
   });

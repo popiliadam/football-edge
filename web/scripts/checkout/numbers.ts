@@ -85,7 +85,9 @@ export function pageNames(snapshot: Snapshot, page: ExpectedPage): string[] {
     match: () => {
       const match = snapshot.matches.find((each) => each.id === id);
       const own = snapshot.leagues.find((each) => each.id === match?.league_id);
-      return [...(own ? [own.name] : []), ...(match ? matchOf(match) : [])];
+      // Hakem adı veri metnidir (spec 2026-10-02 §6): adındaki rakam bulgu değildir.
+      const referee = match?.referee ? [match.referee] : [];
+      return [...(own ? [own.name] : []), ...(match ? matchOf(match) : []), ...referee];
     },
     "track-record": () =>
       snapshot.record.entries.flatMap((entry) =>
