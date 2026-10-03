@@ -1,9 +1,9 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-02 (oturum 10b kapanışı) · **Sıradaki oturum: KULLANICI OTURUMU (§0)** — kullanıcının
-bütün işleri (§0.önceki/0.K) asistan rehberliğinde adım adım, tek oturumda · **Durum:** asistanın kullanıcısız işi yok;
-`main` = `dcf8648`, CI yeşil · **0013 CANLIDA**, **0014 yalnız depoda**, deploy BAĞLI DEĞİL · ilk kulüp maçları
-**2026-10-09/10** · Plan 2 en erken **2026-10-07** · holdout açılmadı
+**Son güncelleme:** 2026-10-04 (KULLANICI OTURUMU kapanışı) · **Sıradaki oturum:** Plan 2 (en erken **2026-10-07**)
+ya da avukat yanıtı geldiğinde yayın aşaması — bkz. §0.S · **Durum:** `main` CI yeşil · **0013–0017 CANLIDA** · TFF baş
+hakemi `main`de ve canlıda · site yerelde gerçek veriyle derlendi (yayın YOK, alan adı YOK) · avukat paketi
+hazır, kullanıcı gönderiyor · ilk kulüp maçları **2026-10-09/10** · holdout açılmadı
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -12,6 +12,48 @@ bütün işleri (§0.önceki/0.K) asistan rehberliğinde adım adım, tek oturum
 > Arıza prosedürleri: `docs/RUNBOOK.md`.
 
 ---
+
+## 0.S KULLANICI OTURUMU SONUCU (2026-10-02 → 10-04) — taze oturum BURADAN başlar
+
+Defter (adım adım kanıt, sha256'lar, kararlar): `.superpowers/sdd/_kalici/kullanici-oturumu/ilerleme.md` (gitignored).
+Hakem özelliğinin SDD defteri ve hükümleri: `/Users/apple/dev/football-edge-hakem/.superpowers/sdd/2026-10-02-tff-hakem-site/progress.md`.
+
+**Biten adımlar (§0.4 numaralarıyla):**
+- **1** K/S kalanı silindi (5 kap, uzak `faz-0` dalı). **2** Supabase Exposed schemas = `public`, `graphql_public` (`net`
+  seçilemiyor, `ops` kapalı) — 2b gerekmedi. **3** GitHub `production` ortamı: dal kuralı `main` + Required reviewers;
+  `site.yml` `build` işi de ortamda (`af34af2`).
+- **4** İz B spec + AK1–AK22 önerilerle onaylandı; 20b/20e/20g metinleri (`e1e75af`); AK17 The Odds API raporu
+  (`15e6a7a`): AK8 (a) serbest, AK21 yalnız hash sürer, AK9 (c) yazılı izinsiz hayır.
+- **5** Marka **Goool** (`29a986e`); alan adı adayı `goool.ai` (satın ALINMADI). **Sıra değişti:** önce yerel test,
+  alan adı + Netlify (Adım 10–11) yayın aşamasına.
+- **6** TFF: iç kullanım sürer **ve Süper Lig maç sayfasında TFF baş hakemi gösterilir** (yeni özellik: spec
+  `2026-10-02-tff-hakem-site-design.md`, plan 7 görev + son inceleme + canlı kuru koşu düzeltmesi; `main`e
+  birleştirme `b54c6f5`); fixture'lar kırpılmadı (kullanıcı kararı).
+- **7** K/4: EN = Sports Mole + Independent + Evening Standard + GFFN + Football Oranje RSS + GDELT + Wikidata (koşullu,
+  ticari olmayan iç kullanım); BBC/Sky/ESPN vb. YASAK (`docs/reports/2026-10-02-en-haber-kaynaklari.md`); TR =
+  ajansspor + Fotomaç + A Spor RSS; SportMonks denemesi Plan 2 başında; X hayır. Toplayıcılar Plan 2 kademe 2.
+- **8** TR kalibrasyonu: 100 insan onaylı etiket (27/73), etiketleyen `insan-1`, depoda başlıksız (`49a0912`).
+- **9** Ücretli Jev ölçümü onaylı, tavan 25 $ — ücret açan commit Plan 2 T3'te kullanıcıya tek satır.
+- **12** Canlıya: **0014 + 0015** (2026-10-03 08:32), **0016** `site.public_floor` search_path (advisors WARN'ı kapattı),
+  **13** pg_net artık riski kabul (kullanıcı önerimi seçti), **14** parola istemci tarafı SCRAM (yardımcı betik
+  `_kalici/kullanici-oturumu/site_reader_parola.py`; RUNBOOK §3.12) + **0017** LOGIN (2026-10-03 22:05); pooler
+  doğrulaması `site_reader · on · 30s`. `SITE_DATABASE_URL` YALNIZ `.env`de (GitHub secret yayın aşamasında).
+- **15** Yerel prova: export (57 maç, 6.117 satır) → verify → build 360 sayfa → check-out 0 bulgu; yayın bekçisi yer
+  tutucuyla adıyla kırmızı (beklenen). Kasımpaşa API adı görüldü → eşlendi (`0a014c1`).
+- **16** Avukat paketi `docs/reports/2026-10-04-avukat-paketi.md` (`c216cee`); izin e-postası taslakları
+  `_kalici/avukat-paketi/eposta-taslaklari.md` — **kullanıcı gönderiyor** (e-postalar avukatın S4/S7 yanıtından sonra).
+
+**Kalanlar (sırayla):**
+1. **Avukat yanıtı** → metin düzeltmeleri, TASLAK kaldırma (bekçi var), DEFERRED 9.7g "bekleniyor" metni, AK13/AK14.
+2. **Yayın aşaması** (avukat onayından sonra): `goool.ai` (Porkbun önerisi; premium çıkarsa yedekler golz.ai/fut9.ai)
+   → ayrı Netlify hesabı → `NETLIFY_*` + `SITE_DATABASE_URL` `production` ortam secret'ları → `SITE_URL` →
+   `site.yml` CI provası (`first_publish`) → ilk yayın → indeksleme (AK14).
+3. **Plan 2** (≥ 2026-10-07): haber toplayıcıları (K/4), Jev ücretli ölçüm commit'i (K/6, kullanıcıya tek satır),
+   SportMonks denemesi (hesap kullanıcıda).
+4. **İzlenecekler:** ilk Süper Lig ataması `match_officials`e düşüyor mu (`collect-daily` logu: bağlanan/alias
+   bekleyen/DB'de yok; Konyaspor alias'ı — DEFERRED 9.7a); snapshot ufku 10-04'ten sonra hâlâ 0 ise arıza (§0.İ/1).
+5. **Temizlik (kullanıcı onayıyla):** `/Users/apple/dev/football-edge-hakem` worktree'si ve yerel/uzak `tff-hakem`
+   dalı (birleşti), Docker `fe-tff-hakem-applied/-empty` kum havuzu kapları.
 
 ## 0. KULLANICI OTURUMU — BURADAN BAŞLA (yazıldı 2026-10-02, oturum 10b kapanışı)
 
