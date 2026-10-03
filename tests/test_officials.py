@@ -55,6 +55,14 @@ def test_every_key_is_its_own_normalise_team_output_and_values_are_null_or_text(
     )
 
 
+def test_kasimpasa_is_mapped_since_its_api_spelling_was_seen() -> None:
+    """Kullanıcı oturumu Adım 15 (2026-10-04): yerel provada `matches`te `tur.1` adı "Kasimpasa SK"
+    görüldü (DEFERRED 9.7a'nın yarısı kapandı); Konyaspor hâlâ bekler."""
+    teams = load_team_map(TEAMS_YAML).teams
+
+    assert (teams["kasimpaşa"], teams["tümosan konyaspor"]) == ("Kasimpasa SK", None)
+
+
 def test_every_super_lig_name_in_the_tff_fixture_has_an_entry() -> None:
     """Ölçülen sayfanın (2026-09-19) 9 Süper Lig maçındaki 18 TFF adı YAML'da anahtar olarak var."""
     team_map = load_team_map(TEAMS_YAML)

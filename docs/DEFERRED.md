@@ -553,6 +553,15 @@ canlı `matches`te hiç görülmedi; ad UYDURULMAZ. Bu iki takımın maçları `
 ve sayfada hakem satırı çıkmaz. Düzeltme: takımın ilk `tur.1` maçı `matches`e girince adı ölçerek YAML'a yaz,
 `test_every_mapped_api_name_was_seen_in_tur1`i veritabanı adresiyle koş. Ne zaman: `collect-daily` logunda
 `alias bekleyen` > 0 görüldüğünde.
+**KISMEN KAPANDI (2026-10-04, kullanıcı oturumu Adım 15):** yerel provada `matches`te "Kasimpasa SK" görüldü →
+`kasimpaşa: "Kasimpasa SK"`; ad testi canlıya karşı salt okuma koşuldu (17 adın hepsi `tur.1`de). Kalan: `tümosan
+konyaspor`.
+
+**9.7g — Oynanmış ama kapanışı mühürlenmemiş maç "Kapanış bekleniyor / Pending" gösteriyor (2026-10-04, yerel prova).**
+Örnek: 2026-09-19 Trabzonspor–Galatasaray (1 tur gözlem, kapanış mühürlenmemiş — mühür düzeltmelerinden önceki
+dönem). Metin doğru ama yanıltıcı: maç çoktan başladı, kapanış artık gelmeyecek. Öneri: `commence_time` geçmiş ve
+kapanış yoksa "kapanış kaydedilmedi / closing not recorded" (sözlük + `match.status` türetimi + check-out cümle
+listesi). Ne zaman: arayüz metinleri avukat incelemesinden dönünce (Adım 16 paketi), ilk yayından önce.
 
 **9.7b — Lig süzgeci C1 ile daraltıldı; kalan risk (2026-10-02).** `league_label_contains: "Süper Lig"`
 etikette TAM ifade olarak aranır (`(?!\w)` — "Süper Ligi" eşleşmez), etiket `İ`→`i` ile katlanır ve

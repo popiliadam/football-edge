@@ -24,5 +24,5 @@ teams:
   "kocaelispor": "Kocaelispor"  # KOCAELİSPOR
   "samsunspor": "Samsunspor"  # SAMSUNSPOR A.Ş.
   "trabzonspor": "Trabzonspor"  # TRABZONSPOR A.Ş.
-  "kasimpaşa": null  # KASIMPAŞA A.Ş. — API yazımı henüz görülmedi (DEFERRED 9.7a)
+  "kasimpaşa": "Kasimpasa SK"  # KASIMPAŞA A.Ş. — API yazımı 2026-10-04 görüldü (yerel prova, Adım 15)
   "tümosan konyaspor": null  # TÜMOSAN KONYASPOR — API yazımı henüz görülmedi (DEFERRED 9.7a)
