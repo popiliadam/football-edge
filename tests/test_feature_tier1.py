@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +23,8 @@ from football_edge.features.questions import (
     load_questions,
 )
 from football_edge.features.tier1 import (
+    BATCH_SIZE,
+    EMPTY_RUN,
     FAILED_PREFIX,
     HORIZON,
     MAX_ATTEMPTS,
@@ -30,9 +32,12 @@ from football_edge.features.tier1 import (
     OUTAGE_STREAK,
     ItemAnswerRow,
     asked_item_ids,
+    batches,
     candidate_fixtures,
     gates_from,
     load_fixtures,
+    merge_runs,
+    newest_within_cap,
     run_tier1,
     write_item_answers,
 )
@@ -646,9 +651,9 @@ def test_run_rows_feed_gates_end_to_end() -> None:
 STARTED = LiveMatch("m-basladi", LEAGUE, T0 + timedelta(minutes=30), "Galatasaray", "Rizespor")
 
 
-def _db_with(*items: StoredNews) -> FakeNewsDb:
+def _db_with(*items: StoredNews, factory: Callable[..., FakeNewsDb] = FakeNewsDb) -> FakeNewsDb:
     """Veritabanı saati haberlerden önce: yazılan haberin `available_at`i = iddia = kendi anı."""
-    db = FakeNewsDb(now=T0 - timedelta(days=30))
+    db = factory(now=T0 - timedelta(days=30))
     drafts = [
         NewsDraft(
             i.source_id, i.lang, i.title, i.body, i.url, i.available_at, OBSERVED, i.content_hash
@@ -691,6 +696,8 @@ def _cli(monkeypatch: pytest.MonkeyPatch, db: FakeNewsDb, client: Any) -> list[A
     monkeypatch.setattr(cli, "TypeSafeJev", lambda: client)
     monkeypatch.setattr(cli, "budgeted_jev", _budgeted)
     monkeypatch.setattr(cli, "_now", lambda: T0 + timedelta(hours=1))
+    # Bugün hiçbir dil üretimde değil (config/languages.yaml); testler TR'yi üretimde sayar.
+    monkeypatch.setattr(cli, "production_languages", lambda path: frozenset({"tr"}))
     return budgeted
 
 
@@ -872,3 +879,198 @@ def test_probabilities_outside_the_offer_or_range_are_a_failure(
 
     assert result.rows == ()
     assert result.failed == 2
+
+
+# ── Plan 2 Task 2: tur tavanı, partiler, dil kapısı ────────────────────────────────────────
+
+
+def test_the_call_cap_defers_the_rest_without_markers() -> None:
+    client = FakeBatteryJev()
+    items = [news(n, f"Galatasaray'da haber {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3)]
+
+    result = run_tier1(
+        items, client, QUESTIONS, fixtures=FIXTURES, clock=lambda: ASKED, max_calls=2
+    )
+
+    assert (len(client.seen), result.calls, result.deferred) == (2, 2, 1)
+    assert result.failures == ()
+
+
+def test_news_without_a_candidate_does_not_use_the_call_cap() -> None:
+    client = FakeBatteryJev()
+    items = [news(1, "Hava durumu"), news(2, "Galatasaray'da sakatlık", T0 + timedelta(minutes=1))]
+
+    result = run_tier1(
+        items, client, QUESTIONS, fixtures=FIXTURES, clock=lambda: ASKED, max_calls=1
+    )
+
+    assert (result.no_candidate, result.calls, result.deferred) == (1, 1, 0)
+
+
+def test_batches_split_the_items_in_time_order() -> None:
+    items = [news(n, f"h{n}", T0 + timedelta(minutes=-n)) for n in range(1, 6)]
+
+    found = batches(items, 2)
+
+    assert [[i.item_id for i in batch] for batch in found] == [[5, 4], [3, 2], [1]]
+    with pytest.raises(ValueError, match="parti"):
+        batches(items, 0)
+
+
+def test_merged_runs_add_up_and_keep_the_order() -> None:
+    first = run([news(1, "Galatasaray'da sakatlık")], FakeBatteryJev())
+    second = run([news(2, "Trabzonspor'da kriz", T0 + timedelta(minutes=1))], FakeBatteryJev())
+
+    merged = merge_runs(merge_runs(EMPTY_RUN, first), second)
+
+    assert merged.rows == (*first.rows, *second.rows)
+    assert (merged.asked, merged.calls) == (first.asked + second.asked, 2)
+    assert merged.budget_hit is False and merged.outage is False
+
+
+@dataclass
+class _CommitLog(FakeNewsDb):
+    """Her commit anında yazılmış cevap sayısı: ödenmiş cevabın hangi partide kalıcılaştığı."""
+
+    committed: list[int] = field(default_factory=list)
+
+    def commit(self) -> None:
+        self.committed = [*self.committed, len(self.answers)]
+        super().commit()
+
+
+TWELVE = tuple(
+    news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in range(1, 13)
+)
+
+
+def test_each_batch_is_committed_before_the_next_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = _db_with(*TWELVE, factory=_CommitLog)
+    _cli(monkeypatch, db, FakeBatteryJev())
+
+    assert cli.main(["tier1"]) == 0
+
+    assert isinstance(db, _CommitLog)
+    first_batch = len([a for a in db.answers if a["item_id"] <= BATCH_SIZE])
+    assert db.committed == [first_batch, len(db.answers)]
+
+
+class _Killed(BaseException):
+    """Zaman aşımının taklidi: `_ask`in `Exception` yakalayıcısını geçer, koşuyu öldürür."""
+
+
+def test_a_run_killed_in_the_second_batch_keeps_the_first_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @dataclass
+    class DiesOnEleventh(FakeBatteryJev):
+        def ask_battery(
+            self, state: Mapping[str, Any], questions: Sequence[Question]
+        ) -> BatteryAnswer:
+            if len(self.seen) == BATCH_SIZE:
+                raise _Killed()
+            return super().ask_battery(state, questions)
+
+    db = _db_with(*TWELVE, factory=_CommitLog)
+    _cli(monkeypatch, db, DiesOnEleventh())
+
+    with pytest.raises(_Killed):
+        cli.main(["tier1"])
+
+    assert isinstance(db, _CommitLog)
+    assert len(db.committed) == 1 and db.committed[0] > 0
+
+
+def test_the_command_stops_asking_at_the_call_cap(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = _db_with(news(1, "Galatasaray'da sakatlık"), news(2, "Trabzonspor'da kriz"))
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "1"]) == 0
+
+    assert len(client.seen) == 1
+    assert "ertelenen 1" in caplog.text
+
+
+def test_under_the_call_cap_the_newest_news_is_asked_first(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """I6: tavan altında en yeniden en eskiye — karar anına en yakın haber önce satın alınır."""
+    db = _db_with(
+        *(news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3))
+    )
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "2"]) == 0
+
+    asked = [call["state"]["news"]["title"] for call in client.seen]
+    assert asked == ["Galatasaray'da gelişme 2", "Galatasaray'da gelişme 3"]
+    assert "ertelenen 1" in caplog.text
+
+
+def test_the_cap_skips_news_without_a_candidate_and_given_up_news() -> None:
+    items = [
+        news(1, "Hava durumu"),
+        *(news(n, f"Galatasaray'da {n}", T0 + timedelta(minutes=n)) for n in (2, 3)),
+    ]
+
+    kept, deferred = newest_within_cap(items, FIXTURES, attempts={3: MAX_ATTEMPTS}, cap=1)
+
+    assert ([i.item_id for i in kept], deferred) == ([1, 2, 3], 0)
+
+
+def test_a_non_production_language_item_never_reaches_jev_even_as_earlier_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review Focus 1: EN haber sorulmaz VE küme adayı olarak başlığıyla Jev'e gitmez (R178).
+    EN haber önceden SORULMUŞ işaretlenir: süzgeç yalnız sorulacakları (`items`) süzseydi, sorulmuş
+    haber `history`ye, oradan `earlier_news`e girerdi — pencerenin kendisi süzülmeli."""
+    english = replace(news(1, "Galatasaray injury update", T0 - timedelta(hours=1)), lang="en")
+    db = _db_with(english, news(2, "Galatasaray'da sakatlık"))
+    asked = ItemAnswerRow(
+        1,
+        QUESTIONS.prompt_version,
+        MATCH_QUESTION,
+        NO_MATCH,
+        {NO_MATCH: 1.0},
+        0.9,
+        None,
+        "jev-fake",
+        T0,
+        0.0,
+    )
+    write_item_answers(db, [asked])  # type: ignore[arg-type]
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    cli.main(["tier1"])
+
+    (call,) = client.seen
+    assert call["state"]["news"]["title"] == "Galatasaray'da sakatlık"
+    assert call["state"]["earlier_news"] == []
+
+
+def test_without_a_production_language_nothing_is_asked_and_the_database_is_untouched(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    def _explode() -> Any:
+        raise AssertionError("üretim dili yokken veritabanına bağlanılmamalı")
+
+    languages = tmp_path / "languages.yaml"
+    languages.write_text(
+        "languages:\n  - code: tr\n    production_enabled: false\n"
+        f"    calibration_report: {tmp_path / 'tr.report.json'}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda: FakeBatteryJev())
+    monkeypatch.setattr(cli, "connect", _explode)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--languages", str(languages)]) == 0
+
+    assert "üretimde dil yok" in caplog.text

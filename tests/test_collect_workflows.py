@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from football_edge import collect
+from tests.jev_workflow_helpers import JEV_SECRET, with_jev_key
 from tests.workflow_helpers import (
     COLLECT_DAILY,
     COLLECT_NEWS,
@@ -107,34 +108,74 @@ def _secret_paths(node: Any, path: tuple[Any, ...] = ()) -> list[tuple[Any, ...]
     return [path] if _secret_expressions(str(node)) else []
 
 
-# Veritabanına yazan adımlar: toplayıcı ve collect-news'te hemen ardından haber deposu (R172).
+# Veritabanına yazan adımlar: toplayıcı; collect-news'te ayrıca haber deposu (R172) ve kademe 1.
 DATABASE_STEPS = {
     COLLECT_DAILY: ("football_edge.collect",),
-    COLLECT_NEWS: ("football_edge.collect", "football_edge.features sync-news"),
+    COLLECT_NEWS: (
+        "football_edge.collect",
+        "football_edge.features sync-news",
+        "football_edge.features tier1",
+    ),
+}
+# Ücret anahtarı (R177, I-4) YALNIZ Jev adımının env'inde durabilir; bugün hiçbirinde yok.
+JEV_STEPS: dict[Path, tuple[str, ...]] = {
+    COLLECT_DAILY: (),
+    COLLECT_NEWS: ("football_edge.features tier1",),
 }
 
 
-@pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
-def test_only_the_collector_step_gets_a_secret_and_only_the_database_one(path: Path) -> None:
-    """Toplayıcılar ücretli API çağırmaz: `ODDS_API_KEY` verilen bir workflow kredi harcayabilir ve
-    pg_cron onu kimse bakmadan koşar. `DATABASE_URL` de YALNIZ veritabanına yazan adımların
-    (toplama; collect-news'te ayrıca haber deposu senkronu) `env`inde durur: workflow ya da job
-    `env`ine taşınırsa secret taramasına, üçüncü taraf `setup-uv` eylemine, `uv sync`e ve alarm
-    adımlarına da açılır."""
-    text = path.read_text(encoding="utf-8")
-    secrets = sorted(set(_secret_expressions(text)))
-    document = yaml.safe_load(text)
-    ((job_id, job),) = document["jobs"].items()
-    expected = [
-        ("jobs", job_id, "steps", _index_of(job["steps"], needle), "env", "DATABASE_URL")
-        for needle in DATABASE_STEPS[path]
-    ]
-    reached = _secret_paths(document)
+def _value(document: Any, path: tuple[Any, ...]) -> Any:
+    node = document
+    for key in path:
+        node = node[key]
+    return node
 
-    assert secrets == ["secrets.DATABASE_URL"], f"{path.name} beklenmeyen secret okuyor: {secrets}"
-    assert reached == expected, (
-        f"{path.name}: secret'ın ulaştığı yerler {reached} — yalnız {expected} olmalı"
+
+def _secret_violations(path: Path, document: dict[str, Any]) -> list[str]:
+    """Secret'ın ulaştığı her yer izinli mi: DATABASE_URL yalnız veritabanı adımlarında (hepsinde),
+    Jev anahtarı yalnız Jev adımlarında (varsa). Workflow/job `env`i ya da başka adım ihlaldir."""
+    ((job_id, job),) = document["jobs"].items()
+    steps = job["steps"]
+
+    def at(needle: str, name: str) -> tuple[Any, ...]:
+        return ("jobs", job_id, "steps", _index_of(steps, needle), "env", name)
+
+    database = {at(n, "DATABASE_URL"): "secrets.DATABASE_URL" for n in DATABASE_STEPS[path]}
+    jev = {at(n, JEV_SECRET): f"secrets.{JEV_SECRET}" for n in JEV_STEPS[path]}
+    allowed = {**database, **jev}
+    reached = {
+        where: _secret_expressions(str(_value(document, where)))
+        for where in _secret_paths(document)
+    }
+    wrong = [f"{w}: {e}" for w, e in reached.items() if e != [allowed.get(w)]]
+    missing = [f"{w}: yok" for w in database if w not in reached]
+    return wrong + missing
+
+
+@pytest.mark.parametrize("path", COLLECTORS, ids=lambda path: path.name)
+def test_only_database_steps_get_the_database_and_only_jev_steps_may_get_the_jev_key(
+    path: Path,
+) -> None:
+    """Toplayıcılar ücretli API çağırmaz: `ODDS_API_KEY` hiç yok. `DATABASE_URL` YALNIZ veritabanına
+    yazan adımların `env`inde; Jev anahtarı YALNIZ kademe adımının `env`inde (bugün hiçbirinde).
+    Yorumdaki `${{ secrets.X }}` de sayılır (metin taraması)."""
+    text = path.read_text(encoding="utf-8")
+    secrets = set(_secret_expressions(text))
+
+    assert secrets <= {"secrets.DATABASE_URL", f"secrets.{JEV_SECRET}"}, secrets
+    assert _secret_violations(path, yaml.safe_load(text)) == []
+
+
+def test_the_paid_switch_is_env_lines_on_the_jev_step_only() -> None:
+    """R177: ücret yaması yalnız kademe 1 adımına iki env satırı ekler ve bu test yeşil kalır."""
+    document = yaml.safe_load(COLLECT_NEWS.read_text(encoding="utf-8"))
+
+    assert (
+        _secret_violations(COLLECT_NEWS, with_jev_key(document, "football_edge.features tier1"))
+        == []
     )
+    misplaced = with_jev_key(document, "football_edge.features sync-news")
+    assert _secret_violations(COLLECT_NEWS, misplaced) != []
 
 
 # `uv run python -m football_edge.collect <alt komut>`un yerine geçer: alt komutu kaydeder,
@@ -186,11 +227,13 @@ def test_a_red_collector_does_not_stop_the_others_and_turns_the_run_red(
     script.write_text(_collect_run_body(path), encoding="utf-8")
     calls = tmp_path / "calls"
     calls.touch()
+    (tmp_path / "output").touch()
     env = {
         "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "CALLS": str(calls),
         "FAIL_COMMAND": failing or "",
         "FAIL_CODE": str(code),
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
     }
 
     result = subprocess.run(
@@ -214,6 +257,9 @@ def test_a_red_collector_does_not_stop_the_others_and_turns_the_run_red(
         assert any(failing in line and named in line for line in errors), (
             f"{path.name}: {failing} (exit {code}) adıyla ({named!r}) raporlanmıyor: {errors}"
         )
+    if path == COLLECT_NEWS:
+        # Senkron ve kademe 1 bu çıktıya bakar (I-6): kod her zaman yazılır, yutulmaz.
+        assert (tmp_path / "output").read_text(encoding="utf-8") == f"code={code}\n"
 
 
 WORKFLOWS = REPO / ".github/workflows"

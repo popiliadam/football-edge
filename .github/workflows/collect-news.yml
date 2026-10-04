@@ -17,7 +17,8 @@ permissions:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Plan 2: kademe 1 en çok 40 çağrı (`MAX_CALLS_PER_RUN`); gecikme Task 5'te ölçülür.
+    timeout-minutes: 20
     permissions:
       # Job düzeyi üst düzeyi TAMAMEN ezer: checkout için `contents: read` burada da yazılı.
       contents: read
@@ -30,14 +31,17 @@ jobs:
           # Bu iş push'lamaz: job token'ı `.git/config`e yazılmaz, sonraki adımlar okuyamaz.
           persist-credentials: false
       - name: Secret taraması
+        id: secret_scan
         # Depo PUBLIC: izlenen bir dosyaya kaçmış secret varsa tur, veritabanı secret'ını hiçbir
-        # adıma vermeden kırmızı düşer.
+        # adıma vermeden kırmızı düşer. Taramadan sonra `success()`i ezen secret'lı adımlar
+        # `steps.secret_scan.outcome`a bağlıdır (DEFERRED 19b).
         run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
       - run: uv sync --frozen
       - name: Haberleri topla
+        id: fetch
         env:
           # Yalnız veritabanı: haber toplayıcısı ücretli API çağırmaz.
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -52,11 +56,17 @@ jobs:
             *) echo "::error::fetch-news beklenmedik kodla düştü (exit $code)" ;;
           esac
           # Hiçbir kod yutulmaz: 7 de işi kırmızıya düşürür, yalnız adıyla.
+          # Senkron ve kademe 1 bu koda bakar: 7 (bir kaynak düştü) onları durdurmaz, tur yine
+          # kırmızı biter (Plan 2 I-6, I-7). Hiçbir kod yutulmaz.
+          echo "code=$code" >> "$GITHUB_OUTPUT"
           exit "$code"
       - name: Haber deposunu güncelle
         # Toplamanın HEMEN ardından (R172): `news_items.first_seen_at` veritabanı saatidir ve
-        # toplamayla senkron arasındaki her dakika onu geç damgalar. Toplama kırmızıysa bu adım
-        # koşmaz; yedi günlük pencere (`SYNC_LOOKBACK`) kaçan haberi sonraki yeşil turda taşır.
+        # toplamayla senkron arasındaki her dakika onu geç damgalar. Toplama exit 7 (bir kaynak
+        # düştü) ise yine koşar — öbür kaynakların haberi bu turda depoya girer (Plan 2 I-6); başka
+        # bir toplama kırmızısında koşmaz; yedi günlük pencere (`SYNC_LOOKBACK`) kaçan haberi
+        # sonraki yeşil turda taşır.
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && (success() || steps.fetch.outputs.code == '7') }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -70,6 +80,55 @@ jobs:
             *) echo "::error::sync-news beklenmedik kodla düştü (exit $code)" ;;
           esac
           exit "$code"
+      - name: Kademe 1 (Jev)
+        id: tier1
+        # Plan 2 R179: haber karar anından önce sorulmuş olmalı (asked_at < decided_at), bu yüzden
+        # senkronun hemen ardından. Yalnız üretim dilleri (R178); tur başına 40 çağrı, parti başına
+        # commit (I-8). Jev arızası haber turunu kırmızı yapmaz: `jev-kademe1` alarmı (R186).
+        # Anahtar ücret yamasıyla gelir (R177): o güne dek 17 = "Jev kapalı", yeşil; yamanın
+        # `JEV_ENABLED: "1"`i varken 17 kırmızıdır (I-5: boş/yanlış adlı secret sessiz kalmasın).
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && (success() || steps.fetch.outputs.code == '7') }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.features tier1
+          code=$?
+          set -e
+          jev=fail
+          case "$code" in
+            0) jev=ok; echo "kademe 1 tamam" ;;
+            17)
+              if [ "${JEV_ENABLED:-}" = "1" ]; then
+                echo "::error::tier1: JEV_ENABLED=1 ama TYPESAFE_API_KEY yok ya da boş (exit 17) — secret adını ve değerini denetle"
+              else
+                jev=ok
+                echo "kademe 1: Jev kapalı (exit 17, anahtar yok) — sinyal toplanmıyor"
+                echo "Jev kapalı: kademe 1 sorulmadı (anahtar yok; ücret yaması bekleniyor, R177)" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              ;;
+            7) echo "::error::tier1: Jev kesintisi (exit 7) — art arda Jev hatası, koşu durdu, sonraki tur yeniden sorar" ;;
+            16) echo "::error::tier1: Jev aylık tavanı doldu (exit 16) — kalan haberler sorulmadı" ;;
+            *) echo "::error::tier1 beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          echo "jev=$jev" >> "$GITHUB_OUTPUT"
+          # Haber turunun sonucu değil: Jev'in sonucu kendi alarmına gider (sonraki iki adım).
+          exit 0
+      - name: Jev alarmı aç
+        # Kendi başlığı (`🔴 jev-kademe1 kırmızı`): tavan ayın kalanında kırmızı kalsa da gerçek bir
+        # kaynak arızası `collect-news` alarmını bildirimle açar (DEFERRED 10h dersi, R186).
+        if: ${{ !cancelled() && steps.tier1.outputs.jev == 'fail' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow jev-kademe1 --run-url "$RUN_URL"
+      - name: Jev alarmı kapat
+        if: ${{ !cancelled() && steps.tier1.outputs.jev == 'ok' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow jev-kademe1 --run-url "$RUN_URL"
       - name: Alarm aç
         # Önceki HERHANGİ bir adım kırmızıysa `ops-alert` issue'su açılır; açıksa yalnız
         # gövdesi güncellenir (her tur yeni bildirim üretseydi alarm gürültüye gömülürdü).

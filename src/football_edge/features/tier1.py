@@ -72,6 +72,10 @@ FAILED_PREFIX = "t1_failed:"
 MAX_ATTEMPTS = 3
 # Art arda bu kadar Jev hatası kesintidir: koşu durur, serinin işareti yazılmaz (17b; inceleme I-2).
 OUTAGE_STREAK = 3
+# Tur başına en çok bu kadar Jev çağrısı (I-8): taşan haber `deferred`, işaretsiz, sonraki turda.
+MAX_CALLS_PER_RUN = 40
+# Parti başına commit: bir zaman aşımı en çok bir partinin ödenmiş cevabını götürür (I-8).
+BATCH_SIZE = 10
 REASON_INVALID = "match_invalid"
 REASON_ERROR = "jev_error"
 # Hata çağrısında model bilinmez; 0012 `jev_model`i NOT NULL ister.
@@ -123,6 +127,8 @@ class Tier1Run:
     failures: tuple[ItemAnswerRow, ...] = ()  # cevapsız denemelerin işaretleri (`FAILED_PREFIX`)
     given_up: int = 0  # `MAX_ATTEMPTS` kez başarısız olduğu için sorulmayan haber
     outage: bool = False  # sorulan her haber Jev hatasıyla düştü: işaret dönülmez (17b)
+    calls: int = 0  # yapılan Jev çağrısı (tavanın saydığı)
+    deferred: int = 0  # çağrı tavanı yüzünden bu turda sorulmayan, adaylı haber
 
 
 # ── Adaylar ────────────────────────────────────────────────────────────────────────────────
@@ -348,6 +354,7 @@ def run_tier1(
     clock: Callable[[], datetime],
     history: Sequence[StoredNews] = (),
     attempts: Mapping[int, int] = MappingProxyType({}),
+    max_calls: int | None = None,
 ) -> Tier1Run:
     """`items`i (zaman, kimlik) sırasıyla sorar; `history` yalnız küme adayıdır, sorulmaz.
 
@@ -355,13 +362,14 @@ def run_tier1(
     Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır. `attempts` haber
     başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz. Art arda
     `OUTAGE_STREAK` Jev hatasında koşu kesinti olarak durur (`outage`; modül belgesi).
+    `max_calls` adaylı haber başına çağrıyı sayar; tavanı aşan haber `deferred`, işaretsiz.
     """
     templates = {question.question_id: question for question in questions.tier1}
     pool = (*history, *items)
     rows: tuple[ItemAnswerRow, ...] = ()
     failures: tuple[ItemAnswerRow, ...] = ()
     streak: tuple[ItemAnswerRow, ...] = ()  # art arda Jev hatalarının henüz yazılmamış işaretleri
-    asked = failed = no_candidate = given_up = 0
+    asked = failed = no_candidate = given_up = calls = deferred = 0
     for item in sorted(items, key=_order):
         item_id = _order(item)[1]
         attempt = attempts.get(item_id, 0) + 1
@@ -371,6 +379,9 @@ def run_tier1(
         candidates = candidate_fixtures(item, fixtures)
         if not candidates:
             no_candidate += 1
+            continue
+        if max_calls is not None and calls >= max_calls:
+            deferred += 1
             continue
         earlier = cluster_candidates(item, pool, candidates)
         battery = _battery(templates, candidates, earlier)
@@ -385,7 +396,10 @@ def run_tier1(
                 budget_hit=True,
                 failures=(*failures, *streak),  # tavan kesinti değil: bekleyen seri işaretlenir
                 given_up=given_up,
+                calls=calls,
+                deferred=deferred,
             )
+        calls += 1
         at = clock()
         new = (
             ()
@@ -411,6 +425,8 @@ def run_tier1(
                     failures=failures,
                     given_up=given_up,
                     outage=True,
+                    calls=calls,
+                    deferred=deferred,
                 )
             continue
         failures, streak = (*failures, *streak), ()
@@ -427,6 +443,54 @@ def run_tier1(
         budget_hit=False,
         failures=(*failures, *streak),
         given_up=given_up,
+        calls=calls,
+        deferred=deferred,
+    )
+
+
+EMPTY_RUN = Tier1Run((), 0, 0, 0, budget_hit=False)
+
+
+def batches(items: Sequence[StoredNews], size: int) -> tuple[tuple[StoredNews, ...], ...]:
+    """(zaman, kimlik) sırasıyla `size`lık partiler; CLI her partiden sonra commit'ler (I-8)."""
+    if size < 1:
+        raise ValueError(f"parti boyu en az 1 olmalı: {size}")
+    ordered = sorted(items, key=_order)
+    return tuple(tuple(ordered[start : start + size]) for start in range(0, len(ordered), size))
+
+
+def newest_within_cap(
+    items: Sequence[StoredNews],
+    fixtures: Sequence[LiveMatch],
+    *,
+    attempts: Mapping[int, int],
+    cap: int,
+) -> tuple[tuple[StoredNews, ...], int]:
+    """Tur tavanı altında EN YENİDEN EN ESKİYE (karara en yakın haber önce): Jev'e gidecek (adayı
+    olan, vazgeçilmemiş) haberlerden en yeni `cap` tanesi kalır. Dönüş: (kalan haberler, ertelenen).
+    Adaysız ve vazgeçilmiş haber tavanı tüketmez; `run_tier1` onları ayrıca sayar."""
+    askable = [
+        item
+        for item in items
+        if attempts.get(_order(item)[1], 0) < MAX_ATTEMPTS and candidate_fixtures(item, fixtures)
+    ]
+    dropped = {_order(item) for item in sorted(askable, key=_order, reverse=True)[cap:]}
+    return tuple(item for item in items if _order(item) not in dropped), len(dropped)
+
+
+def merge_runs(first: Tier1Run, second: Tier1Run) -> Tier1Run:
+    """Ardışık iki partinin koşusu tek koşu: sayılar toplanır, satırlar sırayla eklenir."""
+    return Tier1Run(
+        rows=(*first.rows, *second.rows),
+        asked=first.asked + second.asked,
+        failed=first.failed + second.failed,
+        no_candidate=first.no_candidate + second.no_candidate,
+        budget_hit=first.budget_hit or second.budget_hit,
+        failures=(*first.failures, *second.failures),
+        given_up=first.given_up + second.given_up,
+        outage=first.outage or second.outage,
+        calls=first.calls + second.calls,
+        deferred=first.deferred + second.deferred,
     )
 
 
