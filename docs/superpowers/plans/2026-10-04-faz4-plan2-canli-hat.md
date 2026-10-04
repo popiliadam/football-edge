@@ -5063,6 +5063,8 @@ PYTHONDONTWRITEBYTECODE=1 uv run --env-file .env python -m football_edge.feature
 ```
 Expected: `probe kademe 1: gecikme X.XX sn · model M1 · cevap a/b` ve `probe kademe 2: gecikme Y.YY sn · model M2 · cevap c/30`.
 `sorulacak haber yok` çıkarsa (exit 1) ölçüm yapılmamıştır — adıyla yazılır, bir sonraki gölge turundan sonra tekrarlanır.
+`probe kademe N: Jev hatası (<tür>)` (exit 7) ya da `aylık tavan … (bütçe)` (exit 16) çıkarsa da ölçüm yapılmamıştır,
+ama bu haber yokluğu DEĞİLDİR: DUR — 7'de anahtar/yetki ve Jev durumu, 16'da `jev_spend` okunur; kullanıcıya adıyla sorulur.
 Cevap tablolarına yazılmadığını doğrula (salt okuma):
 `uv run --env-file .env python -c "from football_edge.db import connect; c=connect(); cur=c.cursor(); cur.execute('SET TRANSACTION READ ONLY'); cur.execute('select count(*) from jev_match_answers'); print(cur.fetchone()); c.rollback()"`
 → `(0,)`.
@@ -5078,9 +5080,15 @@ sabit model adı yok demektir, kullanıcıya sorulur). Kademe 1 de bu modeli kul
 varsayılanıyla koştu — M1 ≠ M2 ise DUR ve kullanıcıya sor (iki kademe aynı modelde olmalı). Bu değişiklik küme
 kimliğini (`prompt_version`) ilk ve son kez gerçek yazımdan ÖNCE değiştirir. `faz4_ops.yaml`: `estimate_usd.tier1` /
 `tier2` → kullanıcının okuduğu birim fiyatlar (yukarı yuvarlanmış, 4 ondalık; fazla tahmin tavanı erken kapatır,
-görünür — `jev_budget` gerekçesi); hash'e girmez, sayaç sıfırlanmaz (M4). Gecikme denetimi: `40 × L1 + 2 dk ≤ 20 dk`
-(collect-news) ve `80 × L2 ≤ 35 dk` (shadow); tutmazsa `faz4_ops.yaml` `max_sides_per_run` düşürülür ya da
-`MAX_CALLS_PER_RUN` (kod + test; ayrı commit) — gerekçesi ölçüm belgesine. Sonra yeniden:
+görünür — `jev_budget` gerekçesi); hash'e girmez, sayaç sıfırlanmaz (M4). Gecikme denetimi — bağlayıcı sınır
+adımın kendi kesicisidir: `40 × L1 ≤ 15 dk` (collect-news kademe 1 adımı, `timeout 15m`) ve `80 × L2 ≤ 25 dk`
+(shadow kademe 2 adımı, `timeout 25m`); tutmazsa `faz4_ops.yaml` `max_sides_per_run` düşürülür ya da
+`MAX_CALLS_PER_RUN` (kod + test; ayrı commit) — gerekçesi ölçüm belgesine. İş payı: Task 5 ayrıca birleşmeden
+sonraki ilk koşulardan (ücretsiz — Jev kapalı, exit 17 yeşil) `fetch-news` + `sync-news` (collect-news) ve
+`shadow` + `report` (shadow) adımlarının GERÇEK sürelerini Actions'tan okur; iş zaman aşımına (collect-news 20 dk,
+shadow 45 dk) kalan pay — zaman aşımı − bu adımlar − kademe tavanı (`40 × L1` / `80 × L2`) — 3 dakikanın
+altındaysa ücret yamasından ÖNCE `timeout-minutes` yükseltilir ya da tavanlar düşürülür (gerekçe ölçüm
+belgesine). Sonra yeniden:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 uv run --env-file .env python -m football_edge.features estimate
