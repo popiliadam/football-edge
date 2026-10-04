@@ -128,8 +128,10 @@ step "veri-sözleşmesi" bash -c '
 # 2026-10-04 Plan 2 Task 3 (kademe 2 küme, zincir ve gölge varlık testleri) 450 → 455
 # (`--collect-only` ile ölçüldü).
 # 2026-10-04 Plan 2 Task 4 (dilim sayacı mührü) 455 → 457 (`--collect-only` ile ölçüldü).
+# 2026-10-04 Plan 2 son inceleme (RSS → kademe 2 uçtan uca sızıntı senaryosu) 457 → 458
+# (`--collect-only` ile ölçüldü).
 step "sızıntı" bash -c '
-  EXPECTED_MIN_LEAKAGE=457
+  EXPECTED_MIN_LEAKAGE=458
 
   collect_output=$(uv run pytest tests/ -q -m "leakage and not sitedb" --collect-only 2>&1)
   collect_code=$?
