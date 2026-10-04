@@ -1,11 +1,13 @@
 # Kademe 1/2 işletme ayarları (Faz 4 Plan 2). Dondurulmuş kümenin (config/faz4_live.yaml) hash'ine
 # GİRMEZ: birim fiyat düzeltmesi seçim dilimi sayacını sıfırlamaz.
 #
-# estimate_usd: kademe başına tahmin birimi ($/çağrı); SDK maliyet bildirmez — kullanıcı TypeSafe
-# panelinden okur (R184, I-9). max_sides_per_run: kademe 2 tur tavanı (I-8).
+# estimate_usd: kademe başına tahmin birimi ($/çağrı). Resmî fiyat (docs.typesafe.ai/models, 2026-10-04):
+# girdi $0,042/Mtok, çıktı ücretsiz, istek başı asgari yok. Ölçülen kademe 1 bataryası 1.865 girdi tokenı
+# ≈ $0,000078 → tahmin $0,0005 (~6×); kademe 2 (30 soru + haber kümesi, ~15 bin token tahmini ≈ $0,0006)
+# → $0,002 (~3×). Tahmin fazlası tavanı erken kapatır, görünür (jev_budget gerekçesi). max_sides_per_run: kademe 2 tur tavanı (I-8).
 # max_decision_age_hours: M-2 (spec: 6 saat, üst sınır).
 estimate_usd:
-  tier1: 0.01
-  tier2: 0.01
+  tier1: 0.0005
+  tier2: 0.002
 max_sides_per_run: 80
 max_decision_age_hours: 6

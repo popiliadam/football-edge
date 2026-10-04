@@ -4,10 +4,10 @@
 # Tek karakter (yorum dâhil) değişirse YENİ küme doğar; `features slice-status` küme başına sayar.
 # İşletme ayarları (tahmin birimi, taraf tavanı, karar yaşı) config/faz4_ops.yaml'dadır, hash'e girmez.
 #
-# jev_model: Task 5 tek gerçek çağrıyla ölçer ve sabitler; null iken (anahtar varsa) `features tier2`
-# EXIT_FROZEN_SET (25); kademe 1 null iken hesabın varsayılan modelini kullanır. 'latest' kabul edilmez.
+# jev_model: 2026-10-04 sabitlendi — probe kademe 1 `jev-1.13.0` döndü; docs.typesafe.ai/models sürümlü kimliği
+# sabitlemeyi önerir (`jev-latest` takma ad). Kademe 2 başka model dönerse yazmaz (model_drift). 'latest' kabul edilmez.
 # min_belongs / min_reliability: kademe 1 kapı eşikleri (başlangıç; ilk gerçek yazımdan önce donar).
 tier1_prompt_version: a967064cf504f90fe696f01dae0c24e8f701e4b30739376770fc9248c54d988b
-jev_model: null
+jev_model: jev-1.13.0
 min_belongs: 0.5
 min_reliability: 0.5

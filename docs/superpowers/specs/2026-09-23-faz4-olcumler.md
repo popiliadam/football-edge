@@ -156,3 +156,11 @@ turu 2026-10-09 12:35 UTC'den sonra tekrarlanır.
 
 **Bekleyen kullanıcı durağı (R184, I-9):** birim fiyat TypeSafe panelinden okunur (bu tek çağrının $ tutarı);
 `config/faz4_live.yaml` `jev_model` kademe 2 probe'u modeli doğrulayınca (`jev-1.13.0` beklenir) sabitlenir.
+
+**Birim fiyat ve model — kullanıcı durağı yerine resmî kaynak (2026-10-04, Ruling):** docs.typesafe.ai/models: Jev
+girdi $0,042/Mtok, çıktı ücretsiz, istek başı asgari yok; `jev-1.13.0` sürümlü kimlik, `jev-latest`/`jev-preview` ona
+işaret eden takma adlar, sürüm sabitleme önerilir. Ölçülen tek çağrı 1.865 girdi tokenı → **$0,000078** (eski tahmin
+$0,01 ≈ 128× fazla). `config/faz4_ops.yaml` `estimate_usd`: tier1 0,0005 (~6× pay), tier2 0,002 (~3× pay; 30 soru +
+haber kümesi ~15 bin token tahmini — kademe 2 probe'u 10-09'dan sonra ölçer). `config/faz4_live.yaml` `jev_model:
+jev-1.13.0` → **ilk dondurulmuş küme `prompt_version` = `9b294a616fd62e867c92aa05cc7dc9661090d484a70aaf11f550df8341980c5e`**.
+Kademe 2 başka bir model dönerse satır yazılmaz (`model_drift`). Panel teyidi isteğe bağlı (kullanıcı).
