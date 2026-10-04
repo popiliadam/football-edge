@@ -52,8 +52,42 @@ Hakem özelliğinin SDD defteri ve hükümleri: `/Users/apple/dev/football-edge-
    SportMonks denemesi (hesap kullanıcıda).
 4. **İzlenecekler:** ilk Süper Lig ataması `match_officials`e düşüyor mu (`collect-daily` logu: bağlanan/alias
    bekleyen/DB'de yok; Konyaspor alias'ı — DEFERRED 9.7a); snapshot ufku 10-04'ten sonra hâlâ 0 ise arıza (§0.İ/1).
-5. **Temizlik (kullanıcı onayıyla):** `/Users/apple/dev/football-edge-hakem` worktree'si ve yerel/uzak `tff-hakem`
-   dalı (birleşti), Docker `fe-tff-hakem-applied/-empty` kum havuzu kapları.
+5. ~~Temizlik~~ **YAPILDI 2026-10-04 (kullanıcı onayı):** `football-edge-hakem` worktree'si, yerel + uzak `tff-hakem` dalı
+   (ikisi de `main`in atasıydı), `fe-tff-hakem-*` kum havuzu kapları silindi. Hakem SDD defteri ve ön tarama
+   tablosu `.superpowers/sdd/_kalici/hakem-sdd/`ye kopyalandı (hükümler orada).
+
+### 0.S.1 Taze oturum — başlatma istemi (yapıştır)
+> "`docs/HANDOFF.md` §0.S'den başla. Önce §0.S.2 açılış kontrollerini yap (salt okuma, bana 5 satır özet). Sonra
+> §0.S.3 sırasıyla kalan işlere devam et: kullanıcısız işleri kendin yürüt (her kod değişikliği test + mutasyon +
+> tam kapı + commit/push, canlı DB yazımı §0.önceki/0.D kuralıyla); kullanıcıya bağlı bir kapıya gelince bana tek
+> adımda ne yapacağımı tıklama tıklama anlat ve 'tamam'ımı bekle. Kararlarda önerini söyle; secret'ları asla
+> sohbete yazdırma; bana kabuk adımı verirken tek parça komut ya da betik ver (bellek user-shell-steps-single-command)."
+
+### 0.S.2 Açılış kontrolleri (salt okuma)
+1. `git fetch && git status -sb && git log --oneline -5` — yalnız bot zincir başı commit'leri beklenir.
+2. `gh run list --limit 30` — kırmızı varsa önce o (RUNBOOK).
+3. **snapshot ufku (§0.İ/1):** son `snapshot` logunda `ufuktaki fikstür` > 0 ve `yazılan satır` > 0 mı (ilk kulüp maçları
+   10-09/10; 10-04'ten sonra hâlâ 0 ise arıza).
+4. **TFF hakem bağlama:** son `collect-daily` logunda `hakem bağlama …` satırı (bağlanan / alias bekleyen / DB'de yok /
+   lig dışı) ve canlıda `select count(*) from public.match_officials` (salt okuma). Süper Lig atamaları maç haftası
+   ~Salı–Perşembe açıklanır; ilk satır 10-06/08 civarı beklenir. `alias bekleyen` > 0 ise Konyaspor (DEFERRED 9.7a).
+5. Supabase advisors `security` + `performance` — yalnız bilinçli INFO beklenir (0013–0017 sonrası temiz ölçüldü).
+
+### 0.S.3 Kalan işler — sırayla
+1. **Plan 2 başlangıç kontrol listesi** (§0.önceki/0.A/1; kullanıcı kapıları K/4, K/5, K/6 bu oturumda KAPANDI):
+   (a) GDELT arşiv kapsamı ölçümü (DEFERRED 17k) — hemen yapılabilir; uzak geçici dalın silinmesi kullanıcı onayı;
+   (b) `lag_b_p99` (sync-news ≥ 2 hafta, 10-07'den itibaren — tarih koşullu); (c) gölge raporunun ilk dolu turları
+   (10-09/10 maçlarından sonra); (d) brief'lere taşınacaklar listesi.
+2. **Plan 2 tasarımı ve yazımı** (≥ 2026-10-07, (a) sonucu ve (c) için ilk veri gelince): brainstorming → spec → plan →
+   subagent-driven. Kapsam: K/4 haber toplayıcıları (Sports Mole, Independent, Standard, GFFN, Football Oranje RSS +
+   GDELT izin listesi + Wikidata; TR Fotomaç + A Spor RSS), Jev tier1 zamanlaması, T3 ücretli kalibrasyon ölçümü
+   (ücret açan commit kullanıcıya tek satır — bellek credit-activation-commit-blocked; tavan 25 $), SportMonks denemesi
+   (hesabı kullanıcı açar, Plan 2 başında).
+3. **Avukat yanıtı gelince** (kullanıcı haber verir): metin düzeltmeleri + DEFERRED 9.7g + TASLAK kaldırma → **yayın
+   aşaması** (§0.S "Kalanlar" 2: goool.ai → Netlify → secret'lar → `SITE_URL` → `site.yml` provası → ilk yayın → AK14).
+4. **Tetikli küçükler** (acil değil): DEFERRED 9.7c (bağlama kilidi), 9.7e (TFF saat deseni), 9.7f (kum havuzu LOGIN
+   kalıntısı), 21f–21n.
+
 
 ## 0. KULLANICI OTURUMU — BURADAN BAŞLA (yazıldı 2026-10-02, oturum 10b kapanışı)
 
@@ -62,7 +96,7 @@ bitirmek.** Asistanın kullanıcısız işi kalmadı (oturum 10/10b hepsini kapa
 yol haritası sıralıdır; her adım bir öncekinin çıktısına dayanabilir. Ayrıntılı gerekçeler §0.önceki/0.K'dedir
 (K/n numaraları aynı). Tahmini toplam süre: **3–4 saat** (hukuk görüşmesi hariç — o oturum dışında).
 
-### 0.0 Başlatma istemi (taze oturuma yapıştır)
+### 0.0 Başlatma istemi (ESKİ — kullanıcı oturumu bitti; geçerli istem §0.S.1)
 > "`docs/HANDOFF.md` §0 KULLANICI OTURUMU'ndan başla. Önce §0.3 açılış kontrollerini yap (salt okuma, bana 5 satır
 > özet). Sonra §0.4 yol haritasını Adım 1'den başlayarak yürüt: her adımda bana ne yapacağımı tıklama tıklama anlat,
 > benim 'tamam'ımı bekle, sonra kendi kısmını yap ve doğrula, ilerlemeyi deftere yaz, bir sonraki adıma geç.
