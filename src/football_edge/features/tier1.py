@@ -153,22 +153,24 @@ def team_tokens(name: str) -> frozenset[str]:
     return significant or frozenset(words)
 
 
-def _words(item: StoredNews) -> frozenset[str]:
+def words(item: StoredNews) -> frozenset[str]:
+    """Haberin başlık + gövde sözcükleri, aksansız (`fold`): ad eşleşmesinin girdisi."""
     return frozenset(fold(f"{item.title} {item.body or ''}").split())
 
 
-def _mentions(team: str, words: frozenset[str]) -> bool:
+def mentions(team: str, item_words: frozenset[str]) -> bool:
+    """Takımın ayırt edici bir sözcüğü haberde sözcük öneki olarak geçiyor mu (`Beşiktaş'ta`)."""
     tokens = team_tokens(team)
-    return any(word.startswith(token) for token in tokens for word in words)
+    return any(word.startswith(token) for token in tokens for word in item_words)
 
 
 def candidate_fixtures(item: StoredNews, fixtures: Sequence[LiveMatch]) -> tuple[LiveMatch, ...]:
-    words = _words(item)
+    item_words = words(item)
     scored = [
         (hits, fixture)
         for fixture in fixtures
         if item.available_at < fixture.kickoff <= item.available_at + HORIZON
-        and (hits := sum(_mentions(team, words) for team in (fixture.home, fixture.away)))
+        and (hits := sum(mentions(team, item_words) for team in (fixture.home, fixture.away)))
     ]
     scored.sort(key=lambda entry: (-entry[0], entry[1].kickoff, entry[1].match_id))
     return tuple(fixture for _, fixture in scored[:MAX_FIXTURES])
@@ -190,7 +192,7 @@ def cluster_candidates(
             for other in pool
             if _order(other) < _order(item)
             and other.available_at >= item.available_at - CLUSTER_WINDOW
-            and any(_mentions(team, _words(other)) for team in teams)
+            and any(mentions(team, words(other)) for team in teams)
         ),
         key=_order,
     )

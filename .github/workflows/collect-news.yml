@@ -112,6 +112,7 @@ jobs:
             7) echo "::error::tier1: Jev kesintisi (exit 7) — art arda Jev hatası, koşu durdu, sonraki tur yeniden sorar" ;;
             16) echo "::error::tier1: Jev aylık tavanı doldu (exit 16) — kalan haberler sorulmadı" ;;
             25) echo "::error::tier1: dondurulmuş küme ya da işletme ayarı okunamadı (exit 25) — config/faz4_live.yaml, config/faz4_ops.yaml" ;;
+            124) echo "::error::tier1 15 dakikada kesildi (exit 124) — Jev ya da veritabanı yanıt vermedi; partiler commit'lendi, sonraki tur kalanı sorar" ;;
             *) echo "::error::tier1 beklenmedik kodla düştü (exit $code)" ;;
           esac
           echo "jev=$jev" >> "$GITHUB_OUTPUT"

@@ -220,7 +220,8 @@ def test_a_hung_tier2_is_cut_before_the_job_timeout_and_opens_the_jev_alarm(
 ) -> None:
     """İşin 45 dakikalık zaman aşımı işi İPTAL ederdi: shadow alarmı açılır, `jev-kademe2` adımları
     (`!cancelled()`) koşmazdı. Kademe 2 25 dakikada kesilir, 124 `jev=fail` olur (inceleme
-    turu 1)."""
+    turu 1). 124 zaman aşımı olarak ADIYLA yazılır, "beklenmedik kod" olarak değil (son
+    inceleme)."""
     steps = _steps(SHADOW)
     body = str(steps[_at(steps, TIER2)]["run"])
 
@@ -229,6 +230,7 @@ def test_a_hung_tier2_is_cut_before_the_job_timeout_and_opens_the_jev_alarm(
     assert f"timeout 25m uv run python -m {TIER2}" in body
     assert (run.returncode, run.outputs) == (0, {"jev": "fail"})
     assert len(run.errors) == 1 and "exit 124" in run.errors[0]
+    assert "25 dakikada kesildi" in run.errors[0] and "beklenmedik" not in run.errors[0]
 
 
 def test_the_jev_key_may_reach_only_the_tier2_step() -> None:

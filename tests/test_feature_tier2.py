@@ -306,7 +306,7 @@ def test_each_side_is_asked_once_home_first_and_written_as_real_rows_with_a_mark
 
     assert [call["state"]["team"] for call in client.seen] == ["Galatasaray", "Fenerbahce"]
     assert [n["title"] for n in client.seen[0]["state"]["news"]] == ["Galatasaray'da sakatlık"]
-    assert (result.asked_sides, len(answers(result.rows))) == (2, 60)
+    assert (result.count(ASKED), len(answers(result.rows))) == (2, 60)
     assert statuses(result.rows) == [(HOME, ASKED), (AWAY, ASKED)]
     assert {(r.variant, r.prompt_version, r.asked_at) for r in result.rows} == {
         (VARIANT_REAL, CONFIG.prompt_version, NOW)

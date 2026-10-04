@@ -106,6 +106,7 @@ jobs:
             7) echo "::error::tier2: Jev kesintisi (exit 7) — art arda Jev hatası, koşu durdu" ;;
             16) echo "::error::tier2: Jev aylık tavanı doldu (exit 16) — kalan taraflar sorulmadı" ;;
             25) echo "::error::tier2: dondurulmuş küme eksik/bozuk ya da model değişti (exit 25) — config/faz4_live.yaml, config/faz4_ops.yaml" ;;
+            124) echo "::error::tier2 25 dakikada kesildi (exit 124) — Jev ya da veritabanı yanıt vermedi; cevaplanan taraflar commit'lendi" ;;
             *) echo "::error::tier2 beklenmedik kodla düştü (exit $code)" ;;
           esac
           echo "jev=$jev" >> "$GITHUB_OUTPUT"

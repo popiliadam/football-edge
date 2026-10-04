@@ -148,10 +148,6 @@ class Tier2Run:
         return self.outcomes.get(outcome, 0)
 
     @property
-    def asked_sides(self) -> int:
-        return self.count(ASKED)
-
-    @property
     def budget_hit(self) -> bool:
         return self.stop == BUDGET
 

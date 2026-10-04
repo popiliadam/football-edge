@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta
 
 from football_edge.features.live_config import TIER1, TIER2, LiveConfig
 from football_edge.features.slice import TARGET, eta_for
-from football_edge.features.tier1 import _mentions, _words, candidate_fixtures
+from football_edge.features.tier1 import candidate_fixtures, mentions, words
 from football_edge.features.tier2 import ITEM_LOOKBACK, Decision
 from football_edge.features.types import StoredNews
 from football_edge.jev_budget import MONTHLY_CAP_USD
@@ -40,8 +40,8 @@ class Estimate:
 
 
 def mentioned(team: str, item: StoredNews) -> bool:
-    """Kademe 1'in aday eşleşmesiyle AYNI kural (`tier1._mentions`)."""
-    return _mentions(team, _words(item))
+    """Kademe 1'in aday eşleşmesiyle AYNI kural (`tier1.mentions`)."""
+    return mentions(team, words(item))
 
 
 def news_before(decision: Decision, items: Sequence[StoredNews]) -> tuple[StoredNews, ...]:
