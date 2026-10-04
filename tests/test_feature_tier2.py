@@ -92,13 +92,23 @@ def gate_rows(
     asked_at: datetime = DECIDED - timedelta(hours=20),
     belongs: float = 0.9,
     reliable: float = 0.9,
+    match_id: str = "m-gs",
 ) -> tuple[ItemAnswerRow, ItemAnswerRow]:
-    chosen = f"m-gs:{side}"
+    chosen = f"{match_id}:{side}"
     match = MappingProxyType({chosen: belongs, NO_MATCH: 1 - belongs})
     trust = MappingProxyType({"official": reliable, "rumour": 1 - reliable})
     return (
         ItemAnswerRow(
-            item_id, T1_PV, MATCH_QUESTION, chosen, match, 0.9, "m-gs", "jev-fake", asked_at, 0.001
+            item_id,
+            T1_PV,
+            MATCH_QUESTION,
+            chosen,
+            match,
+            0.9,
+            match_id,
+            "jev-fake",
+            asked_at,
+            0.001,
         ),
         ItemAnswerRow(
             item_id,
@@ -107,7 +117,7 @@ def gate_rows(
             "official",
             trust,
             0.9,
-            "m-gs",
+            match_id,
             "jev-fake",
             asked_at,
             0.001,
@@ -234,6 +244,11 @@ def test_the_decision_query_reads_shadow_existence_not_probabilities_or_results(
         assert forbidden not in text, forbidden
     assert "from model_predictions" in text
     assert "p.decided_at >= %s" in text, "M1: 6 saatlik sınır dahil (`_skip` ile aynı)"
+    # Taklit süzgeci parametreyle uygular, SQL metnini değil: WHERE metinde sabitlenir (inceleme
+    # turu 1, M16/M17) — strateji süzgeci `harman_jev`i dışarıda tutar, üst sınır `now`dur.
+    flat = " ".join(text.split())
+    assert "p.strategy = any(%s)" in flat, "M16: yalnız baz gölge stratejileri"
+    assert "p.decided_at <= %s" in flat, "M17: karar anı üst sınırı (now)"
 
 
 @pytest.mark.leakage
@@ -316,6 +331,15 @@ def test_markers_are_never_answers_and_answers_never_markers() -> None:
     )
     marker = next(row for row in rows if is_status(row.question_id))
     assert (marker.probabilities, marker.confidence, marker.cost_usd) == ({ASKED: 1.0}, 1.0, 0.0)
+
+
+def test_an_asked_marker_carries_the_model_that_answered() -> None:
+    """İşaret, cevabı veren (DÖNEN) modeli taşır — kümedeki ad değil (inceleme turu 1, M18)."""
+    unpinned = replace(CONFIG, jev_model=None)
+
+    result = run(_home_and_away(), FakeBatteryJev(jev_model="jev-donen"), config=unpinned)
+
+    assert {row.jev_model for row in result.rows} == {"jev-donen"}
 
 
 def test_the_final_status_lets_asked_override_an_earlier_stop() -> None:
@@ -471,7 +495,9 @@ def test_match_answers_are_written_once_and_only_asked_markers_close_a_side() ->
     assert found == {("m-gs", DECIDED, HOME)}, "hata işareti tarafı kapatmamalı (yeniden sorulur)"
 
 
-def _config_files(tmp_path: Path, model: str = "jev-fake") -> list[str]:
+def _config_files(
+    tmp_path: Path, model: str = "jev-fake", tier2_estimate: float = 0.01
+) -> list[str]:
     live, ops = tmp_path / "faz4_live.yaml", tmp_path / "faz4_ops.yaml"
     live.write_text(
         f"tier1_prompt_version: {T1_PV}\njev_model: {model}\nmin_belongs: 0.5\n"
@@ -479,7 +505,7 @@ def _config_files(tmp_path: Path, model: str = "jev-fake") -> list[str]:
         encoding="utf-8",
     )
     ops.write_text(
-        "estimate_usd:\n  tier1: 0.01\n  tier2: 0.01\nmax_sides_per_run: 80\n"
+        f"estimate_usd:\n  tier1: 0.01\n  tier2: {tier2_estimate}\nmax_sides_per_run: 80\n"
         "max_decision_age_hours: 6\n",
         encoding="utf-8",
     )
@@ -552,8 +578,13 @@ def test_tier2_without_a_production_language_asks_nothing(
     _cli(monkeypatch, None, FakeBatteryJev())
     monkeypatch.setattr(cli, "connect", _explode)
     monkeypatch.setattr(cli, "production_languages", lambda path: frozenset())
+    # Ücret yamasından sonra adım 0 döner: tur özetinde adıyla görünmeli (kademe 1'in eşi).
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
 
     assert cli.main(["tier2", *_config_files(tmp_path)]) == 0
+
+    assert "kademe 2: üretimde dil yok" in summary.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -571,3 +602,108 @@ def test_tier2_exit_codes_by_name(
 
     assert cli.main(["tier2", *_config_files(tmp_path)]) == code
     assert [row for row in db.match_answers if not is_status(row["question_id"])] == []
+
+
+# ── Düzeltme turu 1 (bağımsız K1 incelemesi) ───────────────────────────────────────────────
+
+
+@dataclass
+class _FailingAt(FakeBatteryJev):
+    """`fail_at`teki sıradaki çağrılar (0'dan) Jev hatasıyla patlar, diğerleri cevap alır."""
+
+    fail_at: frozenset[int] = frozenset()
+
+    def ask_battery(self, state: Mapping[str, Any], questions: Sequence[Question]) -> BatteryAnswer:
+        if len(self.seen) in self.fail_at:
+            self.seen = [*self.seen, {"state": dict(state), "question_ids": ()}]
+            raise ConnectionError("jev hatası")
+        return super().ask_battery(state, questions)
+
+
+def test_an_answered_side_resets_the_error_streak() -> None:
+    """Hata, cevap, hata, cevap, hata: art arda `OUTAGE_STREAK` hata yok — kesinti DEĞİL (M7)."""
+    many = tuple(
+        SideTask(replace(DECISION, match_id=f"m{n}"), HOME, "Galatasaray", (HOME_NEWS,), "c" * 64)
+        for n in range(5)
+    )
+    client = _FailingAt(fail_at=frozenset({0, 2, 4}))
+
+    result = run(many, client)
+
+    assert (result.outage, len(client.seen)) == (False, 5)
+    assert [s for _, s in statuses(result.rows)] == [ERROR, ASKED, ERROR, ASKED, ERROR]
+
+
+@dataclass
+class _Tampered(FakeBatteryJev):
+    """İlk soruya ölçüt dışı seçim, ikinciye 1'den büyük olasılık döner."""
+
+    def ask_battery(self, state: Mapping[str, Any], questions: Sequence[Question]) -> BatteryAnswer:
+        answer = super().ask_battery(state, questions)
+        first, second = questions[0].question_id, questions[1].question_id
+        given = dict(answer.answers)
+        given[first] = replace(given[first], choice="belki")
+        bent = given[second]
+        given[second] = replace(bent, probabilities={**bent.probabilities, bent.choice: 1.5})
+        return replace(answer, answers=given)
+
+
+def test_an_answer_outside_the_criteria_or_the_unit_interval_is_not_written() -> None:
+    """`_valid` (M8): ölçüt dışı seçim ve > 1 olasılık yazılmaz, başarısız sayılır."""
+    home, _ = _home_and_away()
+    battery = side_battery(QUESTIONS, side=HOME, team="Galatasaray")
+
+    result = run((home,), _Tampered())
+
+    written = {row.question_id for row in answers(result.rows)}
+    assert (len(written), result.failed) == (28, 2)
+    assert not written & {battery[0].question_id, battery[1].question_id}
+
+
+def test_tier2_asks_with_the_frozen_model_and_the_tier2_estimate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Kademe 2 kendi tahmin birimini (`estimate_usd.tier2`) ve kümedeki modeli kullanır (M9)."""
+    built: list[Any] = []
+    _cli(monkeypatch, _db(), FakeBatteryJev())
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda **kw: built.append(kw) or FakeBatteryJev())
+    monkeypatch.setattr(cli, "budgeted_jev", lambda jev, spend_conn, **kw: built.append(kw) or jev)
+
+    assert cli.main(["tier2", *_config_files(tmp_path, tier2_estimate=0.02)]) == 0
+
+    assert built[0] == {"model": "jev-fake"}
+    assert built[1]["estimate_usd"] == 0.02
+
+
+EARLY = DECIDED - timedelta(hours=4)
+
+
+def test_the_news_window_reaches_back_from_the_earliest_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """İki karar anı: haber penceresi EN ERKEN karardan `ITEM_LOOKBACK` geri okunur (M3). Erken
+    kararın haberi geç kararın penceresinden eskidir; yine de erken kararın tarafına girer."""
+    old = item(3, "Besiktas'ta gelişme", EARLY - ITEM_LOOKBACK + timedelta(hours=1))
+    db = _db()
+    draft = NewsDraft(
+        old.source_id,
+        old.lang,
+        old.title,
+        None,
+        old.url,
+        old.available_at,
+        OBSERVED,
+        old.content_hash,
+    )
+    write_news(db, [draft])  # type: ignore[arg-type]
+    rows = gate_rows(3, HOME, asked_at=EARLY - timedelta(days=1), match_id="m-bjk")
+    write_item_answers(db, rows)  # type: ignore[arg-type]
+    db.matches = {**db.matches, "m-bjk": ("Besiktas JK", "Trabzonspor", EARLY + timedelta(days=3))}
+    db.predictions = [*db.predictions, ("m-bjk", "market", EARLY)]
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier2", *_config_files(tmp_path)]) == 0
+
+    teams = [call["state"]["team"] for call in client.seen]
+    assert teams == ["Besiktas JK", "Galatasaray", "Fenerbahce"]

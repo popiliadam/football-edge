@@ -37,7 +37,7 @@ jobs:
       - name: Gölge tahmin
         id: shadow
         # Faz 3 (R134): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
-        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım alır.
+        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım, rapor ve kademe 2 alır.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -85,7 +85,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set +e
-          uv run python -m football_edge.features tier2
+          # Asılı bir Jev işin 45 dakikasını yerse iş İPTAL olur: shadow alarmı açılır, Jev alarm
+          # adımları (`!cancelled()`) koşmaz. 25 dakikada kesilir, 124 aşağıda `jev=fail` olur.
+          timeout 25m uv run python -m football_edge.features tier2
           code=$?
           set -e
           jev=fail

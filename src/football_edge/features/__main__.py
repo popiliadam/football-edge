@@ -118,6 +118,15 @@ def _summary(line: str) -> None:
             summary.write(f"{line}\n")
 
 
+def _no_language(name: str, path: Path) -> int:
+    """Üretimde dil yok: hiçbir başlık Jev'e gitmez (R178). Log + tur özeti — ücret yamasından
+    sonra 0 dönen adım özette adıyla görünür. Dönüş: komutun çıkış kodu (0)."""
+    line = f"{name}: üretimde dil yok ({path}) — Jev'e haber gitmedi"
+    LOGGER.info("%s", line)
+    _summary(line)
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m football_edge.features")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -248,9 +257,7 @@ def _tier1(args: argparse.Namespace) -> int:
         return EXIT_NO_JEV_KEY
     languages = production_languages(args.languages)
     if not languages:
-        LOGGER.info("kademe 1: üretimde dil yok (%s) — Jev'e haber gitmedi", args.languages)
-        _summary(f"kademe 1: üretimde dil yok ({args.languages}) — Jev'e haber gitmedi")
-        return 0
+        return _no_language("kademe 1", args.languages)
     questions = load_questions(args.questions)
     now = _now()
     # Varsayılan pencere: adayı hâlâ başlamamış olabilecek haberler (fikstür ufku kadar geri).
@@ -344,8 +351,7 @@ def _tier2(args: argparse.Namespace) -> int:
         return EXIT_FROZEN_SET
     languages = production_languages(args.languages)
     if not languages:
-        LOGGER.info("kademe 2: üretimde dil yok (%s) — Jev'e haber gitmedi", args.languages)
-        return 0
+        return _no_language("kademe 2", args.languages)
     written = 0
     with connect() as conn, connect() as spend_conn:
 

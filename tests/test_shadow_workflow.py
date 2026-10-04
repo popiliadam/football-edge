@@ -1,5 +1,5 @@
-"""`shadow.yml`: yalnız pg_cron (0011), secret yalnız gölge ve rapor adımlarında, çıkış kodları
-adıyla; haftalık gölge raporu (Faz 4 T0a) yalnız salı turunda."""
+"""`shadow.yml`: yalnız pg_cron (0011), veritabanı secret'ı yalnız gölge, rapor ve kademe 2
+adımlarında, çıkış kodları adıyla; haftalık gölge raporu (Faz 4 T0a) yalnız salı turunda."""
 
 from __future__ import annotations
 
@@ -211,6 +211,22 @@ def test_the_tier2_step_never_turns_the_shadow_run_red_and_names_every_jev_outco
         assert run.errors == ()
     else:
         assert len(run.errors) == 1 and named in run.errors[0] and f"exit {code}" in run.errors[0]
+
+
+def test_a_hung_tier2_is_cut_before_the_job_timeout_and_opens_the_jev_alarm(
+    tmp_path: Path,
+) -> None:
+    """İşin 45 dakikalık zaman aşımı işi İPTAL ederdi: shadow alarmı açılır, `jev-kademe2` adımları
+    (`!cancelled()`) koşmazdı. Kademe 2 25 dakikada kesilir, 124 `jev=fail` olur (inceleme
+    turu 1)."""
+    steps = _steps(SHADOW)
+    body = str(steps[_at(steps, TIER2)]["run"])
+
+    run = run_step(tmp_path, body, code=124)
+
+    assert f"timeout 25m uv run python -m {TIER2}" in body
+    assert (run.returncode, run.outputs) == (0, {"jev": "fail"})
+    assert len(run.errors) == 1 and "exit 124" in run.errors[0]
 
 
 def test_the_jev_key_may_reach_only_the_tier2_step() -> None:
