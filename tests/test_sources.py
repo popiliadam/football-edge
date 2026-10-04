@@ -439,7 +439,11 @@ def _collector_fetched_paths() -> tuple[tuple[str, str], ...]:
     pairs += (("tff", tff.REFEREE_PATH),)
     pairs += tuple(("wikidata", venues.ENTITY_PATH.format(qid=spec.qid)) for spec in venues.VENUES)
     pairs += (("openmeteo", FORECAST_PATH),)
-    pairs += tuple(news._ARTICLE_PATHS.items())  # anahtar = adaptörün kaynak id'si
+    pairs += tuple(
+        (source_id, feed.path)  # anahtar = adaptörün kaynak id'si; her akış ayrı beyan edilmeli
+        for source_id, feeds in news._ARTICLE_PATHS.items()
+        for feed in feeds
+    )
     return pairs
 
 

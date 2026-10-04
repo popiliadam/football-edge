@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -9,10 +10,13 @@ import pytest
 from football_edge.collector import ContractViolation, fetch_text
 from football_edge.collectors import news as news_module
 from football_edge.collectors.news import (
+    RSS_SOURCES,
     AjansporAdapter,
+    Feed,
     GoogleNewsAdapter,
     NewsCollectResult,
     NewsItem,
+    RssAdapter,
     collect_news,
     enabled_adapters,
     news_observation,
@@ -592,7 +596,9 @@ def test_collect_news_writes_and_counts_self_stamped_items(
     # ÜZERİNDEN sınamak için geçici olarak bir yol ekleniyor (gerçek, ölçülmüş yol —
     # task-8-report.md — ama canlıya hiç istek atılmıyor, MockTransport devrede).
     monkeypatch.setitem(
-        news_module._ARTICLE_PATHS, "googlenews", "/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr"
+        news_module._ARTICLE_PATHS,
+        "googlenews",
+        (Feed("/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr", "application/xml"),),
     )
     sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
     write_robots(tmp_path, "ajansspor", "")
@@ -628,7 +634,9 @@ def test_collect_news_self_stamped_items_do_not_mask_a_stale_source_provided_ite
     `max_age`i aşar ve iddia KIRILIR — kaynak `failed_sources`e düşer, HİÇBİR ŞEY yazılmaz
     (kendi-damgalı öğe dahil — batch bölünmez, bkz. `collect_news` docstring'i)."""
     monkeypatch.setitem(
-        news_module._ARTICLE_PATHS, "googlenews", "/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr"
+        news_module._ARTICLE_PATHS,
+        "googlenews",
+        (Feed("/rss/search?q=Galatasaray&hl=tr&gl=TR&ceid=TR:tr", "application/xml"),),
     )
     sources_path = _sources_yaml(tmp_path, googlenews_enabled=True)
     write_robots(tmp_path, "ajansspor", "")
@@ -721,3 +729,218 @@ def test_collect_news_does_not_count_a_batch_whose_commit_fails(tmp_path: Path) 
     assert result.self_stamped == 0
     assert result.failed_sources == ("ajansspor",)
     assert db.rollbacks == 1
+
+
+# ---------------------------------------------------------------------------
+# Plan 2 Task 1 — yedi RSS kaynağı. Gövdeler SENTETİK (uydurma başlık, `*.test` alanları);
+# içerik türleri ve tazelik pencereleri kontrolörün 2026-10-04 ölçümüdür.
+# ---------------------------------------------------------------------------
+
+OCT3 = datetime(2026, 10, 3, 11, 30, tzinfo=UTC)
+MEASURED_FEEDS = {
+    "sportsmole": (Feed("/football/rss.xml", "application/xml"),),
+    "independent": (Feed("/sport/football/rss", "text/xml"),),
+    "standard": (Feed("/sport/football/rss", "text/xml"),),
+    "gffn": (Feed("/feed/", "application/rss+xml"),),
+    "football-oranje": (Feed("/feed/", "application/rss+xml"),),
+    "fotomac": (Feed("/rss/news.xml", "text/xml"),),
+    "aspor": (Feed("/rss/futbol.xml", "application/xml"),),
+}
+
+
+def _synthetic_rss(entries: list[tuple[str, str | None]], host: str) -> str:
+    """`entries`: (kısa ad, RFC 2822 pubDate ya da None). Özet (`description`) KASITLI var."""
+    items = "".join(
+        f"<item><title>Uydurma başlık {slug}</title><link>https://{host}/{slug}</link>"
+        + (f"<pubDate>{pub_date}</pubDate>" if pub_date else "")
+        + f"<description>Uydurma özet {slug}</description></item>"
+        for slug, pub_date in entries
+    )
+    return f"<rss version='2.0'><channel><title>sentetik</title>{items}</channel></rss>"
+
+
+def _rss_sources_yaml(tmp_path: Path, ids: tuple[str, ...]) -> Path:
+    blocks = "".join(
+        f"""
+  - id: {sid}
+    base_url: https://{sid}.test
+    user_agent: football-edge-test/0.1
+    crawl_delay_seconds: 0.0
+    robots_verified_at: 2026-10-03
+    declared_paths: ['{MEASURED_FEEDS[sid][0].path}']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: ''
+"""
+        for sid in ids
+    )
+    path = tmp_path / "sources.yaml"
+    path.write_text("sources:" + blocks, encoding="utf-8")
+    for sid in ids:
+        write_robots(tmp_path, sid, "")
+    return path
+
+
+def _typed_handler(bodies: dict[str, tuple[str, str]], seen: list[str] | None = None) -> object:
+    """host → (gövde, content-type). `seen` her isteğin URL'sini toplar."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(str(request.url))
+        for host, (body, content_type) in bodies.items():
+            if host in str(request.url):
+                return httpx.Response(200, text=body, headers={"content-type": content_type})
+        return httpx.Response(404, text="not found")
+
+    return handler
+
+
+def _collect(tmp_path: Path, ids: tuple[str, ...], bodies: dict[str, tuple[str, str]]) -> Any:
+    client = httpx.Client(transport=httpx.MockTransport(_typed_handler(bodies)))  # type: ignore[arg-type]
+    return collect_news(
+        FakeObservationDb(),  # type: ignore[arg-type]
+        client,
+        sources_path=_rss_sources_yaml(tmp_path, ids),
+        robots_dir=tmp_path,
+        now=OCT3,
+    )
+
+
+def _rfc(when: datetime) -> str:
+    return when.strftime("%a, %d %b %Y %H:%M:%S +0000")
+
+
+def test_every_rss_source_is_registered_with_its_measured_feed_and_content_type() -> None:
+    assert set(RSS_SOURCES) == set(MEASURED_FEEDS)
+    assert {sid: news_module._ARTICLE_PATHS[sid] for sid in RSS_SOURCES} == MEASURED_FEEDS
+    registry = load_sources(Path("config/sources.yaml"))
+    adapters = {adapter.source_id: adapter for adapter in enabled_adapters(registry)}
+    assert all(isinstance(adapters[sid], RssAdapter) for sid in RSS_SOURCES)
+
+
+def test_rss_adapter_keeps_title_link_and_date_but_never_the_summary() -> None:
+    body = _synthetic_rss([("a", "Sat, 03 Oct 2026 10:00:00 GMT")], "fotomac.test")
+
+    (item,) = RssAdapter("fotomac").parse(body, now=OCT3)
+
+    assert (item.title, item.url, item.source_id) == (
+        "Uydurma başlık a",
+        "https://fotomac.test/a",
+        "fotomac",
+    )
+    assert set(news_observation(item).payload) == {"title", "url", "published_at", "source_id"}
+    assert "Uydurma özet" not in str(news_observation(item).payload)
+
+
+@pytest.mark.parametrize(
+    "pub_date",
+    [
+        "Sat, 03 Oct 2026 14:00:00 +0300",
+        "Sat, 03 Oct 2026 12:00:00 +0100",
+        "Sat, 03 Oct 2026 11:00:00 GMT",
+        "Sat, 03 Oct 2026 11:00:00 +0000",
+    ],
+)
+def test_rss_pubdate_offsets_are_converted_to_the_same_utc_instant(pub_date: str) -> None:
+    body = _synthetic_rss([("a", pub_date)], "aspor.test")
+
+    (item,) = RssAdapter("aspor").parse(body, now=OCT3)
+
+    assert item.published_at == datetime(2026, 10, 3, 11, 0, tzinfo=UTC)
+    assert item.published_at.tzinfo is UTC
+    assert item.published_at_is_source_provided is True
+
+
+def test_a_plus_three_hour_feed_is_not_future_dated_at_collection(tmp_path: Path) -> None:
+    """11:20 UTC = 14:20 +0300. Saat dilimi atılsaydı öğe 14:20 UTC, yani `now`dan (11:30) SONRA
+    olurdu ve `assert_fresh` kaynağı "gelecekte" diye kırmızı yapardı."""
+    body = _synthetic_rss([("taze", "Sat, 03 Oct 2026 14:20:00 +0300")], "fotomac.test")
+
+    result = _collect(tmp_path, ("fotomac",), {"fotomac.test": (body, "text/xml")})
+
+    assert result == NewsCollectResult(written=1, self_stamped=0, failed_sources=())
+
+
+def test_each_feed_is_fetched_with_its_own_measured_content_type(tmp_path: Path) -> None:
+    fresh = _rfc(OCT3 - timedelta(hours=1))
+    ids = ("independent", "gffn")
+    right = {
+        "independent.test": (_synthetic_rss([("i", fresh)], "independent.test"), "text/xml"),
+        "gffn.test": (_synthetic_rss([("g", fresh)], "gffn.test"), "application/rss+xml"),
+    }
+
+    assert _collect(tmp_path, ids, right).failed_sources == ()
+
+    wrong = {**right, "independent.test": (right["independent.test"][0], "application/xml")}
+    assert _collect(tmp_path, ids, wrong).failed_sources == ("independent",)
+
+
+@pytest.mark.parametrize(
+    ("source_id", "age"),
+    [
+        ("football-oranje", timedelta(days=5)),
+        ("gffn", timedelta(days=3)),
+        ("sportsmole", timedelta(days=1, hours=20)),
+    ],
+)
+def test_low_volume_feeds_have_their_own_freshness_window(
+    tmp_path: Path, source_id: str, age: timedelta
+) -> None:
+    feed = MEASURED_FEEDS[source_id][0]
+    body = _synthetic_rss([("eski", _rfc(OCT3 - age))], f"{source_id}.test")
+
+    result = _collect(tmp_path, (source_id,), {f"{source_id}.test": (body, feed.content_type)})
+
+    assert result.failed_sources == (), f"{source_id} {age} yaşındaki öğeyle kırmızı"
+
+
+@pytest.mark.parametrize(
+    ("source_id", "age"),
+    [
+        ("football-oranje", timedelta(days=7, hours=1)),
+        ("gffn", timedelta(days=4, hours=1)),
+        ("sportsmole", timedelta(days=3)),
+    ],
+)
+def test_a_feed_beyond_its_own_window_is_red(
+    tmp_path: Path, source_id: str, age: timedelta
+) -> None:
+    feed = MEASURED_FEEDS[source_id][0]
+    body = _synthetic_rss([("bayat", _rfc(OCT3 - age))], f"{source_id}.test")
+
+    result = _collect(tmp_path, (source_id,), {f"{source_id}.test": (body, feed.content_type)})
+
+    assert result.failed_sources == (source_id,)
+
+
+def test_a_url_seen_in_two_feeds_of_a_source_is_written_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(
+        news_module._ARTICLE_PATHS,
+        "sportsmole",
+        (
+            Feed("/football/rss.xml", "application/xml"),
+            Feed("/premier-league/rss.xml", "application/xml"),
+        ),
+    )
+    body = _synthetic_rss([("ortak", _rfc(OCT3 - timedelta(hours=1)))], "sportsmole.test")
+    seen: list[str] = []
+    client = httpx.Client(
+        transport=httpx.MockTransport(  # type: ignore[arg-type]
+            _typed_handler({"sportsmole.test": (body, "application/xml")}, seen)
+        )
+    )
+    db = FakeObservationDb()
+
+    result = collect_news(
+        db,  # type: ignore[arg-type]
+        client,
+        sources_path=_rss_sources_yaml(tmp_path, ("sportsmole",)),
+        robots_dir=tmp_path,
+        now=OCT3,
+    )
+
+    assert len(seen) == 2, "iki akış da istenmeli"
+    assert result.written == 1 and len(db.rows) == 1

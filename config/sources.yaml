@@ -130,6 +130,105 @@ sources:
       giriş noktasıdır (R7: beyan edilen yol önek değil, GERÇEK bir istek olmalı — ikisi de
       öyle), ileride alt-sitemap keşfi gerekirse kod tarafı hazır bulur.
 
+  - id: sportsmole
+    base_url: https://www.sportsmole.co.uk
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/football/rss.xml']
+    enabled: true
+    access_basis: robots
+    terms_url: https://www.sportsmole.co.uk/about/information/terms-and-conditions_467.html
+    note: >-
+      Plan 2 R175 (K/4 kullanıcı kararı: koşullu iç kullanım; docs/reports/2026-10-02-en-haber-kaynaklari.md).
+      Content-Signal satırı YOK (ai-input belirtilmemiş — yalnız açık `no` Jev'i keser, spec §4/9).
+      Ölçüldü 2026-10-04: 200 application/xml, 82 öğe, güncel. Saklanan yalnız başlık + URL; özet okunmaz.
+      Koşullar (12.05.2026): kişisel/ticari olmayan; her kullanım yazılı izne bağlı — ticari lansmandan
+      önce yazılı izin; başlıkların TypeSafe'e gönderimi avukat S8 sorusunda (M-8).
+
+  - id: independent
+    base_url: https://www.independent.co.uk
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/sport/football/rss']
+    enabled: true
+    access_basis: robots
+    terms_url: https://www.independent.co.uk/service/user-policies-a6184151.html
+    note: >-
+      Plan 2 R175 (K/4). Content-Signal satırı YOK (ai-input belirtilmemiş). Ölçüldü 2026-10-04: 200
+      text/xml, 11 öğe. Koşullar başlık + URL ile bağlantıyı açıkça serbest bırakır; izinsiz saklama/
+      arşivleme yasak → saklanan YALNIZ başlık + URL (R175). Avukat S8.
+
+  - id: standard
+    base_url: https://www.standard.co.uk
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/sport/football/rss']
+    enabled: true
+    access_basis: robots
+    terms_url: https://www.standard.co.uk/service/terms-of-use-6902768.html
+    note: >-
+      Plan 2 R175 (K/4). Independent ile aynı koşul metni. Content-Signal satırı YOK. Ölçüldü
+      2026-10-04: 200 text/xml, 23 öğe. Saklanan yalnız başlık + URL. Avukat S8.
+
+  - id: gffn
+    base_url: https://www.getfootballnewsfrance.com
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/feed/']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      Plan 2 R175 (K/4). robots'ta `User-agent: *` grubu yok (yalnız bingbot/AmazonAdBot, Crawl-delay 1)
+      → kısıtsız; Content-Signal satırı YOK. Ölçüldü 2026-10-04: 200 application/rss+xml, 10 öğe
+      (bugün). Düşük hacim: tazelik penceresi 4 gün (collectors/news.py `_MAX_AGE`). Koşul sayfası yok —
+      koşul yokluğu hak verilmesi demek değil. Avukat S8.
+
+  - id: football-oranje
+    base_url: https://www.football-oranje.com
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/feed/']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      Plan 2 R175 (K/4). robots `*` için `Disallow:` boş; Content-Signal satırı YOK. Ölçüldü 2026-10-04:
+      200 application/rss+xml, 10 öğe, EN YENİSİ 3 gün önce → tazelik penceresi 7 gün
+      (collectors/news.py `_MAX_AGE`). Hollanda futbolu (milli takım ağırlıklı). Koşul sayfası bulunamadı.
+
+  - id: fotomac
+    base_url: https://www.fotomac.com.tr
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/rss/news.xml']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      Plan 2 R175 (K/4). Content-Signal: search=yes, ai-input=yes, ai-train=no. `/rss/futbol.xml` ve
+      `/rss/anasayfa.xml` BAYAT (son öğe 2025-05-31) → yol `/rss/news.xml` (ölçüldü 2026-10-04: 200
+      text/xml, 214 öğe, güncel). Koşul sayfası okunmadı — avukat paketi S5/S8.
+
+  - id: aspor
+    base_url: https://www.aspor.com.tr
+    user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
+    crawl_delay_seconds: 2.0
+    robots_verified_at: 2026-10-04
+    declared_paths: ['/rss/futbol.xml']
+    enabled: true
+    access_basis: robots
+    terms_url: ''
+    note: >-
+      Plan 2 R175 (K/4). Content-Signal: search=yes, ai-input=yes, ai-train=no. Ölçüldü 2026-10-04: 200
+      application/xml, 100 öğe, güncel. Koşul sayfası okunmadı — avukat paketi S5/S8.
+
   - id: openmeteo
     base_url: https://api.open-meteo.com
     user_agent: football-edge/0.1
