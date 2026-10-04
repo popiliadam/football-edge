@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +23,8 @@ from football_edge.features.questions import (
     load_questions,
 )
 from football_edge.features.tier1 import (
+    BATCH_SIZE,
+    EMPTY_RUN,
     FAILED_PREFIX,
     HORIZON,
     MAX_ATTEMPTS,
@@ -30,9 +32,12 @@ from football_edge.features.tier1 import (
     OUTAGE_STREAK,
     ItemAnswerRow,
     asked_item_ids,
+    batches,
     candidate_fixtures,
     gates_from,
     load_fixtures,
+    merge_runs,
+    newest_within_cap,
     run_tier1,
     write_item_answers,
 )
@@ -404,11 +409,13 @@ def test_answers_before_the_error_streak_are_kept_and_later_items_are_not_asked(
 
 def test_fewer_errors_than_the_streak_are_marked_as_before() -> None:
     """Tek başına hep düşen haber kesinti değildir: işaretlenir ve `MAX_ATTEMPTS`te bırakılır —
-    yoksa her koşuda yeniden sorulup tavandan yerdi (son inceleme I-2)."""
+    yoksa her koşuda yeniden sorulup tavandan yerdi (son inceleme I-2). Sondaki seri `pending`de
+    döner (sonraki partide sürebilir); koşu bitince çağıran onu da yazar."""
     result = run(TWO, FakeBatteryJev(error=ConnectionError("jev kapalı")))
 
     assert result.outage is False
-    assert [(m.item_id, m.choice) for m in result.failures] == [
+    assert result.failures == ()
+    assert [(m.item_id, m.choice) for m in result.pending] == [
         (1, "jev_error:ConnectionError"),
         (2, "jev_error:ConnectionError"),
     ]
@@ -422,7 +429,8 @@ def test_an_answer_breaks_the_error_streak() -> None:
 
     assert result.outage is False
     assert {r.item_id for r in result.rows} == {3}
-    assert [m.item_id for m in result.failures] == [1, 2, 4, 5]
+    assert [m.item_id for m in result.failures] == [1, 2]
+    assert [m.item_id for m in result.pending] == [4, 5]
     assert len(client.seen) == 5
 
 
@@ -646,9 +654,9 @@ def test_run_rows_feed_gates_end_to_end() -> None:
 STARTED = LiveMatch("m-basladi", LEAGUE, T0 + timedelta(minutes=30), "Galatasaray", "Rizespor")
 
 
-def _db_with(*items: StoredNews) -> FakeNewsDb:
+def _db_with(*items: StoredNews, factory: Callable[..., FakeNewsDb] = FakeNewsDb) -> FakeNewsDb:
     """Veritabanı saati haberlerden önce: yazılan haberin `available_at`i = iddia = kendi anı."""
-    db = FakeNewsDb(now=T0 - timedelta(days=30))
+    db = factory(now=T0 - timedelta(days=30))
     drafts = [
         NewsDraft(
             i.source_id, i.lang, i.title, i.body, i.url, i.available_at, OBSERVED, i.content_hash
@@ -691,6 +699,8 @@ def _cli(monkeypatch: pytest.MonkeyPatch, db: FakeNewsDb, client: Any) -> list[A
     monkeypatch.setattr(cli, "TypeSafeJev", lambda: client)
     monkeypatch.setattr(cli, "budgeted_jev", _budgeted)
     monkeypatch.setattr(cli, "_now", lambda: T0 + timedelta(hours=1))
+    # Bugün hiçbir dil üretimde değil (config/languages.yaml); testler TR'yi üretimde sayar.
+    monkeypatch.setattr(cli, "production_languages", lambda path: frozenset({"tr"}))
     return budgeted
 
 
@@ -872,3 +882,323 @@ def test_probabilities_outside_the_offer_or_range_are_a_failure(
 
     assert result.rows == ()
     assert result.failed == 2
+
+
+# ── Plan 2 Task 2: tur tavanı, partiler, dil kapısı ────────────────────────────────────────
+
+
+def test_the_call_cap_defers_the_rest_without_markers() -> None:
+    client = FakeBatteryJev()
+    items = [news(n, f"Galatasaray'da haber {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3)]
+
+    result = run_tier1(
+        items, client, QUESTIONS, fixtures=FIXTURES, clock=lambda: ASKED, max_calls=2
+    )
+
+    assert (len(client.seen), result.calls, result.deferred) == (2, 2, 1)
+    assert result.failures == ()
+
+
+def test_news_without_a_candidate_does_not_use_the_call_cap() -> None:
+    client = FakeBatteryJev()
+    items = [news(1, "Hava durumu"), news(2, "Galatasaray'da sakatlık", T0 + timedelta(minutes=1))]
+
+    result = run_tier1(
+        items, client, QUESTIONS, fixtures=FIXTURES, clock=lambda: ASKED, max_calls=1
+    )
+
+    assert (result.no_candidate, result.calls, result.deferred) == (1, 1, 0)
+
+
+def test_batches_split_the_items_in_time_order() -> None:
+    items = [news(n, f"h{n}", T0 + timedelta(minutes=-n)) for n in range(1, 6)]
+
+    found = batches(items, 2)
+
+    assert [[i.item_id for i in batch] for batch in found] == [[5, 4], [3, 2], [1]]
+    with pytest.raises(ValueError, match="parti"):
+        batches(items, 0)
+
+
+def test_merged_runs_add_up_and_keep_the_order() -> None:
+    first = run([news(1, "Galatasaray'da sakatlık")], FakeBatteryJev())
+    second = run([news(2, "Trabzonspor'da kriz", T0 + timedelta(minutes=1))], FakeBatteryJev())
+
+    merged = merge_runs(merge_runs(EMPTY_RUN, first), second)
+
+    assert merged.rows == (*first.rows, *second.rows)
+    assert (merged.asked, merged.calls) == (first.asked + second.asked, 2)
+    assert merged.budget_hit is False and merged.outage is False
+
+
+@dataclass
+class _CommitLog(FakeNewsDb):
+    """Her commit anında yazılmış cevap sayısı: ödenmiş cevabın hangi partide kalıcılaştığı."""
+
+    committed: list[int] = field(default_factory=list)
+
+    def commit(self) -> None:
+        self.committed = [*self.committed, len(self.answers)]
+        super().commit()
+
+
+TWELVE = tuple(
+    news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in range(1, 13)
+)
+
+
+def test_each_batch_is_committed_before_the_next_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = _db_with(*TWELVE, factory=_CommitLog)
+    _cli(monkeypatch, db, FakeBatteryJev())
+
+    assert cli.main(["tier1"]) == 0
+
+    assert isinstance(db, _CommitLog)
+    first_batch = len([a for a in db.answers if a["item_id"] <= BATCH_SIZE])
+    assert db.committed == [first_batch, len(db.answers)]
+
+
+class _Killed(BaseException):
+    """Zaman aşımının taklidi: `_ask`in `Exception` yakalayıcısını geçer, koşuyu öldürür."""
+
+
+def test_a_run_killed_in_the_second_batch_keeps_the_first_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @dataclass
+    class DiesOnEleventh(FakeBatteryJev):
+        def ask_battery(
+            self, state: Mapping[str, Any], questions: Sequence[Question]
+        ) -> BatteryAnswer:
+            if len(self.seen) == BATCH_SIZE:
+                raise _Killed()
+            return super().ask_battery(state, questions)
+
+    db = _db_with(*TWELVE, factory=_CommitLog)
+    _cli(monkeypatch, db, DiesOnEleventh())
+
+    with pytest.raises(_Killed):
+        cli.main(["tier1"])
+
+    assert isinstance(db, _CommitLog)
+    assert len(db.committed) == 1 and db.committed[0] > 0
+
+
+def test_the_command_stops_asking_at_the_call_cap(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = _db_with(news(1, "Galatasaray'da sakatlık"), news(2, "Trabzonspor'da kriz"))
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "1"]) == 0
+
+    assert len(client.seen) == 1
+    assert "ertelenen 1" in caplog.text
+
+
+def test_under_the_call_cap_the_newest_news_is_asked_first(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """I6: tavan altında en yeniden en eskiye — karar anına en yakın haber önce satın alınır."""
+    db = _db_with(
+        *(news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3))
+    )
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "2"]) == 0
+
+    asked = [call["state"]["news"]["title"] for call in client.seen]
+    assert asked == ["Galatasaray'da gelişme 2", "Galatasaray'da gelişme 3"]
+    assert "ertelenen 1" in caplog.text
+
+
+def test_the_cap_skips_news_without_a_candidate_and_given_up_news() -> None:
+    items = [
+        news(1, "Hava durumu"),
+        *(news(n, f"Galatasaray'da {n}", T0 + timedelta(minutes=n)) for n in (2, 3)),
+    ]
+
+    kept, deferred = newest_within_cap(items, FIXTURES, attempts={3: MAX_ATTEMPTS}, cap=1)
+
+    assert ([i.item_id for i in kept], deferred) == ([1, 2, 3], 0)
+
+
+def test_a_non_production_language_item_never_reaches_jev_even_as_earlier_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review Focus 1: EN haber sorulmaz VE küme adayı olarak başlığıyla Jev'e gitmez (R178).
+    EN haber önceden SORULMUŞ işaretlenir: süzgeç yalnız sorulacakları (`items`) süzseydi, sorulmuş
+    haber `history`ye, oradan `earlier_news`e girerdi — pencerenin kendisi süzülmeli."""
+    english = replace(news(1, "Galatasaray injury update", T0 - timedelta(hours=1)), lang="en")
+    db = _db_with(english, news(2, "Galatasaray'da sakatlık"))
+    asked = ItemAnswerRow(
+        1,
+        QUESTIONS.prompt_version,
+        MATCH_QUESTION,
+        NO_MATCH,
+        {NO_MATCH: 1.0},
+        0.9,
+        None,
+        "jev-fake",
+        T0,
+        0.0,
+    )
+    write_item_answers(db, [asked])  # type: ignore[arg-type]
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    cli.main(["tier1"])
+
+    (call,) = client.seen
+    assert call["state"]["news"]["title"] == "Galatasaray'da sakatlık"
+    assert call["state"]["earlier_news"] == []
+
+
+def test_without_a_production_language_nothing_is_asked_and_the_database_is_untouched(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    def _explode() -> Any:
+        raise AssertionError("üretim dili yokken veritabanına bağlanılmamalı")
+
+    languages = tmp_path / "languages.yaml"
+    languages.write_text(
+        "languages:\n  - code: tr\n    production_enabled: false\n"
+        f"    calibration_report: {tmp_path / 'tr.report.json'}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda: FakeBatteryJev())
+    monkeypatch.setattr(cli, "connect", _explode)
+    # Ücret yamasından sonra adım 0 döner: tur özetinde adıyla görünmeli (inceleme turu 1, bulgu 8).
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--languages", str(languages)]) == 0
+
+    assert "üretimde dil yok" in caplog.text
+    assert "kademe 1: üretimde dil yok" in summary.read_text(encoding="utf-8")
+
+
+# ── Task 2 düzeltme turu 1: partiler arası seri, ertelenenin kümesi, parti sınırları ────────
+
+
+@dataclass
+class _DownFrom(FakeBatteryJev):
+    """İlk `start` çağrı cevap alır; sonrakilerin hepsi Jev hatasıyla patlar (kesinti)."""
+
+    start: int = 0
+
+    def ask_battery(self, state: Mapping[str, Any], questions: Sequence[Question]) -> BatteryAnswer:
+        if len(self.seen) >= self.start:
+            self.seen = [*self.seen, {"state": dict(state), "question_ids": ()}]
+            raise ConnectionError("jev kapalı")
+        return super().ask_battery(state, questions)
+
+
+def _markers(db: FakeNewsDb) -> list[tuple[int, str]]:
+    return [
+        (a["item_id"], a["choice"])
+        for a in db.answers
+        if str(a["question_id"]).startswith(FAILED_PREFIX)
+    ]
+
+
+def test_an_outage_straddling_a_batch_boundary_writes_no_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """17b partiler arasında da geçerli: seri parti sınırında sıfırlanmaz, işaret yazılmaz ve
+    kesinti en çok `OUTAGE_STREAK` çağrıya mal olur (inceleme turu 1, bulgu 1)."""
+    db = _db_with(*TWELVE)
+    client = _DownFrom(start=BATCH_SIZE - 2)  # 1. partinin son ikisi + 2. partinin hepsi düşer
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == cli.EXIT_SOURCE_FAILED
+
+    assert _markers(db) == [], "kesinti serisi parti sınırında işaretlendi"
+    assert len(client.seen) - (BATCH_SIZE - 2) == OUTAGE_STREAK
+
+
+def test_an_error_streak_shorter_than_an_outage_is_marked_at_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Koşunun sonunda kalan kısa seri kesinti değildir: tek koşudaki gibi işaretlenir."""
+    db = _db_with(*TWO)
+    _cli(monkeypatch, db, FakeBatteryJev(error=ConnectionError("jev kapalı")))
+
+    assert cli.main(["tier1"]) == 0
+
+    assert _markers(db) == [(1, "jev_error:ConnectionError"), (2, "jev_error:ConnectionError")]
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "calls"),
+    [
+        (ConnectionError("jev kapalı"), 7, OUTAGE_STREAK),
+        (BudgetExceeded("tavan"), EXIT_BUDGET, 1),
+    ],
+    ids=["outage", "budget"],
+)
+def test_an_outage_or_the_budget_stops_the_remaining_batches(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, code: int, calls: int
+) -> None:
+    db = _db_with(*TWELVE)
+    client = FakeBatteryJev(error=error)
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == code
+
+    assert len(client.seen) == calls, "kalan partiler sorulmamalı"
+    assert db.answers == []
+
+
+def test_later_batches_see_earlier_batches_as_cluster_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _db_with(*TWELVE)
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == 0
+
+    eleventh = client.seen[BATCH_SIZE]["state"]
+    assert eleventh["news"]["title"] == "Galatasaray'da gelişme 11"
+    assert [e["id"] for e in eleventh["earlier_news"]] == [f"item:{n}" for n in range(3, 11)]
+
+
+def test_news_deferred_by_the_call_cap_stays_a_cluster_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tavanla ertelenen eski haber sorulmasa da küme adayıdır: yoksa en yeni haber yeni küme başı
+    yazılır ve eski haber sonra sorulunca olay çift sayılır (inceleme turu 1, bulgu 2)."""
+    db = _db_with(
+        *(news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3))
+    )
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1", "--max-calls", "1"]) == 0
+
+    (call,) = client.seen
+    assert call["state"]["news"]["title"] == "Galatasaray'da gelişme 3"
+    assert [e["id"] for e in call["state"]["earlier_news"]] == ["item:1", "item:2"]
+
+
+def test_a_negative_call_cap_is_rejected_and_zero_defers_everything(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = _db_with(*TWO)
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with pytest.raises(SystemExit) as rejected:
+        cli.main(["tier1", "--max-calls", "-1"])
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "0"]) == 0
+
+    assert rejected.value.code == 2
+    assert client.seen == []
+    assert "ertelenen 2" in caplog.text

@@ -28,7 +28,8 @@ Kesinti (DEFERRED 17b; son inceleme I-2): art arda `OUTAGE_STREAK` haber Jev hat
 (`REASON_ERROR`) düşerse düşüş haberlerin değil Jev'in sonucudur. Koşu orada DURUR — bir kesinti
 koşusu en çok `OUTAGE_STREAK` çağrıya mal olur, tavan korunur —, serinin işaretleri yazılmaz ve
 `Tier1Run.outage` bildirilir; yoksa üç kesinti koşusu haberleri bu `prompt_version` için kalıcı
-olarak kapsam dışı bırakırdı. Seriden önceki cevaplar ve işaretler (ödendi) korunur. Seriye
+olarak kapsam dışı bırakırdı. Seriden önceki cevaplar ve işaretler (ödendi) korunur. Seri
+partiler arasında sürer (`Tier1Run.pending`): parti sınırı onu sıfırlamaz. Seriye
 ulaşmayan hata (tek başına hep düşen haber) bugünkü gibi işaretlenir ve `MAX_ATTEMPTS`te bırakılır.
 """
 
@@ -39,7 +40,7 @@ import logging
 import math
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 from typing import Any
@@ -72,6 +73,10 @@ FAILED_PREFIX = "t1_failed:"
 MAX_ATTEMPTS = 3
 # Art arda bu kadar Jev hatası kesintidir: koşu durur, serinin işareti yazılmaz (17b; inceleme I-2).
 OUTAGE_STREAK = 3
+# Tur başına en çok bu kadar Jev çağrısı (I-8): taşan haber `deferred`, işaretsiz, sonraki turda.
+MAX_CALLS_PER_RUN = 40
+# Parti başına commit: bir zaman aşımı en çok bir partinin ödenmiş cevabını götürür (I-8).
+BATCH_SIZE = 10
 REASON_INVALID = "match_invalid"
 REASON_ERROR = "jev_error"
 # Hata çağrısında model bilinmez; 0012 `jev_model`i NOT NULL ister.
@@ -123,6 +128,13 @@ class Tier1Run:
     failures: tuple[ItemAnswerRow, ...] = ()  # cevapsız denemelerin işaretleri (`FAILED_PREFIX`)
     given_up: int = 0  # `MAX_ATTEMPTS` kez başarısız olduğu için sorulmayan haber
     outage: bool = False  # sorulan her haber Jev hatasıyla düştü: işaret dönülmez (17b)
+    calls: int = 0  # yapılan Jev çağrısı (tavanın saydığı)
+    deferred: int = 0  # çağrı tavanı yüzünden bu turda sorulmayan, adaylı haber
+    # Sondaki art arda Jev hatalarının YAZILMAMIŞ işaretleri: seri sonraki partide sürer (17b).
+    pending: tuple[ItemAnswerRow, ...] = ()
+
+
+EMPTY_RUN = Tier1Run((), 0, 0, 0, budget_hit=False)
 
 
 # ── Adaylar ────────────────────────────────────────────────────────────────────────────────
@@ -339,6 +351,57 @@ def _split(choice: str) -> tuple[str | None, str | None]:
     return (match_id, side) if match_id and side in SIDES else (None, None)
 
 
+def _ask_item(
+    run: Tier1Run,
+    client: JevClient,
+    item: StoredNews,
+    candidates: Sequence[LiveMatch],
+    *,
+    attempt: int,
+    templates: Mapping[str, Question],
+    pool: Sequence[StoredNews],
+    questions: QuestionSet,
+    clock: Callable[[], datetime],
+) -> Tier1Run:
+    """Bir haberin TEK batarya çağrısı; `run` o ana kadarki koşu, dönüş güncellenmiş koşu.
+
+    `run.pending` art arda Jev hatalarının henüz yazılmamış işaretleridir: cevap (ya da geçersiz
+    cevap) seriyi `failures`a boşaltır, `OUTAGE_STREAK`e ulaşan seri kesintidir ve atılır.
+    """
+    item_id = _order(item)[1]
+    earlier = cluster_candidates(item, pool, candidates)
+    battery = _battery(templates, candidates, earlier)
+    try:
+        answer = _ask(client, _state(item, candidates, earlier), battery, item_id)
+    except BudgetExceeded:
+        # Tavan kesinti değil: bekleyen seri işaretlenir; çağrı yapılmadı, `calls` artmaz.
+        return replace(run, budget_hit=True, failures=(*run.failures, *run.pending), pending=())
+    at = clock()
+    new = (
+        ()
+        if isinstance(answer, str)
+        else _answer_rows(
+            item_id, battery, answer, prompt_version=questions.prompt_version, asked_at=at
+        )
+    )
+    run = replace(
+        run,
+        rows=(*run.rows, *new),
+        asked=run.asked + len(battery),
+        failed=run.failed + len(battery) - len(new),
+        calls=run.calls + 1,
+    )
+    if new:
+        return replace(run, failures=(*run.failures, *run.pending), pending=())
+    marker = _failure(item_id, attempt, answer, prompt_version=questions.prompt_version, at=at)
+    if isinstance(answer, str) and answer.startswith(f"{REASON_ERROR}:"):
+        streak = (*run.pending, marker)
+        if len(streak) >= OUTAGE_STREAK:
+            return replace(run, outage=True, pending=())
+        return replace(run, pending=streak)
+    return replace(run, failures=(*run.failures, *run.pending, marker), pending=())
+
+
 def run_tier1(
     items: Sequence[StoredNews],
     client: JevClient,
@@ -348,85 +411,90 @@ def run_tier1(
     clock: Callable[[], datetime],
     history: Sequence[StoredNews] = (),
     attempts: Mapping[int, int] = MappingProxyType({}),
+    max_calls: int | None = None,
+    pending: Sequence[ItemAnswerRow] = (),
 ) -> Tier1Run:
     """`items`i (zaman, kimlik) sırasıyla sorar; `history` yalnız küme adayıdır, sorulmaz.
 
     Tavan (`BudgetExceeded`) çağrıdan ÖNCE düşer: o ana kadarki cevaplar kaybolmaz, dönülür.
     Başka bir Jev hatası yalnız o haberi düşürür; soruları başarısız sayılır. `attempts` haber
     başına önceki başarısız deneme sayısıdır: `MAX_ATTEMPTS`e ulaşan haber sorulmaz. Art arda
-    `OUTAGE_STREAK` Jev hatasında koşu kesinti olarak durur (`outage`; modül belgesi).
+    `OUTAGE_STREAK` Jev hatası kesintidir (`outage`). `max_calls` adaylı haberin çağrısını sayar,
+    aşan haber `deferred` (işaretsiz); `pending` önceki partinin seri işaretleri (yazılmamış).
     """
     templates = {question.question_id: question for question in questions.tier1}
     pool = (*history, *items)
-    rows: tuple[ItemAnswerRow, ...] = ()
-    failures: tuple[ItemAnswerRow, ...] = ()
-    streak: tuple[ItemAnswerRow, ...] = ()  # art arda Jev hatalarının henüz yazılmamış işaretleri
-    asked = failed = no_candidate = given_up = 0
+    run = replace(EMPTY_RUN, pending=tuple(pending))
     for item in sorted(items, key=_order):
-        item_id = _order(item)[1]
-        attempt = attempts.get(item_id, 0) + 1
+        attempt = attempts.get(_order(item)[1], 0) + 1
         if attempt > MAX_ATTEMPTS:
-            given_up += 1
+            run = replace(run, given_up=run.given_up + 1)
             continue
         candidates = candidate_fixtures(item, fixtures)
         if not candidates:
-            no_candidate += 1
+            run = replace(run, no_candidate=run.no_candidate + 1)
             continue
-        earlier = cluster_candidates(item, pool, candidates)
-        battery = _battery(templates, candidates, earlier)
-        try:
-            answer = _ask(client, _state(item, candidates, earlier), battery, item_id)
-        except BudgetExceeded:
-            return Tier1Run(
-                rows,
-                asked,
-                failed,
-                no_candidate,
-                budget_hit=True,
-                failures=(*failures, *streak),  # tavan kesinti değil: bekleyen seri işaretlenir
-                given_up=given_up,
-            )
-        at = clock()
-        new = (
-            ()
-            if isinstance(answer, str)
-            else _answer_rows(
-                item_id, battery, answer, prompt_version=questions.prompt_version, asked_at=at
-            )
+        if max_calls is not None and run.calls >= max_calls:
+            run = replace(run, deferred=run.deferred + 1)
+            continue
+        run = _ask_item(
+            run,
+            client,
+            item,
+            candidates,
+            attempt=attempt,
+            templates=templates,
+            pool=pool,
+            questions=questions,
+            clock=clock,
         )
-        asked, failed = asked + len(battery), failed + len(battery) - len(new)
-        rows = (*rows, *new)
-        if isinstance(answer, str) and answer.startswith(f"{REASON_ERROR}:"):
-            marker = _failure(
-                item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
-            )
-            streak = (*streak, marker)
-            if len(streak) >= OUTAGE_STREAK:
-                return Tier1Run(
-                    rows,
-                    asked,
-                    failed,
-                    no_candidate,
-                    budget_hit=False,
-                    failures=failures,
-                    given_up=given_up,
-                    outage=True,
-                )
-            continue
-        failures, streak = (*failures, *streak), ()
-        if not new:
-            marker = _failure(
-                item_id, attempt, answer, prompt_version=questions.prompt_version, at=at
-            )
-            failures = (*failures, marker)
+        if run.budget_hit or run.outage:
+            return run
+    return run
+
+
+def batches(items: Sequence[StoredNews], size: int) -> tuple[tuple[StoredNews, ...], ...]:
+    """(zaman, kimlik) sırasıyla `size`lık partiler; CLI her partiden sonra commit'ler (I-8)."""
+    if size < 1:
+        raise ValueError(f"parti boyu en az 1 olmalı: {size}")
+    ordered = sorted(items, key=_order)
+    return tuple(tuple(ordered[start : start + size]) for start in range(0, len(ordered), size))
+
+
+def newest_within_cap(
+    items: Sequence[StoredNews],
+    fixtures: Sequence[LiveMatch],
+    *,
+    attempts: Mapping[int, int],
+    cap: int,
+) -> tuple[tuple[StoredNews, ...], int]:
+    """Tur tavanı altında EN YENİDEN EN ESKİYE (karara en yakın haber önce): Jev'e gidecek (adayı
+    olan, vazgeçilmemiş) haberlerden en yeni `cap` tanesi kalır. Dönüş: (kalan haberler, ertelenen).
+    Adaysız ve vazgeçilmiş haber tavanı tüketmez; `run_tier1` onları ayrıca sayar."""
+    askable = [
+        item
+        for item in items
+        if attempts.get(_order(item)[1], 0) < MAX_ATTEMPTS and candidate_fixtures(item, fixtures)
+    ]
+    dropped = {_order(item) for item in sorted(askable, key=_order, reverse=True)[cap:]}
+    return tuple(item for item in items if _order(item) not in dropped), len(dropped)
+
+
+def merge_runs(first: Tier1Run, second: Tier1Run) -> Tier1Run:
+    """Ardışık iki partinin koşusu tek koşu: sayılar toplanır, satırlar sırayla eklenir.
+    `second`, `first.pending` ile koşulmuştur: bekleyen seri `second.pending`dir."""
     return Tier1Run(
-        rows,
-        asked,
-        failed,
-        no_candidate,
-        budget_hit=False,
-        failures=(*failures, *streak),
-        given_up=given_up,
+        rows=(*first.rows, *second.rows),
+        asked=first.asked + second.asked,
+        failed=first.failed + second.failed,
+        no_candidate=first.no_candidate + second.no_candidate,
+        budget_hit=first.budget_hit or second.budget_hit,
+        failures=(*first.failures, *second.failures),
+        given_up=first.given_up + second.given_up,
+        outage=first.outage or second.outage,
+        calls=first.calls + second.calls,
+        deferred=first.deferred + second.deferred,
+        pending=second.pending,
     )
 
 

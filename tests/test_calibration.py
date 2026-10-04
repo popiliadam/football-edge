@@ -21,6 +21,7 @@ from football_edge.calibration import (
     LabelledItem,
     language_config_violations,
     load_labels,
+    production_languages,
     production_ready,
     run_calibration,
     score_language,
@@ -346,3 +347,48 @@ def test_one_enabled_language_missing_a_report_is_named_even_if_another_is_clean
 
     assert len(violations) == 1
     assert "tr" in violations[0]
+
+
+def _languages_file(tmp_path: Path, *, enabled: bool, accuracy: float, n: int = 100) -> Path:
+    report = tmp_path / "tr.report.json"
+    report.write_text(
+        json.dumps(
+            {
+                "language": "tr",
+                "n": n,
+                "accuracy": accuracy,
+                "false_positive": 0,
+                "false_negative": 0,
+                "mean_confidence": 0.9,
+            }
+        ),
+        encoding="utf-8",
+    )
+    path = tmp_path / "languages.yaml"
+    path.write_text(
+        "languages:\n"
+        f"  - code: tr\n    production_enabled: {'true' if enabled else 'false'}\n"
+        f"    calibration_report: {report}\n"
+        f"  - code: en\n    production_enabled: false\n"
+        f"    calibration_report: {tmp_path / 'en.report.json'}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize(
+    ("enabled", "accuracy", "n", "expected"),
+    [
+        (True, 0.85, 100, {"tr"}),
+        (True, 0.84, 100, set()),
+        (True, 0.95, 99, set()),
+        (False, 0.95, 100, set()),
+    ],
+)
+def test_production_languages_need_the_flag_and_a_passing_report(
+    tmp_path: Path, enabled: bool, accuracy: float, n: int, expected: set[str]
+) -> None:
+    """R178/R182: bayrak tek başına yetmez — rapor `min_n = 100`, `min_accuracy = 0,85`i geçmeli."""
+    path = _languages_file(tmp_path, enabled=enabled, accuracy=accuracy, n=n)
+
+    assert production_languages(path) == frozenset(expected)

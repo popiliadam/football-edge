@@ -178,6 +178,23 @@ def run_calibration(language: str, calibration_dir: Path, client: JevClient) -> 
     return path, reason
 
 
+def production_languages(languages_path: Path) -> frozenset[str]:
+    """Kademe 1 ve 2'nin sorabildiği diller (Plan 2 R178): `production_enabled: true` VE raporu
+    `production_ready()`yi (`min_n = 100`, `min_accuracy = 0,85`) geçen. Kapı (`dil-kalibrasyonu`)
+    ikisinin ayrışmasını zaten kırmızı yapar; burada yine sorulur ki ayrışmış bir dosya kalibre
+    olmayan haberi Jev'e göndermesin."""
+    raw = yaml.safe_load(languages_path.read_text(encoding="utf-8"))
+    enabled: frozenset[str] = frozenset()
+    for entry in raw.get("languages") or ():
+        report_path = Path(entry["calibration_report"])
+        if not entry["production_enabled"] or not report_path.is_file():
+            continue
+        report = CalibrationReport(**json.loads(report_path.read_text(encoding="utf-8")))
+        if production_ready(report)[0]:
+            enabled = enabled | {str(entry["code"])}
+    return enabled
+
+
 def language_config_violations(languages_path: Path) -> tuple[str, ...]:
     """`production_enabled: true` diyen HER dilin GEÇERLİ bir kalibrasyon raporu var mı?
 
