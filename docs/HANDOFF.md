@@ -293,7 +293,7 @@ birlikte yürür; kullanıcı dosyayı düzenlemez, kararları SÖYLER, asistan 
 - Bitti: `load_labels` 100 satır okur; meta'da ad + tarih + seçimler.
 
 **Adım 9 — Ücretli Jev (K/6, 5 dk karar).**
-- Bugün ölçümü koşturan CLI YOK (`calibration.run_calibration` var, komut satırı yok — Plan 2 T3 işi). Bu yüzden:
+- ~~Bugün ölçümü koşturan CLI YOK~~ **Düzeltme 2026-10-04:** CLI VAR — `python -m football_edge.collect calibrate --language tr` (`collect.py:490`, `budgeted_jev`). Bu yüzden:
   **bu oturumda yalnız karar alınır**, ücret açan commit Plan 2 T3'te (≥ 10-07) yapılır.
 - Asistan söyler: tahmini maliyet (100 madde × fiyat — `jev_budget` ve TypeSafe fiyatından hesaplar), tavan
   `MONTHLY_CAP_USD = 25.0`.
