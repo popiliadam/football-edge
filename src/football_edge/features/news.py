@@ -204,8 +204,11 @@ def ai_input_denied(robots_text: str) -> bool:
     """`Content-Signal` satırlarından biri `ai-input=no` diyor mu (Plan 2 spec §4/9).
 
     Yalnız AÇIK `no` engeller: satır yoksa ya da `ai-input` anılmıyorsa False (EN beş kaynakta
-    satır yok — ölçüldü 2026-10-04). Grup ayrımı yapılmaz: herhangi bir grubun `no`su yeter."""
-    for line in robots_text.splitlines():
+    satır yok — ölçüldü 2026-10-04). Grup ayrımı yapılmaz: herhangi bir grubun `no`su yeter.
+    Satır sonu `#` yorumu ve dosya başı BOM atılır: ikisi de açık `no`yu gizleyip fail-open
+    yapardı (inceleme düzeltme turu 1)."""
+    for raw_line in robots_text.splitlines():
+        line = raw_line.split("#", 1)[0].lstrip("\ufeff")
         key, _, value = line.partition(":")
         if key.strip().casefold() != "content-signal":
             continue

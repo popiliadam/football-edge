@@ -135,6 +135,12 @@ def _ensure_aware_utc(value: datetime) -> datetime:
 # ---------------------------------------------------------------------------
 
 
+# RFC 2822'nin UTC adları. `parsedate_to_datetime` bilmediği alfabetik bölgede (ölçüldü: `BST`,
+# `CEST`) naive döner; `_ensure_aware_utc` onu UTC sayar ve saat kayar (BST'de 1 saat GELECEK →
+# `assert_fresh` her turda kırmızı). Bu adlar dışındaki alfabetik bölge güvenilmez: öğe damgasız.
+_UTC_ZONE_NAMES = frozenset({"GMT", "UT", "UTC", "Z"})
+
+
 def _rss_published_at(node: Element, now: datetime) -> tuple[datetime, bool]:
     """`(zaman damgası, kaynak mı sağladı)`. RSS 2.0'da `<pubDate>` OPSİYONELDİR (sitemap'in
     `news:publication_date`sinin AKSİNE — bkz. `_news_published_at`); eksikliği bir şema
@@ -144,6 +150,10 @@ def _rss_published_at(node: Element, now: datetime) -> tuple[datetime, bool]:
     """
     raw_date = node.findtext("pubDate")
     if not raw_date:
+        return now, False
+    tokens = raw_date.split()
+    zone = tokens[-1] if tokens else ""
+    if zone.isalpha() and zone.upper() not in _UTC_ZONE_NAMES:
         return now, False
     try:
         published = parsedate_to_datetime(raw_date)

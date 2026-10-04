@@ -295,6 +295,10 @@ REPO = Path(__file__).resolve().parent.parent
         ("User-agent: *\nDisallow:\n", False),
         ("user-agent: *\ncontent-signal: AI-INPUT = No\n", True),
         ("User-agent: *\nContent-Signal: ai-train=no\n", False),
+        # Satır sonu robots yorumu ve dosya başı BOM açık `no`yu gizlememeli (fail-open olurdu).
+        ("User-agent: *\nContent-Signal: search=yes, ai-input=no # policy\n", True),
+        ("\ufeffContent-Signal: ai-input=no\nUser-agent: *\n", True),
+        ("User-agent: *\n# Content-Signal: ai-input=no\n", False),
     ],
 )
 def test_only_an_explicit_ai_input_no_denies_jev(robots: str, denied: bool) -> None:

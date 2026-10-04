@@ -879,9 +879,10 @@ def test_each_feed_is_fetched_with_its_own_measured_content_type(tmp_path: Path)
 @pytest.mark.parametrize(
     ("source_id", "age"),
     [
-        ("football-oranje", timedelta(days=5)),
-        ("gffn", timedelta(days=3)),
-        ("sportsmole", timedelta(days=1, hours=20)),
+        # Sınırın HEMEN içi: pencere bir dakika bile daralsa kırmızı olur.
+        ("football-oranje", timedelta(days=7) - timedelta(minutes=1)),
+        ("gffn", timedelta(days=4) - timedelta(minutes=1)),
+        ("sportsmole", timedelta(days=2) - timedelta(minutes=1)),
     ],
 )
 def test_low_volume_feeds_have_their_own_freshness_window(
@@ -898,9 +899,10 @@ def test_low_volume_feeds_have_their_own_freshness_window(
 @pytest.mark.parametrize(
     ("source_id", "age"),
     [
-        ("football-oranje", timedelta(days=7, hours=1)),
-        ("gffn", timedelta(days=4, hours=1)),
-        ("sportsmole", timedelta(days=3)),
+        # Sınırın HEMEN dışı: pencere bir dakika bile genişlese yeşil olur.
+        ("football-oranje", timedelta(days=7) + timedelta(minutes=1)),
+        ("gffn", timedelta(days=4) + timedelta(minutes=1)),
+        ("sportsmole", timedelta(days=2) + timedelta(minutes=1)),
     ],
 )
 def test_a_feed_beyond_its_own_window_is_red(
@@ -925,7 +927,11 @@ def test_a_url_seen_in_two_feeds_of_a_source_is_written_once(
             Feed("/premier-league/rss.xml", "application/xml"),
         ),
     )
-    body = _synthetic_rss([("ortak", _rfc(OCT3 - timedelta(hours=1)))], "sportsmole.test")
+    # `tarihsiz` iki akışta da var ve pubDate'siz: tekilleştirme yoksa `self_stamped` 2 olur.
+    # (`FakeObservationDb` kendisi de tekilleştirdiği için `written` tek başına bunu sınamaz.)
+    body = _synthetic_rss(
+        [("ortak", _rfc(OCT3 - timedelta(hours=1))), ("tarihsiz", None)], "sportsmole.test"
+    )
     seen: list[str] = []
     client = httpx.Client(
         transport=httpx.MockTransport(  # type: ignore[arg-type]
@@ -943,4 +949,37 @@ def test_a_url_seen_in_two_feeds_of_a_source_is_written_once(
     )
 
     assert len(seen) == 2, "iki akış da istenmeli"
-    assert result.written == 1 and len(db.rows) == 1
+    assert result == NewsCollectResult(written=2, self_stamped=1, failed_sources=())
+    assert len(db.rows) == 2
+
+
+@pytest.mark.parametrize(
+    ("pub_date", "source_provided"),
+    [
+        # `parsedate_to_datetime` BST/CEST'i tanımaz, naive döner; UTC sayılsaydı saat kayardı.
+        ("Sat, 03 Oct 2026 12:00:00 BST", False),
+        ("Sat, 03 Oct 2026 13:00:00 CEST", False),
+        ("Sat, 03 Oct 2026 11:00:00 GMT", True),
+        ("Sat, 03 Oct 2026 12:00:00 +0100", True),
+    ],
+)
+def test_an_unknown_alphabetic_zone_is_not_trusted_as_a_source_timestamp(
+    pub_date: str, source_provided: bool
+) -> None:
+    body = _synthetic_rss([("a", pub_date)], "independent.test")
+
+    (item,) = RssAdapter("independent").parse(body, now=OCT3)
+
+    assert item.published_at_is_source_provided is source_provided
+    expected = datetime(2026, 10, 3, 11, 0, tzinfo=UTC) if source_provided else OCT3
+    assert item.published_at == expected
+
+
+def test_a_bst_feed_is_not_future_dated_at_collection(tmp_path: Path) -> None:
+    """12:20 BST = 11:20 UTC. BST UTC sayılsaydı öğe 12:20 UTC, yani `now`dan (11:30) SONRA
+    olurdu ve `assert_fresh` kaynağı her turda "gelecekte" diye kırmızı yapardı."""
+    body = _synthetic_rss([("yaz-saati", "Sat, 03 Oct 2026 12:20:00 BST")], "independent.test")
+
+    result = _collect(tmp_path, ("independent",), {"independent.test": (body, "text/xml")})
+
+    assert result == NewsCollectResult(written=1, self_stamped=1, failed_sources=())
