@@ -39,8 +39,23 @@ NOT_READERS = frozenset({("features/tier2.py", "INSERT_MATCH_ANSWERS")})
 # Tablo takma adı (`a.question_id`) da aynı süzgeçtir: dilim sayacı EXISTS ile `model_predictions`a
 # bağlanır ve sütunları nitelikle yazar (Plan 2 Task 4).
 MARKERS_ONLY = re.compile(r"\bAND\s+(?:\w+\.)?question_id\s*=\s*ANY\(%s\)")
+# İşaret okuyucusunda süzgeci delen biçimler: `OR` dalı ve satır yorumu (inceleme 8).
+LOOSE = re.compile(r"\bOR\b|--", re.IGNORECASE)
 EXCLUDES_MARKERS = re.compile(r"\bAND\s+NOT\s+starts_with\(question_id, %s\)")
 ASKED_MARKERS = "ASKED_MARKERS"
+
+
+def marker_faults(text: str) -> list[str]:
+    """İşaret okuyucusu metninin kusurları: `asked` süzgeci yok, tablo bir kez geçmiyor (alt sorgu
+    ya da öz-birleşim süzgeçsiz satır okur), `OR` ya da `--` süzgeci deler."""
+    faults = []
+    if not MARKERS_ONLY.search(text):
+        faults.append("asked süzgeci yok")
+    if text.lower().count(TABLE) != 1:
+        faults.append(f"{TABLE} bir kez geçmiyor")
+    if LOOSE.search(text):
+        faults.append("OR ya da -- yorum")
+    return faults
 
 
 def unsealed(root: Path) -> list[str]:
@@ -89,7 +104,7 @@ def test_the_allowlisted_readers_keep_their_direction_and_still_exist() -> None:
 
     assert set(found) == MARKER_READERS | ANSWER_READERS | NOT_READERS
     assert not MARKER_READERS & ANSWER_READERS
-    assert [r for r in MARKER_READERS if not MARKERS_ONLY.search(found[r])] == []
+    assert {r: marker_faults(found[r]) for r in MARKER_READERS if marker_faults(found[r])} == {}
     assert [r for r in MARKER_READERS if not _passes_markers(SRC, *r)] == []
     assert [r for r in ANSWER_READERS if not EXCLUDES_MARKERS.search(found[r])] == []
     assert all(
@@ -134,6 +149,32 @@ def answered(cur):
 )
 def test_the_marker_filter_reads_through_a_table_alias_only(where: str, matches: bool) -> None:
     assert bool(MARKERS_ONLY.search(where)) is matches
+
+
+BYPASSES = {
+    "alt-sorgu": (
+        "SELECT match_id FROM jev_match_answers WHERE match_id IN (SELECT match_id FROM "
+        "jev_match_answers WHERE variant = %s AND question_id = ANY(%s))"
+    ),
+    "öz-birleşim": (
+        "SELECT b.question_id FROM jev_match_answers a JOIN jev_match_answers b "
+        "ON b.match_id = a.match_id WHERE a.variant = %s AND a.question_id = ANY(%s)"
+    ),
+    "or": (
+        "SELECT match_id FROM jev_match_answers WHERE variant = %s AND question_id = ANY(%s) "
+        "OR true"
+    ),
+    "yorum": (
+        "SELECT match_id FROM jev_match_answers WHERE variant = %s --\n AND question_id = ANY(%s)"
+    ),
+}
+
+
+@pytest.mark.parametrize("text", BYPASSES.values(), ids=BYPASSES.keys())
+def test_a_marker_reader_that_slips_past_the_asked_filter_is_red(text: str) -> None:
+    """Her biçim `MARKERS_ONLY`i geçer; yine de süzgeçsiz satır okur (inceleme 8)."""
+    assert MARKERS_ONLY.search(text)
+    assert marker_faults(text) != []
 
 
 def test_a_marker_reader_executed_without_the_asked_markers_is_red(tmp_path: Path) -> None:

@@ -81,6 +81,7 @@ from football_edge.features.tier2 import (
     ASKED,
     DEFERRED,
     ERROR,
+    ITEM_LOOKBACK,
     NO_NEWS,
     STALE,
     MatchAnswerRow,
@@ -391,15 +392,26 @@ def _tier2(args: argparse.Namespace) -> int:
     return _tier2_exit(run, config.jev_model)
 
 
+def _current_set(args: argparse.Namespace) -> str | None:
+    """Geçerli kümenin `prompt_version`ı; dosya okunamazsa None — sayaç yine koşar."""
+    try:
+        config = load_live_config(
+            args.live_config, ops_path=args.ops_config, questions_path=args.questions
+        )
+    except (LiveConfigError, OSError) as error:
+        LOGGER.warning("dilim: küme/işletme ayarı okunamadı, geçerli küme işaretsiz — %s", error)
+        return None
+    return config.prompt_version
+
+
 def _slice_status(args: argparse.Namespace) -> int:
     """R181: küme başına dilim sayacı; salt okuma, sonuç/olasılık okumaz. Küme dosyası okunamazsa
     sayaç yine basılır, yalnız geçerli küme işaretsiz kalır."""
-    config = _live_config(args, "dilim (geçerli küme işaretsiz)")
+    current = _current_set(args)
     with connect() as conn:
         read_only(conn)
         rows = select_slice_rows(conn)
         conn.rollback()
-    current = None if config is None else config.prompt_version
     text = render(slice_lines(rows, now=_now(), current=current))
     if args.out is None:
         sys.stdout.write(text)
@@ -417,7 +429,8 @@ def _estimate(args: argparse.Namespace) -> int:
     now = _now()
     with connect() as conn:
         read_only(conn)
-        items = load_news(conn, since=now - WINDOW - HORIZON)
+        # Kademe 2 üst sınırı karar anından `ITEM_LOOKBACK` geriye bakar (`estimate.news_before`).
+        items = load_news(conn, since=now - WINDOW - ITEM_LOOKBACK)
         fixtures = load_fixtures(conn, since=now - WINDOW, until=now + HORIZON)
         decisions = load_decisions(conn, now=now, max_age=WINDOW)
         rows = select_slice_rows(conn)
@@ -431,7 +444,7 @@ def _estimate(args: argparse.Namespace) -> int:
 def _probe_once(
     conn: Any, client: JevClient, questions: QuestionSet, tier: int, now: datetime
 ) -> ProbeResult | None:
-    items = load_news(conn, since=now - WINDOW - HORIZON)
+    items = load_news(conn, since=now - WINDOW - ITEM_LOOKBACK)
     if tier == 1:
         fresh = tuple(
             i for i in items if i.lang in ASSUMED_LANGUAGES and i.available_at >= now - HORIZON

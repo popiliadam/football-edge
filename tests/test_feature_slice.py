@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pytest
 
 from football_edge.features import __main__ as cli
 from football_edge.features.slice import (
+    RATE_WINDOW,
     SLICE_SQL,
     TARGET,
     eta_for,
@@ -49,6 +51,8 @@ def test_the_slice_query_reads_no_answer_content_probability_or_result() -> None
     assert "exists (" in text and "from model_predictions" in text
     assert "a.question_id = any(%s)" in text, "yalnız `asked` işareti sayılır (haberli karar)"
     assert "p.match_id = a.match_id and p.decided_at = a.decided_at" in text, "aynı karar anı"
+    assert "a.variant = %s" in text, "yalnız gerçek varyant (kanarya arşivi sayılmaz)"
+    assert "p.strategy = any(%s)" in text, "yalnız baz gölge stratejileri"
 
 
 @pytest.mark.leakage
@@ -93,6 +97,19 @@ def test_the_eta_is_the_weeks_left_at_the_current_rate() -> None:
     assert eta_for(300, 30.0, today=today) == today + timedelta(days=140)
     assert eta_for(0, 0.0, today=today) is None
     assert eta_for(TARGET, 0.0, today=today) == today
+    # Kesirli gün yukarı yuvarlanır: 1 karar ÷ haftada 3 = 2,33 gün → 3 gün (inceleme M5).
+    assert eta_for(TARGET - 1, 3.0, today=today) == today + timedelta(days=3)
+
+
+def test_the_rate_window_starts_just_after_its_edge() -> None:
+    """Hız penceresi `(now − 28 gün, now]`: tam kenardaki karar hıza girmez, bir saniye sonraki
+    girer; ikisi de sayılır (inceleme M4)."""
+    edge = NOW - RATE_WINDOW
+    rows = [(A, "m1", edge), (A, "m2", edge + timedelta(seconds=1))]
+
+    (line,) = slice_lines(rows, now=NOW, current=None)
+
+    assert (line.count, line.weekly_rate) == (2, pytest.approx(0.25))
 
 
 def test_slice_status_appends_to_the_summary_inside_a_read_only_transaction(
@@ -111,3 +128,25 @@ def test_slice_status_appends_to_the_summary_inside_a_read_only_transaction(
     text = out.read_text(encoding="utf-8")
     assert text.startswith("önceki\n") and f"1 / {TARGET}" in text and "(geçerli küme)" in text
     assert db.statements[0] == "SET TRANSACTION READ ONLY"
+
+
+def test_slice_status_without_the_set_file_still_counts_and_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Küme dosyası okunamazsa sayaç KOŞAR (exit 0), geçerli küme işaretsizdir; log "koşulmadı"
+    demez (inceleme 6)."""
+    db = FakeTier2Db()
+    db.match_answers = [_answer("m1", D)]
+    db.predictions = [("m1", "market", D)]
+    monkeypatch.setattr(cli, "connect", lambda: db)
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+
+    with caplog.at_level(logging.INFO):
+        code = cli.main(["slice-status", "--live-config", str(tmp_path / "yok.yaml")])
+
+    out = capsys.readouterr().out
+    assert code == 0 and f"1 / {TARGET}" in out and "(geçerli küme)" not in out
+    assert "koşulmadı" not in caplog.text and "geçerli küme işaretsiz" in caplog.text

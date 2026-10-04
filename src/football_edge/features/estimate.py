@@ -2,10 +2,10 @@
 
 YAZMAZ, Jev KURMAZ: salt okuma işlemi, sonunda geri alma. TR üretimde VARSAYILIR
 (`ASSUMED_LANGUAGES`): kademe 1 çağrısı = son `WINDOW`da adayı olan (`candidate_fixtures`) haber;
-kademe 2 ÜST SINIRI = gölge kararlarının, karar anından önceki `HORIZON`da takım adı geçen haberi
-olan tarafları (kademe 1 kapısı henüz yok). Aylık dolar `config/faz4_ops.yaml` tahmin birimleriyle;
-900'e varış geçerli kümenin sayacından ve haberli karar hızından. Kullanıcı durağı: aylık > 20 $ ya
-da varış > 2027-06-30.
+kademe 2 ÜST SINIRI = gölge kararlarının, karar anından önceki `ITEM_LOOKBACK`te (kademe 2'nin kendi
+haber penceresi) takım adı geçen haberi olan tarafları (kademe 1 kapısı henüz yok). Aylık dolar
+`config/faz4_ops.yaml` tahmin birimleriyle; 900'e varış geçerli kümenin sayacından ve haberli karar
+hızından. Kullanıcı durağı: aylık > 20 $ ya da varış > 2027-06-30.
 """
 
 from __future__ import annotations
@@ -16,9 +16,10 @@ from datetime import date, datetime, timedelta
 
 from football_edge.features.live_config import TIER1, TIER2, LiveConfig
 from football_edge.features.slice import TARGET, eta_for
-from football_edge.features.tier1 import HORIZON, candidate_fixtures, fold, team_tokens
-from football_edge.features.tier2 import Decision
+from football_edge.features.tier1 import _mentions, _words, candidate_fixtures
+from football_edge.features.tier2 import ITEM_LOOKBACK, Decision
 from football_edge.features.types import StoredNews
+from football_edge.jev_budget import MONTHLY_CAP_USD
 from football_edge.live.context import LiveMatch
 
 WINDOW = timedelta(days=28)
@@ -39,12 +40,13 @@ class Estimate:
 
 
 def mentioned(team: str, item: StoredNews) -> bool:
-    words = fold(f"{item.title} {item.body or ''}").split()
-    return any(word.startswith(token) for token in team_tokens(team) for word in words)
+    """Kademe 1'in aday eşleşmesiyle AYNI kural (`tier1._mentions`)."""
+    return _mentions(team, _words(item))
 
 
 def news_before(decision: Decision, items: Sequence[StoredNews]) -> tuple[StoredNews, ...]:
-    start = decision.decided_at - HORIZON
+    """Kademe 2'nin karar anına göre haber penceresi (`ITEM_LOOKBACK`): üst sınır dar olamaz."""
+    start = decision.decided_at - ITEM_LOOKBACK
     return tuple(
         item
         for item in items
@@ -98,7 +100,7 @@ def render_estimate(found: Estimate) -> str:
         f"günlük {found.tier1_calls / days:.1f}",
         f"kademe 2 üst sınır taraf (son {days} gün): {found.tier2_sides}",
         f"haberli karar: {found.news_decisions} · haftalık {found.news_decisions / weeks:.1f}",
-        f"aylık tahmin: ${found.monthly_usd:.2f} (tavan $25)",
+        f"aylık tahmin: ${found.monthly_usd:.2f} (tavan ${MONTHLY_CAP_USD:.0f})",
         f"{TARGET}'e varış: {found.eta or 'tahmin yok'}",
         *(f"KULLANICI DURAĞI: {stop}" for stop in found.stops),
     ]

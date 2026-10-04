@@ -275,3 +275,17 @@ def test_the_slice_step_names_its_exit_code(tmp_path: Path, code: int, named: st
         assert run.errors == ()
     else:
         assert len(run.errors) == 1 and named in run.errors[0] and f"exit {code}" in run.errors[0]
+
+
+def test_a_hung_slice_status_is_cut_before_the_job_timeout_and_named(tmp_path: Path) -> None:
+    """Asılı bir sayaç işin 45 dakikasını yerse iş İPTAL olur ve `!cancelled()` Jev alarm adımları
+    atlanır: 5 dakikada kesilir, 124 adıyla kırmızı (inceleme 7)."""
+    steps = _steps(SHADOW)
+    body = str(steps[_at(steps, SLICE)]["run"])
+
+    run = run_step(tmp_path, body, code=124)
+
+    assert f"timeout 5m uv run python -m {SLICE}" in body
+    assert run.returncode == 124
+    assert len(run.errors) == 1 and "5 dakikada kesildi" in run.errors[0]
+    assert "exit 124" in run.errors[0]

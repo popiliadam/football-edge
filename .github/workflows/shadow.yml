@@ -113,17 +113,19 @@ jobs:
       - name: Seçim dilimi sayacı
         # Plan 2 R181: küme başına (maç, karar anı) sayısı, haftalık hız, 900'e varış — iş özetine.
         # Salt okuma; sonuç/olasılık okumaz. Gölge yeşilse koşar (kademe 2 kırmızı olsa da).
-        # `timeout` yok: Jev'e çıkmaz, tek bir salt okuma sorgusudur.
+        # Asılı bir bağlantı işin 45 dakikasını yerse iş İPTAL olur ve `!cancelled()` Jev alarm
+        # adımları atlanır: 5 dakikada kesilir, 124 adıyla kırmızı.
         if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && steps.shadow.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set +e
-          uv run python -m football_edge.features slice-status --out "$GITHUB_STEP_SUMMARY"
+          timeout 5m uv run python -m football_edge.features slice-status --out "$GITHUB_STEP_SUMMARY"
           code=$?
           set -e
           case "$code" in
             0) ;;
+            124) echo "::error::slice-status 5 dakikada kesildi (exit 124) — veritabanı yanıt vermedi" ;;
             *) echo "::error::slice-status beklenmedik kodla düştü (exit $code)" ;;
           esac
           exit "$code"
