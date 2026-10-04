@@ -1,6 +1,6 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-04 (KULLANICI OTURUMU kapanışı) · **Sıradaki oturum:** Plan 2 (en erken **2026-10-07**)
+**Son güncelleme:** 2026-10-04 (oturum 11: 9.7c kapandı, 17k ölçülemez → arşiv ayağı kapalı; kullanıcısız iş kalmadı) · **Sıradaki oturum:** Plan 2 (en erken **2026-10-07**)
 ya da avukat yanıtı geldiğinde yayın aşaması — bkz. §0.S · **Durum:** `main` CI yeşil · **0013–0017 CANLIDA** · TFF baş
 hakemi `main`de ve canlıda · site yerelde gerçek veriyle derlendi (yayın YOK, alan adı YOK) · avukat paketi
 hazır, kullanıcı gönderiyor · ilk kulüp maçları **2026-10-09/10** · holdout açılmadı
