@@ -16,9 +16,10 @@ import yaml
 
 from football_edge.collector import ContractViolation
 from football_edge.collectors.tff import parse_referees
-from football_edge.db import connect
+from football_edge.db import LEDGER_LOCK_KEY, connect
 from football_edge.naming import normalise_team
 from football_edge.officials import (
+    OFFICIALS_LOCK_KEY,
     Assignment,
     Candidate,
     TeamMap,
@@ -364,3 +365,9 @@ def test_no_label_warning_when_a_block_matched_or_none_is_near(
     plan_links(rows, [], MAP)
 
     assert "lig etiketi" not in caplog.text
+
+
+def test_the_linking_lock_is_not_the_ledger_lock() -> None:
+    """9.7c: bağlama kilidi defterinkini paylaşırsa TFF turu 15 dakikalık mühür yazarını bekler
+    (ve tersi); serileştirmek istenen yalnız iki bağlama turudur."""
+    assert OFFICIALS_LOCK_KEY != LEDGER_LOCK_KEY

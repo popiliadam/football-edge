@@ -574,6 +574,9 @@ Süper Ligi değilse (mesaj etiketi adıyla taşır) — dışlama listesine sö
 
 **9.7c — `officials.link_officials` oku→karşılaştır→yaz kilitsiz (2026-10-02, G4 incelemesi).** CI dışında elle
 `fetch-tff` ile eşzamanlı koşu aynı hakemi iki kez yazabilir (görünüm etkilenmez); çözüm `pg_advisory_xact_lock`.
+**KAPANDI (2026-10-04):** `link_officials`in ilk ifadesi `pg_advisory_xact_lock(OFFICIALS_LOCK_KEY)` (defter
+anahtarından ayrı). Kanıt: `test_concurrent_rounds_do_not_record_the_same_referee_twice` (gerçek Postgres; ilk tur commit
+önünde bekletilir) kilitsiz RED (ikinci satır), kilitle GREEN; geç kilit / kilitsiz / defter anahtarı mutantları öldü.
 
 **9.7d — 0015 canlıda: `service_role`un `match_officials` INSERT yetkisi bilinçli kabul (2026-10-02, G3 incelemesi).**
 0013 kararı (`service_role`e dokunulmaz); Adım 12'de advisors çıktısı okunurken deftere kabul olarak yazılır.

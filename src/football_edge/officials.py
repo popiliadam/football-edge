@@ -49,6 +49,14 @@ _LATEST = (
     "WHERE match_id = ANY(%s) ORDER BY match_id, seen_at DESC, id DESC"
 )
 _INSERT = "INSERT INTO match_officials (match_id, referee, seen_at) VALUES (%s, %s, %s)"
+# DEFERRED 9.7c: bağlama oku→karşılaştır→yaz'dır; CI turu ile elle `fetch-tff` aynı anda koşarsa
+# ikisi de son hakemi (ötekinin commit'lenmemiş satırını görmeden) okur ve aynı hakemi iki kez
+# yazar. `pg_advisory_xact_lock` işlem kapsamlıdır (commit/rollback bırakır; transaction
+# pooler'da sızmaz — `db.LEDGER_LOCK_KEY` gerekçesi). Anahtar SABİT ve bu tabloya özgüdür:
+# defterin anahtarını paylaşırsa bağlama mühür yazarını boşuna bekler; değişirse eski sürümle
+# serileşme biter.
+OFFICIALS_LOCK_KEY = 0x0FF1C1A1  # "OFFICIAL" — keyfî ama sabit
+_LOCK = "SELECT pg_advisory_xact_lock(%s)"
 
 _Key = tuple[str, str, date]  # (API ev adı, API deplasman adı, İstanbul günü)
 
@@ -298,7 +306,12 @@ def link_officials(
     team_map: TeamMap,
     now: datetime,
 ) -> LinkResult:
-    """Turun ayrıştırılmış sonucunu bağlar ve değişeni `match_officials`e yazar; commit eder."""
+    """Turun ayrıştırılmış sonucunu bağlar ve değişeni `match_officials`e yazar; commit eder.
+
+    İlk ifade kilittir: okumadan SONRA alınırsa iki tur da son hakemi okumuş olur ve hiçbir şey
+    serileşmez (DEFERRED 9.7c)."""
+    with conn.cursor() as cur:
+        cur.execute(_LOCK, (OFFICIALS_LOCK_KEY,))
     assignments = tuple(assignment_of(entry) for entry in observations)
     days = sorted({item.match_date for item in assignments if team_map.matches_league(item.league)})
     plan = plan_links(assignments, find_candidates(conn, team_map.league_id, days), team_map)

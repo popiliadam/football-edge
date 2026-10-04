@@ -7,7 +7,9 @@ kopyasında (`site_db_each`): append-only tablo temizlenmez, veritabanı atılı
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, date, datetime
+from typing import Any
 
 import psycopg
 import pytest
@@ -107,3 +109,47 @@ def test_candidates_are_the_istanbul_day_of_the_target_league(site_db_each: str)
         found = find_candidates(conn, "tur.1", [date(2026, 9, 19)])
 
     assert sorted(candidate.match_id for candidate in found) == ["m-gece", MATCH]
+
+
+class _CommitGate:
+    """Commit'ten hemen önce bekleyen bağlantı: tur satırını YAZMIŞ, commit ETMEMİŞ hâlde kalır."""
+
+    def __init__(
+        self, conn: psycopg.Connection[Any], reached: threading.Event, release: threading.Event
+    ):
+        self._conn, self._reached, self._release = conn, reached, release
+
+    def cursor(self) -> psycopg.Cursor[Any]:
+        return self._conn.cursor()
+
+    def commit(self) -> None:
+        self._reached.set()
+        self._release.wait(10)
+        self._conn.commit()
+
+
+def test_concurrent_rounds_do_not_record_the_same_referee_twice(site_db_each: str) -> None:
+    """DEFERRED 9.7c: CI turu ile elle `fetch-tff` aynı anda koşarsa ikisi de son hakemi BOŞ okur
+    (ötekinin satırı commit'lenmemiş) ve ikisi de yazar. Bağlama, okumadan ÖNCE işlem kapsamlı
+    kilit almalı: ikinci tur birincinin commit'ini bekler ve aynı hakemi görüp yazmaz."""
+    _seed(site_db_each)
+    reached, release = threading.Event(), threading.Event()
+
+    def first_round() -> None:
+        with psycopg.connect(site_db_each) as conn:
+            gate = _CommitGate(conn, reached, release)
+            link_officials(gate, _round("ALİ HAKEM"), team_map=TEAMS, now=_at(9))  # type: ignore[arg-type]
+
+    first = threading.Thread(target=first_round)
+    first.start()
+    assert reached.wait(10), "ilk tur commit'e varmadı — test kurgusu bozuk"
+    second = threading.Thread(target=_link, args=(site_db_each, "ALİ HAKEM", 10))
+    second.start()
+    second.join(1.0)
+    waited = second.is_alive()
+    release.set()
+    first.join(10)
+    second.join(10)
+
+    assert _recorded(site_db_each) == [(MATCH, "ALİ HAKEM", _at(9))]
+    assert waited, "ikinci tur ilkinin commit'ini beklemedi"
