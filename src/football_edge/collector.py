@@ -158,7 +158,7 @@ def fetch_text(
     """
     response = _guarded_get(client, source, path, parser, timeout=timeout)
     received = response.headers.get("content-type", "")
-    if expect not in received:
+    if expect.casefold() not in received.casefold():
         raise ContractViolation(
             f"{source.id}: beklenen content-type '{expect}', gelen '{received}' ({path})"
         )
