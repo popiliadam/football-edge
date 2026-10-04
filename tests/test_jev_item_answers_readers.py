@@ -42,6 +42,8 @@ READERS = frozenset(
     {
         ("features/tier1.py", "_ASKED"),
         ("features/tier1.py", "_ATTEMPTS"),
+        # kademe 2 kapı okuyucusu (Plan 2): işareti DIŞLAR, sonra `gates_as_of` → `gates_from`
+        ("features/tier2.py", "_ITEM_ANSWERS"),
     }
 )
 # Tabloyu OKUMAYAN ama iki sözcüğü de taşıyan metin: INSERT'in SELECT'i `unnest`ten okur; tablo
@@ -58,6 +60,9 @@ MARKER_FILTER = "starts_with(question_id, %s)"
 DIRECTION = {
     ("features/tier1.py", "_ASKED"): re.compile(r"\bAND\s+NOT\s+starts_with\(question_id, %s\)"),
     ("features/tier1.py", "_ATTEMPTS"): re.compile(r"\bAND\s+starts_with\(question_id, %s\)"),
+    ("features/tier2.py", "_ITEM_ANSWERS"): re.compile(
+        r"\bAND\s+NOT\s+starts_with\(question_id, %s\)"
+    ),
 }
 
 

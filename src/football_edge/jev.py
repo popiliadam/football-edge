@@ -127,13 +127,17 @@ class TypeSafeJev:
 
     Zaman aşımı ve 5xx'te sınırlı yeniden deneme SDK'nın varsayılan `RetryPolicy`sidir
     (2 yeniden deneme); tükenirse istisna çağırana çıkar, satır yazılmaz (spec §9).
+
+    `model` her istekte gönderilir; dönen model yine `BatteryAnswer.jev_model`dedir — çağıran
+    karşılaştırır (kademe 2).
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, *, model: str | None = None) -> None:
         resolved = api_key or os.getenv("TYPESAFE_API_KEY")
         if not resolved:
             raise MissingJevKey("TYPESAFE_API_KEY tanımlı değil")
         self._api_key = resolved
+        self._model = model  # Plan 2 R185: kademe 2 sabit modelle sorar; None = hesabın varsayılanı
 
     def ask_choice(
         self, state: dict[str, Any], instructions: str, criteria: dict[str, str]
@@ -144,6 +148,7 @@ class TypeSafeJev:
             response = client.system_one(
                 state=state,
                 questions={"match": Choice(instructions=instructions, criteria=criteria)},
+                model=self._model,
             )
         return _choice_answer(response.choices["match"])
 
@@ -161,5 +166,6 @@ class TypeSafeJev:
                     )
                     for question in questions
                 },
+                model=self._model,
             )
         return battery_from_response(response, question_ids)

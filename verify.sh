@@ -125,8 +125,10 @@ step "veri-sözleşmesi" bash -c '
 # `sitedb` işaretli sızıntı testleri (holdout tohumları, bağımlılık kapanışı) `site-db` adımında
 # koşar ve orada sayılır: her test kapıda tam bir kez koşar.
 # 2026-10-02 hakem as-of testiyle 442 → 450 (`--collect-only` ile ölçüldü, son inceleme M1).
+# 2026-10-04 Plan 2 Task 3 (kademe 2 küme, zincir ve gölge varlık testleri) 450 → 455
+# (`--collect-only` ile ölçüldü).
 step "sızıntı" bash -c '
-  EXPECTED_MIN_LEAKAGE=450
+  EXPECTED_MIN_LEAKAGE=455
 
   collect_output=$(uv run pytest tests/ -q -m "leakage and not sitedb" --collect-only 2>&1)
   collect_code=$?

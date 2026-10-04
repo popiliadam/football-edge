@@ -14,6 +14,10 @@ yazılır ve `EXIT_BUDGET`. Jev kesintisinde (art arda `OUTAGE_STREAK` Jev hatas
 serinin işareti yazılmaz, haberler sonraki koşuda yeniden sorulur ve `EXIT_SOURCE_FAILED`.
 Harcama defteri AYRI, autocommit bir bağlantıdadır: cevap işlemi geri alınsa bile harcama
 kaydı kalır (`PostgresSpendLedger`).
+`tier2`: bu turun gölge kararlarının taraflarına kademe 2 bataryası (Plan 2 R180) — AĞA ÇIKAR,
+PARA HARCAR. Sıra: küme/işletme dosyaları (25) → anahtar (17) → küme donmuş mu (25) → dil →
+veritabanı. Taraf başına commit ve durum işareti; tavan 16, kesinti 7, dönen model kümedekinden
+farklı 25.
 """
 
 from __future__ import annotations
@@ -32,6 +36,17 @@ from football_edge.calibration import production_languages
 from football_edge.collect import EXIT_SOURCE_FAILED, LANGUAGES_PATH, configure_logging
 from football_edge.collector import ContractViolation
 from football_edge.db import connect
+from football_edge.features.live_config import (
+    EXIT_FROZEN_SET,
+    LIVE_CONFIG_PATH,
+    OPS_CONFIG_PATH,
+    TIER1,
+    TIER2,
+    LiveConfig,
+    LiveConfigError,
+    frozen_violations,
+    load_live_config,
+)
 from football_edge.features.news import SYNC_LOOKBACK, load_news, sync_news
 from football_edge.features.questions import QUESTIONS_PATH, QuestionSet, load_questions
 from football_edge.features.tier1 import (
@@ -51,6 +66,20 @@ from football_edge.features.tier1 import (
     newest_within_cap,
     run_tier1,
     write_item_answers,
+)
+from football_edge.features.tier2 import (
+    ANSWERED_BEFORE,
+    ASKED,
+    DEFERRED,
+    ERROR,
+    NO_NEWS,
+    STALE,
+    MatchAnswerRow,
+    Tier2Run,
+    answered_sides,
+    collect_tasks,
+    run_tier2,
+    write_match_answers,
 )
 from football_edge.features.types import StoredNews
 from football_edge.jev import EXIT_NO_JEV_KEY, JevClient, MissingJevKey, TypeSafeJev
@@ -99,7 +128,24 @@ def _parser() -> argparse.ArgumentParser:
     tier1.add_argument("--since", type=_utc, default=None)
     tier1.add_argument("--languages", type=Path, default=LANGUAGES_PATH)
     tier1.add_argument("--max-calls", type=_non_negative, default=MAX_CALLS_PER_RUN)
+    tier2 = commands.add_parser("tier2")
+    tier2.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    tier2.add_argument("--languages", type=Path, default=LANGUAGES_PATH)
+    for command in (tier1, tier2):
+        command.add_argument("--live-config", type=Path, default=LIVE_CONFIG_PATH)
+        command.add_argument("--ops-config", type=Path, default=OPS_CONFIG_PATH)
     return parser
+
+
+def _live_config(args: argparse.Namespace, name: str) -> LiveConfig | None:
+    """Küme + işletme ayarları; okunamazsa adıyla loglanır ve None (çağıran `EXIT_FROZEN_SET`)."""
+    try:
+        return load_live_config(
+            args.live_config, ops_path=args.ops_config, questions_path=args.questions
+        )
+    except (LiveConfigError, OSError) as error:
+        LOGGER.error("%s koşulmadı: küme/işletme ayarı okunamadı — %s", name, error)
+        return None
 
 
 def _sync_news(args: argparse.Namespace) -> int:
@@ -191,8 +237,12 @@ def _tier1_exit(run: Tier1Run) -> int:
 
 
 def _tier1(args: argparse.Namespace) -> int:
+    config = _live_config(args, "kademe 1")
+    if config is None:
+        return EXIT_FROZEN_SET
     try:
-        jev = TypeSafeJev()
+        # Kademe 2 ile aynı model (inceleme I8); `null` iken hesabın varsayılanı.
+        jev = TypeSafeJev(model=config.jev_model)
     except MissingJevKey as error:
         LOGGER.error("kademe 1 koşulmadı: %s", error)
         return EXIT_NO_JEV_KEY
@@ -223,7 +273,7 @@ def _tier1(args: argparse.Namespace) -> int:
         chosen = {item.item_id for item in items}
         run, written, marked = _ask_in_batches(
             conn,
-            budgeted_jev(jev, spend_conn, clock=_now),
+            budgeted_jev(jev, spend_conn, clock=_now, estimate_usd=config.estimate_usd[TIER1]),
             questions,
             items=items,
             # Pencerenin kalanı küme adayıdır: sorulmuşlar, `since`ten önceki (72 saatlik) kuyruk
@@ -238,8 +288,88 @@ def _tier1(args: argparse.Namespace) -> int:
     return _tier1_exit(run)
 
 
+def _report_tier2(run: Tier2Run, *, decisions: int, written: int) -> None:
+    LOGGER.info(
+        "kademe 2: karar %d · sorulan taraf %d · haberi olmayan taraf %d ('yok', imputed) · "
+        "daha önce cevaplanmış %d · bayat (> 6 sa) %d · ertelenen %d · hata %d",
+        decisions,
+        run.count(ASKED),
+        run.count(NO_NEWS),
+        run.count(ANSWERED_BEFORE),
+        run.count(STALE),
+        run.count(DEFERRED),
+        run.count(ERROR),
+    )
+    LOGGER.info(
+        "kademe 2: yazılan satır %d (işaret dâhil) · başarısız soru %d", written, run.failed
+    )
+
+
+def _tier2_exit(run: Tier2Run, frozen_model: str | None) -> int:
+    if run.budget_hit:
+        LOGGER.error("jev: aylık tavan $%.2f doldu — kalan taraflar sorulmadı", MONTHLY_CAP_USD)
+        return EXIT_BUDGET
+    if run.model_drift is not None:
+        LOGGER.error(
+            "jev: dönen model %r ≠ dondurulmuş %r — yazılmadı; yeni küme gerekir (R185)",
+            run.model_drift,
+            frozen_model,
+        )
+        return EXIT_FROZEN_SET
+    # Hiç taraf cevaplanmadı ama hata var: kesinti sayılır (inceleme I4), seri kısa olsa da.
+    if run.outage or (run.count(ASKED) == 0 and run.count(ERROR) > 0):
+        LOGGER.error(
+            "jev: kesinti — %d taraf Jev hatasıyla düştü, hiçbiri cevaplanmadı ya da art arda %d",
+            run.count(ERROR),
+            OUTAGE_STREAK,
+        )
+        return EXIT_SOURCE_FAILED
+    return 0
+
+
+def _tier2(args: argparse.Namespace) -> int:
+    config = _live_config(args, "kademe 2")
+    if config is None:
+        return EXIT_FROZEN_SET
+    try:
+        jev = TypeSafeJev(model=config.jev_model)
+    except MissingJevKey as error:
+        LOGGER.error("kademe 2 koşulmadı: %s", error)
+        return EXIT_NO_JEV_KEY
+    questions = load_questions(args.questions)
+    violations = frozen_violations(config, questions_prompt_version=questions.prompt_version)
+    for violation in violations:
+        LOGGER.error("kademe 2: dondurulmuş küme — %s", violation)
+    if violations:
+        return EXIT_FROZEN_SET
+    languages = production_languages(args.languages)
+    if not languages:
+        LOGGER.info("kademe 2: üretimde dil yok (%s) — Jev'e haber gitmedi", args.languages)
+        return 0
+    written = 0
+    with connect() as conn, connect() as spend_conn:
+
+        def sink(rows: tuple[MatchAnswerRow, ...]) -> None:
+            nonlocal written
+            written += write_match_answers(conn, rows)
+            conn.commit()  # taraf başına (I-8)
+
+        decisions, tasks = collect_tasks(conn, config=config, languages=languages, now=_now())
+        run = run_tier2(
+            tasks,
+            budgeted_jev(jev, spend_conn, clock=_now, estimate_usd=config.estimate_usd[TIER2]),
+            questions,
+            config=config,
+            clock=_now,
+            answered=answered_sides(conn, config.prompt_version, [d.match_id for d in decisions]),
+            sink=sink,
+        )
+    _report_tier2(run, decisions=len(decisions), written=written)
+    return _tier2_exit(run, config.jev_model)
+
+
 COMMANDS: Mapping[str, Callable[[argparse.Namespace], int]] = MappingProxyType(
-    {"sync-news": _sync_news, "tier1": _tier1}
+    {"sync-news": _sync_news, "tier1": _tier1, "tier2": _tier2}
 )
 
 

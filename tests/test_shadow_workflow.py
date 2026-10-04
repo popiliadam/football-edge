@@ -6,9 +6,19 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
+from tests.jev_workflow_helpers import (
+    JEV_CASE_IDS,
+    JEV_CASES,
+    JEV_SECRET,
+    SWITCH,
+    run_step,
+    with_jev_key,
+)
 from tests.workflow_helpers import (
     REPO,
     _allow_list,
@@ -44,14 +54,27 @@ def test_shadow_is_dispatched_by_pg_cron_after_the_decision_on_tuesday_and_frida
     assert set(_triggers(SHADOW)) == {"workflow_dispatch"}
 
 
-def test_only_the_shadow_and_report_steps_get_the_database() -> None:
-    steps = _steps(SHADOW)
-    index, report = _index_of(steps, COMMAND), _index_of(steps, REPORT)
-    holders = [i for i, step in enumerate(steps) if "DATABASE_URL" in str(step.get("env", {}))]
-    scan = _index_of(steps, "scripts/check_secrets.sh")
+TIER2 = "football_edge.features tier2"
+AFTER_SHADOW = (
+    "${{ !cancelled() && steps.secret_scan.outcome == 'success' && "
+    "steps.shadow.outcome == 'success' }}"
+)
+JEV2_OPEN_IF = "${{ !cancelled() && steps.tier2.outputs.jev == 'fail' }}"
 
-    assert index is not None and report is not None and holders == [index, report]
-    assert scan is not None and scan < index < report
+
+def _at(steps: list[dict[str, Any]], needle: str) -> int:
+    index = _index_of(steps, needle)
+    assert index is not None, f"shadow.yml: {needle!r} adımı yok"
+    return index
+
+
+def test_only_the_database_steps_get_the_database() -> None:
+    steps = _steps(SHADOW)
+    shadow, report, tier2 = _at(steps, COMMAND), _at(steps, REPORT), _at(steps, TIER2)
+    holders = [i for i, step in enumerate(steps) if "DATABASE_URL" in str(step.get("env", {}))]
+
+    assert holders == [shadow, report, tier2]
+    assert _at(steps, "scripts/check_secrets.sh") < shadow < report < tier2
 
 
 def _fake_bin(tmp_path: Path) -> Path:
@@ -152,8 +175,59 @@ def test_a_red_shadow_step_skips_the_report_and_still_raises_the_alarm() -> None
     rapor koşmaz, tur kırmızı kalır ve alarm son iki adımda açılır."""
     steps = _steps(SHADOW)
     index, report = _index_of(steps, COMMAND), _index_of(steps, REPORT)
-    opens = _index_of(steps, "scripts/ops_alert.py fail")
+    opens = _index_of(steps, "scripts/ops_alert.py fail --workflow shadow ")
 
     assert index is not None and report is not None and opens is not None
     assert "if" not in steps[report] and "continue-on-error" not in steps[report]
     assert index < report < opens == len(steps) - 2
+
+
+def test_tier2_runs_after_the_report_even_when_the_report_is_red() -> None:
+    """R180/R186: maç kümesi bu turun gölge satırlarıdır — gölge yeşilse kademe 2 koşar."""
+    steps = _steps(SHADOW)
+    step = steps[_at(steps, TIER2)]
+
+    env = dict(step["env"])
+
+    assert (step["id"], step["if"]) == ("tier2", AFTER_SHADOW)
+    assert env.pop("DATABASE_URL") == "${{ secrets.DATABASE_URL }}"
+    assert env in ({}, SWITCH), "ücret anahtarı ile JEV_ENABLED birlikte gelir (R177, I-5)"
+
+
+@pytest.mark.parametrize(
+    ("code", "enabled", "jev", "named"),
+    JEV_CASES,
+    ids=JEV_CASE_IDS,
+)
+def test_the_tier2_step_never_turns_the_shadow_run_red_and_names_every_jev_outcome(
+    tmp_path: Path, code: int, enabled: str | None, jev: str, named: str
+) -> None:
+    steps = _steps(SHADOW)
+
+    run = run_step(tmp_path, str(steps[_at(steps, TIER2)]["run"]), code=code, jev_enabled=enabled)
+
+    assert (run.returncode, run.outputs) == (0, {"jev": jev})
+    if jev == "ok":
+        assert run.errors == ()
+    else:
+        assert len(run.errors) == 1 and named in run.errors[0] and f"exit {code}" in run.errors[0]
+
+
+def test_the_jev_key_may_reach_only_the_tier2_step() -> None:
+    """Yamasız ve yamalı (R177) belge: anahtar ya hiçbir adımda ya YALNIZ kademe 2'de."""
+    document = yaml.safe_load(SHADOW.read_text(encoding="utf-8"))
+
+    for candidate in (document, with_jev_key(document, TIER2)):
+        steps = candidate["jobs"]["shadow"]["steps"]
+        holders = [i for i, step in enumerate(steps) if JEV_SECRET in str(step.get("env", {}))]
+        assert holders in ([], [_at(steps, TIER2)])
+
+
+def test_a_failed_tier2_opens_the_jev_kademe2_alarm_before_the_shadow_alarm() -> None:
+    steps = _steps(SHADOW)
+    tier2 = _at(steps, TIER2)
+    opens = _at(steps, "scripts/ops_alert.py fail --workflow jev-kademe2 ")
+    closes = _at(steps, "scripts/ops_alert.py ok --workflow jev-kademe2 ")
+
+    assert tier2 < opens < closes < _at(steps, "scripts/ops_alert.py fail --workflow shadow ")
+    assert steps[opens]["if"] == JEV2_OPEN_IF

@@ -691,12 +691,12 @@ def test_load_fixtures_returns_live_matches_in_the_window() -> None:
 def _cli(monkeypatch: pytest.MonkeyPatch, db: FakeNewsDb, client: Any) -> list[Any]:
     budgeted: list[Any] = []
 
-    def _budgeted(jev: Any, spend_conn: Any, *, clock: Any) -> Any:
+    def _budgeted(jev: Any, spend_conn: Any, *, clock: Any, **_: Any) -> Any:
         budgeted.append(clock())
         return jev
 
     monkeypatch.setattr(cli, "connect", lambda: db)
-    monkeypatch.setattr(cli, "TypeSafeJev", lambda: client)
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda **_: client)
     monkeypatch.setattr(cli, "budgeted_jev", _budgeted)
     monkeypatch.setattr(cli, "_now", lambda: T0 + timedelta(hours=1))
     # Bugün hiçbir dil üretimde değil (config/languages.yaml); testler TR'yi üretimde sayar.
@@ -1070,7 +1070,7 @@ def test_without_a_production_language_nothing_is_asked_and_the_database_is_unto
         f"    calibration_report: {tmp_path / 'tr.report.json'}\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(cli, "TypeSafeJev", lambda: FakeBatteryJev())
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda **_: FakeBatteryJev())
     monkeypatch.setattr(cli, "connect", _explode)
     # Ücret yamasından sonra adım 0 döner: tur özetinde adıyla görünmeli (inceleme turu 1, bulgu 8).
     summary = tmp_path / "summary.md"
@@ -1202,3 +1202,48 @@ def test_a_negative_call_cap_is_rejected_and_zero_defers_everything(
     assert rejected.value.code == 2
     assert client.seen == []
     assert "ertelenen 2" in caplog.text
+
+
+# ── Plan 2 Task 3: kademe 1 küme dosyasından model ve tahmin birimi alır ──────────────────
+
+
+def test_tier1_asks_with_the_frozen_model_and_the_tier1_estimate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """I8: kademe 1 de `faz4_live.yaml`daki modeli kullanır; tahmin birimi `faz4_ops.yaml`dan."""
+    live, ops = tmp_path / "live.yaml", tmp_path / "ops.yaml"
+    live.write_text(
+        f"tier1_prompt_version: {QUESTIONS.prompt_version}\njev_model: jev-2026-10\n"
+        "min_belongs: 0.5\nmin_reliability: 0.5\n",
+        encoding="utf-8",
+    )
+    ops.write_text(
+        "estimate_usd:\n  tier1: 0.03\n  tier2: 0.01\nmax_sides_per_run: 80\n"
+        "max_decision_age_hours: 6\n",
+        encoding="utf-8",
+    )
+    built: list[Any] = []
+    db = _db_with(news(1, "Galatasaray'da sakatlık"))
+    _cli(monkeypatch, db, FakeBatteryJev())
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda **kw: built.append(kw) or FakeBatteryJev())
+    monkeypatch.setattr(cli, "budgeted_jev", lambda jev, spend_conn, **kw: built.append(kw) or jev)
+
+    assert cli.main(["tier1", "--live-config", str(live), "--ops-config", str(ops)]) == 0
+
+    assert built[0] == {"model": "jev-2026-10"}
+    assert built[1]["estimate_usd"] == 0.03
+
+
+def test_tier1_with_a_broken_set_file_exits_25_before_the_database(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """M3: bozuk küme dosyası adlı kodla biter (exit 1 değil); veritabanına dokunulmaz."""
+
+    def _explode() -> Any:
+        raise AssertionError("bozuk küme dosyasıyla veritabanına bağlanılmamalı")
+
+    broken = tmp_path / "live.yaml"
+    broken.write_text("jev_model: null\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "connect", _explode)
+
+    assert cli.main(["tier1", "--live-config", str(broken)]) == cli.EXIT_FROZEN_SET == 25

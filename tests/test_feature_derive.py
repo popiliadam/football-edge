@@ -12,11 +12,17 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from football_edge.features.derive import (
+    IMPUTED,
+    LEVEL_SCORES,
+    NONE_LEVEL,
     FeatureVector,
+    LevelAnswer,
     SideAnswer,
     features_of,
     item_set_hash,
+    level_answer,
     select_items,
+    side_answers,
 )
 from football_edge.features.types import HOME, OBSERVED, ItemGate, StoredNews
 
@@ -242,3 +248,28 @@ def test_a_non_finite_answer_is_missing_not_a_nan_feature(answer: SideAnswer) ->
 
     assert vector.values == (0.0,)
     assert vector.missing == 1
+
+
+def test_the_level_value_is_the_probability_weighted_scale() -> None:
+    assert level_answer({"none": 0.5, "high": 0.5}, 0.8) == LevelAnswer(0.5, 0.8)
+    assert level_answer({"none": 0.0}, 0.8) is None
+    assert level_answer({"belki": 1.0}, 0.8) is None
+    assert level_answer({"none": math.nan}, 0.8) is None
+
+
+def test_an_unasked_side_is_imputed_at_the_none_level_and_counted() -> None:
+    """I-1: haberi olmayan taraf sorulmaz; özellikte ölçeğin "yok" düzeyine deterministik atanır."""
+    found = side_answers(["t2_x"], home=None, away={"t2_x": LevelAnswer(2 / 3, 0.7)})
+
+    assert found.imputed == 1
+    assert (IMPUTED.value, IMPUTED.confidence) == (LEVEL_SCORES[NONE_LEVEL], 1.0) == (0.0, 1.0)
+    vector = features_of(found.answers, ["t2_x"], c_min=0.5)
+    assert vector.values == pytest.approx((0.0 - 2 / 3,))
+    assert vector.missing == 0
+
+
+def test_an_asked_side_without_an_answer_stays_missing_not_imputed() -> None:
+    found = side_answers(["t2_x", "t2_y"], home={"t2_x": LevelAnswer(1.0, 0.9)}, away={})
+
+    assert found.imputed == 0
+    assert features_of(found.answers, ["t2_x", "t2_y"], c_min=0.5).missing == 2

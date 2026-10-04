@@ -32,8 +32,9 @@ JEV_CASES = [
     (7, None, "fail", "kesinti"),
     (16, None, "fail", "tavan"),
     (1, None, "fail", "beklenmedik"),
+    (25, None, "fail", "küme"),
 ]
-JEV_CASE_IDS = ["ok", "off-17", "enabled-17", "outage-7", "budget-16", "other-1"]
+JEV_CASE_IDS = ["ok", "off-17", "enabled-17", "outage-7", "budget-16", "other-1", "frozen-25"]
 # Ücret yamasının (R177) Jev adımına eklediği env satırları — yamalı/yamasız hâl ikisi de geçerli.
 SWITCH = {JEV_SECRET: "${{ secrets." + JEV_SECRET + " }}", "JEV_ENABLED": "1"}
 FAKE_UV = """\

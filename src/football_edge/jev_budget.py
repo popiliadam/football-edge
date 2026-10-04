@@ -251,15 +251,20 @@ class BudgetedJev:
 
 
 def budgeted_jev(
-    jev: JevClient, spend_conn: psycopg.Connection[Any], *, clock: Callable[[], datetime]
+    jev: JevClient,
+    spend_conn: psycopg.Connection[Any],
+    *,
+    clock: Callable[[], datetime],
+    estimate_usd: float = ESTIMATE_USD_UNMEASURED,
 ) -> BudgetedJev:
     """Her Jev çağrı yolunun ortak tavanı (spec §9, R159): her çağrı `jev_spend`e AYRI,
-    autocommit bağlantıda yazılır — komutun işlemi geri alınsa da ödenen çağrı kayıtlı kalır."""
+    autocommit bağlantıda yazılır — komutun işlemi geri alınsa da ödenen çağrı kayıtlı kalır.
+    `estimate_usd`: kademe başına tahmin birimi (`config/faz4_ops.yaml`, Plan 2)."""
     spend_conn.autocommit = True
     return BudgetedJev(
         jev,
         PostgresSpendLedger(spend_conn),
         cap_usd=MONTHLY_CAP_USD,
-        estimate_usd=ESTIMATE_USD_UNMEASURED,
+        estimate_usd=estimate_usd,
         clock=clock,
     )
