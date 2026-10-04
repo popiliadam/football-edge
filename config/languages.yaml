@@ -5,14 +5,13 @@
 # (`check-languages`) her push'ta bunu sorar — rapor dosyası yoksa ya da
 # `calibration.production_ready()`yi geçmiyorsa kapı kırmızı verir.
 #
-# BUGÜN: bu ortamda TYPESAFE_API_KEY yok, canlı Jev çağrısı yapılamadı. `data/calibration/
-# tr.jsonl` yalnız BİÇİM örnekleri taşıyor (10 satır, insan onaylı GERÇEK etiket değil —
-# bkz. data/calibration/README.md). Bu yüzden HER dil hâlâ false: ölçülmedi, ölçülene
-# kadar da açılmaz. Doğruluk eşiğin altında çıksa bile bu bir başarısızlık değildir —
-# Faz 1'in ölçmek için var olduğu şeyin cevabıdır.
+# 2026-10-04 (Faz 4 Plan 2 R182): TR ölçüldü — 100 insan onaylı etiket (`data/calibration/tr.jsonl`),
+# Jev `jev-1.13.0`: doğruluk 0,91 (YP 2, YN 7, ortalama güven 0,78) ≥ önceden bağlı eşik 0,85 → tr
+# üretimde. EN ölçülmedi (etiket yok, R183): false kalır. Doğruluk eşiğin altında çıksa bile bu bir
+# başarısızlık değildir — Faz 1'in ölçmek için var olduğu şeyin cevabıdır.
 languages:
   - code: tr
-    production_enabled: false # ölçülene kadar false
+    production_enabled: true # Plan 2 R182: 2026-10-04 ölçüldü, doğruluk 0.91, n=100
     calibration_report: data/calibration/tr.report.json
   - code: en
     production_enabled: false

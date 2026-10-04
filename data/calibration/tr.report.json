@@ -1,0 +1,8 @@
+{
+  "language": "tr",
+  "n": 100,
+  "accuracy": 0.91,
+  "false_positive": 2,
+  "false_negative": 7,
+  "mean_confidence": 0.7824000000000002
+}

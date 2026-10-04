@@ -164,3 +164,11 @@ $0,01 ≈ 128× fazla). `config/faz4_ops.yaml` `estimate_usd`: tier1 0,0005 (~6�
 haber kümesi ~15 bin token tahmini — kademe 2 probe'u 10-09'dan sonra ölçer). `config/faz4_live.yaml` `jev_model:
 jev-1.13.0` → **ilk dondurulmuş küme `prompt_version` = `9b294a616fd62e867c92aa05cc7dc9661090d484a70aaf11f550df8341980c5e`**.
 Kademe 2 başka bir model dönerse satır yazılmaz (`model_drift`). Panel teyidi isteğe bağlı (kullanıcı).
+
+## Plan 2 T6 — TR dil kalibrasyonu (2026-10-04, ÜCRETLİ)
+
+`uv run --env-file .env python -m football_edge.collect calibrate --language tr` → `calibrate: tr: doğruluk 0.91, n=100`
+(100 çağrı, model `jev-1.13.0`). Rapor `data/calibration/tr.report.json`: doğruluk 0,91 · yanlış pozitif 2 · yanlış
+negatif 7 · ortalama güven 0,78. Önceden bağlı eşik (R182: `min_n` 100, `min_accuracy` 0,85) geçti → `config/languages.yaml`
+`tr: production_enabled: true`; `check-languages` TEMİZ. EN ölçülmedi (etiket yok — R183). Not: ölçüm başlık-ilgililik
+görevidir; kademe 1/2 cevaplarının doğruluğunu ölçmez (spec §4/7).
