@@ -26,11 +26,19 @@ from tests.test_jev_item_answers_readers import _statements
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "football_edge"
 TABLE = "jev_match_answers"
-MARKER_READERS = frozenset({("features/tier2.py", "_ANSWERED")})
+MARKER_READERS = frozenset(
+    {
+        ("features/tier2.py", "_ANSWERED"),
+        # seçim dilimi sayacı (Plan 2 Task 4, R181): yalnız `asked` işaretinin VARLIĞI
+        ("features/slice.py", "SLICE_SQL"),
+    }
+)
 ANSWER_READERS: frozenset[tuple[str, str]] = frozenset()
 # INSERT'in SELECT'i `unnest`ten okur; tablo adı metinde YALNIZ INSERT hedefi olarak geçer.
 NOT_READERS = frozenset({("features/tier2.py", "INSERT_MATCH_ANSWERS")})
-MARKERS_ONLY = re.compile(r"\bAND\s+question_id\s*=\s*ANY\(%s\)")
+# Tablo takma adı (`a.question_id`) da aynı süzgeçtir: dilim sayacı EXISTS ile `model_predictions`a
+# bağlanır ve sütunları nitelikle yazar (Plan 2 Task 4).
+MARKERS_ONLY = re.compile(r"\bAND\s+(?:\w+\.)?question_id\s*=\s*ANY\(%s\)")
 EXCLUDES_MARKERS = re.compile(r"\bAND\s+NOT\s+starts_with\(question_id, %s\)")
 ASKED_MARKERS = "ASKED_MARKERS"
 
@@ -111,6 +119,21 @@ MARKER_BODY = """_ANSWERED = "SELECT match_id FROM jev_match_answers WHERE quest
 def answered(cur):
     cur.execute(_ANSWERED, (list(ASKED_MARKERS),))
 """
+
+
+@pytest.mark.parametrize(
+    ("where", "matches"),
+    [
+        ("WHERE variant = %s AND question_id = ANY(%s)", True),
+        ("WHERE a.variant = %s AND a.question_id = ANY(%s)", True),
+        ("WHERE a.variant = %s AND NOT a.question_id = ANY(%s)", False),
+        ("WHERE a.variant = %s AND a.match_id = ANY(%s)", False),
+        ("WHERE a.question_id = ANY(%s)", False),
+    ],
+    ids=["düz", "takma-ad", "değil", "başka-sütun", "and-yok"],
+)
+def test_the_marker_filter_reads_through_a_table_alias_only(where: str, matches: bool) -> None:
+    assert bool(MARKERS_ONLY.search(where)) is matches
 
 
 def test_a_marker_reader_executed_without_the_asked_markers_is_red(tmp_path: Path) -> None:

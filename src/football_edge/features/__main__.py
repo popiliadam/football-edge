@@ -1,4 +1,6 @@
-"""`python -m football_edge.features {sync-news,tier1}` — haber deposu ve kademe 1 (spec §4, §6).
+"""`python -m football_edge.features <komut>` — haber deposu, kademe 1/2 ve ölçüm (spec §4, §6).
+
+Komutlar: `sync-news`, `tier1`, `tier2`, `slice-status`, `estimate`, `probe`.
 
 `sync-news`: haber gözlemlerini `news_items`a taşır; ağa çıkmaz, para harcamaz. `collect-news` iş
 akışında toplamanın hemen ardından koşar (R172): `first_seen_at` bizim saatimizdir ve toplamayla
@@ -18,6 +20,9 @@ kaydı kalır (`PostgresSpendLedger`).
 PARA HARCAR. Sıra: küme/işletme dosyaları (25) → anahtar (17) → küme donmuş mu (25) → dil →
 veritabanı. Taraf başına commit ve durum işareti; tavan 16, kesinti 7, dönen model kümedekinden
 farklı 25.
+`slice-status` (R181), `estimate` (R184) ve `probe` (Task 5): veri bağlantısı `SET TRANSACTION READ
+ONLY` ile açılır ve geri alınır — cevap tablolarına yazmaz (M-8). `estimate` Jev KURMAZ; `probe` TEK
+ücretli batarya sorar (harcama defteri ayrı autocommit bağlantıda, tavan gereği).
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -36,6 +42,7 @@ from football_edge.calibration import production_languages
 from football_edge.collect import EXIT_SOURCE_FAILED, LANGUAGES_PATH, configure_logging
 from football_edge.collector import ContractViolation
 from football_edge.db import connect
+from football_edge.features.estimate import ASSUMED_LANGUAGES, WINDOW, estimate, render_estimate
 from football_edge.features.live_config import (
     EXIT_FROZEN_SET,
     LIVE_CONFIG_PATH,
@@ -48,7 +55,9 @@ from football_edge.features.live_config import (
     load_live_config,
 )
 from football_edge.features.news import SYNC_LOOKBACK, load_news, sync_news
+from football_edge.features.probe import ProbeResult, probe_task, probe_tier1, probe_tier2
 from football_edge.features.questions import QUESTIONS_PATH, QuestionSet, load_questions
+from football_edge.features.slice import read_only, render, select_slice_rows, slice_lines
 from football_edge.features.tier1 import (
     BATCH_SIZE,
     CLUSTER_WINDOW,
@@ -78,6 +87,7 @@ from football_edge.features.tier2 import (
     Tier2Run,
     answered_sides,
     collect_tasks,
+    load_decisions,
     run_tier2,
     write_match_answers,
 )
@@ -140,7 +150,14 @@ def _parser() -> argparse.ArgumentParser:
     tier2 = commands.add_parser("tier2")
     tier2.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     tier2.add_argument("--languages", type=Path, default=LANGUAGES_PATH)
-    for command in (tier1, tier2):
+    counter = commands.add_parser("slice-status")
+    counter.add_argument("--out", type=Path, default=None)
+    dry = commands.add_parser("estimate")
+    probe = commands.add_parser("probe")
+    probe.add_argument("--tier", type=int, choices=(1, 2), required=True)
+    for command in (counter, dry, probe):
+        command.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
+    for command in (tier1, tier2, counter, dry, probe):
         command.add_argument("--live-config", type=Path, default=LIVE_CONFIG_PATH)
         command.add_argument("--ops-config", type=Path, default=OPS_CONFIG_PATH)
     return parser
@@ -374,8 +391,94 @@ def _tier2(args: argparse.Namespace) -> int:
     return _tier2_exit(run, config.jev_model)
 
 
+def _slice_status(args: argparse.Namespace) -> int:
+    """R181: küme başına dilim sayacı; salt okuma, sonuç/olasılık okumaz. Küme dosyası okunamazsa
+    sayaç yine basılır, yalnız geçerli küme işaretsiz kalır."""
+    config = _live_config(args, "dilim (geçerli küme işaretsiz)")
+    with connect() as conn:
+        read_only(conn)
+        rows = select_slice_rows(conn)
+        conn.rollback()
+    current = None if config is None else config.prompt_version
+    text = render(slice_lines(rows, now=_now(), current=current))
+    if args.out is None:
+        sys.stdout.write(text)
+    else:
+        with args.out.open("a", encoding="utf-8") as handle:
+            handle.write(text)
+    return 0
+
+
+def _estimate(args: argparse.Namespace) -> int:
+    """R184: Jev'siz kuru koşu — salt okuma, geri alma; Jev KURULMAZ."""
+    config = _live_config(args, "estimate")
+    if config is None:
+        return EXIT_FROZEN_SET
+    now = _now()
+    with connect() as conn:
+        read_only(conn)
+        items = load_news(conn, since=now - WINDOW - HORIZON)
+        fixtures = load_fixtures(conn, since=now - WINDOW, until=now + HORIZON)
+        decisions = load_decisions(conn, now=now, max_age=WINDOW)
+        rows = select_slice_rows(conn)
+        conn.rollback()
+    count = sum(1 for version, _match, _at in rows if version == config.prompt_version)
+    found = estimate(items, fixtures, decisions, config=config, slice_count=count, now=now)
+    sys.stdout.write(render_estimate(found))
+    return 0
+
+
+def _probe_once(
+    conn: Any, client: JevClient, questions: QuestionSet, tier: int, now: datetime
+) -> ProbeResult | None:
+    items = load_news(conn, since=now - WINDOW - HORIZON)
+    if tier == 1:
+        fresh = tuple(
+            i for i in items if i.lang in ASSUMED_LANGUAGES and i.available_at >= now - HORIZON
+        )
+        fixtures = load_fixtures(conn, since=now, until=now + HORIZON)
+        return probe_tier1(fresh, fixtures, client, questions, clock=_now)
+    task = probe_task(load_decisions(conn, now=now, max_age=WINDOW), items)
+    return None if task is None else probe_tier2(task, client, questions)
+
+
+def _probe(args: argparse.Namespace) -> int:
+    """R184 / Task 5: TEK ücretli batarya; gecikme + model; cevap tablolarına yazmaz (M-8)."""
+    config = _live_config(args, "probe")
+    if config is None:
+        return EXIT_FROZEN_SET
+    try:
+        jev = TypeSafeJev(model=config.jev_model)
+    except MissingJevKey as error:
+        LOGGER.error("probe koşulmadı: %s", error)
+        return EXIT_NO_JEV_KEY
+    questions = load_questions(args.questions)
+    estimate_usd = config.estimate_usd[TIER1 if args.tier == 1 else TIER2]
+    now = _now()
+    with connect() as conn, connect() as spend_conn:
+        read_only(conn)
+        client = budgeted_jev(jev, spend_conn, clock=_now, estimate_usd=estimate_usd)
+        result = _probe_once(conn, client, questions, args.tier, now)
+        conn.rollback()
+    if result is None:
+        LOGGER.error("probe: sorulacak haber yok — ölçüm yapılmadı")
+        return 1
+    sys.stdout.write(
+        f"probe {result.tier}: gecikme {result.seconds:.2f} sn · model {result.jev_model} · "
+        f"cevap {result.answered}/{result.asked}\n"
+    )
+    return 0
+
+
 COMMANDS: Mapping[str, Callable[[argparse.Namespace], int]] = MappingProxyType(
-    {"sync-news": _sync_news, "tier1": _tier1, "tier2": _tier2}
+    {
+        "sync-news": _sync_news,
+        "tier1": _tier1,
+        "tier2": _tier2,
+        "slice-status": _slice_status,
+        "estimate": _estimate,
+        "probe": _probe,
+    }
 )
 
 

@@ -66,6 +66,7 @@ class _Tier2Cursor(_Cursor):
             "SELECT DISTINCT p.match_id, p.decided_at": self._decisions,
             "SELECT item_id, prompt_version, question_id": self._item_answers,
             "SELECT DISTINCT match_id, decided_at, split_part": self._answered,
+            "SELECT a.prompt_version, a.match_id, a.decided_at": self._slice,
             "INSERT INTO jev_match_answers": self._insert,
         }
         return next((h for prefix, h in handlers.items() if text.startswith(prefix)), None)
@@ -131,3 +132,16 @@ class _Tier2Cursor(_Cursor):
             keys = keys | {key}
             self._t2.match_answers = [*self._t2.match_answers, row]
             self._result.append((row["match_id"],))
+
+    def _slice(self, params: Any) -> None:
+        variant, question_ids, strategies = params
+        shadow = {(m, d) for m, s, d in self._t2.predictions if s in strategies}
+        self._result = sorted(
+            {
+                (r["prompt_version"], r["match_id"], r["decided_at"])
+                for r in self._t2.match_answers
+                if r["variant"] == variant
+                and r["question_id"] in question_ids
+                and (r["match_id"], r["decided_at"]) in shadow
+            }
+        )

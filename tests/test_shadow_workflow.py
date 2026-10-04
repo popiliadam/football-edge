@@ -1,5 +1,6 @@
-"""`shadow.yml`: yalnız pg_cron (0011), veritabanı secret'ı yalnız gölge, rapor ve kademe 2
-adımlarında, çıkış kodları adıyla; haftalık gölge raporu (Faz 4 T0a) yalnız salı turunda."""
+"""`shadow.yml`: yalnız pg_cron (0011), veritabanı secret'ı yalnız gölge, rapor, kademe 2
+ve dilim sayacı adımlarında, çıkış kodları adıyla; haftalık gölge raporu (Faz 4 T0a) yalnız salı
+turunda."""
 
 from __future__ import annotations
 
@@ -73,8 +74,9 @@ def test_only_the_database_steps_get_the_database() -> None:
     shadow, report, tier2 = _at(steps, COMMAND), _at(steps, REPORT), _at(steps, TIER2)
     holders = [i for i, step in enumerate(steps) if "DATABASE_URL" in str(step.get("env", {}))]
 
-    assert holders == [shadow, report, tier2]
-    assert _at(steps, "scripts/check_secrets.sh") < shadow < report < tier2
+    counter = _at(steps, "football_edge.features slice-status")
+    assert holders == [shadow, report, tier2, counter]
+    assert _at(steps, "scripts/check_secrets.sh") < shadow < report < tier2 < counter
 
 
 def _fake_bin(tmp_path: Path) -> Path:
@@ -247,3 +249,29 @@ def test_a_failed_tier2_opens_the_jev_kademe2_alarm_before_the_shadow_alarm() ->
 
     assert tier2 < opens < closes < _at(steps, "scripts/ops_alert.py fail --workflow shadow ")
     assert steps[opens]["if"] == JEV2_OPEN_IF
+
+
+SLICE = "football_edge.features slice-status"
+
+
+def test_slice_status_goes_to_the_summary_right_after_tier2() -> None:
+    steps = _steps(SHADOW)
+    tier2, counter = _at(steps, TIER2), _at(steps, SLICE)
+
+    assert counter == tier2 + 1
+    assert steps[counter]["if"] == AFTER_SHADOW
+    assert steps[counter]["env"] == {"DATABASE_URL": "${{ secrets.DATABASE_URL }}"}
+    assert '--out "$GITHUB_STEP_SUMMARY"' in str(steps[counter]["run"])
+
+
+@pytest.mark.parametrize(("code", "named"), [(0, ""), (1, "beklenmedik")])
+def test_the_slice_step_names_its_exit_code(tmp_path: Path, code: int, named: str) -> None:
+    steps = _steps(SHADOW)
+
+    run = run_step(tmp_path, str(steps[_at(steps, SLICE)]["run"]), code=code)
+
+    assert run.returncode == code
+    if code == 0:
+        assert run.errors == ()
+    else:
+        assert len(run.errors) == 1 and named in run.errors[0] and f"exit {code}" in run.errors[0]

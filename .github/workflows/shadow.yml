@@ -37,7 +37,8 @@ jobs:
       - name: Gölge tahmin
         id: shadow
         # Faz 3 (R134): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
-        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım, rapor ve kademe 2 alır.
+        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım, rapor, kademe 2
+        # ve dilim sayacı alır.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -109,6 +110,23 @@ jobs:
           esac
           echo "jev=$jev" >> "$GITHUB_OUTPUT"
           exit 0
+      - name: Seçim dilimi sayacı
+        # Plan 2 R181: küme başına (maç, karar anı) sayısı, haftalık hız, 900'e varış — iş özetine.
+        # Salt okuma; sonuç/olasılık okumaz. Gölge yeşilse koşar (kademe 2 kırmızı olsa da).
+        # `timeout` yok: Jev'e çıkmaz, tek bir salt okuma sorgusudur.
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && steps.shadow.outcome == 'success' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          uv run python -m football_edge.features slice-status --out "$GITHUB_STEP_SUMMARY"
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            *) echo "::error::slice-status beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
       - name: Jev alarmı aç
         if: ${{ !cancelled() && steps.tier2.outputs.jev == 'fail' }}
         env:
