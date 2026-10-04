@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -72,6 +73,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _non_negative(text: str) -> int:
+    """`--max-calls`: negatif tavan `[cap:]` dilimiyle neredeyse her haberi tutardı."""
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"en az 0 olmalı: {value}")
+    return value
+
+
+def _summary(line: str) -> None:
+    """GitHub turunun özetine bir satır; yalnız Actions'ta (`GITHUB_STEP_SUMMARY` varsa)."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path:
+        with Path(path).open("a", encoding="utf-8") as summary:
+            summary.write(f"{line}\n")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m football_edge.features")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -81,7 +98,7 @@ def _parser() -> argparse.ArgumentParser:
     tier1.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     tier1.add_argument("--since", type=_utc, default=None)
     tier1.add_argument("--languages", type=Path, default=LANGUAGES_PATH)
-    tier1.add_argument("--max-calls", type=int, default=MAX_CALLS_PER_RUN)
+    tier1.add_argument("--max-calls", type=_non_negative, default=MAX_CALLS_PER_RUN)
     return parser
 
 
@@ -127,7 +144,9 @@ def _ask_in_batches(
     max_calls: int,
 ) -> tuple[Tier1Run, int, int]:
     """Partiler: her partiden sonra yaz + commit (I-8); sonraki partinin küme havuzu öncekileri
-    görür. Tavan ya da kesinti kalan partileri durdurur. Dönüş: (birleşik koşu, cevap, işaret)."""
+    görür. Tavan ya da kesinti kalan partileri durdurur. Sondaki hata serisi (`pending`) sonraki
+    partiye taşınır — parti sınırı kesintiyi bölmez (17b) — ve koşu bitince yazılır.
+    Dönüş: (birleşik koşu, cevap, işaret)."""
     total, written, marked = EMPTY_RUN, 0, 0
     done: tuple[StoredNews, ...] = ()
     for batch in batches(items, BATCH_SIZE):
@@ -139,7 +158,9 @@ def _ask_in_batches(
             clock=_now,
             history=(*history, *done),
             attempts=attempts,
+            # CLI'da tavanı `newest_within_cap` zaten uygular; bu sınır bir savunmadır.
             max_calls=max_calls - total.calls,
+            pending=total.pending,
         )
         written += write_item_answers(conn, run.rows)
         marked += write_item_answers(conn, run.failures)
@@ -147,6 +168,10 @@ def _ask_in_batches(
         total, done = merge_runs(total, run), (*done, *batch)
         if run.budget_hit or run.outage:
             break
+    if total.pending:
+        # Koşunun sonunda kalan kısa seri kesinti değildir: tek koşudaki gibi işaretlenir.
+        marked += write_item_answers(conn, total.pending)
+        conn.commit()
     return total, written, marked
 
 
@@ -174,6 +199,7 @@ def _tier1(args: argparse.Namespace) -> int:
     languages = production_languages(args.languages)
     if not languages:
         LOGGER.info("kademe 1: üretimde dil yok (%s) — Jev'e haber gitmedi", args.languages)
+        _summary(f"kademe 1: üretimde dil yok ({args.languages}) — Jev'e haber gitmedi")
         return 0
     questions = load_questions(args.questions)
     now = _now()
@@ -194,13 +220,15 @@ def _tier1(args: argparse.Namespace) -> int:
         items, deferred = newest_within_cap(
             unasked, fixtures, attempts=attempts, cap=args.max_calls
         )
+        chosen = {item.item_id for item in items}
         run, written, marked = _ask_in_batches(
             conn,
             budgeted_jev(jev, spend_conn, clock=_now),
             questions,
             items=items,
-            # Pencerenin kalanı küme adayıdır: sorulmuşlar ve `since`ten önceki (72 saatlik) kuyruk.
-            history=tuple(n for n in window if n.item_id in asked or n.available_at < since),
+            # Pencerenin kalanı küme adayıdır: sorulmuşlar, `since`ten önceki (72 saatlik) kuyruk
+            # ve tavanla ertelenenler — ertelenen eski haber de aynı olayın öncülüdür.
+            history=tuple(n for n in window if n.item_id not in chosen),
             fixtures=fixtures,
             attempts=attempts,
             max_calls=args.max_calls,

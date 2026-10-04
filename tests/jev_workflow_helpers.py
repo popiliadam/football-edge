@@ -41,6 +41,13 @@ FAKE_UV = """\
 echo "$*" >> "$CALLS"
 exit "${FAIL_CODE:-0}"
 """
+# `timeout <süre> komut…` (coreutils; macOS'ta yok): süreyi atlar, komutu koşar. Süre iddiası
+# adım gövdesinin metnindedir; kesmenin kendisi 124 koduyla sınanır.
+FAKE_TIMEOUT = """\
+#!/usr/bin/env bash
+shift
+exec "$@"
+"""
 
 
 @dataclass(frozen=True)
@@ -53,9 +60,10 @@ class StepRun:
 
 
 def run_step(tmp_path: Path, body: str, *, code: int, jev_enabled: str | None = None) -> StepRun:
-    fake = tmp_path / "uv"
-    fake.write_text(FAKE_UV, encoding="utf-8")
-    fake.chmod(0o755)
+    for name, script in (("uv", FAKE_UV), ("timeout", FAKE_TIMEOUT)):
+        fake = tmp_path / name
+        fake.write_text(script, encoding="utf-8")
+        fake.chmod(0o755)
     calls, output, summary = tmp_path / "calls", tmp_path / "output", tmp_path / "summary.md"
     for path in (calls, output, summary):
         path.touch()

@@ -409,11 +409,13 @@ def test_answers_before_the_error_streak_are_kept_and_later_items_are_not_asked(
 
 def test_fewer_errors_than_the_streak_are_marked_as_before() -> None:
     """Tek başına hep düşen haber kesinti değildir: işaretlenir ve `MAX_ATTEMPTS`te bırakılır —
-    yoksa her koşuda yeniden sorulup tavandan yerdi (son inceleme I-2)."""
+    yoksa her koşuda yeniden sorulup tavandan yerdi (son inceleme I-2). Sondaki seri `pending`de
+    döner (sonraki partide sürebilir); koşu bitince çağıran onu da yazar."""
     result = run(TWO, FakeBatteryJev(error=ConnectionError("jev kapalı")))
 
     assert result.outage is False
-    assert [(m.item_id, m.choice) for m in result.failures] == [
+    assert result.failures == ()
+    assert [(m.item_id, m.choice) for m in result.pending] == [
         (1, "jev_error:ConnectionError"),
         (2, "jev_error:ConnectionError"),
     ]
@@ -427,7 +429,8 @@ def test_an_answer_breaks_the_error_streak() -> None:
 
     assert result.outage is False
     assert {r.item_id for r in result.rows} == {3}
-    assert [m.item_id for m in result.failures] == [1, 2, 4, 5]
+    assert [m.item_id for m in result.failures] == [1, 2]
+    assert [m.item_id for m in result.pending] == [4, 5]
     assert len(client.seen) == 5
 
 
@@ -1069,8 +1072,133 @@ def test_without_a_production_language_nothing_is_asked_and_the_database_is_unto
     )
     monkeypatch.setattr(cli, "TypeSafeJev", lambda: FakeBatteryJev())
     monkeypatch.setattr(cli, "connect", _explode)
+    # Ücret yamasından sonra adım 0 döner: tur özetinde adıyla görünmeli (inceleme turu 1, bulgu 8).
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
 
     with caplog.at_level(logging.INFO):
         assert cli.main(["tier1", "--languages", str(languages)]) == 0
 
     assert "üretimde dil yok" in caplog.text
+    assert "kademe 1: üretimde dil yok" in summary.read_text(encoding="utf-8")
+
+
+# ── Task 2 düzeltme turu 1: partiler arası seri, ertelenenin kümesi, parti sınırları ────────
+
+
+@dataclass
+class _DownFrom(FakeBatteryJev):
+    """İlk `start` çağrı cevap alır; sonrakilerin hepsi Jev hatasıyla patlar (kesinti)."""
+
+    start: int = 0
+
+    def ask_battery(self, state: Mapping[str, Any], questions: Sequence[Question]) -> BatteryAnswer:
+        if len(self.seen) >= self.start:
+            self.seen = [*self.seen, {"state": dict(state), "question_ids": ()}]
+            raise ConnectionError("jev kapalı")
+        return super().ask_battery(state, questions)
+
+
+def _markers(db: FakeNewsDb) -> list[tuple[int, str]]:
+    return [
+        (a["item_id"], a["choice"])
+        for a in db.answers
+        if str(a["question_id"]).startswith(FAILED_PREFIX)
+    ]
+
+
+def test_an_outage_straddling_a_batch_boundary_writes_no_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """17b partiler arasında da geçerli: seri parti sınırında sıfırlanmaz, işaret yazılmaz ve
+    kesinti en çok `OUTAGE_STREAK` çağrıya mal olur (inceleme turu 1, bulgu 1)."""
+    db = _db_with(*TWELVE)
+    client = _DownFrom(start=BATCH_SIZE - 2)  # 1. partinin son ikisi + 2. partinin hepsi düşer
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == cli.EXIT_SOURCE_FAILED
+
+    assert _markers(db) == [], "kesinti serisi parti sınırında işaretlendi"
+    assert len(client.seen) - (BATCH_SIZE - 2) == OUTAGE_STREAK
+
+
+def test_an_error_streak_shorter_than_an_outage_is_marked_at_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Koşunun sonunda kalan kısa seri kesinti değildir: tek koşudaki gibi işaretlenir."""
+    db = _db_with(*TWO)
+    _cli(monkeypatch, db, FakeBatteryJev(error=ConnectionError("jev kapalı")))
+
+    assert cli.main(["tier1"]) == 0
+
+    assert _markers(db) == [(1, "jev_error:ConnectionError"), (2, "jev_error:ConnectionError")]
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "calls"),
+    [
+        (ConnectionError("jev kapalı"), 7, OUTAGE_STREAK),
+        (BudgetExceeded("tavan"), EXIT_BUDGET, 1),
+    ],
+    ids=["outage", "budget"],
+)
+def test_an_outage_or_the_budget_stops_the_remaining_batches(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, code: int, calls: int
+) -> None:
+    db = _db_with(*TWELVE)
+    client = FakeBatteryJev(error=error)
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == code
+
+    assert len(client.seen) == calls, "kalan partiler sorulmamalı"
+    assert db.answers == []
+
+
+def test_later_batches_see_earlier_batches_as_cluster_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = _db_with(*TWELVE)
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1"]) == 0
+
+    eleventh = client.seen[BATCH_SIZE]["state"]
+    assert eleventh["news"]["title"] == "Galatasaray'da gelişme 11"
+    assert [e["id"] for e in eleventh["earlier_news"]] == [f"item:{n}" for n in range(3, 11)]
+
+
+def test_news_deferred_by_the_call_cap_stays_a_cluster_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tavanla ertelenen eski haber sorulmasa da küme adayıdır: yoksa en yeni haber yeni küme başı
+    yazılır ve eski haber sonra sorulunca olay çift sayılır (inceleme turu 1, bulgu 2)."""
+    db = _db_with(
+        *(news(n, f"Galatasaray'da gelişme {n}", T0 + timedelta(minutes=n)) for n in (1, 2, 3))
+    )
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    assert cli.main(["tier1", "--max-calls", "1"]) == 0
+
+    (call,) = client.seen
+    assert call["state"]["news"]["title"] == "Galatasaray'da gelişme 3"
+    assert [e["id"] for e in call["state"]["earlier_news"]] == ["item:1", "item:2"]
+
+
+def test_a_negative_call_cap_is_rejected_and_zero_defers_everything(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = _db_with(*TWO)
+    client = FakeBatteryJev()
+    _cli(monkeypatch, db, client)
+
+    with pytest.raises(SystemExit) as rejected:
+        cli.main(["tier1", "--max-calls", "-1"])
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["tier1", "--max-calls", "0"]) == 0
+
+    assert rejected.value.code == 2
+    assert client.seen == []
+    assert "ertelenen 2" in caplog.text

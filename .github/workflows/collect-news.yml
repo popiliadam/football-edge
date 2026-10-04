@@ -57,7 +57,7 @@ jobs:
           esac
           # Hiçbir kod yutulmaz: 7 de işi kırmızıya düşürür, yalnız adıyla.
           # Senkron ve kademe 1 bu koda bakar: 7 (bir kaynak düştü) onları durdurmaz, tur yine
-          # kırmızı biter (Plan 2 I-6, I-7). Hiçbir kod yutulmaz.
+          # kırmızı biter (Plan 2 I-6, I-7).
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit "$code"
       - name: Haber deposunu güncelle
@@ -92,7 +92,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set +e
-          uv run python -m football_edge.features tier1
+          # Asılı bir Jev işin 20 dakikasını yerse `collect-news` alarmı açılırdı: 15 dakikada
+          # kesilir, 124 aşağıda `jev=fail` olur ve `jev-kademe1` alarmını açar.
+          timeout 15m uv run python -m football_edge.features tier1
           code=$?
           set -e
           jev=fail

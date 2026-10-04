@@ -72,6 +72,18 @@ def test_the_tier1_step_never_turns_the_news_run_red_and_names_every_jev_outcome
         assert len(run.errors) == 1 and named in run.errors[0] and f"exit {code}" in run.errors[0]
 
 
+def test_a_hung_jev_is_cut_before_the_job_timeout_and_opens_the_jev_alarm(tmp_path: Path) -> None:
+    """İşin 20 dakikalık zaman aşımı `collect-news` alarmını açardı, `jev-kademe1`i değil:
+    kademe 1 15 dakikada kesilir, 124 `jev=fail` olur (inceleme turu 1, bulgu 7)."""
+    body = _tier1_body()
+
+    run = run_step(tmp_path, body, code=124)
+
+    assert f"timeout 15m uv run python -m {TIER1}" in body
+    assert (run.returncode, run.outputs) == (0, {"jev": "fail"})
+    assert len(run.errors) == 1 and "exit 124" in run.errors[0]
+
+
 def test_jev_off_is_written_to_the_run_summary(tmp_path: Path) -> None:
     run = run_step(tmp_path, _tier1_body(), code=17)
 
