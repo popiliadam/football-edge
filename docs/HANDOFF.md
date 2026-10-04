@@ -37,23 +37,26 @@ son incelemesi READY TO MERGE + tek düzeltme dalgası; taze klon kapısı ve CI
   GÜÇ YETERSİZ. **Plan 3 önerisi (kullanıcı durağı, sonra):** ayrı seçim dilimi kaldırılır, önceden kayıtlı TEK bileşik
   özellik + prequential β.
 
-### 0.T.1 Kalanlar — sırayla
-1. **KULLANICI DURAĞI — birim fiyat (R184):** TypeSafe panelinde 2026-10-04 17:32 UTC civarı tek System One çağrısı
-   (kademe 1, 4 soru, 1.865/367 token) — $ tutarı. Asistan `config/faz4_ops.yaml` `estimate_usd`'yi buna göre yazar.
-2. **2026-10-09 12:35 UTC gölge turundan sonra (asistan):** `features probe --tier 2` (ücretli, tek çağrı) → model
-   `jev-1.13.0` doğrulanır → `config/faz4_live.yaml` `jev_model: jev-1.13.0` (küme kimliği değişir, ilk ve son kez
-   gerçek yazımdan önce) → `features estimate` yeniden (ilk dolu hafta ≥ 10-13) → plan Task 5 Step 5–6.
-   Ayrıca ilk turların gerçek adım sürelerini oku (plan Task 5 Step 5: kalan pay < 3 dk ise `timeout-minutes`).
-3. **Task 6 (asistan, T5'ten sonra):** TR kalibrasyonu `uv run --env-file .env python -m football_edge.collect calibrate
-   --language tr` (ücretli, ~100 çağrı); ≥ 0,85 ise `tr` üretime; değilse KULLANICI DURAĞI (eşik gevşetilmez). Ücret
-   yaması `docs/superpowers/plans/2026-10-04-faz4-plan2-ucret-yamasi.patch` hazırlanır.
-4. **KULLANICI — ücret açma (R177):** önce GitHub secret `TYPESAFE_API_KEY` (kendi kabuğunda `gh secret set
-   TYPESAFE_API_KEY`), sonra tek komut (plan Task 6 Step 4). Asistan kapı + push + ilk turları izler.
-5. **İzlenecekler:** ilk `collect-news` turunda 7 yeni kaynak (runner'dan 403/429 olursa kaynak adıyla exit 7 —
-   footystats emsali); `shadow` özetinde "Jev kapalı"/"üretimde dil yok" ve dilim satırı; hakem bağlama (§0.S.2/4).
-6. **EN etiket paketi (R183):** EN `news_items` ≥ 150 olunca Opus ön etiket + ikinci etiket → kullanıcı onayı.
-7. **Avukat paketine ek (S8):** başlıkların TypeSafe'e gönderimi ve Fotomaç/A Spor'un koşul sayfası olmaması —
-   kullanıcı paketi gönderirken eklesin.
+### 0.T.1 Kalanlar — sırayla (güncel 2026-10-04 20:15 UTC)
+- ~~Birim fiyat~~ **YAPILDI:** resmî fiyat docs.typesafe.ai/models ($0,042/Mtok girdi, çıktı ücretsiz) + ölçülen token →
+  $0,000078/kademe 1 bataryası; `config/faz4_ops.yaml` 0,0005 / 0,002; `jev_model: jev-1.13.0` sabit, ilk küme
+  `prompt_version` `9b294a61…` (`ca9d1a8`).
+- ~~TR kalibrasyonu~~ **YAPILDI:** doğruluk 0,91 (n=100, YP 2, YN 7) ≥ 0,85 → `tr` üretimde (`c6d8415`).
+- ~~Ücret yaması~~ **HAZIR:** `docs/superpowers/plans/2026-10-04-faz4-plan2-ucret-yamasi.patch` (yamalı hâlde 240 test +
+  secret taraması yeşil; `ea1cc00`). GitHub secret `TYPESAFE_API_KEY` 2026-09-23'ten beri tanımlı.
+- **gffn runner'da kapalı** (Cloudflare veri merkezi IP'si — DEFERRED 22a; `9096e9d`). Diğer 6 kaynak canlı: ilk tur 450
+  gözlem / 374 haber, 20:07 turu yeşil, alarm #6 kapandı.
+
+1. **KULLANICI — tek komut (R177):** `cd /Users/apple/dev/football-edge && git apply docs/superpowers/plans/2026-10-04-faz4-plan2-ucret-yamasi.patch && git commit -m "ci: Jev ücretli adımlarını aç (TYPESAFE_API_KEY + JEV_ENABLED)" -- .github/workflows/collect-news.yml .github/workflows/shadow.yml`
+   → asistan: tam kapı → `origin/main` birleştirme → push → ilk ücretli `collect-news` turu (kademe 1 "tamam", `jev_spend`).
+2. **2026-10-09 12:35 UTC gölge turundan sonra (asistan):** shadow özetinde kademe 2 + "seçim dilimi"; `features probe --tier
+   2` gerekmez (gerçek tur ölçer) — `jev_match_answers` modelinin `jev-1.13.0` olduğunu ve `model_drift` olmadığını doğrula;
+   ilk tur adım sürelerini oku (kalan pay < 3 dk ise `timeout-minutes`, DEFERRED 22e).
+3. **≥ 2026-10-13:** `features estimate` yeniden (ilk dolu hafta) → 900 projeksiyonu; R187 ile karşılaştır.
+4. **Plan 3 (≥ 900 haberli maç ya da kullanıcı kararıyla önce):** R187 önerisi — prequential tek bileşik özellik
+   (KULLANICI DURAĞI), ardından T8–T11; `lag_b_p99` (≥ 10-07) ön kayda girer.
+5. **İzlenecekler:** hakem bağlama (§0.S.2/4); EN etiket paketi (R183, EN `news_items` ≥ 150); avukat paketine S8 eki
+   (başlıkların TypeSafe'e gönderimi; Fotomaç/A Spor koşul sayfası yok).
 
 ## 0.S KULLANICI OTURUMU SONUCU (2026-10-02 → 10-04) — taze oturum BURADAN başlar
 
