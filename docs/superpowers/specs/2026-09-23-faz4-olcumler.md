@@ -138,3 +138,21 @@ adları (bu ölçümde: `theguardian.com`, `bbc.co.uk`/`bbc.com`, `espn.com`) to
 - ajansspor ToS (robots'ta `Disallow`, okunmadı).
 - Sky Sports ToS metni.
 - §3/2b (yayıncı iddiası ↔ `first_seen_at`) — Plan 2'de, Task 9'dan ≥ 2 hafta sonra.
+
+## Plan 2 T5 (kısmi) — kuru koşu ve ilk gerçek Jev çağrısı (2026-10-04)
+
+**Kuru koşu** (`uv run --env-file .env python -m football_edge.features estimate`, salt okuma, Jev yok; 17:32 UTC):
+kademe 1 çağrı (son 28 gün) 27 · günlük 1,0 · kademe 2 üst sınır taraf 0 · haberli karar 0 · aylık tahmin $0,29 (tavan $25)
+· 900'e varış tahmin yok. **Temsili değil:** son 28 gün milli ara (gölge kararı yok) ve yeni 7 RSS kaynağı henüz
+toplanmadı. Basılan "KULLANICI DURAĞI" satırı veri yokluğundan — gerçek bir aşım değil. Projeksiyon ilk dolu maç
+haftasından sonra (≥ 2026-10-13) yeniden koşulur; o zamana dek vekil R187 W38 ölçümü (~33 haberli maç/hafta).
+
+**Ölçüm çağrısı — kademe 1** (`features probe --tier 1`, ÜCRETLİ, tek batarya): gecikme 0,86 sn · model `jev-1.13.0`
+· cevap 4/4. `jev_spend` satırı 1: `kind=battery`, `cost_usd=0.01` (`estimated`), `input_tokens=1865`,
+`output_tokens=367`. Cevap tabloları yazılmadı (probe salt ölçüm). Tur sınırı denetimi: 40 × 0,86 sn ≈ 35 sn ≪ 15 dk.
+
+**Ölçüm çağrısı — kademe 2:** `sorulacak haber yok` (exit 1, çağrı yok) — gölge kararı yok. İlk karar günlü gölge
+turu 2026-10-09 12:35 UTC'den sonra tekrarlanır.
+
+**Bekleyen kullanıcı durağı (R184, I-9):** birim fiyat TypeSafe panelinden okunur (bu tek çağrının $ tutarı);
+`config/faz4_live.yaml` `jev_model` kademe 2 probe'u modeli doğrulayınca (`jev-1.13.0` beklenir) sabitlenir.
