@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -10,11 +11,21 @@ import pytest
 
 from football_edge.features import __main__ as cli
 from football_edge.features.news import NewsDraft, news_hash, write_news
-from football_edge.features.probe import TimingJev, probe_task, probe_tier1, probe_tier2
+from football_edge.features.probe import (
+    PROBE_BUDGET,
+    PROBE_JEV_ERROR,
+    PROBE_NO_NEWS,
+    ProbeFailure,
+    TimingJev,
+    probe_task,
+    probe_tier1,
+    probe_tier2,
+)
 from football_edge.features.questions import load_questions
 from football_edge.features.tier2 import Decision
 from football_edge.features.types import AWAY, OBSERVED, StoredNews
 from football_edge.jev import Question
+from football_edge.jev_budget import EXIT_BUDGET, BudgetExceeded
 from football_edge.live.context import LiveMatch
 from tests.fake_jev import FakeBatteryJev
 from tests.fake_tier2_db import FakeTier2Db
@@ -153,4 +164,111 @@ def test_the_probe_command_uses_the_frozen_model_and_the_unit_of_its_tier(
     assert len(client.seen) == 1 and f"probe kademe {tier}:" in out
     if tier == 2:
         assert "cevap 30/30" in out and client.seen[0]["state"]["team"] == "Galatasaray"
+    assert db.read_only and db.answers == [] and db.match_answers == []
+
+
+# ── Ölçülemeyen probe: haber yok ≠ Jev hatası ≠ tavan (son inceleme I2) ────────────────────
+
+
+def test_the_tier1_probe_without_a_candidate_reports_no_news_and_asks_nothing() -> None:
+    client = FakeBatteryJev()
+
+    result = probe_tier1(ITEMS, (), client, QUESTIONS, clock=lambda: NOW)
+
+    assert result == ProbeFailure("kademe 1", PROBE_NO_NEWS) and client.seen == []
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "detail"),
+    [
+        (TimeoutError("zaman aşımı"), PROBE_JEV_ERROR, "TimeoutError"),
+        (BudgetExceeded("t"), PROBE_BUDGET, ""),
+    ],
+    ids=["jev-error", "budget"],
+)
+def test_a_failed_tier1_probe_names_the_failure_not_missing_news(
+    error: Exception, reason: str, detail: str
+) -> None:
+    client = FakeBatteryJev(error=error)
+
+    result = probe_tier1(ITEMS, (FIXTURE,), client, QUESTIONS, clock=lambda: NOW)
+
+    assert isinstance(result, ProbeFailure)
+    assert (result.tier, result.reason) == ("kademe 1", reason)
+    assert detail in result.detail and len(client.seen) == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "reason", "detail"),
+    [
+        (ConnectionError("kapalı"), PROBE_JEV_ERROR, "ConnectionError"),
+        (BudgetExceeded("t"), PROBE_BUDGET, ""),
+    ],
+    ids=["jev-error", "budget"],
+)
+def test_a_failed_tier2_probe_names_the_failure(error: Exception, reason: str, detail: str) -> None:
+    decision = Decision("m-new", NOW - timedelta(hours=1), "Trabzonspor", "Galatasaray", NOW)
+    task = probe_task((decision,), ITEMS)
+    assert task is not None
+
+    result = probe_tier2(task, FakeBatteryJev(error=error), QUESTIONS)
+
+    assert isinstance(result, ProbeFailure)
+    assert (result.tier, result.reason) == ("kademe 2", reason)
+    assert detail in result.detail
+
+
+def _probe_cli(monkeypatch: pytest.MonkeyPatch, db: FakeTier2Db, client: FakeBatteryJev) -> None:
+    monkeypatch.setattr(cli, "connect", lambda: db)
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+    monkeypatch.setattr(cli, "TypeSafeJev", lambda **_: client)
+    monkeypatch.setattr(cli, "budgeted_jev", lambda jev, spend_conn, **_: jev)
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+def test_the_probe_command_without_news_exits_one_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tier: int
+) -> None:
+    """Haber yok: kademe 1'de aday fikstür yok, kademe 2'de karar yok — Jev çağrılmaz."""
+    db = _news_db()
+    db.fixtures = []
+    client = FakeBatteryJev()
+    _probe_cli(monkeypatch, db, client)
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["probe", "--tier", str(tier)]) == 1
+
+    assert "sorulacak haber yok" in caplog.text and client.seen == []
+    assert "Jev hatası" not in caplog.text and "tavan" not in caplog.text
+
+
+@pytest.mark.parametrize("tier", [1, 2])
+@pytest.mark.parametrize(
+    ("error", "code", "message"),
+    [
+        (ConnectionError("401 yetkisiz"), 7, "Jev hatası (ConnectionError)"),
+        (BudgetExceeded("tavan"), EXIT_BUDGET, "aylık tavan"),
+    ],
+    ids=["jev-error", "budget"],
+)
+def test_a_failed_probe_command_exits_with_the_named_code_not_no_news(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tier: int,
+    error: Exception,
+    code: int,
+    message: str,
+) -> None:
+    """Jev/yetki hatası `EXIT_SOURCE_FAILED` (7), tavan `EXIT_BUDGET` (16): kademe 1/2 ile aynı;
+    ikisi de "sorulacak haber yok" diye okunmaz (son inceleme I2)."""
+    db = _news_db()
+    db.matches = {"m-gs": ("Galatasaray", "Fenerbahce", NOW + timedelta(days=2))}
+    db.predictions = [("m-gs", "market", NOW - timedelta(hours=1))]
+    _probe_cli(monkeypatch, db, FakeBatteryJev(error=error))
+
+    with caplog.at_level(logging.INFO):
+        assert cli.main(["probe", "--tier", str(tier)]) == code
+
+    assert f"probe kademe {tier}: {message}" in caplog.text
+    assert "sorulacak haber yok" not in caplog.text
     assert db.read_only and db.answers == [] and db.match_answers == []

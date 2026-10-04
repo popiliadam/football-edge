@@ -22,7 +22,8 @@ veritabanı. Taraf başına commit ve durum işareti; tavan 16, kesinti 7, döne
 farklı 25.
 `slice-status` (R181), `estimate` (R184) ve `probe` (Task 5): veri bağlantısı `SET TRANSACTION READ
 ONLY` ile açılır ve geri alınır — cevap tablolarına yazmaz (M-8). `estimate` Jev KURMAZ; `probe` TEK
-ücretli batarya sorar (harcama defteri ayrı autocommit bağlantıda, tavan gereği).
+ücretli batarya sorar (harcama defteri ayrı autocommit bağlantıda, tavan gereği). Ölçülemeyen
+probe'un çıkışı sebebini söyler: Jev/yetki hatası 7, tavan 16, yalnız sorulacak haber yoksa 1.
 """
 
 from __future__ import annotations
@@ -55,7 +56,16 @@ from football_edge.features.live_config import (
     load_live_config,
 )
 from football_edge.features.news import SYNC_LOOKBACK, load_news, sync_news
-from football_edge.features.probe import ProbeResult, probe_task, probe_tier1, probe_tier2
+from football_edge.features.probe import (
+    PROBE_BUDGET,
+    PROBE_JEV_ERROR,
+    PROBE_NO_NEWS,
+    ProbeFailure,
+    ProbeResult,
+    probe_task,
+    probe_tier1,
+    probe_tier2,
+)
 from football_edge.features.questions import QUESTIONS_PATH, QuestionSet, load_questions
 from football_edge.features.slice import read_only, render, select_slice_rows, slice_lines
 from football_edge.features.tier1 import (
@@ -443,7 +453,7 @@ def _estimate(args: argparse.Namespace) -> int:
 
 def _probe_once(
     conn: Any, client: JevClient, questions: QuestionSet, tier: int, now: datetime
-) -> ProbeResult | None:
+) -> ProbeResult | ProbeFailure:
     items = load_news(conn, since=now - WINDOW - ITEM_LOOKBACK)
     if tier == 1:
         fresh = tuple(
@@ -452,7 +462,30 @@ def _probe_once(
         fixtures = load_fixtures(conn, since=now, until=now + HORIZON)
         return probe_tier1(fresh, fixtures, client, questions, clock=_now)
     task = probe_task(load_decisions(conn, now=now, max_age=WINDOW), items)
-    return None if task is None else probe_tier2(task, client, questions)
+    if task is None:
+        return ProbeFailure("kademe 2", PROBE_NO_NEWS)
+    return probe_tier2(task, client, questions)
+
+
+def _probe_failed(failure: ProbeFailure) -> int:
+    """Ölçülemeyen probe'un çıkışı (son inceleme I2): Jev/yetki hatası `EXIT_SOURCE_FAILED`, tavan
+    `EXIT_BUDGET` — kademe 1/2 ile aynı kodlar —; yalnız sorulacak haber yoksa 1."""
+    if failure.reason == PROBE_JEV_ERROR:
+        LOGGER.error(
+            "probe %s: Jev hatası (%s) — çağrı düştü, ölçüm yapılmadı",
+            failure.tier,
+            failure.detail.removeprefix(f"{PROBE_JEV_ERROR}:"),
+        )
+        return EXIT_SOURCE_FAILED
+    if failure.reason == PROBE_BUDGET:
+        LOGGER.error(
+            "probe %s: aylık tavan $%.2f doldu (bütçe) — çağrı yapılmadı, ölçüm yapılmadı",
+            failure.tier,
+            MONTHLY_CAP_USD,
+        )
+        return EXIT_BUDGET
+    LOGGER.error("probe: sorulacak haber yok — ölçüm yapılmadı")
+    return 1
 
 
 def _probe(args: argparse.Namespace) -> int:
@@ -473,9 +506,8 @@ def _probe(args: argparse.Namespace) -> int:
         client = budgeted_jev(jev, spend_conn, clock=_now, estimate_usd=estimate_usd)
         result = _probe_once(conn, client, questions, args.tier, now)
         conn.rollback()
-    if result is None:
-        LOGGER.error("probe: sorulacak haber yok — ölçüm yapılmadı")
-        return 1
+    if isinstance(result, ProbeFailure):
+        return _probe_failed(result)
     sys.stdout.write(
         f"probe {result.tier}: gecikme {result.seconds:.2f} sn · model {result.jev_model} · "
         f"cevap {result.answered}/{result.asked}\n"
