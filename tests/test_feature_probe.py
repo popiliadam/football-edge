@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -113,13 +114,15 @@ def test_the_probe_command_prints_the_model_and_writes_no_answer_row(
 
 def _configs(tmp_path: Path) -> list[str]:
     """Kümede sabit model, kademe başına FARKLI birim: geçişler gözlenebilsin (inceleme P1, P3)."""
+    # Depo değerlerine bağlanmaz (Task 5 modeli/birimi sabitler); satırlar test değerine yazılır.
     live = (CONFIG_DIR / "faz4_live.yaml").read_text(encoding="utf-8")
     ops = (CONFIG_DIR / "faz4_ops.yaml").read_text(encoding="utf-8")
-    assert live.count("jev_model: null") == 1 and ops.count("tier2: 0.01") == 1
-    (tmp_path / "live.yaml").write_text(
-        live.replace("jev_model: null", "jev_model: jev-2026-10"), encoding="utf-8"
-    )
-    (tmp_path / "ops.yaml").write_text(ops.replace("tier2: 0.01", "tier2: 0.03"), encoding="utf-8")
+    live, models = re.subn(r"(?m)^jev_model: .*$", "jev_model: jev-2026-10", live)
+    ops, tier1 = re.subn(r"(?m)^  tier1: .*$", "  tier1: 0.01", ops)
+    ops, tier2 = re.subn(r"(?m)^  tier2: .*$", "  tier2: 0.03", ops)
+    assert (models, tier1, tier2) == (1, 1, 1)
+    (tmp_path / "live.yaml").write_text(live, encoding="utf-8")
+    (tmp_path / "ops.yaml").write_text(ops, encoding="utf-8")
     return [
         "--live-config",
         str(tmp_path / "live.yaml"),
