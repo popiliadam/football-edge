@@ -1,0 +1,31 @@
+User-agent: *
+Sitemap: https://www.aspor.com.tr/sitemap/news.xml
+Sitemap: https://www.aspor.com.tr/sitemap/post.xml
+Sitemap: https://www.aspor.com.tr/sitemap/video.xml
+Sitemap: https://www.aspor.com.tr/sitemap/tags.xml
+Sitemap: https://www.aspor.com.tr/sitemap/image.xml
+
+Disallow: /bize-ulasin
+Disallow: /arama
+Disallow: /webtv/iframe/*
+Disallow: /iframe/*
+Disallow: /js
+Disallow: /json
+Disallow: /ajax
+Disallow: /infinite/article/*
+Disallow: /cdn-cgi/speculation
+Disallow: /infinitecategoryjson/
+
+Disallow: /turkiye-kupasi/kupatv/popupvideo*
+Disallow: /turkiye-kupasi/infinite/article/*
+Disallow: /turkiye-kupasi/json/galeri/*
+Disallow: /turkiye-kupasi/haber-gonder*
+Disallow: /turkiye-kupasi/video/othervideoframe*
+Disallow: /turkiye-kupasi/ajax/home/widgetframes*
+
+Disallow: /secim/
+Disallow: /fetch
+
+Disallow: *getcandidatetopinfo*
+
+Content-Signal: search=yes, ai-input=yes, ai-train=no

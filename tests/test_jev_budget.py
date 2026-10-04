@@ -67,6 +67,7 @@ def test_every_exit_code_name_owns_exactly_one_value_across_commands() -> None:
         "football_edge.jev",
         "football_edge.jev_budget",
         "football_edge.site.contract",
+        "football_edge.features.live_config",
     )
     owners: dict[int, set[str]] = {}
     for name in modules:
@@ -86,6 +87,7 @@ def test_every_exit_code_name_owns_exactly_one_value_across_commands() -> None:
         {"EXIT_SITE_NONDETERMINISTIC"},
         {"EXIT_SITE_INVALID"},
     ]
+    assert owners[25] == {"EXIT_FROZEN_SET"}
 
 
 def test_month_bounds_is_the_utc_calendar_month_and_rolls_over_december() -> None:
@@ -352,3 +354,14 @@ def test_budgeted_jev_opens_an_autocommit_ledger_and_enforces_the_monthly_cap() 
     with pytest.raises(BudgetExceeded):
         client.ask_choice({"x": 1}, "hangisi?", {"a": "a"})
     assert jev.seen == []
+
+
+def test_budgeted_jev_takes_the_per_tier_estimate() -> None:
+    conn = FakeSpendConn()
+    client = budgeted_jev(  # type: ignore[arg-type]
+        FakeBatteryJev(cost_basis=COST_UNPRICED), conn, clock=lambda: NOW, estimate_usd=0.05
+    )
+
+    client.ask_battery({}, [Question("q", "soru", {"a": "b"})])
+
+    assert conn.inserted[0][2] == 0.05

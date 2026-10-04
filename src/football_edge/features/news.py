@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -28,8 +30,24 @@ from football_edge.features.types import (
     StoredNews,
 )
 
-# Kaynak → haber dili. EN kaynağı (Plan 2, T2) buraya eklenir; dilsiz kaynak okunmaz.
-NEWS_SOURCE_LANGS: Mapping[str, str] = MappingProxyType({"ajansspor": "tr"})
+LOGGER = logging.getLogger("football_edge.features.news")
+
+# Kaynak → haber dili (Plan 2 R175). Dilsiz kaynak okunmaz; EN kalibrasyonu (R183) bitene dek EN
+# haberi depoya girer ama Jev'e gitmez (dil kapısı kademelerdedir, R178).
+NEWS_SOURCE_LANGS: Mapping[str, str] = MappingProxyType(
+    {
+        "ajansspor": "tr",
+        "fotomac": "tr",
+        "aspor": "tr",
+        "sportsmole": "en",
+        "independent": "en",
+        "standard": "en",
+        "gffn": "en",
+        "football-oranje": "en",
+    }
+)
+# Toplayıcının robots anlık görüntüleri (`collect.ROBOTS_DIR` ile aynı; testle sabit).
+ROBOTS_DIR = Path("config/robots")
 NEWS_KIND = "news"
 # `sync-news`in varsayılan geriye bakışı: haber sitemap'i son iki günü taşır; pay bir haftadır.
 SYNC_LOOKBACK = timedelta(days=7)
@@ -182,6 +200,36 @@ def archive_available_at(published: datetime, lag: timedelta) -> datetime:
     return published + lag
 
 
+def ai_input_denied(robots_text: str) -> bool:
+    """`Content-Signal` satırlarından biri `ai-input=no` diyor mu (Plan 2 spec §4/9).
+
+    Yalnız AÇIK `no` engeller: satır yoksa ya da `ai-input` anılmıyorsa False (EN beş kaynakta
+    satır yok — ölçüldü 2026-10-04). Grup ayrımı yapılmaz: herhangi bir grubun `no`su yeter.
+    Satır sonu `#` yorumu ve dosya başı BOM atılır: ikisi de açık `no`yu gizleyip fail-open
+    yapardı (inceleme düzeltme turu 1)."""
+    for raw_line in robots_text.splitlines():
+        line = raw_line.split("#", 1)[0].lstrip("\ufeff")
+        key, _, value = line.partition(":")
+        if key.strip().casefold() != "content-signal":
+            continue
+        for part in value.split(","):
+            name, _, flag = part.partition("=")
+            if name.strip().casefold() == "ai-input" and flag.strip().casefold() == "no":
+                return True
+    return False
+
+
+def jev_blocked_sources(robots_dir: Path = ROBOTS_DIR) -> frozenset[str]:
+    """Haberi Jev'e GİTMEYEN canlı kaynaklar: anlık görüntüsü `ai-input=no` diyen ya da anlık
+    görüntüsü OLMAYAN (ölçülmemiş = izin yok) `NEWS_SOURCE_LANGS` kaynakları."""
+    blocked: frozenset[str] = frozenset()
+    for source_id in NEWS_SOURCE_LANGS:
+        snapshot = robots_dir / f"{source_id}.txt"
+        if not snapshot.is_file() or ai_input_denied(snapshot.read_text(encoding="utf-8")):
+            blocked = blocked | {source_id}
+    return blocked
+
+
 def write_news(conn: psycopg.Connection[Any], drafts: Sequence[NewsDraft]) -> int:
     """YENİ yazılan haber sayısı (yinelenenler sayılmaz)."""
     if not drafts:
@@ -203,7 +251,17 @@ def sync_news(conn: psycopg.Connection[Any], *, since: datetime | None = None) -
     return write_news(conn, news_from_observations(observed))
 
 
-def load_news(conn: psycopg.Connection[Any], *, since: datetime) -> tuple[StoredNews, ...]:
+def load_news(
+    conn: psycopg.Connection[Any], *, since: datetime, robots_dir: Path = ROBOTS_DIR
+) -> tuple[StoredNews, ...]:
+    """Jev'e giden TEK okuma yolu (kademe 1, kademe 2, ölçüm komutları). Robots'u `ai-input=no`
+    diyen canlı kaynağın haberi BURADA düşer (spec §4/9); arşiv kaynağı (`NEWS_SOURCE_LANGS`
+    dışı) süzülmez."""
+    blocked = jev_blocked_sources(robots_dir)
+    if blocked:
+        LOGGER.warning(
+            "haber: Jev'e kapalı kaynak %s (ai-input=no ya da anlık görüntü yok)", sorted(blocked)
+        )
     with conn.cursor() as cur:
         cur.execute(_SELECT_NEWS, (since,))
         rows = cur.fetchall()
@@ -222,4 +280,5 @@ def load_news(conn: psycopg.Connection[Any], *, since: datetime) -> tuple[Stored
             first_seen_at=row[10],
         )
         for row in rows
+        if str(row[1]) not in blocked
     )

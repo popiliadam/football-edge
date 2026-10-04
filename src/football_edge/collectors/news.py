@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 from xml.etree.ElementTree import Element, ParseError
@@ -133,6 +135,12 @@ def _ensure_aware_utc(value: datetime) -> datetime:
 # ---------------------------------------------------------------------------
 
 
+# RFC 2822'nin UTC adları. `parsedate_to_datetime` bilmediği alfabetik bölgede (ölçüldü: `BST`,
+# `CEST`) naive döner; `_ensure_aware_utc` onu UTC sayar ve saat kayar (BST'de 1 saat GELECEK →
+# `assert_fresh` her turda kırmızı). Bu adlar dışındaki alfabetik bölge güvenilmez: öğe damgasız.
+_UTC_ZONE_NAMES = frozenset({"GMT", "UT", "UTC", "Z"})
+
+
 def _rss_published_at(node: Element, now: datetime) -> tuple[datetime, bool]:
     """`(zaman damgası, kaynak mı sağladı)`. RSS 2.0'da `<pubDate>` OPSİYONELDİR (sitemap'in
     `news:publication_date`sinin AKSİNE — bkz. `_news_published_at`); eksikliği bir şema
@@ -142,6 +150,10 @@ def _rss_published_at(node: Element, now: datetime) -> tuple[datetime, bool]:
     """
     raw_date = node.findtext("pubDate")
     if not raw_date:
+        return now, False
+    tokens = raw_date.split()
+    zone = tokens[-1] if tokens else ""
+    if zone.isalpha() and zone.upper() not in _UTC_ZONE_NAMES:
         return now, False
     try:
         published = parsedate_to_datetime(raw_date)
@@ -190,6 +202,31 @@ def _rss_items(body: str, source_id: str, now: datetime) -> tuple[NewsItem, ...]
 @dataclass(frozen=True)
 class GoogleNewsAdapter:
     source_id: str = "googlenews"
+
+    def parse(self, body: str, *, now: datetime) -> tuple[NewsItem, ...]:
+        return _rss_items(body, self.source_id, now)
+
+
+# ---------------------------------------------------------------------------
+# Genel RSS 2.0 akışları (Plan 2 R175): 5 EN + 2 TR kaynak. Yalnız başlık, bağlantı ve `pubDate`
+# okunur — `<description>` (özet) OKUNMAZ, saklanmaz: Independent/Standard koşulları yalnız başlık
+# + URL ile bağlantıyı serbest bırakır. `pubDate`'siz öğe bugünkü bayrakla (`now`, M6) yazılır.
+# ---------------------------------------------------------------------------
+
+RSS_SOURCES: tuple[str, ...] = (
+    "sportsmole",
+    "independent",
+    "standard",
+    "gffn",
+    "football-oranje",
+    "fotomac",
+    "aspor",
+)
+
+
+@dataclass(frozen=True)
+class RssAdapter:
+    source_id: str
 
     def parse(self, body: str, *, now: datetime) -> tuple[NewsItem, ...]:
         return _rss_items(body, self.source_id, now)
@@ -360,6 +397,7 @@ def news_observation(item: NewsItem) -> Observation:
 _ADAPTERS: dict[str, NewsAdapter] = {
     "ajansspor": AjansporAdapter(),
     "googlenews": GoogleNewsAdapter(),
+    **{source_id: RssAdapter(source_id) for source_id in RSS_SOURCES},
 }
 
 
@@ -375,9 +413,9 @@ def enabled_adapters(sources: tuple[Source, ...]) -> tuple[NewsAdapter, ...]:
 # ---------------------------------------------------------------------------
 # CLI kablolaması (`fetch-news`) — Task 8'in R1 gereği ERTELEDİĞİ kablolama.
 #
-# Her adaptörün GERÇEKTEN fetch ettiği tek yol burada adlandırılır (R7 — bkz.
-# `config/sources.yaml`nin ajansspor notu, M4): `/sitemap/news` bir urlset döner,
-# `AjansporAdapter.parse` onu doğrudan tüketir. `/sitemap` (index) `declared_paths`te
+# Her adaptörün GERÇEKTEN fetch ettiği akışlar burada adlandırılır (R7) — kaynak başına `Feed`
+# demeti. Ajansspor (bkz. `config/sources.yaml`nin ajansspor notu, M4): `/sitemap/news` bir
+# urlset döner, `AjansporAdapter.parse` onu doğrudan tüketir. `/sitemap` (index) `declared_paths`te
 # beyan edilir ama BURADA fetch edilmez — bir index'in içindeki alt-sitemap'i keşfetmek
 # ayrı bir iş, bu görevin kapsamı dışı. `googlenews` bu sözlükte YOK: `enabled: false`
 # olduğu sürece `enabled_adapters` onu zaten hiç döndürmez (bkz. `test_enabled_adapters_
@@ -385,7 +423,38 @@ def enabled_adapters(sources: tuple[Source, ...]) -> tuple[NewsAdapter, ...]:
 # adıyla (RuntimeError) durur — sessizce atlanmaz.
 # ---------------------------------------------------------------------------
 
-_ARTICLE_PATHS: dict[str, str] = {"ajansspor": "/sitemap/news"}
+
+@dataclass(frozen=True)
+class Feed:
+    """Bir kaynağın GERÇEKTEN istenen bir yolu (R7) ve o yolun ölçülmüş içerik türü (spec §7)."""
+
+    path: str
+    content_type: str
+
+
+# Ölçüldü 2026-10-04 (kontrolör, proje kimliğiyle kaynak başına tek istek): içerik türü KAYNAĞA
+# göre değişir; `fetch_text` 200'ün doğru veri olduğunu ancak türle bilir. Kaynak birden çok akış
+# taşıyabilir (demet); her akış `config/sources.yaml` `declared_paths`te beyanlıdır
+# (`tests/test_sources.py::test_each_collectors_fetched_path_is_declared`).
+_ARTICLE_PATHS: dict[str, tuple[Feed, ...]] = {
+    "ajansspor": (Feed("/sitemap/news", "application/xml"),),
+    "sportsmole": (Feed("/football/rss.xml", "application/xml"),),
+    "independent": (Feed("/sport/football/rss", "text/xml"),),
+    "standard": (Feed("/sport/football/rss", "text/xml"),),
+    "gffn": (Feed("/feed/", "application/rss+xml"),),
+    "football-oranje": (Feed("/feed/", "application/rss+xml"),),
+    "fotomac": (Feed("/rss/news.xml", "text/xml"),),
+    "aspor": (Feed("/rss/futbol.xml", "application/xml"),),
+}
+
+# Kaynak başına tazelik sınırı; yoksa `collect_news(max_age=)` (2 gün). Ölçüldü 2026-10-04:
+# football-oranje 10 öğe, EN YENİSİ 3 gün önce; gffn 10 öğe, günde ~1–3. İki günlük sınır bu iki
+# düşük hacimli akışı her sakin haftada exit 7'ye ve alarm gürültüsüne düşürürdü. Pay: oranje
+# ölçülen 3 günün iki katından fazla → 7 gün; gffn → 4 gün. Pencereyi aşan kaynak yine kırmızıdır
+# (`tests/test_news.py::test_a_feed_beyond_its_own_window_is_red`).
+_MAX_AGE: Mapping[str, timedelta] = MappingProxyType(
+    {"football-oranje": timedelta(days=7), "gffn": timedelta(days=4)}
+)
 
 
 @dataclass(frozen=True)
@@ -403,6 +472,56 @@ def _source_by_id(sources: tuple[Source, ...], source_id: str) -> Source:
         if entry.id == source_id:
             return entry
     raise RuntimeError(f"{source_id}: kaynak kaydı yok — toplama durduruldu")
+
+
+def _fetch_items(
+    client: httpx.Client,
+    source: Source,
+    adapter: NewsAdapter,
+    robots_dir: Path,
+    now: datetime,
+) -> tuple[NewsItem, ...]:
+    """Kaynağın bütün akışları; aynı URL iki akışta görünürse ilki kalır (tek gözlem).
+
+    Eşlemesiz adaptör bir wiring hatasıdır (`RuntimeError`) ve çağıranın `try`ı İÇİNDE düşer:
+    adaptör bazlı izolasyon korunur (bkz. `collect_news`)."""
+    feeds = _ARTICLE_PATHS.get(adapter.source_id)
+    if not feeds:
+        raise RuntimeError(f"{adapter.source_id}: fetch yolu tanımlı değil — wiring eksik")
+    parser = robots_for(source, robots_dir)
+    items: tuple[NewsItem, ...] = ()
+    seen: frozenset[str] = frozenset()
+    for feed in feeds:
+        body = fetch_text(client, source, feed.path, parser, expect=feed.content_type)
+        fresh = tuple(item for item in adapter.parse(body, now=now) if item.url not in seen)
+        items = (*items, *fresh)
+        seen = seen | {item.url for item in fresh}
+    return items
+
+
+def _collect_source(
+    conn: psycopg.Connection[Any],
+    client: httpx.Client,
+    source: Source,
+    adapter: NewsAdapter,
+    *,
+    robots_dir: Path,
+    now: datetime,
+    max_age: timedelta,
+) -> tuple[int, int]:
+    """(yeni yazılan, kendi-damgalı) — yalnız commit edilen turda sayılır (Minor #4)."""
+    items = _fetch_items(client, source, adapter, robots_dir, now)
+    sourced = tuple(item for item in items if item.published_at_is_source_provided)
+    if sourced:
+        assert_fresh(
+            tuple(news_observation(item) for item in sourced),
+            now,
+            max_age=_MAX_AGE.get(adapter.source_id, max_age),
+            source_id=adapter.source_id,
+        )
+    new_rows = write_observations(conn, tuple(news_observation(item) for item in items))
+    conn.commit()
+    return new_rows, len(items) - len(sourced)
 
 
 def collect_news(
@@ -434,7 +553,8 @@ def collect_news(
     OKUNMAMIŞ olur, tam qa-loop'un "kırılamayan test" uyarısının veri sözleşmesi hâli.
     Eğer `sourced` TAMAMEN boşsa `assert_fresh` hiç ÇAĞRILMAZ (boş demet üzerinde çağrılan
     `assert_fresh` "hiç gözlem yok" der — ama gözlem VAR, yalnız hiçbiri kaynak-verili
-    değil; bu farklı bir arıza, karıştırılmamalı).
+    değil; bu farklı bir arıza, karıştırılmamalı). Tazelik penceresi kaynak başınadır: `_MAX_AGE`,
+    yoksa `max_age`.
 
     Arıza izolasyonu ADAPTÖR bazındadır (`collect_footystats`teki lig izolasyonuyla aynı
     gerekçe): bir kaynağın feed'i çekilemez/ayrıştırılamazsa ya da tazelik iddiası
@@ -448,39 +568,17 @@ def collect_news(
     for adapter in enabled_adapters(sources):
         try:
             source = _source_by_id(sources, adapter.source_id)
-            path = _ARTICLE_PATHS.get(adapter.source_id)
-            if path is None:
-                # `try` İÇİNDE, KASITLI: bu bir wiring/yapılandırma hatasıdır ve
-                # `_enabled_source`'un (tff.py/footystats.py) tek-kaynaklı, döngüsüz
-                # çağrısında uncaught kalması doğruydu — ama BURADA birden çok adaptör
-                # AYNI döngüde. Dışarıda bırakılsaydı bir adaptörün eksik eşlemesi
-                # DİĞER (doğru yapılandırılmış) adaptörün hiç denenmeden çökmesine yol
-                # açardı — tam bu fonksiyonun docstring'inin vaat ettiği ADAPTÖR bazlı
-                # izolasyonun ihlali. Yakalanınca da SESSİZ değil: adıyla loglanır ve
-                # `failed_sources`e düşer, aynı diğer arızalar gibi.
-                raise RuntimeError(f"{adapter.source_id}: fetch yolu tanımlı değil — wiring eksik")
-            parser = robots_for(source, robots_dir)
-            # Ölçüldü (2026-09-19, M4): ajansspor.com/sitemap/news content-type'ı
-            # "application/xml" döner (canlı curl, config/sources.yaml notu).
-            body = fetch_text(client, source, path, parser, expect="application/xml")
-            items = adapter.parse(body, now=now)
-            sourced = tuple(item for item in items if item.published_at_is_source_provided)
-            if sourced:
-                assert_fresh(
-                    tuple(news_observation(item) for item in sourced),
-                    now,
-                    max_age=max_age,
-                    source_id=adapter.source_id,
-                )
-            new_rows = write_observations(conn, tuple(news_observation(item) for item in items))
-            conn.commit()
-            # `written` ve `self_stamped` yalnız BAŞARILI (commit edilen) turda sayılır (Minor
-            # #4, review, promoted — G1 ile aynı gerekçe: commit() kendisi düşerse satırlar
-            # geri alınır ama sayaç ÖNCEDEN artmış olurdu, "N yeni gözlem" hiç kalıcı olmamış
-            # veri için basılırdı). `assert_fresh` yukarıda RAISE ederse bu satırlara hiç
-            # gelinmez: yarım kalmış bir turun "N öğe kendi-damgalıydı" demesi de aynı hataydı.
+            new_rows, stamped = _collect_source(
+                conn,
+                client,
+                source,
+                adapter,
+                robots_dir=robots_dir,
+                now=now,
+                max_age=max_age,
+            )
             written += new_rows
-            self_stamped += len(items) - len(sourced)
+            self_stamped += stamped
         except Exception:
             conn.rollback()
             LOGGER.exception("kaynak=%s haber toplanamadı", adapter.source_id)

@@ -4,17 +4,24 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from football_edge import collect
 from football_edge.collector import ContractViolation
+from football_edge.collectors.news import RSS_SOURCES
 from football_edge.features import __main__ as cli
 from football_edge.features.news import (
     INSERT_NEWS,
+    NEWS_SOURCE_LANGS,
+    ROBOTS_DIR,
     SYNC_LOOKBACK,
     NewsDraft,
+    ai_input_denied,
     archive_available_at,
+    jev_blocked_sources,
     load_news,
     news_from_observations,
     news_hash,
@@ -275,3 +282,77 @@ def test_a_post_dated_claim_is_not_available_before_the_claim() -> None:
     (item,) = load_news(db, since=T0)  # type: ignore[arg-type]
 
     assert (item.first_seen_at, item.available_at) == (T0, ahead)
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+@pytest.mark.parametrize(
+    ("robots", "denied"),
+    [
+        ("User-agent: *\nContent-Signal: search=yes, ai-input=no, ai-train=no\n", True),
+        ("User-agent: *\nContent-Signal: ai-train=no, search=yes, ai-input=yes\n", False),
+        ("User-agent: *\nDisallow:\n", False),
+        ("user-agent: *\ncontent-signal: AI-INPUT = No\n", True),
+        ("User-agent: *\nContent-Signal: ai-train=no\n", False),
+        # Satır sonu robots yorumu ve dosya başı BOM açık `no`yu gizlememeli (fail-open olurdu).
+        ("User-agent: *\nContent-Signal: search=yes, ai-input=no # policy\n", True),
+        ("\ufeffContent-Signal: ai-input=no\nUser-agent: *\n", True),
+        ("User-agent: *\n# Content-Signal: ai-input=no\n", False),
+    ],
+)
+def test_only_an_explicit_ai_input_no_denies_jev(robots: str, denied: bool) -> None:
+    assert ai_input_denied(robots) is denied
+
+
+def _snapshots(tmp_path: Path, **overrides: str) -> Path:
+    for source_id in NEWS_SOURCE_LANGS:
+        (tmp_path / f"{source_id}.txt").write_text(
+            overrides.get(source_id, "User-agent: *\nDisallow:\n"), encoding="utf-8"
+        )
+    return tmp_path
+
+
+def test_load_news_drops_a_source_whose_robots_denies_ai_input(tmp_path: Path) -> None:
+    robots = _snapshots(tmp_path, fotomac="User-agent: *\nContent-Signal: ai-input=no\n")
+    db = FakeNewsDb(now=T0)
+    db.observe("ajansspor", T0, _payload())
+    db.observe(
+        "fotomac", T0, _payload(title="Uydurma Fotomaç başlığı", url="https://fotomac.test/1")
+    )
+    sync_news(db)  # type: ignore[arg-type]
+
+    found = load_news(db, since=T0, robots_dir=robots)  # type: ignore[arg-type]
+
+    assert [item.source_id for item in found] == ["ajansspor"]
+
+
+def test_a_live_source_without_a_robots_snapshot_is_blocked(tmp_path: Path) -> None:
+    robots = _snapshots(tmp_path)
+    (robots / "aspor.txt").rename(robots / "aspor.yedek")
+
+    assert jev_blocked_sources(robots) == frozenset({"aspor"})
+
+
+def test_no_live_news_source_is_blocked_by_todays_robots_snapshots() -> None:
+    assert jev_blocked_sources(REPO / "config" / "robots") == frozenset()
+
+
+def test_the_jev_robots_dir_is_the_collectors() -> None:
+    assert ROBOTS_DIR == collect.ROBOTS_DIR
+
+
+def test_every_news_source_has_a_language() -> None:
+    assert set(NEWS_SOURCE_LANGS) == {"ajansspor", *RSS_SOURCES}
+    assert {sid for sid, lang in NEWS_SOURCE_LANGS.items() if lang == "tr"} == {
+        "ajansspor",
+        "fotomac",
+        "aspor",
+    }
+    assert {sid for sid, lang in NEWS_SOURCE_LANGS.items() if lang == "en"} == {
+        "sportsmole",
+        "independent",
+        "standard",
+        "gffn",
+        "football-oranje",
+    }

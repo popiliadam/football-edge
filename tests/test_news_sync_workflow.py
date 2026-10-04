@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from football_edge import collect
+from tests.jev_workflow_helpers import AFTER_FETCH
 from tests.workflow_helpers import COLLECT_NEWS, _index_of, _steps
 
 SYNC = "football_edge.features sync-news"
@@ -44,12 +45,13 @@ def test_sync_runs_right_after_the_collector_and_before_the_alarm() -> None:
     assert sync < alarm, "senkron alarm adımından önce: kırmızısı alarmı açmalı"
 
 
-def test_sync_step_gets_only_the_database_and_is_never_silenced() -> None:
-    """Koşullu (`if:`) ya da `continue-on-error` bir senkron sessizce yeşil kalabilirdi."""
+def test_sync_step_gets_only_the_database_and_runs_after_a_failed_source() -> None:
+    """Toplama exit 7 (bir kaynak düştü) senkronu durdurmaz (Plan 2 I-6); başka bir toplama
+    kırmızısında koşmaz. `continue-on-error` yok: senkronun kendi kırmızısı turu kırmızı yapar."""
     step = _sync_step()
 
     assert step.get("env") == {"DATABASE_URL": "${{ secrets.DATABASE_URL }}"}
-    assert "if" not in step
+    assert step.get("if") == AFTER_FETCH
     assert not step.get("continue-on-error", False)
 
 

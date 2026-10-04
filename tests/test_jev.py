@@ -199,9 +199,12 @@ def _patch_sdk(
             return None
 
         def system_one(
-            self, *, state: dict[str, Any], questions: dict[str, Any]
+            self, *, state: dict[str, Any], questions: dict[str, Any], model: str | None = None
         ) -> typesafe_sdk.SystemOneResponse:
-            recorder.calls = (*recorder.calls, {"state": state, "questions": questions})
+            recorder.calls = (
+                *recorder.calls,
+                {"state": state, "questions": questions, "model": model},
+            )
             return response
 
     monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", _Client)
@@ -249,3 +252,12 @@ def test_battery_answer_rejects_a_non_finite_or_negative_cost() -> None:
     for bad in (math.nan, math.inf, -0.01):
         with pytest.raises(ValueError, match="cost_usd"):
             BatteryAnswer(answers={}, jev_model="jev-test", cost_usd=bad)
+
+
+def test_a_pinned_model_is_sent_with_every_battery(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = _patch_sdk(monkeypatch, _response({"a": _choice("evet")}))
+
+    TypeSafeJev(api_key="k" * 16, model="jev-2026-10").ask_battery({}, [_question("a")])
+    TypeSafeJev(api_key="k" * 16).ask_battery({}, [_question("a")])
+
+    assert [call["model"] for call in recorder.calls if "model" in call] == ["jev-2026-10", None]

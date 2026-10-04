@@ -17,7 +17,8 @@ jobs:
   shadow:
     runs-on: ubuntu-latest
     # Tabanı yükle (~10 sn, ~760 MB) + grup başına bir Elo ve bir Dixon-Coles durumu.
-    timeout-minutes: 30
+    # + kademe 2: en çok 80 taraf × gecikme; Task 5 ölçer.
+    timeout-minutes: 45
     permissions:
       contents: read
       issues: write
@@ -27,14 +28,17 @@ jobs:
         with:
           persist-credentials: false
       - name: Secret taraması
+        id: secret_scan
         run: ./scripts/check_secrets.sh
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
       - run: uv sync --frozen
       - name: Gölge tahmin
+        id: shadow
         # Faz 3 (R134): yayın yok, kredi yok. Exit 9 kilit ihlali, 11 model yapılandırması
-        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım alır.
+        # katalog/kilitle uyuşmuyor. Veritabanı secret'ını yalnız bu adım, rapor, kademe 2
+        # ve dilim sayacı alır.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -71,6 +75,74 @@ jobs:
             *) echo "::error::live report beklenmedik kodla düştü (exit $code)" ;;
           esac
           exit "$code"
+      - name: Kademe 2 (Jev)
+        id: tier2
+        # Plan 2 R180: bu turun gölge satırlarının (maç, karar anı) haberli taraflarına taraf başına
+        # tek batarya (30 soru), dondurulmuş küme config/faz4_live.yaml (R185). Rapor kırmızı olsa da
+        # koşar: yalnız gölge adımının başarısına bağlı. Jev arızası gölge turunu kırmızı yapmaz:
+        # `jev-kademe2` alarmı (R186). Anahtarsız 17 = "Jev kapalı"; JEV_ENABLED=1 iken kırmızı (I-5).
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && steps.shadow.outcome == 'success' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          # Asılı bir Jev işin 45 dakikasını yerse iş İPTAL olur: shadow alarmı açılır, Jev alarm
+          # adımları (`!cancelled()`) koşmaz. 25 dakikada kesilir, 124 aşağıda `jev=fail` olur.
+          timeout 25m uv run python -m football_edge.features tier2
+          code=$?
+          set -e
+          jev=fail
+          case "$code" in
+            0) jev=ok; echo "kademe 2 tamam" ;;
+            17)
+              if [ "${JEV_ENABLED:-}" = "1" ]; then
+                echo "::error::tier2: JEV_ENABLED=1 ama TYPESAFE_API_KEY yok ya da boş (exit 17) — secret adını ve değerini denetle"
+              else
+                jev=ok
+                echo "kademe 2: Jev kapalı (exit 17, anahtar yok) — sinyal toplanmıyor"
+                echo "Jev kapalı: kademe 2 sorulmadı (anahtar yok; ücret yaması bekleniyor, R177)" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              ;;
+            7) echo "::error::tier2: Jev kesintisi (exit 7) — art arda Jev hatası, koşu durdu" ;;
+            16) echo "::error::tier2: Jev aylık tavanı doldu (exit 16) — kalan taraflar sorulmadı" ;;
+            25) echo "::error::tier2: dondurulmuş küme eksik/bozuk ya da model değişti (exit 25) — config/faz4_live.yaml, config/faz4_ops.yaml" ;;
+            124) echo "::error::tier2 25 dakikada kesildi (exit 124) — Jev ya da veritabanı yanıt vermedi; cevaplanan taraflar commit'lendi" ;;
+            *) echo "::error::tier2 beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          echo "jev=$jev" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Seçim dilimi sayacı
+        # Plan 2 R181: küme başına (maç, karar anı) sayısı, haftalık hız, 900'e varış — iş özetine.
+        # Salt okuma; sonuç/olasılık okumaz. Gölge yeşilse koşar (kademe 2 kırmızı olsa da).
+        # Asılı bir bağlantı işin 45 dakikasını yerse iş İPTAL olur ve `!cancelled()` Jev alarm
+        # adımları atlanır: 5 dakikada kesilir, 124 adıyla kırmızı.
+        if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && steps.shadow.outcome == 'success' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set +e
+          timeout 5m uv run python -m football_edge.features slice-status --out "$GITHUB_STEP_SUMMARY"
+          code=$?
+          set -e
+          case "$code" in
+            0) ;;
+            124) echo "::error::slice-status 5 dakikada kesildi (exit 124) — veritabanı yanıt vermedi" ;;
+            *) echo "::error::slice-status beklenmedik kodla düştü (exit $code)" ;;
+          esac
+          exit "$code"
+      - name: Jev alarmı aç
+        if: ${{ !cancelled() && steps.tier2.outputs.jev == 'fail' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py fail --workflow jev-kademe2 --run-url "$RUN_URL"
+      - name: Jev alarmı kapat
+        if: ${{ !cancelled() && steps.tier2.outputs.jev == 'ok' }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python scripts/ops_alert.py ok --workflow jev-kademe2 --run-url "$RUN_URL"
       - name: Alarm aç
         if: ${{ failure() || cancelled() }}
         env:

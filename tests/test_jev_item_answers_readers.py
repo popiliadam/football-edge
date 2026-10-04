@@ -42,6 +42,8 @@ READERS = frozenset(
     {
         ("features/tier1.py", "_ASKED"),
         ("features/tier1.py", "_ATTEMPTS"),
+        # kademe 2 kapı okuyucusu (Plan 2): işareti DIŞLAR, sonra `gates_as_of` → `gates_from`
+        ("features/tier2.py", "_ITEM_ANSWERS"),
     }
 )
 # Tabloyu OKUMAYAN ama iki sözcüğü de taşıyan metin: INSERT'in SELECT'i `unnest`ten okur; tablo
@@ -58,6 +60,9 @@ MARKER_FILTER = "starts_with(question_id, %s)"
 DIRECTION = {
     ("features/tier1.py", "_ASKED"): re.compile(r"\bAND\s+NOT\s+starts_with\(question_id, %s\)"),
     ("features/tier1.py", "_ATTEMPTS"): re.compile(r"\bAND\s+starts_with\(question_id, %s\)"),
+    ("features/tier2.py", "_ITEM_ANSWERS"): re.compile(
+        r"\bAND\s+NOT\s+starts_with\(question_id, %s\)"
+    ),
 }
 
 
@@ -147,9 +152,9 @@ class _Static:
         return glue.join("{}" if piece is None else piece for piece in pieces)
 
 
-def _reads(text: str) -> bool:
+def _reads(text: str, table: str = TABLE) -> bool:
     # Tırnaksız ad Postgres'te küçük harfe iner: `FROM JEV_ITEM_ANSWERS` aynı tabloyu okur.
-    return TABLE in text.lower() and SELECT.search(text) is not None
+    return table in text.lower() and SELECT.search(text) is not None
 
 
 def _owner(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str | None:
@@ -164,7 +169,8 @@ def _owner(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> str | None:
     return None
 
 
-def _statements(root: Path) -> Iterator[Sql]:
+def _statements(root: Path, table: str = TABLE) -> Iterator[Sql]:
+    """`table`ı okuyan her statik SELECT metni (`jev_match_answers` mühürü de bunu kullanır)."""
     for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
@@ -175,7 +181,7 @@ def _statements(root: Path) -> Iterator[Sql]:
             if node in static.used or not isinstance(node, ast.expr):
                 continue
             text = static.text(node)
-            if text is not None and _reads(text):
+            if text is not None and _reads(text, table):
                 name = _owner(node, parents)
                 yield Sql(path.relative_to(root).as_posix(), name, node.lineno, text)
 

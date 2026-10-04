@@ -69,6 +69,24 @@ def test_fetch_rejects_a_wrong_content_type(tmp_path) -> None:  # type: ignore[n
         fetch_text(client, source, "/feed", parser, expect="application/xml")
 
 
+def test_fetch_content_type_check_ignores_case(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Medya türü ve charset adı büyük/küçük harfe duyarsızdır (RFC 9110 §8.3.1):
+    `TEXT/XML; charset=UTF-8` ölçülmüş `text/xml` beklentisini karşılar."""
+    write_robots(tmp_path, "ok", "")
+    source = fake_source(id="ok")
+    parser = robots_for(source, tmp_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text="<rss/>", headers={"content-type": "TEXT/XML; charset=UTF-8"}
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        text = fetch_text(client, source, "/feed", parser, expect="text/xml")
+
+    assert text == "<rss/>"
+
+
 def test_fetch_decodes_with_the_declared_encoding(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """TFF windows-1254: charset YALNIZ HTTP başlığında. httpx'in tahminine bırakılmaz."""
     write_robots(tmp_path, "tff", "")

@@ -556,16 +556,20 @@ def test_red_run_opens_the_alarm_and_green_run_closes_it(path: Path) -> None:
         assert '--run-url "$RUN_URL"' in str(step["run"])
 
 
+JEV_CLOSE = "scripts/ops_alert.py ok --workflow jev-"
+
+
 @pytest.mark.parametrize("path", ALARMED, ids=lambda path: path.name)
 def test_only_the_closing_step_may_fail_without_turning_the_run_red(path: Path) -> None:
     """Yeşil turda `ok` düşerse (ör. GitHub 502) tur alarmsız kırmızıya dönerdi: `Alarm kapat`
-    `continue-on-error` taşır. Başka HİÇBİR adım taşımaz — alarm açan ya da bekçi düşerse tur
-    kırmızı kalmalı ki bozuk alarm yolu görünsün."""
+    `continue-on-error` taşır; Jev alarmını kapatan adım da (Plan 2 R186: aynı gerekçe, kendi
+    başlığı). Başka HİÇBİR adım taşımaz — alarm açan ya da bekçi düşerse tur kırmızı kalmalı."""
     steps, _, closes = _alarm_steps(path)
     tolerant = [index for index, step in enumerate(steps) if step.get("continue-on-error")]
+    jev_closes = [i for i, step in enumerate(steps) if JEV_CLOSE in str(step.get("run", ""))]
 
-    assert closes is not None and tolerant == [closes], (
-        f"{path.name}: continue-on-error taşıyan adımlar {tolerant}, beklenen yalnız [{closes}]"
+    assert closes is not None and tolerant == sorted([*jev_closes, closes]), (
+        f"{path.name}: continue-on-error taşıyan adımlar {tolerant}"
     )
     assert steps[closes]["continue-on-error"] is True
 
