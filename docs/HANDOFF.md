@@ -1,9 +1,6 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-04 (oturum 11: 9.7c kapandı, 17k ölçülemez → arşiv ayağı kapalı; kullanıcısız iş kalmadı) · **Sıradaki oturum:** Plan 2 (en erken **2026-10-07**)
-ya da avukat yanıtı geldiğinde yayın aşaması — bkz. §0.S · **Durum:** `main` CI yeşil · **0013–0017 CANLIDA** · TFF baş
-hakemi `main`de ve canlıda · site yerelde gerçek veriyle derlendi (yayın YOK, alan adı YOK) · avukat paketi
-hazır, kullanıcı gönderiyor · ilk kulüp maçları **2026-10-09/10** · holdout açılmadı
+**Son güncelleme:** 2026-10-04 (oturum 11: Faz 4 **Plan 2 `main`de** — canlı Jev hattı; 9.7c ve 17k kapandı) · **Sıradaki:** §0.T — kullanıcı durağı (birim fiyat) ve tarih koşullu adımlar · **Durum:** `main` CI yeşil · 0013–0017 CANLIDA · 7 yeni RSS kaynağı canlı toplanıyor · Jev ücretli adımları KAPALI (yama hazır, kullanıcı commit'i) · hiçbir dil üretimde değil (TR kalibrasyonu bekliyor) · site yayın YOK · holdout açılmadı
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -12,6 +9,51 @@ hazır, kullanıcı gönderiyor · ilk kulüp maçları **2026-10-09/10** · hol
 > Arıza prosedürleri: `docs/RUNBOOK.md`.
 
 ---
+
+## 0.T OTURUM 11 (2026-10-04) — Faz 4 Plan 2 canlı Jev hattı — taze oturum BURADAN başlar
+
+**Spec** `docs/superpowers/specs/2026-10-04-faz4-plan2-canli-hat-design.md` (R173–R187; bağımsız spec incelemesi
+işlendi) · **Plan** `docs/superpowers/plans/2026-10-04-faz4-plan2-canli-hat.md` (Task 1–6; bağımsız plan incelemesi
+Task 1–3'ü kopyada koştu) · **SDD defteri** (gitignored, bütün Ruling'ler ve ertelenmiş küçükler)
+`.superpowers/sdd/2026-10-04-faz4-plan2-canli-hat/progress.md`.
+
+**Biten (hepsi `main`de, `fed0a94`; her görev bağımsız inceleme + kendi mutasyonları + 1 düzeltme turu; bütün dal
+son incelemesi READY TO MERGE + tek düzeltme dalgası; taze klon kapısı ve CI yeşil):**
+- **Ön işler:** 9.7c bağlama kilidi (`8392068`); 17k GDELT arşiv kapsamı **ölçülemez** (runner da yerel de 429) →
+  arşiv ayağı KAPALI, §7.3 yalnız-canlı yol; geçici dal/worktree silindi (kullanıcı onayı).
+- **Task 1** 7 RSS kaynağı (EN sportsmole, independent, standard, gffn, football-oranje; TR fotomac `/rss/news.xml`,
+  aspor `/rss/futbol.xml`), kaynak başına içerik türü ve tazelik (oranje 7 g, gffn 4 g), `ai-input=no` → Jev'e gitmez
+  (açık `no` ya da eksik anlık görüntü). Saklanan yalnız başlık + URL (R175).
+- **Task 2** kademe 1: yalnız üretim dilleri, tur başına 40 çağrı, 10'luk parti commit'i, tavan altında en yeni önce,
+  kesinti serisi partiler arası; `collect-news.yml` adımı (`timeout 15m`, ayrı `jev-kademe1` alarmı).
+- **Task 3** kademe 2: `config/faz4_live.yaml` (dondurulmuş küme, hash'li) + `config/faz4_ops.yaml` (hash'siz), taraf
+  durum işaretleri `side_status:<side>:<outcome>`, gölge turunun maçları, 6 sa sınırı, `shadow.yml` adımı (`timeout
+  25m`, `jev-kademe2` alarmı); okuyucu mühürü `tests/test_jev_match_answers_readers.py`.
+- **Task 4** `features slice-status` (gölge özetine "seçim dilimi N / 900"), `features estimate` (Jev'siz kuru koşu),
+  `features probe` (tek ölçüm çağrısı). Kalıcı uçtan uca sızıntı testi `tests/test_feature_e2e_leakage.py`.
+- **Task 5 (kısmi):** kuru koşu (milli ara — temsili değil) + **ilk gerçek Jev çağrısı**: kademe 1 0,86 sn, model
+  `jev-1.13.0`, 1.865/367 token (`docs/superpowers/specs/2026-09-23-faz4-olcumler.md` "Plan 2 T5").
+- **Takvim bulgusu (R187):** ~33 haberli maç/hafta (yalnız TR) → 900'e ~27 hafta; §7.3 yolu bu sezon büyük olasılıkla
+  GÜÇ YETERSİZ. **Plan 3 önerisi (kullanıcı durağı, sonra):** ayrı seçim dilimi kaldırılır, önceden kayıtlı TEK bileşik
+  özellik + prequential β.
+
+### 0.T.1 Kalanlar — sırayla
+1. **KULLANICI DURAĞI — birim fiyat (R184):** TypeSafe panelinde 2026-10-04 17:32 UTC civarı tek System One çağrısı
+   (kademe 1, 4 soru, 1.865/367 token) — $ tutarı. Asistan `config/faz4_ops.yaml` `estimate_usd`'yi buna göre yazar.
+2. **2026-10-09 12:35 UTC gölge turundan sonra (asistan):** `features probe --tier 2` (ücretli, tek çağrı) → model
+   `jev-1.13.0` doğrulanır → `config/faz4_live.yaml` `jev_model: jev-1.13.0` (küme kimliği değişir, ilk ve son kez
+   gerçek yazımdan önce) → `features estimate` yeniden (ilk dolu hafta ≥ 10-13) → plan Task 5 Step 5–6.
+   Ayrıca ilk turların gerçek adım sürelerini oku (plan Task 5 Step 5: kalan pay < 3 dk ise `timeout-minutes`).
+3. **Task 6 (asistan, T5'ten sonra):** TR kalibrasyonu `uv run --env-file .env python -m football_edge.collect calibrate
+   --language tr` (ücretli, ~100 çağrı); ≥ 0,85 ise `tr` üretime; değilse KULLANICI DURAĞI (eşik gevşetilmez). Ücret
+   yaması `docs/superpowers/plans/2026-10-04-faz4-plan2-ucret-yamasi.patch` hazırlanır.
+4. **KULLANICI — ücret açma (R177):** önce GitHub secret `TYPESAFE_API_KEY` (kendi kabuğunda `gh secret set
+   TYPESAFE_API_KEY`), sonra tek komut (plan Task 6 Step 4). Asistan kapı + push + ilk turları izler.
+5. **İzlenecekler:** ilk `collect-news` turunda 7 yeni kaynak (runner'dan 403/429 olursa kaynak adıyla exit 7 —
+   footystats emsali); `shadow` özetinde "Jev kapalı"/"üretimde dil yok" ve dilim satırı; hakem bağlama (§0.S.2/4).
+6. **EN etiket paketi (R183):** EN `news_items` ≥ 150 olunca Opus ön etiket + ikinci etiket → kullanıcı onayı.
+7. **Avukat paketine ek (S8):** başlıkların TypeSafe'e gönderimi ve Fotomaç/A Spor'un koşul sayfası olmaması —
+   kullanıcı paketi gönderirken eklesin.
 
 ## 0.S KULLANICI OTURUMU SONUCU (2026-10-02 → 10-04) — taze oturum BURADAN başlar
 
