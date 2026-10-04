@@ -75,7 +75,8 @@ Hakem özelliğinin SDD defteri ve hükümleri: `/Users/apple/dev/football-edge-
 
 ### 0.S.3 Kalan işler — sırayla
 1. **Plan 2 başlangıç kontrol listesi** (§0.önceki/0.A/1; kullanıcı kapıları K/4, K/5, K/6 bu oturumda KAPANDI):
-   (a) GDELT arşiv kapsamı ölçümü (DEFERRED 17k) — hemen yapılabilir; uzak geçici dalın silinmesi kullanıcı onayı;
+   (a) ~~GDELT arşiv kapsamı ölçümü (DEFERRED 17k)~~ **KAPANDI 2026-10-04: ölçülemez (runner da yerel de 429) → arşiv
+   ayağı KAPALI, Plan 2 spec §7.3 yalnız-canlı yoluyla yazılır** (kanıt DEFERRED 17k). 9.7c de kapandı (`8392068`);
    (b) `lag_b_p99` (sync-news ≥ 2 hafta, 10-07'den itibaren — tarih koşullu); (c) gölge raporunun ilk dolu turları
    (10-09/10 maçlarından sonra); (d) brief'lere taşınacaklar listesi.
 2. **Plan 2 tasarımı ve yazımı** (≥ 2026-10-07, (a) sonucu ve (c) için ilk veri gelince): brainstorming → spec → plan →
@@ -556,7 +557,7 @@ Bu bölüm kendi başına yeterlidir; altındaki "0.eski*" bölümleri tarihçed
 
 ### 0.A Asistanın kullanıcısız işleri (öncelik sırasıyla)
 1. **Plan 2 başlangıç kontrol listesi (≥ 2026-10-07)** — Faz 4 Plan 2 (Jev sinyali) yazılmadan önce:
-   - (a) **Arşiv kapsamı ölçümü (DEFERRED 17k):** GDELT DOC API yerel ağdan 429 → runner'da tek kullanımlık dal +
+   - (a) **[KAPANDI 2026-10-04 — ölçülemez, arşiv ayağı kapalı; §0.S.3/1a]** **Arşiv kapsamı ölçümü (DEFERRED 17k):** GDELT DOC API yerel ağdan 429 → runner'da tek kullanımlık dal +
      `workflow_dispatch`, T0c `step3_coverage.py 50 50` (~2.800 sorgu, ≥ 6 sn aralık, ~4,7 saat; betikler
      `.superpowers/sdd/2026-09-23-faz4-plan1-dalga0-1/t0c/`). **DİKKAT:** `Matches.csv` holdout SONUÇLARI taşır —
      dala YALNIZ sonuç sütunları çıkarılmış kopya (tarih/lig/takım) itilir; ham dosya public depoya ASLA girmez. ≥ %30
