@@ -179,10 +179,14 @@ sources:
     crawl_delay_seconds: 2.0
     robots_verified_at: 2026-10-04
     declared_paths: ['/feed/']
-    enabled: true
+    enabled: false
     access_basis: robots
     terms_url: ''
     note: >-
+      RUNNER'DA KAPALI (2026-10-04, ilk canlı tur run 37223137766): GitHub runner'ından `/feed/` için
+      `text/html` döndü, aynı UA yerelden 200 application/rss+xml (server: cloudflare) — Cloudflare veri
+      merkezi IP'sine sayfa sunuyor; footystats emsali, bot koruması aşılmaz (R2). Yerel (Mac) toplama
+      yolu EN üretime alınırken yeniden değerlendirilir (DEFERRED 22a).
       Plan 2 R175 (K/4). robots'ta `User-agent: *` grubu yok (yalnız bingbot/AmazonAdBot, Crawl-delay 1)
       → kısıtsız; Content-Signal satırı YOK. Ölçüldü 2026-10-04: 200 application/rss+xml, 10 öğe
       (bugün). Düşük hacim: tazelik penceresi 4 gün (collectors/news.py `_MAX_AGE`). Koşul sayfası yok —

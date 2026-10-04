@@ -816,7 +816,24 @@ def test_every_rss_source_is_registered_with_its_measured_feed_and_content_type(
     assert {sid: news_module._ARTICLE_PATHS[sid] for sid in RSS_SOURCES} == MEASURED_FEEDS
     registry = load_sources(Path("config/sources.yaml"))
     adapters = {adapter.source_id: adapter for adapter in enabled_adapters(registry)}
-    assert all(isinstance(adapters[sid], RssAdapter) for sid in RSS_SOURCES)
+    assert all(isinstance(adapters[sid], RssAdapter) for sid in set(RSS_SOURCES) - RUNNER_BLOCKED)
+
+
+# İlk canlı tur (2026-10-04 18:07 UTC, run 37223137766): gffn runner'dan `/feed/` için
+# `text/html` aldı; aynı UA yerelden `application/rss+xml` (server: cloudflare). Veri merkezi
+# IP'sine Cloudflare sayfası — footystats emsali (R2: bot koruması aşılmaz). Kayıtlı kalır,
+# runner'da kapalı (DEFERRED 22a).
+RUNNER_BLOCKED = frozenset({"gffn"})
+
+
+def test_a_source_cloudflare_blocks_on_runners_is_registered_but_disabled() -> None:
+    registry = load_sources(Path("config/sources.yaml"))
+    enabled = {adapter.source_id for adapter in enabled_adapters(registry)}
+
+    assert RUNNER_BLOCKED.issubset(RSS_SOURCES)
+    assert RUNNER_BLOCKED.isdisjoint(enabled)
+    notes = {source.id: source.note for source in registry if source.id in RUNNER_BLOCKED}
+    assert all("cloudflare" in note.lower() and "2026-10-04" in note for note in notes.values())
 
 
 def test_rss_adapter_keeps_title_link_and_date_but_never_the_summary() -> None:
