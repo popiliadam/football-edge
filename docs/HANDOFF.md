@@ -1,6 +1,6 @@
 # football-edge — Oturum Devri (Handoff)
 
-**Son güncelleme:** 2026-10-04 (oturum 11: Faz 4 **Plan 2 `main`de** — canlı Jev hattı; 9.7c ve 17k kapandı) · **Sıradaki:** §0.T — kullanıcı durağı (birim fiyat) ve tarih koşullu adımlar · **Durum:** `main` CI yeşil · 0013–0017 CANLIDA · 7 yeni RSS kaynağı canlı toplanıyor · Jev ücretli adımları KAPALI (yama hazır, kullanıcı commit'i) · hiçbir dil üretimde değil (TR kalibrasyonu bekliyor) · site yayın YOK · holdout açılmadı
+**Son güncelleme:** 2026-10-05 (oturum 11 kapanışı) · **Taze oturum:** §0.U'dan başlar · **Durum:** `main` CI yeşil · Faz 0–3 + İz C BİTTİ · Faz 4 Plan 2 CANLIDA (ücretli Jev açık, TR üretimde, 6 RSS kaynağı) · Faz 6 yerelde hazır, yayın YOK (avukat bekleniyor) · Faz 5 ve Faz 7 başlamadı · holdout 1 kez açıldı (Faz 3, id 13), 2. açılış yapılmadı
 
 > Giriş sırası: `README.md` → bu dosya → `docs/DEFERRED.md`.
 > **Faz 3'ün devir belgesi ve "ölçülmeyenler" listesi: `docs/phases/03-baz-model/HANDOFF.md` §3.**
@@ -10,7 +10,121 @@
 
 ---
 
-## 0.T OTURUM 11 (2026-10-04) — Faz 4 Plan 2 canlı Jev hattı — taze oturum BURADAN başlar
+## 0.U TAZE OTURUM — BURADAN BAŞLA (yazıldı 2026-10-05, oturum 11 kapanışı)
+
+### 0.U.1 Başlatma istemi (yapıştır)
+> "`docs/HANDOFF.md` §0.U'dan başla. Önce §0.U.3 açılış kontrollerini yap (salt okuma, bana 5 satır özet). Sonra §0.U.4
+> sırasıyla kalan işleri bitir: kullanıcısız işleri kendin yürüt (her kod değişikliği TDD + bağımsız inceleme + mutasyon
+> + tam kapı + commit/push; canlı DB yazımı §0.D kuralıyla); tarih koşullu işlere tarihi geldiyse geç, gelmediyse
+> atla ve sonrakine geç; kullanıcıya bağlı bir kapıya gelince bana tek adımda ne yapacağımı tıklama tıklama anlat ve
+> 'tamam'ımı bekle. Kararlarda önerini söyle ve uygula (bellek user-delegates-to-recommendation); secret'ları asla
+> sohbete yazdırma; kabuk adımı verirken tek parça komut ver (bellek user-shell-steps-single-command)."
+
+### 0.U.2 Neredeyiz (tek bakış)
+| Faz | Durum | Belge |
+|---|---|---|
+| 0 Kayıt altyapısı | BİTTİ 2026-09-19 | `docs/phases/00-kayit-altyapisi/HANDOFF.md` |
+| 1 Toplayıcılar | BİTTİ 2026-09-21 | `docs/phases/01-toplayicilar/HANDOFF.md` |
+| 2 Tarihsel taban | BİTTİ 2026-09-22 (8 aktif lig) | `docs/phases/02-tarihsel-taban/HANDOFF.md` |
+| 3 Jev'siz baz | BİTTİ 2026-09-23 (holdout 1. açılış: piyasa yenilemedi) | `docs/phases/03-baz-model/HANDOFF.md` |
+| 4 Jev sinyali | Plan 1 + Plan 2 BİTTİ, **canlıda veri biriktiriyor**; Plan 3 (ön kayıt, kapı) kaldı | §0.T, spec'ler `2026-09-23-faz4-jev-sinyal-design.md`, `2026-10-04-faz4-plan2-canli-hat-design.md` |
+| 5 İstifleme/staking/CLV kapısı | BAŞLAMADI (Faz 4 kapı kararını bekler) | yol haritası `2026-09-19-faz-1-7-yol-haritasi.md` |
+| 6 Site (İz B) | Yerelde hazır, **yayın yok** (avukat → alan adı → Netlify) | `docs/phases/06-site/HANDOFF.md`, §0.S |
+| 7 İçerik hattı | BAŞLAMADI (Faz 6 yayınını bekler) | yol haritası |
+| İz C İşletme | BİTTİ 2026-09-22 | — |
+
+Canlı işler (UTC, çoğu pg_cron → dispatch): `seal` */15 · `snapshot` 06:22 · `collect-daily` 07:10 · `collect-news` 2 saatte
+bir :07 (RSS + `sync-news` + **ücretli kademe 1**) · `shadow` salı/cuma 12:35 (gölge + rapor + **ücretli kademe 2** +
+`slice-status`) · `history` salı/cuma 09:50 · `sources-audit` 05:41 · `full-scan` pazar 04:23 · `footystats` Mac launchd.
+Jev: model `jev-1.13.0` sabit, girdi $0,042/Mtok (çıktı ücretsiz), tavan $25/ay, ilk ücretli tur ≈ $0,003.
+
+### 0.U.3 Açılış kontrolleri (salt okuma; Supabase proje `aaxadphezxavohkhqdrf`)
+1. `git fetch && git status -sb && git log --oneline -5` — yalnız bot zincir başı commit'leri beklenir.
+2. `gh run list --limit 30` + `gh issue list --state open` — kırmızı/alarm varsa önce o (RUNBOOK). Alarm başlıkları:
+   `collect-news`, `jev-kademe1`, `shadow`, `jev-kademe2`, `seal`, `snapshot`, `collect-daily`.
+3. Jev ve haber (SQL): `select kind,count(*),sum(input_tokens) from jev_spend where spent_at > now()-interval '1 day'
+   group by 1` · `jev_item_answers` son 24 sa satır sayısı ve `t1_failed:%` işaretleri (0 beklenir) · `jev_match_answers`
+   sayısı ve `side_status:%` dağılımı (10-09 sonrası) · `news_items` kaynak başına son 24 sa (6 RSS + ajansspor; gffn yok).
+4. Son `collect-news` logunda `kademe 1: haber N · adaysız A · yazılan cevap C · ertelenen E` (E sürekli > 0 ise tavan
+   40 düşük — `MAX_CALLS_PER_RUN`); son `shadow` özetinde "seçim dilimi N / 900" ve kademe 2 satırı.
+5. TFF hakem bağlama (`collect-daily`: bağlanan / alias bekleyen / DB'de yok) + `select count(*) from match_officials`;
+   advisors `security`/`performance` — yalnız bilinçli INFO.
+
+### 0.U.4 Kalan işler — sırayla (tamamı; her birinin tetiği ve sahibi yazılı)
+
+**A. Faz 4 Plan 3 — ön kayıt (ZAMANA DUYARLI, asistan; tercihen 2026-10-09 12:35 UTC'den ÖNCE, en geç ilk sonuç
+senkronundan — ~10-13 — önce mühürlenir):**
+1. R187 önerisi (kullanıcı kararı devretti — "en iyi senaryo"): ayrı seçim dilimi KALDIRILIR; önceden kayıtlı TEK bileşik
+   özellik `f = ortalama(T2 çekirdek seviyeleri)_ev − _dep` (eşit ağırlık, işaret önceden; `derive.side_answers` +
+   `IMPUTED` hazır); β prequential (her maçın β'sı yalnız ondan önce sonucu bilinen maçlarla, sırt cezası sabit); kapı D1
+   eşleştirilmiş ΔLL bootstrap GA alt sınırı > 0; durma ≥ 1.800 haberli maç ya da 2027-06-30 (R171 deseni); T3/T4 betimsel.
+2. Süreç: brainstorming → spec deltası `docs/superpowers/specs/<tarih>-faz4-plan3-onkayit-design.md` → bağımsız spec
+   incelemesi → `config/faz4_preregistration.yaml` (ana spec §8: raporun bastığı HER şey birebir; tohum, tekrar, sha'lar —
+   `model_faz3.yaml`, `faz4_live.yaml`, soru dosyası, kilit) → commit = mühür. Değerlendirme kodu (prequential fit +
+   renderer + ön kayıt ↔ renderer birebirlik testi; DEFERRED 17c–17e, 16k-a; `faz4` `PHASES`'e yalnız renderer testiyle)
+   ön kayıttan sonra yazılabilir, ama **hiçbir `harman_jev` karşılaştırması ön kayıt commit'inden önce hesaplanmaz**
+   (haftalık rapor mühürü zaten okumaz).
+3. `lag_b_p99` (≥ 2026-10-07, sync-news ≥ 2 hafta): yayıncı iddiası ↔ `first_seen_at`; ön kayda güvenlik payı olarak.
+4. Güç: canlı ΔLL SD (T0a gölge serisi, ilk dolu turlar ≥ 10-13) ile 1.800 yeniden hesaplanır — ön kayıt bu hesap
+   KURALINI içerir, sayıyı değil (sayı gelince ek commit, pencere sonucu görülmeden).
+5. Ön kayıt mühürlendikten sonra `harman_jev` gölge yazımı (R173: β ve özellik donunca) — prequential β ile canlı
+   strateji; ayrı `model_config_sha256` (`config/model_faz4.yaml`).
+6. T11 holdout 2. açılışı: **arşiv ayağı kapalı olduğu için GEREKMEZ** (R162'nin arşiv ayağı yok) — Faz 5'e iki açılış
+   kalır; yazılı Ruling ile kapatılır.
+
+**B. Tarih koşullu kontroller (asistan):**
+1. **2026-10-09 12:35 UTC sonrası:** ilk kademe 2 turu — `jev_match_answers` model `jev-1.13.0`, `model_drift` işareti 0,
+   `side_status` dağılımı; adım süreleri (`gh run view <id> --json jobs`): kademe 2 + slice ≤ 25 + 5 dk, iş 45 dk payı
+   ≥ 3 dk (DEFERRED 22e); 30 soruluk batarya token sayısı → `config/faz4_ops.yaml` `tier2` tahmini gerekçesiyle güncellenir
+   (hash dışı). Gölge turunda `karar N · eşlenemeyen U` — U > 0 ise `config/history_aliases.yaml` (§0.İ/3, TAHMİN EDİLMEZ).
+2. **2026-10-10/11 hafta sonu sonrası:** `live parity --since 2026-10-01` (salt okuma; ned.1/bel.1 ilk maçlar).
+3. **≥ 2026-10-13:** `features estimate` (ilk dolu hafta) → 900/1.800 projeksiyonu ölçüm belgesine; ilk dolu salı gölge
+   raporu (gerçekçi 10-20). Odds API kredi tüketimi ilk hafta (§0.İ/6) → K/9 için kullanıcıya rakamla.
+4. TFF: ilk Süper Lig `match_officials` satırı (10-06/08 bekleniyor); `alias bekleyen` > 0 ise Konyaspor (DEFERRED 9.7a).
+
+**C. Kullanıcı kapıları (her biri tek adım; asistan sırası gelince tıklama tıklama anlatır):**
+1. **Avukat paketi gönderimi** (`docs/reports/2026-10-04-avukat-paketi.md`) + **S8 eki**: başlıkların TypeSafe'e (Jev)
+   gönderildiği; Fotomaç/A Spor koşul sayfası yok; gffn runner'da kapalı. Yanıt gelince (asistan): metin düzeltmeleri,
+   TASLAK kaldırma (bekçi var), DEFERRED 9.7g ("kapanış kaydedilmedi" metni), AK13/AK14.
+2. **Yayın aşaması** (avukat onayından sonra): `goool.ai` (Porkbun; premium çıkarsa golz.ai/fut9.ai) → ayrı Netlify
+   hesabı → `production` ortam secret'ları `NETLIFY_AUTH_TOKEN`/`NETLIFY_SITE_ID`/`SITE_DATABASE_URL` (kullanıcı kendi
+   kabuğunda `gh secret set --env production …`) → asistan: `SITE_URL`, `site.yml` `first_publish` provası, ilk yayın,
+   indeksleme (AK14). Ayrıntı `docs/phases/06-site/HANDOFF.md` "Canlıya geçiş".
+3. **EN etiket onayı** (R183): EN `news_items` ≥ 150 olunca asistan Opus ön etiket + bağımsız ikinci etiket paketi hazırlar
+   (`.superpowers/sdd/_kalici/kalibrasyon-onay/en.review.md`) → kullanıcı onaylar → `calibrate --language en` (ücretli,
+   ~$0,01) → ≥ 0,85 ise `en` üretimde (ön kayıttan ÖNCE ise dil kümesine girer; sonra ise kullanıcı kararı — M-6).
+4. **İsteğe bağlı:** SportMonks denemesi (R176 ertelendi); Odds API plan yükseltmesi (K/9, kredi ölçümünden sonra);
+   gffn için Mac yerel toplama (DEFERRED 22a, EN üretime alınırken).
+5. **Ticari lansmandan önce:** football-data, TFF (C12), The Odds API yazılı izinleri (e-posta taslakları
+   `.superpowers/sdd/_kalici/avukat-paketi/eposta-taslaklari.md`; kullanıcı gönderir).
+
+**D. Sonraki fazlar (tetik gelince):**
+1. **Faz 4 kapı kararı** (ön kayıttaki durma kuralı dolunca): GEÇTİ / KALDI / GÜÇ YETERSİZ → faz HANDOFF'u
+   `docs/phases/04-jev-sinyal/HANDOFF.md` (o gün oluşturulur) (+ "kapının ölçmedikleri": spec §11 + Plan 2 §4).
+2. **Faz 5** (Faz 4 kapısından sonra): istifleme, ¼ Kelly + simülasyon, EV eşiği + sitede "value" rozeti, üretim CLV
+   kapısı, judge-selftest, kayıp otopsisi; ızgara genişletme 16n (R161). Holdout: 2 açılış hakkı (A.6).
+3. **Faz 7** (Faz 6 yayınından sonra): katmanlama kararı, Sonnet hattı + maliyet tavanı (kullanıcı onayı — ücretli),
+   yayın öncesi Jev doğrulama geçidi.
+
+**E. Kullanıcısız küçük borçlar (boşlukta, öncelik sırasıyla; hepsi TDD + inceleme + kapı):** DEFERRED 22g (probe hata
+sinyali `TimingJev.errors`), 22h (ITEM_LOOKBACK kenarı testi), 22e (`timeout -k 1m`), 9.7c sonrası 9.7e/9.7f (tetikli),
+Faz 0 yapısal: 2.1 en az yetkili toplayıcı rolü (canlı migration + `DATABASE_URL` secret değişimi → kullanıcı adımı),
+5.1 shellcheck/actionlint kapıya; §16–§21 kalanlar tetikleriyle.
+
+### 0.U.5 Disiplin (bu oturumda kanıtlananlar — bellek dosyaları da geçerli)
+- **Tam kapı yerelde eksiksiz:** `export PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH` (Node 24) + kendi kum havuzu
+  (`FE_SANDBOX_PREFIX=fe-<önek> FE_SANDBOX_PORT=<port> scripts/sandbox_db.sh up`, sonra `eval "$(… env)" >/dev/null;
+  unset DATABASE_URL`) → `T=$(mktemp -d <scratch>/gate.XXXX); TMPDIR=$T PYTHONDONTWRITEBYTECODE=1 ./verify.sh > $T/out.txt
+  2>&1` → `KAPI YEŞİL` + yalnız `zincir` SKIP. Push yalnız yeşilde; koşan CI varken push yok (cancel-in-progress).
+- **Worktree'de kapı:** `uv sync --frozen --extra scrape` + `web/`de `pnpm install --frozen-lockfile` gerekir.
+- **SDD:** görev başına bağımsız inceleyici (general-purpose, `git archive` kopyasında KENDİ mutasyonları), düzeltme turu,
+  kapsamlı yeniden inceleme; bütün dal son incelemesi + tek düzeltme dalgası. Plan incelemesinde planın kodunu kopyada
+  koşturmak bu oturumda 2 kritik + 8 önemli hata yakaladı — uygula.
+- **Ücretli Jev:** her çağrı `budgeted_jev` (AST kapısı); maliyet `jev_spend` token sayısından resmî fiyatla hesaplanır.
+- **Canlı veri ölçümü:** `uv run --env-file .env python …` (değer basılmaz); salt okuma SQL için Supabase MCP.
+- **Tarihçe:** bu oturumun SDD defteri (bütün Ruling'ler) `.superpowers/sdd/2026-10-04-faz4-plan2-canli-hat/progress.md`.
+
+## 0.T OTURUM 11 (2026-10-04) — Faz 4 Plan 2 canlı Jev hattı (tarihçe; güncel liste §0.U)
 
 **Spec** `docs/superpowers/specs/2026-10-04-faz4-plan2-canli-hat-design.md` (R173–R187; bağımsız spec incelemesi
 işlendi) · **Plan** `docs/superpowers/plans/2026-10-04-faz4-plan2-canli-hat.md` (Task 1–6; bağımsız plan incelemesi
@@ -58,7 +172,7 @@ son incelemesi READY TO MERGE + tek düzeltme dalgası; taze klon kapısı ve CI
 5. **İzlenecekler:** hakem bağlama (§0.S.2/4); EN etiket paketi (R183, EN `news_items` ≥ 150); avukat paketine S8 eki
    (başlıkların TypeSafe'e gönderimi; Fotomaç/A Spor koşul sayfası yok).
 
-## 0.S KULLANICI OTURUMU SONUCU (2026-10-02 → 10-04) — taze oturum BURADAN başlar
+## 0.S KULLANICI OTURUMU SONUCU (2026-10-02 → 10-04) (tarihçe; güncel liste §0.U)
 
 Defter (adım adım kanıt, sha256'lar, kararlar): `.superpowers/sdd/_kalici/kullanici-oturumu/ilerleme.md` (gitignored).
 Hakem özelliğinin SDD defteri ve hükümleri: `/Users/apple/dev/football-edge-hakem/.superpowers/sdd/2026-10-02-tff-hakem-site/progress.md`.
@@ -135,7 +249,7 @@ Hakem özelliğinin SDD defteri ve hükümleri: `/Users/apple/dev/football-edge-
    kalıntısı), 21f–21n.
 
 
-## 0. KULLANICI OTURUMU — BURADAN BAŞLA (yazıldı 2026-10-02, oturum 10b kapanışı)
+## 0. KULLANICI OTURUMU (yazıldı 2026-10-02, oturum 10b kapanışı — tarihçe; güncel liste §0.U)
 
 Bu oturumun amacı: **kullanıcının yapması gereken her şeyi (§0.K) tek oturumda, asistan adım adım yönlendirerek
 bitirmek.** Asistanın kullanıcısız işi kalmadı (oturum 10/10b hepsini kapattı — §0.önceki/0.2a–0.2b). Aşağıdaki
