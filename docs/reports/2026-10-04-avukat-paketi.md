@@ -1,6 +1,7 @@
 # Hukuk danışma paketi — Goool (football-edge)
 
-**Tarih:** 2026-10-04 · **Durum:** TASLAK — avukata gönderilmek üzere · **Hazırlayan:** proje sahibi adına
+**Tarih:** 2026-10-04 (güncellendi 2026-10-05: §2 son paragraf, S1 bağlamı, S8 eki — haber hattı ve Jev canlıda) ·
+**Durum:** TASLAK — avukata gönderilmek üzere · **Hazırlayan:** proje sahibi adına
 asistan (yalnız derleme; görüşme ve gönderim proje sahibinde)
 
 > **Hukuk tavsiyesi değildir.** Bu belge soru sorar; hiçbir soruya cevap vermez ve varsayım olarak yazılan her
@@ -91,8 +92,11 @@ yasal taslak metinler ("TASLAK — avukat onayı bekler" başlıklı).
 **YALNIZ İÇ KULLANIM** (sitede ve depoda yok): bahis sitesi adları ve ham fiyatları (defterde); football-data
 CSV satırları (yalnız model eğitimi ve geriye dönük test; depoya ve kayıtlara girmez, yapay zekâya verilmez);
 haber başlıkları ve Jev etiketleri (toplayıcı bugün başlık + bağlantı + zaman saklar; şemada gövde alanı var,
-bugün boş); footystats xG, Open-Meteo hava durumu, Wikidata stadyum konumu; model tahminleri. Planlı EN/TR RSS
-ve GDELT toplayıcıları henüz yazılmadı.
+bugün boş); footystats xG, Open-Meteo hava durumu, Wikidata stadyum konumu; model tahminleri. **2026-10-04'ten beri**
+TR (ajansspor, Fotomaç, A Spor) ve EN (Sports Mole, The Independent, Evening Standard, Football Oranje) RSS
+toplayıcıları 2 saatte bir çalışıyor; GFFN veri merkezi IP'sinden engelli olduğu için fiilen toplanmıyor. GDELT
+erişilemedi (hız sınırı) ve planda değil. **2026-10-05'ten beri** yalnız Türkçe başlıklar Jev/TypeSafe'e ücretli
+olarak gönderiliyor (S1, S8 eki).
 
 **Public depoda bilinmesi gerekenler:** kaynak kod; zincir başı dosyaları; test amaçlı sayfa kopyaları
 (TFF'nin iki tam sayfası — hakem adları dahil, kırpılmadı; ajansspor site haritasının bir kopyası — ~40 gerçek
@@ -104,9 +108,10 @@ metinleri depoda **değil**, yerelde tutuluyor (depoda yalnız kimlik + etiket).
 Her soru: **Bağlam** · **Soru(lar)** · **Dayanak**. Kısaltma: "taslak" = §5'teki yasal taslak metinler.
 
 ### S1. Sakatlık haberleri = sağlık verisi mi? (KVKK md. 6, GDPR md. 9)
-- **Bağlam:** Haber hattı (bugün ajansspor; planlı Fotomaç/A Spor, EN RSS) sakatlık/cezalı haberlerini de
+- **Bağlam:** Haber hattı (TR: ajansspor, Fotomaç, A Spor; EN: dört RSS, §2) sakatlık/cezalı haberlerini de
   içeren başlıkları saklıyor ve maç öncesi sinyal için yurt dışındaki bir yapay zekâ hizmetine (Jev/TypeSafe;
-  sunucu konumu doğrulanmadı) **yalnız başlık** olarak gönderecek. Sitede oyuncu düzeyinde hiçbir bilgi
+  sunucu konumu doğrulanmadı) **yalnız başlık** olarak **gönderiyor** (2026-10-05'ten beri, yalnız Türkçe; EN dil
+  kalibrasyonu bitince İngilizce de). Sitede oyuncu düzeyinde hiçbir bilgi
   yayımlanmaz; özellikler takım düzeyinde toplulaştırılacak. İleride yapılandırılmış "sakat/cezalı" verisi
   sağlayan ücretli bir API (deneme planlı) ve resmî kulüp hesaplarının gönderileri de gündemde.
 - **Sorular:** (a) Kamuya açık haberdeki "X oyuncusu sakatlandı" bilgisi KVKK md. 6 anlamında özel nitelikli
@@ -224,6 +229,18 @@ Her soru: **Bağlam** · **Soru(lar)** · **Dayanak**. Kısaltma: "taslak" = §5
   varsayılmalı? (c) RSS yayımlamak, içeriğin otomatik okunmasına zımni izin sayılır mı?
 - **Dayanak:** `docs/reports/2026-10-02-en-haber-kaynaklari.md` §1 (KOŞULLU sınıf); `docs/HANDOFF.md` K/4
   (KARAR VERİLDİ).
+- **S8 eki (2026-10-05, durum değişti):**
+  - Toplayıcılar 2026-10-04'ten beri **canlı**. Saklanan yalnız **başlık + bağlantı + zaman**; özet/gövde
+    saklanmıyor (soru (a)'daki "özet" bugün geçerli değil).
+  - Başlıklar maç öncesi sinyal için **Jev/TypeSafe'e (yurt dışı, ücretli API) gönderiliyor** — bugün yalnız
+    Türkçe kaynaklarınki; İngilizce başlıklar dil kalibrasyonu geçince gönderilecek. Gönderilen tek içerik
+    başlıktır; TypeSafe'in veriyi saklama/eğitimde kullanma koşulu okunmadı.
+  - **Fotomaç ve A Spor**'un koşul sayfası yok (yalnız robots: `ai-input=yes, ai-train=no`).
+  - **GFFN** toplanmıyor (veri merkezi IP'sine Cloudflare engeli); kapsamdan çıkarılabilir.
+  - Yeni sorular: (d) Başlığı yapay zekâ girdisi olarak bir **üçüncü taraf hizmete göndermek**, yayıncı
+    koşullarındaki çoğaltma/iletim sınırına ve robots `ai-input` sinyaline göre nasıl değerlendirilir (EN beş
+    kaynak ve TR üç kaynak ayrı ayrı)? (e) Koşul sayfası olmayan TR kaynakları için robots `Content-Signal`
+    yeterli bir dayanak mı? (f) TypeSafe ile bir veri işleme sözleşmesi (DPA) gerekir mi (S1c ile birlikte)?
 
 ### S9. Site metinleri — iç inceleme bulguları C1–C11 (kısa liste)
 Tam tablo: `docs/phases/06-site/HANDOFF.md` "Hukuk incelemesi". S3/S6/S7'de geçenler (C2–C4, C8–C10, C12)
