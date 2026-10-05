@@ -90,6 +90,8 @@ jobs:
         if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && (success() || steps.fetch.outputs.code == '7') }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          JEV_ENABLED: "1"
         run: |
           set +e
           # Asılı bir Jev işin 20 dakikasını yerse `collect-news` alarmı açılırdı: 15 dakikada

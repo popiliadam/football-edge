@@ -84,6 +84,8 @@ jobs:
         if: ${{ !cancelled() && steps.secret_scan.outcome == 'success' && steps.shadow.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          JEV_ENABLED: "1"
         run: |
           set +e
           # Asılı bir Jev işin 45 dakikasını yerse iş İPTAL olur: shadow alarmı açılır, Jev alarm
