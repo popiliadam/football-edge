@@ -47,8 +47,8 @@ son incelemesi READY TO MERGE + tek düzeltme dalgası; taze klon kapısı ve CI
 - **gffn runner'da kapalı** (Cloudflare veri merkezi IP'si — DEFERRED 22a; `9096e9d`). Diğer 6 kaynak canlı: ilk tur 450
   gözlem / 374 haber, 20:07 turu yeşil, alarm #6 kapandı.
 
-1. **KULLANICI — tek komut (R177):** `cd /Users/apple/dev/football-edge && git apply docs/superpowers/plans/2026-10-04-faz4-plan2-ucret-yamasi.patch && git commit -m "ci: Jev ücretli adımlarını aç (TYPESAFE_API_KEY + JEV_ENABLED)" -- .github/workflows/collect-news.yml .github/workflows/shadow.yml`
-   → asistan: tam kapı → `origin/main` birleştirme → push → ilk ücretli `collect-news` turu (kademe 1 "tamam", `jev_spend`).
+1. ~~KULLANICI — tek komut (R177)~~ **YAPILDI 2026-10-05:** `6cdde02` (kullanıcı) → ilk ücretli kademe 1 turu yeşil (40 çağrı,
+   158 cevap, 0 hata, ≈ $0,003; ölçüm belgesi "ilk ücretli kademe 1 turu").
 2. **2026-10-09 12:35 UTC gölge turundan sonra (asistan):** shadow özetinde kademe 2 + "seçim dilimi"; `features probe --tier
    2` gerekmez (gerçek tur ölçer) — `jev_match_answers` modelinin `jev-1.13.0` olduğunu ve `model_drift` olmadığını doğrula;
    ilk tur adım sürelerini oku (kalan pay < 3 dk ise `timeout-minutes`, DEFERRED 22e).

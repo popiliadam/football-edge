@@ -172,3 +172,12 @@ Kademe 2 başka bir model dönerse satır yazılmaz (`model_drift`). Panel teyid
 negatif 7 · ortalama güven 0,78. Önceden bağlı eşik (R182: `min_n` 100, `min_accuracy` 0,85) geçti → `config/languages.yaml`
 `tr: production_enabled: true`; `check-languages` TEMİZ. EN ölçülmedi (etiket yok — R183). Not: ölçüm başlık-ilgililik
 görevidir; kademe 1/2 cevaplarının doğruluğunu ölçmez (spec §4/7).
+
+## Plan 2 — ilk ücretli kademe 1 turu (2026-10-05 06:07 UTC, run 37270803362)
+
+Ücret commit'i `6cdde02` (kullanıcı) → ilk tur yeşil. İş 68 sn; kademe 1 adımı 31 sn (40 çağrı, ~0,78 sn/çağrı) — 15 dk
+kesiciye ve 20 dk iş sınırına geniş pay (DEFERRED 22e riski yok). Log: `jev: soru 158 · başarısız 0 · çağrı 40`;
+`kademe 1: haber 780 · adaysız 709 · yazılan cevap 158 · ertelenen 31 (tur tavanı)`; başarısızlık işareti 0. Canlı
+(salt okuma): `jev_spend` bugün 40 satır, 69.705 girdi tokenı → resmî fiyatla ≈ $0,0029 (bütçe sayacı tahminle $0,02
+saydı); `jev_item_answers` 158 satır / 40 haber, model `jev-1.13.0`; `jev_match_answers` 0 (ilk gölge kararı 10-09).
+Tavan 40 korunur: aday 71'in 31'i bir sonraki tura kaldı, sürekli durumda 2 saatlik aday < 40 bekleniyor.
