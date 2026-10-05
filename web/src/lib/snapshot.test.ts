@@ -22,7 +22,7 @@ const otherLeagueMatch = fixture.matches.findIndex(
 
 describe("parseSnapshot — yönlendirmenin dayandığı değişmezler", () => {
   it("B-2 fixture'ını kabul eder", () => {
-    expect(fixture.matches).toHaveLength(9);
+    expect(fixture.matches).toHaveLength(12);
   });
 
   it.each([

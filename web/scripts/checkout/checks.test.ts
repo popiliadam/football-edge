@@ -165,6 +165,21 @@ describe("(2)(3) H6c alanlar", () => {
     expect(findings.some((f) => f.includes(`${sealed} etiketi`))).toBe(true);
   });
 
+  // 9.7g: mühürsüz ve başlamış maçın etiketi "Closing not recorded"; "Pending" kırmızı.
+  it("başlamış mühürsüz maçın mühür etiketi kaydedilmedi", () => {
+    const unsealed = snapshot.matches.find((each) => !each.sealed);
+    if (!unsealed) throw new Error("fixture mühürsüz maç taşımıyor");
+    const later = { ...snapshot, generated_at: "2099-01-01T00:00:00Z" };
+    const target = { ...matchPage, id: `match:${unsealed.id}` };
+    const key = `match:${unsealed.id}:sealed`;
+    const label = (text: string) =>
+      checkFields(later, target, span(key, "false", text)).filter((f) =>
+        f.includes(`${key} etiketi`),
+      );
+    expect(label("Closing not recorded")).toEqual([]);
+    expect(label("Pending")).toHaveLength(1);
+  });
+
   it("sonuç etiketi takası kırmızı (yalnız öznitelik değil, görünen metin)", () => {
     const entry = snapshot.record.entries.find((each) => each.outcome === "home");
     if (!entry) throw new Error("fixture home sonucu taşımıyor");

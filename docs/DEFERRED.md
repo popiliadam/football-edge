@@ -562,6 +562,10 @@ konyaspor`.
 dönem). Metin doğru ama yanıltıcı: maç çoktan başladı, kapanış artık gelmeyecek. Öneri: `commence_time` geçmiş ve
 kapanış yoksa "kapanış kaydedilmedi / closing not recorded" (sözlük + `match.status` türetimi + check-out cümle
 listesi). Ne zaman: arayüz metinleri avukat incelemesinden dönünce (Adım 16 paketi), ilk yayından önce.
+**KAPANDI 2026-10-05:** `web/src/lib/closing.ts` `closingState` (mühürlü · bekleniyor · kaydedilmedi; saat anlık
+görüntünün `generated_at`i; "kaydedilmedi" yalnız başlama < dışa aktarım — tam anda boru hattı hâlâ mühürler, `rounds.py`); maç sayfası durumu ve `RoundsTable` kapanış nedeni
+`match.notRecorded` ("Closing not recorded" / "Kapanış kaydedilmedi"); check-out `closingReason` + `expectedLabel`
+bağımsız yeniden türetir (testli).
 
 **9.7b — Lig süzgeci C1 ile daraltıldı; kalan risk (2026-10-02).** `league_label_contains: "Süper Lig"`
 etikette TAM ifade olarak aranır (`(?!\w)` — "Süper Ligi" eşleşmez), etiket `İ`→`i` ile katlanır ve
@@ -848,7 +852,7 @@ gitignored) ve görev incelemeleri. Kapının ölçmedikleri ayrıca `docs/phase
 | 20f | Erişilebilirlik: iki `<nav>` aynı erişilebilir adı taşıyor (T5 m2); Next'in 404 sayfalarında `<html lang>` yok (T5 m3) | Plan (g) "tam erişilebilirlik (axe)" sınırıyla aynı sınıf | Erişilebilirlik denetimi (axe) eklenirken · **KAPANDI (oturum 10, 2026-10-01, T4 `51e8748`):** üç `<nav>` ayrı ad (`nav.main`/`nav.breadcrumb`/`nav.legal`, en+tr), check-out `checkA11y` adsız/aynı adlı `<nav>`ı kırmızı sayar; 404 sayfaları `<html lang="en">` (`app/global-not-found.tsx`; ölçüldü: görünür içerik bayt aynı, CSP/`_headers` değişmedi) — check-out `checkFrameworkLang`. Kalan: axe (plan (g)); deneysel API bağımlılığı → 21c |
 | 20g | en boş sicil metni "registered in advance" → "to be registered in advance" (T6 m2) | Metin onayı kapsamında | AK2 · **KAPANDI (2026-10-02, kullanıcı oturumu Adım 4):** "to be registered in advance" |
 | 20h | Sicil sayfası GA düzeyini göstermiyor (T6 m5) | Ürün kararı | Faz 5 sicili bağlanırken |
-| 20i | tr koşullar metni: "yalnız baş hash'leri"nden "yalnız" düşsün (en ile tutarlı) (T7 n1); "bahis kabul etmez" cümlesinin öznesi defter gibi okunuyor (T7 n2) | Yasal taslaklar avukat incelemesinden geçecek | Taslakların avukat incelemesiyle (AK13; HANDOFF "Hukuk incelemesi") |
+| 20i | tr koşullar metni: "yalnız baş hash'leri"nden "yalnız" düşsün (en ile tutarlı) (T7 n1); "bahis kabul etmez" cümlesinin öznesi defter gibi okunuyor (T7 n2) | Yasal taslaklar avukat incelemesinden geçecek | Taslakların avukat incelemesiyle (AK13; HANDOFF "Hukuk incelemesi") · **Kapandı 2026-10-05** (AK13): "yalnız" düştü; özne "Site bahis kabul etmez" (TR ve EN) |
 | 20j | `verify.sh` site bloğunun alt kabukla (`[ "${CI:-}" = "true" ] \|\| ( … )`, `site-db`den önce açılan) sarılması ve `step` fonksiyonunun yeniden tanımlanması test takımını yeşil bırakır (derinlik testi parantez saymıyor) — son B-2 düzeltme dalgası yeniden incelemesi | Kasıtlı kaçış; kazara giriş bayt pini ve derinlik testiyle yakalanıyor | `verify.sh`in bir sonraki yapısal değişikliği |
 | 20k | Python ve TS `_headers` ayrıştırıcıları ortak fixture'la eşitlenmiyor (B-2 bütün-dal m7) | İkisi ayrı ayrı testli; ayrışma yalnız biri değişirse | `_headers` biçimi değişirken · **KAPANDI (oturum 10, 2026-10-01, T4 `03aa3a6`):** `web/fixtures/headers.fixture.txt` + `.expected.json`; Python ve TS ayrıştırıcıları aynı baytlardan aynı sonucu çıkarır. Kalan → 21d |
 | 20l | `TMPDIR` bir git çalışma ağacının içindeyse iki B-1 testi ("git yok" varsayımı) kırmızı (B-2 bütün-dal m8) | Kapı komutu `T=$(mktemp -d)` ile depo dışında çalışır | Bu testlere dokunulduğunda: `GIT_CEILING_DIRECTORIES` ile yalıt · **KAPANDI (oturum 10, 2026-10-01, T2 `6ac002a`):** iki çıpa/git geçmişi testi alt süreç ortamına `GIT_CEILING_DIRECTORIES` verir; depo içi TMPDIR'de tam takım yeşil (önce 2 kırmızı) |

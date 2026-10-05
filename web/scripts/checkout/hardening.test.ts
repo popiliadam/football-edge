@@ -138,15 +138,10 @@ describe("M2 biçim karakterleri ve bölünmüş sözcük", () => {
 });
 
 describe("M3 kapalı <details>", () => {
-  const draft = t("en", "legal.draft");
-  it("kapalı details içindeki TASLAK görünür sayılmaz; açık details ya da özet görünür", () => {
+  it("kapalı details içindeki yer tutucu da yayında sayılır", () => {
     const legal = page("legal:terms");
-    const css = () => "";
-    const closed = `<main><details><summary>x</summary><p>${draft}</p></details></main>`;
-    expect(draftFindings(legal, closed, css)[0]).toContain("görünür TASLAK işareti 0");
-    expect(draftFindings(legal, closed.replace("<details>", '<details open="">'), css)).toEqual([]);
-    const summary = `<main><details><summary>${draft}</summary></details></main>`;
-    expect(draftFindings(legal, summary, css)).toEqual([]);
+    const closed = "<main><details><summary>x</summary><p>[AVUKAT SORUSU] y</p></details></main>";
+    expect(draftFindings(legal, closed)).toHaveLength(1);
   });
 });
 

@@ -8,6 +8,10 @@ export const SITE_URL = "https://example.invalid";
 // `ledger/` DİZİNİNİN geçmişidir — sayfa ona çıplak `head-YYYY-MM-DD.txt` adını ekler (sözleşmenin çıpa
 // `file` alanı dizinsizdir). Gerçek değer AK3/AK4 ile birlikte yazılır, ör. `…/commits/main/ledger`.
 export const LEDGER_HISTORY_URL = "https://example.invalid/ledger";
+// Yasal metinlerin işletmeci iletişimi (AK13, kullanıcı kararı 2026-10-05: yalnız marka + alan adına bağlı
+// e-posta; kişi adı yok). Alan adı (AK4) kesinleşince bu adresin alanı SITE_URL'ninkiyle aynı olmalı
+// (src/lib/site-config.test.ts sınar; goool.ai alınamazsa ikisi birlikte değişir).
+export const CONTACT_EMAIL = "iletisim@goool.ai";
 
 export const SITE_LANGS = ["en", "tr"] as const;
 export type Lang = (typeof SITE_LANGS)[number];

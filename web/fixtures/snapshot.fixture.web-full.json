@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_at": "2026-09-24T06:00:00Z",
   "git_sha": "25b512eecb97580981907c7a574434c66321f5bb",
-  "content_sha256": "b086de8b2e5364bb1aaa33b137c66eab5593d33549901e1db5057d338851fce6",
+  "content_sha256": "2340c84a520c5e83c46e9e71da551d6e99b2a2f88a5f3944194cf67cf246c3d0",
   "ledger": {
     "rows": 1834,
     "last_id": 1840,
@@ -33,7 +33,7 @@
       "slug": "synthetic-league-beta",
       "name": "Synthetic League Beta",
       "country": "Otherland",
-      "matches": 1,
+      "matches": 4,
       "move_distribution": null
     }
   ],
@@ -70,15 +70,15 @@
       "league_id": "xlb.1",
       "slug": "delta-city",
       "name": "Delta City",
-      "matches": 1,
-      "indexable": false
+      "matches": 4,
+      "indexable": true
     },
     {
       "league_id": "xlb.1",
       "slug": "epsilon-town",
       "name": "Epsilon Town",
-      "matches": 1,
-      "indexable": false
+      "matches": 4,
+      "indexable": true
     }
   ],
   "matches": [
@@ -263,6 +263,26 @@
       "indexable": true
     },
     {
+      "id": "21ba8a4264801e3612b928c9ce1bc6a1",
+      "league_id": "xlb.1",
+      "path_id": "21ba8a426480",
+      "slug": "epsilon-town-vs-delta-city",
+      "date": "2026-09-22",
+      "commence_time": "2026-09-22T18:00:00Z",
+      "home": "Epsilon Town",
+      "away": "Delta City",
+      "referee": null,
+      "sealed": true,
+      "rounds": 1,
+      "h2h": {
+        "opening": null,
+        "latest": null,
+        "closing": null
+      },
+      "move": null,
+      "indexable": false
+    },
+    {
       "id": "0f3c3311e1a439f1e8dadf2f6ad860b9",
       "league_id": "xla.1",
       "path_id": "0f3c3311e1a4",
@@ -307,6 +327,46 @@
         "home": -1.3,
         "draw": -0.4,
         "away": 1.7
+      },
+      "indexable": true
+    },
+    {
+      "id": "06e8cfc828128b1b3942511f44401369",
+      "league_id": "xlb.1",
+      "path_id": "06e8cfc82812",
+      "slug": "delta-city-vs-epsilon-town",
+      "date": "2026-09-23",
+      "commence_time": "2026-09-23T13:00:00Z",
+      "home": "Delta City",
+      "away": "Epsilon Town",
+      "referee": null,
+      "sealed": false,
+      "rounds": 3,
+      "h2h": {
+        "opening": {
+          "observed_at": "2026-09-21T06:00:00Z",
+          "books": 4,
+          "p": {
+            "home": 44.0,
+            "draw": 28.0,
+            "away": 28.0
+          }
+        },
+        "latest": {
+          "observed_at": "2026-09-23T12:45:00Z",
+          "books": 4,
+          "p": {
+            "home": 45.5,
+            "draw": 27.5,
+            "away": 27.0
+          }
+        },
+        "closing": null
+      },
+      "move": {
+        "home": 1.5,
+        "draw": -0.5,
+        "away": -1.0
       },
       "indexable": true
     },
@@ -403,6 +463,46 @@
         "home": -3.4,
         "draw": 0.2,
         "away": 3.2
+      },
+      "indexable": true
+    },
+    {
+      "id": "9e2b37085b9582e9e08e7a0e294cb5c9",
+      "league_id": "xlb.1",
+      "path_id": "9e2b37085b95",
+      "slug": "epsilon-town-vs-delta-city",
+      "date": "2026-09-24",
+      "commence_time": "2026-09-24T06:00:00Z",
+      "home": "Epsilon Town",
+      "away": "Delta City",
+      "referee": null,
+      "sealed": false,
+      "rounds": 2,
+      "h2h": {
+        "opening": {
+          "observed_at": "2026-09-22T06:00:00Z",
+          "books": 3,
+          "p": {
+            "home": 35.0,
+            "draw": 30.0,
+            "away": 35.0
+          }
+        },
+        "latest": {
+          "observed_at": "2026-09-24T05:45:00Z",
+          "books": 3,
+          "p": {
+            "home": 33.8,
+            "draw": 30.4,
+            "away": 35.8
+          }
+        },
+        "closing": null
+      },
+      "move": {
+        "home": -1.2,
+        "draw": 0.4,
+        "away": 0.8
       },
       "indexable": true
     },

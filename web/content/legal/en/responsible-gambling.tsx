@@ -10,13 +10,20 @@ export default function ResponsibleGambling() {
       </p>
       <h2>Where to get help</h2>
       <p>
-        Help is available in your country. Contact details below are placeholders and are checked
-        against their primary sources before publication.
+        If gambling is harming you or someone close to you, free and confidential help is available,
+        for example:
       </p>
       <ul>
-        <li>United Kingdom: national gambling helpline [DOĞRULANACAK]</li>
-        <li>Türkiye: Yeşilay advice line [DOĞRULANACAK]</li>
+        <li>
+          Great Britain (England, Scotland and Wales): National Gambling Helpline, 0808 8020 133,
+          free and open day and night, run by GamCare
+        </li>
+        <li>
+          Türkiye: Yeşilay Counselling Centre (YEDAM) advice line, 115, for addictions including
+          gambling
+        </li>
       </ul>
+      <p>If you live elsewhere, look for the national gambling support service in your country.</p>
     </article>
   );
 }

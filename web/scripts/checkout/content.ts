@@ -1,16 +1,17 @@
 // Görünen içerik denetimleri — T5–T8 incelemelerinin kalıcı hâli (task-9-carryins.md 1–10):
 // yalnız iç bağlantı, görünen metinde yasak sözcük, durum etiketleri, sicil dürüstlük metinleri ve
-// hücreleri, TASLAK görünürlüğü, olumsuzlama işareti, 18+ işaretlemesi. Sayı kuralı numbers.ts'te.
+// hücreleri, taslak/yer tutucu yokluğu (AK13), olumsuzlama işareti, 18+ işaretlemesi. Sayı kuralı numbers.ts'te.
 import { SITE_URL } from "../../site.config.ts";
 import { DICTIONARIES, type DictKey, t } from "../../src/i18n/dict.ts";
 import type { Snapshot } from "../../src/lib/snapshot-types.ts";
 import { decodeEntities, stripScripts, tags, visibleText } from "../lib/html.ts";
 import { ALLOW_MARKER, countMarkers } from "./checks.ts";
+import { closingMissed } from "./closing.ts";
 import { decodeNamed } from "./entities.ts";
 import type { ExpectedPage } from "./expect.ts";
 import { utcText } from "./numbers.ts";
 import { ldStrings, surfaceTexts } from "./surface.ts";
-import { isDeferred, isHidden, joined, squash, textNodes, within } from "./text.ts";
+import { isHidden, joined, squash, textNodes, within } from "./text.ts";
 import {
   ALLOWED_SENTENCE_KEYS,
   ALLOWED_SENTENCES,
@@ -161,6 +162,19 @@ function contains(nodes: string, key: DictKey, lang: ExpectedPage["lang"]): bool
   return nodes.includes(squash(t(lang, key)));
 }
 
+// 9.7g: kapanış turu eksikse neden. Sitenin `lib/closing.ts`inden BAĞIMSIZ yeniden türetilir (denetçi
+// sitenin koduna dayanmaz): mühürlü → yetersiz kitap; başlamadı → bekleniyor; başladı → kaydedilmedi.
+
+export function closingReason(
+  match: Pick<Snapshot["matches"][number], "sealed" | "commence_time">,
+  generatedAt: string,
+): DictKey {
+  if (match.sealed) return "match.insufficient";
+  return closingMissed(match.commence_time, generatedAt)
+    ? "match.notRecorded"
+    : "match.awaitingClose";
+}
+
 // (T5 4) Durum etiketleri: eşik altı turun NEDENİ (kapanış bekleniyor / yetersiz kitap), hareket ve
 // dağılım yoksa boş durum cümlesi. Mühür etiketi checkFields'te (data-fe `attr` etiketi).
 export function stateFindings(snapshot: Snapshot, page: ExpectedPage, html: string): string[] {
@@ -182,7 +196,7 @@ export function stateFindings(snapshot: Snapshot, page: ExpectedPage, html: stri
     );
     const want = ROUNDS.filter((round) => match.h2h[round] === null).map((round) => {
       const reason =
-        round === "closing" && !match.sealed ? "match.awaitingClose" : "match.insufficient";
+        round === "closing" ? closingReason(match, snapshot.generated_at) : "match.insufficient";
       return `${t(page.lang, `match.${round}`)}=${t(page.lang, reason)}`;
     });
     if (shown.sort().join("|") !== want.sort().join("|")) {
@@ -270,46 +284,17 @@ export function recordCellFindings(snapshot: Snapshot, page: ExpectedPage, html:
   return findings;
 }
 
-// (T7 8) TASLAK işareti yasal sayfada GÖRÜNÜR: gizli/şablon/pencere içinde değil, <main>'de; metin
-// sözlükten. Ucuz CSS denetimi: işaretin (ve atalarının) sınıfı derlenmiş CSS'te gizlenmiyor.
-const CSS_HIDES = /display\s*:\s*none|visibility\s*:\s*hidden/i;
+// AK13 (avukat onayı 2026-10-05): taslak işareti ve avukata soru / doğrulama yer tutucuları yayında
+// HİÇBİR sayfada olmaz — gizli, şablon ya da kapalı <details> içinde de (ham HTML'de aranır).
+// Büyük harf `TASLAK` birebir; ötekiler `fold` ile (büyük/küçük harf, aksan, görünmez karakter katlanır).
+const DRAFT_MARKERS = ["TASLAK", "pending legal review", "[AVUKAT SORUSU]", "[DOĞRULANACAK]"];
 
-export function cssHidingFindings(
-  where: string,
-  css: string,
-  classes: readonly string[],
-): string[] {
-  const findings: string[] = [];
-  for (const [, selector = "", body = ""] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!CSS_HIDES.test(body)) continue;
-    for (const name of classes) {
-      if (new RegExp(`\\.${name.replace(/[^\w-]/g, "\\$&")}(?![\\w-])`).test(selector)) {
-        findings.push(`${where}: TASLAK işaretinin sınıfı ${name} CSS'te gizleniyor`);
-      }
-    }
-  }
-  return findings;
-}
-
-export function draftFindings(
-  page: ExpectedPage,
-  html: string,
-  css: (href: string) => string,
-): string[] {
-  if (page.kind !== "legal") return [];
-  const draft = squash(t(page.lang, "legal.draft"));
-  const visible = textNodes(html).filter(
-    (node) =>
-      squash(node.text) === draft && within(node, "main") && !isHidden(node) && !isDeferred(node),
-  );
-  if (visible.length !== 1) {
-    return [`${page.path}: görünür TASLAK işareti ${visible.length} (1 bekleniyor)`];
-  }
-  const classes = (visible[0]?.ancestors ?? []).flatMap((each) =>
-    (each.attrs.class ?? "").split(/\s+/).filter(Boolean),
-  );
-  const sheets = tags(html, "link").filter((link) => link.rel === "stylesheet" && link.href);
-  return sheets.flatMap((sheet) => cssHidingFindings(page.path, css(sheet.href ?? ""), classes));
+export function draftFindings(page: ExpectedPage, html: string): string[] {
+  const text = decodeEntities(html).replace(/\p{Cf}/gu, "");
+  const folded = fold(text);
+  return DRAFT_MARKERS.filter((marker) =>
+    marker === "TASLAK" ? text.includes(marker) : folded.includes(fold(marker)),
+  ).map((marker) => `${page.path}: "${marker}" yayında olmamalı (AK13)`);
 }
 
 // (T7 9) Olumsuzlama işareti yalnız koşullar belgesinde, tam bir kez.

@@ -1,6 +1,7 @@
 // Açılış / son / kapanış konsensüsü. Eşik altı tur `null`dır: sayı UYDURULMAZ, neden yazılır.
 import type { Lang } from "../../site.config.ts";
-import { t } from "../i18n/dict.ts";
+import { type DictKey, t } from "../i18n/dict.ts";
+import { closingState } from "../lib/closing.ts";
 import { feKey } from "../lib/fe.ts";
 import type { Match } from "../lib/snapshot-types.ts";
 import styles from "../styles/site.module.css";
@@ -9,7 +10,24 @@ import { Num } from "./Fe.tsx";
 const ROUNDS = ["opening", "latest", "closing"] as const;
 const SIDES = ["home", "draw", "away"] as const;
 
-export function RoundsTable({ match, lang }: { match: Match; lang: Lang }) {
+// Eksik kapanışın nedeni (9.7g): mühürlüyse yetersiz kitap; değilse maç başlamadıysa "bekleniyor",
+// başladıysa "kaydedilmedi".
+const CLOSING_MISSING: Record<ReturnType<typeof closingState>, DictKey> = {
+  sealed: "match.insufficient",
+  awaiting: "match.awaitingClose",
+  missed: "match.notRecorded",
+};
+
+export function RoundsTable({
+  match,
+  lang,
+  generatedAt,
+}: {
+  match: Match;
+  lang: Lang;
+  generatedAt: string;
+}) {
+  const closingMissing = CLOSING_MISSING[closingState(match, generatedAt)];
   return (
     <table className={styles.table}>
       <thead>
@@ -24,8 +42,7 @@ export function RoundsTable({ match, lang }: { match: Match; lang: Lang }) {
       <tbody>
         {ROUNDS.map((name) => {
           const round = match.h2h[name];
-          const missing =
-            name === "closing" && !match.sealed ? "match.awaitingClose" : "match.insufficient";
+          const missing = name === "closing" ? closingMissing : "match.insufficient";
           return (
             <tr key={name}>
               <th scope="row">{t(lang, `match.${name}`)}</th>

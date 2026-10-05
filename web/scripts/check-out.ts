@@ -94,7 +94,6 @@ function expectedSlugs(snapshot: Snapshot): string {
 type Site = {
   snapshot: Snapshot;
   headers: Headers;
-  css: (href: string) => string;
   negations: readonly string[];
 };
 
@@ -145,7 +144,7 @@ function frameworkFindings(site: Site, out: string): string[] {
 
 // Sayfa başına bütün denetimler (her biri bulgu listesi döner).
 function pageFindings(site: Site, page: ExpectedPage, html: string): string[] {
-  const { snapshot, headers, css } = site;
+  const { snapshot, headers } = site;
   return [
     ...checkFields(snapshot, page, html),
     ...checkCsp(page, html, headers),
@@ -156,7 +155,7 @@ function pageFindings(site: Site, page: ExpectedPage, html: string): string[] {
     ...stateFindings(snapshot, page, html),
     ...honestyFindings(snapshot, page, html),
     ...recordCellFindings(snapshot, page, html),
-    ...draftFindings(page, html, css),
+    ...draftFindings(page, html),
     ...markerFindings(page, html),
     ...ageGateFindings(page, html),
   ];
@@ -196,7 +195,7 @@ function main(): number {
   const byPath = new Map(built.map((page) => [page.path, page.html]));
   const headers = parseHeaders(optional(join(out, "_headers")));
   const negations = [...new Set(built.flatMap((page) => negationTexts(page.html)))];
-  const site = { snapshot, headers, css: (href: string) => optional(join(out, href)), negations };
+  const site = { snapshot, headers, negations };
 
   const findings = [
     ...checkPages(expected, built),

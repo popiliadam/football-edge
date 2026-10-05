@@ -1,7 +1,7 @@
 # Hukuk danışma paketi — Goool (football-edge)
 
 **Tarih:** 2026-10-04 (güncellendi 2026-10-05: §2 son paragraf, S1 bağlamı, S8 eki — haber hattı ve Jev canlıda) ·
-**Durum:** TASLAK — avukata gönderilmek üzere · **Hazırlayan:** proje sahibi adına
+**Durum:** GÖNDERİLDİ ve YANITLANDI 2026-10-05 — avukat "sorun yok" (kullanıcı beyanı; ayrıntı `docs/phases/06-site/HANDOFF.md` AK13) · **Hazırlayan:** proje sahibi adına
 asistan (yalnız derleme; görüşme ve gönderim proje sahibinde)
 
 > **Hukuk tavsiyesi değildir.** Bu belge soru sorar; hiçbir soruya cevap vermez ve varsayım olarak yazılan her

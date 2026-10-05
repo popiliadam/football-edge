@@ -13,12 +13,15 @@ import { squash, textNodes } from "./text.ts";
 // Sunucu çıktısındaki zaman metni (LocalTime.tsx'ten bağımsız yazılır).
 export const utcText = (iso: string): string => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 
-// Yasal taslağın kendi rakamları, belge başına: 18 yaş atfı (her belgede), KVKK md. 6 (gizlilik).
+// Yasal metnin kendi rakamları, belge başına: 18 yaş atfı (her belgede), KVKK maddeleri (gizlilik),
+// doğrulanmış yardım hatları. Liste `content.test.ts`te birebir sabittir (genişletmek bilinçli olmalı).
 export const LEGAL_NUMBERS: Record<LegalDoc, readonly string[]> = {
   terms: ["18"],
-  privacy: ["6", "18"],
+  // KVKK md. 5/2-f (hukuki sebep), md. 11 (haklar) — AK13, 2026-10-05.
+  privacy: ["2", "5", "11", "18"],
   cookies: ["18"],
-  "responsible-gambling": ["18"],
+  // Doğrulanmış yardım hatları (2026-10-05): YEDAM 115, National Gambling Helpline 0808 8020 133.
+  "responsible-gambling": ["18", "115", "0808", "8020", "133"],
 };
 const AGE_SENTENCES: readonly DictKey[] = ["age.body", "age.confirm"];
 const PERCENTILE_LABELS: readonly DictKey[] = ["league.p10", "league.p90"];

@@ -88,7 +88,8 @@ yarısı (DEFERRED 23b, `writing-plans`), kapanış kaydı yolu (23a). Aşağıd
 4. TFF: ilk Süper Lig `match_officials` satırı (10-06/08 bekleniyor); `alias bekleyen` > 0 ise Konyaspor (DEFERRED 9.7a).
 
 **C. Kullanıcı kapıları (her biri tek adım; asistan sırası gelince tıklama tıklama anlatır):**
-1. **Avukat paketi gönderimi** (`docs/reports/2026-10-04-avukat-paketi.md`) + **S8 eki**: başlıkların TypeSafe'e (Jev)
+1. **BİTTİ 2026-10-05 — avukat "sorun yok"** (AK13; metinler, TASLAK kaldırma, 9.7g, 20i yapıldı — ayrıntı
+   `docs/phases/06-site/HANDOFF.md` AK13; öneri: yeni metin farkı avukata bir kez iletilsin). Eski metin: **Avukat paketi gönderimi** (`docs/reports/2026-10-04-avukat-paketi.md`) + **S8 eki**: başlıkların TypeSafe'e (Jev)
    gönderildiği; Fotomaç/A Spor koşul sayfası yok; gffn runner'da kapalı. Yanıt gelince (asistan): metin düzeltmeleri,
    TASLAK kaldırma (bekçi var), DEFERRED 9.7g ("kapanış kaydedilmedi" metni), AK13/AK14.
 2. **Yayın aşaması** (avukat onayından sonra): `goool.ai` (Porkbun; premium çıkarsa golz.ai/fut9.ai) → ayrı Netlify

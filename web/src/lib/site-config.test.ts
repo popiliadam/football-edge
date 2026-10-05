@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CONTACT_EMAIL,
   indexingEnabled,
   isLang,
   LEDGER_HISTORY_URL,
@@ -35,6 +36,12 @@ describe("site.config (spec §8.3, H7)", () => {
     expect(new URL(SITE_URL).hostname.endsWith(".invalid")).toBe(true);
   });
 
+  it("iletişim e-postası alan adına bağlıdır: alan adı yer tutucu değilse aynı alan", () => {
+    expect(CONTACT_EMAIL).toMatch(/^[a-z0-9.-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/);
+    const host = new URL(SITE_URL).hostname;
+    if (!host.endsWith(".invalid")) expect(CONTACT_EMAIL.split("@")[1]).toBe(host);
+  });
+
   it("dil listesi yer tutucudur: en + tr (AK5 önerisi)", () => {
     expect(SITE_LANGS).toEqual(["en", "tr"]);
     expect(isLang("tr")).toBe(true);
@@ -43,12 +50,12 @@ describe("site.config (spec §8.3, H7)", () => {
 });
 
 describe("yer tutucular tek kaynaktan (AK3, AK4)", () => {
-  it("marka, alan adı ve çıpa adresi site.config.ts dışında literal olarak geçmez", () => {
+  it("marka, alan adı, çıpa adresi ve iletişim site.config.ts dışında literal olarak geçmez", () => {
     const files = ["src", "content", "scripts"].flatMap(sources);
     expect(files.length).toBeGreaterThan(10);
     for (const file of files) {
       const text = readFileSync(file, "utf-8");
-      for (const literal of [SITE_NAME, SITE_URL, LEDGER_HISTORY_URL]) {
+      for (const literal of [SITE_NAME, SITE_URL, LEDGER_HISTORY_URL, CONTACT_EMAIL]) {
         expect(text.includes(literal), `${file} ${literal}`).toBe(false);
       }
     }

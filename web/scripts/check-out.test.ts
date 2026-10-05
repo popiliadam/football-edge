@@ -31,3 +31,25 @@ describe("check-out: Next'in 404 sayfalarının dili", () => {
     expect(run.status).toBe(1);
   });
 });
+
+// AK13: yer tutucu denetimi (`draftFindings`) check-out'a BAĞLI — çağrı ya da içe aktarma silinirse kırmızı.
+// Temiz fikstürler bunu kanıtlamaz (olumsuz denetim); fikstür tek bir zehirli yasal sayfadır.
+describe("check-out: taslak işareti ve yer tutucu bağlı", () => {
+  it("yasal sayfadaki [AVUKAT SORUSU] bulgu, çıkış kodu 1", () => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        "scripts/check-out.ts",
+        "--snapshot",
+        "fixtures/snapshot.fixture.web-empty.json",
+        "--out",
+        "fixtures/checkout-draft-marker",
+      ],
+      { cwd: WEB_DIR, encoding: "utf8" },
+    );
+    expect(run.stdout).toContain(
+      'BULGU: /en/legal/terms/: "[AVUKAT SORUSU]" yayında olmamalı (AK13)',
+    );
+    expect(run.status).toBe(1);
+  });
+});

@@ -2,9 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LEGAL_DOCS, SITE_LANGS } from "../../site.config.ts";
+import { CONTACT_EMAIL, LEGAL_DOCS, SITE_LANGS, SITE_NAME } from "../../site.config.ts";
 import LegalPage from "../../src/app/[lang]/legal/[doc]/page.tsx";
-import { t } from "../../src/i18n/dict.ts";
+import en from "../../src/i18n/en.json";
+import tr from "../../src/i18n/tr.json";
 
 const DIR = import.meta.dirname;
 const read = (lang: string, doc: string) => readFileSync(resolve(DIR, lang, `${doc}.tsx`), "utf-8");
@@ -58,8 +59,6 @@ const RETRACTED_CLAIMS = [
   "kişisel veri toplamıyoruz.",
 ].map(fold);
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 describe("yasal taslaklar (spec §10.1)", () => {
   it("her dilde dört belge var, fazlası yok", () => {
     for (const lang of SITE_LANGS) {
@@ -68,32 +67,82 @@ describe("yasal taslaklar (spec §10.1)", () => {
     }
   });
 
-  it.each(PAIRS)(
-    "%s/%s sayfası 'TASLAK — avukat onayı bekler' işaretini başlığın altında görünür basar",
-    async (lang, doc) => {
-      const draft = t(lang, "legal.draft");
-      expect(draft.startsWith("TASLAK — avukat onayı bekler")).toBe(true);
-      const html = renderToStaticMarkup(
-        await LegalPage({ params: Promise.resolve({ lang, doc }) }),
-      );
-      // Yalnız sınıf özniteliği: `hidden`, `style` ya da yoruma alınmış bir işaret eşleşmez.
-      expect(html).toMatch(new RegExp(`</h1><p(?: class="[^"]*")?>${escapeRegExp(draft)}</p>`));
-      // Tek kaynak: içerik dosyaları işareti kendileri taşımaz.
-      expect(read(lang, doc)).not.toContain("TASLAK");
-    },
-  );
-
-  it("yardım hattı listesinde her satır [DOĞRULANACAK] işaretli", () => {
-    for (const lang of SITE_LANGS) {
-      const items = read(lang, "responsible-gambling").match(/<li>[\s\S]*?<\/li>/g) ?? [];
-      expect(items.length).toBeGreaterThanOrEqual(2);
-      for (const item of items) expect(item, `${lang}: ${item}`).toContain("[DOĞRULANACAK]");
+  // Avukat onayı (2026-10-05, AK13): taslak işareti ve avukata soru/doğrulama yer tutucuları kalktı;
+  // geri gelirlerse yayın kırmızı (check-out `draftFindings` derlenmiş sayfada da arar).
+  it.each(PAIRS)("%s/%s sayfası taslak işareti ya da yer tutucu basmaz", async (lang, doc) => {
+    const html = renderToStaticMarkup(await LegalPage({ params: Promise.resolve({ lang, doc }) }));
+    for (const marker of ["TASLAK", "pending legal review", "[AVUKAT SORUSU]", "[DOĞRULANACAK]"]) {
+      expect(html, `${lang}/${doc}: ${marker}`).not.toContain(marker);
+      expect(read(lang, doc), `${lang}/${doc}: ${marker}`).not.toContain(marker);
     }
   });
 
-  it("gizlilik metninin avukat soruları işaretli: IP kayıtları, işleyen/aktarım, haber hattı", () => {
+  it("sözlükte taslak anahtarı yok", () => {
+    for (const dictionary of [en, tr]) expect(Object.keys(dictionary)).not.toContain("legal.draft");
+  });
+
+  // Birincil kaynaklardan doğrulandı (2026-10-05): YEDAM 115 (yedam.org.tr — kumar dahil);
+  // National Gambling Helpline 0808 8020 133 (Gambling Commission, GamCare işletir; Büyük Britanya).
+  it("yardım hatları doğrulanmış numaralarıyla, ikisi de her dilde", () => {
     for (const lang of SITE_LANGS) {
-      expect(read(lang, "privacy").split("[AVUKAT SORUSU]")).toHaveLength(4);
+      const items = (read(lang, "responsible-gambling").match(/<li>[\s\S]*?<\/li>/g) ?? []).map(
+        (item) => item.replace(/\s+/g, " "),
+      );
+      expect(items, lang).toHaveLength(2);
+      expect(
+        items.some((item) => item.includes("0808 8020 133")),
+        lang,
+      ).toBe(true);
+      expect(
+        items.some((item) => /\b115\b/.test(item) && item.includes("YEDAM")),
+        lang,
+      ).toBe(true);
+      // Hat Büyük Britanya'yı kapsar (Kuzey İrlanda dışarıda): "Birleşik Krallık / United Kingdom" yanlış.
+      const britain = lang === "tr" ? "Büyük Britanya" : "Great Britain";
+      expect(
+        items.some((item) => item.includes(britain)),
+        lang,
+      ).toBe(true);
+      expect(items.join(" "), lang).not.toMatch(/Birleşik Krallık|United Kingdom/);
+    }
+  });
+
+  it("koşullar: işletmeci markası, iletişim, İngiltere ve Galler hukuku, tüketici hakkı saklı", async () => {
+    const wanted = {
+      en: ["laws of England and Wales", "courts of England and Wales", "consumer"],
+      tr: ["İngiltere ve Galler hukukuna", "İngiltere ve Galler mahkemeleri", "tüketici"],
+    } as const;
+    for (const lang of SITE_LANGS) {
+      const html = renderToStaticMarkup(
+        await LegalPage({ params: Promise.resolve({ lang, doc: "terms" }) }),
+      );
+      for (const text of [SITE_NAME, CONTACT_EMAIL, ...wanted[lang]]) {
+        expect(html, `${lang}: ${text}`).toContain(text);
+      }
+    }
+  });
+
+  it("gizlilik: veri sorumlusu, iletişim, yurt dışı barındırma, haber hattı ve haklar yazılı", async () => {
+    const wanted = {
+      en: ["controller", "Netlify", "United States", "TypeSafe", "TFF", "UK GDPR", "KVKK", "ICO"],
+      tr: [
+        "veri sorumlusu",
+        "Netlify",
+        "ABD",
+        "TypeSafe",
+        "TFF",
+        "KVKK md. 11",
+        "md. 5/2-f",
+        "Kurul",
+      ],
+    } as const;
+    for (const lang of SITE_LANGS) {
+      const html = renderToStaticMarkup(
+        await LegalPage({ params: Promise.resolve({ lang, doc: "privacy" }) }),
+      );
+      for (const text of [SITE_NAME, CONTACT_EMAIL, ...wanted[lang]]) {
+        expect(html, `${lang}: ${text}`).toContain(text);
+      }
     }
   });
 

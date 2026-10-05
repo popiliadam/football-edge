@@ -9,13 +9,21 @@ import { LocalTime } from "../../../../../../components/LocalTime.tsx";
 import { RefereeLine } from "../../../../../../components/RefereeLine.tsx";
 import { RoundsTable } from "../../../../../../components/RoundsTable.tsx";
 import { AnalysisSlot, ValueBadge } from "../../../../../../components/Slots.tsx";
-import { t } from "../../../../../../i18n/dict.ts";
+import { type DictKey, t } from "../../../../../../i18n/dict.ts";
+import { type ClosingState, closingState } from "../../../../../../lib/closing.ts";
 import { feKey } from "../../../../../../lib/fe.ts";
 import { breadcrumbLd, matchLd, pageLd } from "../../../../../../lib/jsonld.ts";
 import { pageMetadata } from "../../../../../../lib/meta.ts";
 import { langOf, leagueOf, matchOf } from "../../../../../../lib/params.ts";
 import { homePath, leaguePath, matchPath } from "../../../../../../lib/routes.ts";
 import { leagueById, loadSnapshot } from "../../../../../../lib/snapshot.ts";
+
+// Mühür durumu etiketi (9.7g): başlamış ama mühürlenmemiş maç "bekleniyor" demez.
+const STATUS: Record<ClosingState, DictKey> = {
+  sealed: "match.sealed",
+  awaiting: "match.pending",
+  missed: "match.notRecorded",
+};
 
 type Params = {
   params: Promise<{ lang: string; league: string; pathId: string; slug: string }>;
@@ -73,7 +81,7 @@ export default async function MatchPage({ params }: Params) {
       <RefereeLine name={match.referee} lang={lang} />
       <ValueBadge value={snapshot.value_badge} />
       <h2>{t(lang, "match.consensus")}</h2>
-      <RoundsTable match={match} lang={lang} />
+      <RoundsTable match={match} lang={lang} generatedAt={snapshot.generated_at} />
       <dl>
         <dt>{t(lang, "match.rounds")}</dt>
         <dd>
@@ -87,7 +95,7 @@ export default async function MatchPage({ params }: Params) {
         <dt>{t(lang, "match.status")}</dt>
         <dd>
           <Flag fe={feKey("match", match.id, "sealed")} value={match.sealed}>
-            {t(lang, match.sealed ? "match.sealed" : "match.pending")}
+            {t(lang, STATUS[closingState(match, snapshot.generated_at)])}
           </Flag>
         </dd>
       </dl>

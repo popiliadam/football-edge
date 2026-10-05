@@ -275,8 +275,26 @@ Plan: `docs/superpowers/plans/2026-10-02-tff-hakem-site.md`.
 ## Hukuk incelemesi (HANDOFF §0.7/7'ye)
 
 B-2 Task 7 incelemesinin "Content findings for lawyer review" tablosu (C1–C11; inceleme dosyası gitignored SDD
-kaydındadır) ve TFF baş hakemi C12 (2026-10-02) — avukat paketi C1–C12. Hiçbiri hukuki görüş değil; yasal taslaklar TASLAK işaretiyle, `noindex` ve site haritası dışında durur.
+kaydındadır) ve TFF baş hakemi C12 (2026-10-02) — avukat paketi C1–C12. Hiçbiri hukuki görüş değil; yasal metinler 2026-10-05'e dek TASLAK işaretiyle durdu (AK13 ile kalktı), `noindex` ve site haritası dışında KALIR.
 AK13 avukat paketine girer. Belgeler: `web/content/legal/<dil>/<belge>.tsx`.
+
+**AK13 KAPANDI 2026-10-05 — avukat onayı.** Kullanıcı beyanı: avukat paketi (`docs/reports/2026-10-04-avukat-paketi.md`,
+S8 ekiyle) için "sorun yok" — paket §6.2(a) "şimdiki hâliyle yayımlanabilir" olarak kaydedildi; yazılı yanıt depoya
+girmedi. Paket §6.3'ün yer tutucu metinlerini avukat vermediği için asistan en temkinli yönde yazdı (kullanıcı
+kararlarıyla): işletmeci **yalnız marka + `CONTACT_EMAIL`** (kişi adı yok — **bilinen risk:** KVKK md. 10'un "veri
+sorumlusunun kimliği" unsuru eksik; kullanıcının bilinçli kararı), uygulanacak hukuk **İngiltere ve Galler** (kullanıcı
+"Birleşik Krallık" seçti; tek yargı alanı olarak E&W yazıldı, tüketicinin zorunlu hakları saklı), IP kayıtları kişisel
+veri sayılır + barındırıcı ABD (Netlify) + yurt dışı işleme, haber hattının başlıkları TypeSafe'e gönderdiği açıkça,
+KVKK md. 11 hakları + başvuru + Kurul (EN: UK GDPR/EU GDPR/KVKK + ICO), yardım hatları birincil kaynaktan doğrulandı
+(YEDAM 115 — yedam.org.tr; National Gambling Helpline 0808 8020 133 — Gambling Commission, GamCare, Büyük Britanya).
+TASLAK şeridi ve `legal.draft` kalktı; check-out `draftFindings` artık TASLAK / `[AVUKAT SORUSU]` / `[DOĞRULANACAK]`
+metnini HER sayfada kırmızı sayar. Yasal sayfalar `noindex` ve site haritası dışında KALIR (arama değeri yok).
+Gizlilik metnine hakem adı paragrafı eklendi (TFF baş hakemi C12 — ad TFF'nin açık atama sayfalarından, kaynağıyla).
+**Öneri (kullanıcı):** yeni metinlerin farkı (`git show` bu commit) avukata bir kez iletilsin — §6.3 metinleri onun
+kaleminden çıkmadı; özellikle yazılmayan dört nokta: KVKK md. 9 yurt dışı aktarım dayanağı (Netlify, TypeSafe), haber
+işlemenin hukuki sebebi, md. 6 sağlık verisi sorusu (S1), hakem adlarının hukuki sebebi (C12).
+**Yayından önce zorunlu:** `CONTACT_EMAIL` alanı (bugün `goool.ai`) SATIN ALINMIŞ ve posta kutusu/yönlendirme bir
+deneme e-postasıyla ALDIĞI doğrulanmış olmalı — aksi hâlde KVKK başvuruları başkasının alabileceği bir alana gider.
 
 | # | yer | konu | soru |
 |---|---|---|---|

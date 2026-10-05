@@ -9,7 +9,10 @@ mühürsüz maç (`closing: null`) · tek turlu maç (sıfır hareket, `0.0`) ·
 ondalık (`40.0`) · negatif hareket · HTML'de kaçış isteyen adlar (`&`, `'`) · Türkçe harfler ·
 çıpa geride (dolu) ve çıpa eşit (boş) · dışa aktarım anından önce ve sonra başlayan maçlar ·
 dolu (`xla.1`, 5 hareketli mühürlü maç) ve boş (`xlb.1`) hareket dağılımı · hakemli (iki maç) ve
-hakemsiz maç (spec 2026-10-02 §6).
+hakemsiz maç (spec 2026-10-02 §6) · DEFERRED 9.7g: dışa aktarımdan ÖNCE başlamış mühürsüz maç
+("kaydedilmedi"), başlama anı tam dışa aktarım anına eşit mühürsüz maç (sınır, boru hattıyla aynı:
+"bekleniyor") ve mühürlü
+ama kapanış turu eşik altı (`null`) maç ("yetersiz kitap").
 
 Türetilmiş alanlar dışa aktarıcının (B-1 `derive`) kurallarıyla tutarlıdır: hareket = uç −
 açılış, iki uç görünürse (tek turda açılış = son → sıfır üçlü); dağılım = mühürlü, ≥ 2 turlu,
@@ -231,6 +234,53 @@ def _matches() -> list[Json]:
             move=_triple(-3.4, 0.2, 3.2),
             indexable=True,
         ),
+        # 10–12 (DEFERRED 9.7g): kapanış durumu türetimi derlenmiş sayfada sınansın.
+        # Dışa aktarımdan ÖNCE başladı, mühürlenmedi: kapanış "kaydedilmedi".
+        _match(
+            10,
+            "xlb.1",
+            "2026-09-23T13:00:00Z",
+            "dc",
+            "et",
+            sealed=False,
+            rounds=3,
+            opening=_round("2026-09-21T06:00:00Z", 4, 44.0, 28.0, 28.0),
+            latest=_round("2026-09-23T12:45:00Z", 4, 45.5, 27.5, 27.0),
+            closing=None,
+            move=_triple(1.5, -0.5, -1.0),
+            indexable=True,
+        ),
+        # Başlama anı = dışa aktarım anı (sınır): `rounds.seal_window` tam başlama anında hâlâ
+        # mühürler, bu yüzden henüz kaçırılmamıştır — "bekleniyor".
+        _match(
+            11,
+            "xlb.1",
+            "2026-09-24T06:00:00Z",
+            "et",
+            "dc",
+            sealed=False,
+            rounds=2,
+            opening=_round("2026-09-22T06:00:00Z", 3, 35.0, 30.0, 35.0),
+            latest=_round("2026-09-24T05:45:00Z", 3, 33.8, 30.4, 35.8),
+            closing=None,
+            move=_triple(-1.2, 0.4, 0.8),
+            indexable=True,
+        ),
+        # Mühürlü ama tek turu eşik altı (2 kitap): bütün turlar `null`, neden "yetersiz kitap".
+        _match(
+            12,
+            "xlb.1",
+            "2026-09-22T18:00:00Z",
+            "et",
+            "dc",
+            sealed=True,
+            rounds=1,
+            opening=None,
+            latest=None,
+            closing=None,
+            move=None,
+            indexable=False,
+        ),
     ]
     return sorted(matches, key=lambda match: (match["commence_time"], match["id"]))
 
@@ -250,7 +300,7 @@ def _leagues() -> list[Json]:
             "slug": "synthetic-league-beta",
             "name": "Synthetic League Beta",
             "country": "Otherland",
-            "matches": 1,
+            "matches": 4,
             "move_distribution": None,
         },
     ]
@@ -262,8 +312,8 @@ def _teams() -> list[Json]:
         ("xla.1", "gn", 2),
         ("xla.1", "db", 5),
         ("xla.1", "ob", 4),
-        ("xlb.1", "dc", 1),
-        ("xlb.1", "et", 1),
+        ("xlb.1", "dc", 4),
+        ("xlb.1", "et", 4),
     )
     teams = [
         {

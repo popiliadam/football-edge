@@ -10,13 +10,22 @@ export default function ResponsibleGambling() {
       </p>
       <h2>Nereden yardım alınır</h2>
       <p>
-        Aşağıdaki iletişim bilgileri yer tutucudur; yayından önce birincil kaynaklarından
-        doğrulanır.
+        Bahis size ya da bir yakınınıza zarar veriyorsa ücretsiz ve gizli destek alabilirsiniz,
+        örneğin:
       </p>
       <ul>
-        <li>Yeşilay danışma hattı [DOĞRULANACAK]</li>
-        <li>Yeşilay Danışmanlık Merkezi (YEDAM) [DOĞRULANACAK]</li>
+        <li>
+          Türkiye: Yeşilay Danışmanlık Merkezi (YEDAM) danışma hattı, 115, kumar dâhil bağımlılıklar
+          için
+        </li>
+        <li>
+          Büyük Britanya (İngiltere, İskoçya ve Galler): National Gambling Helpline, 0808 8020 133,
+          ücretsiz ve gece gündüz açık, GamCare işletir
+        </li>
       </ul>
+      <p>
+        Başka bir ülkede yaşıyorsanız o ülkenin ulusal kumar bağımlılığı destek hizmetine başvurun.
+      </p>
     </article>
   );
 }

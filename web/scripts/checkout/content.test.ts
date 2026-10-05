@@ -9,7 +9,6 @@ import { fullFixture } from "../../src/lib/fixture.ts";
 import { parseSnapshot } from "../../src/lib/snapshot.ts";
 import {
   ageGateFindings,
-  cssHidingFindings,
   draftFindings,
   honestyFindings,
   linkFindings,
@@ -20,7 +19,7 @@ import {
   wordFindings,
 } from "./content.ts";
 import { type ExpectedPage, expectedPages } from "./expect.ts";
-import { numberFindings } from "./numbers.ts";
+import { LEGAL_NUMBERS, numberFindings } from "./numbers.ts";
 import { textNodes } from "./text.ts";
 
 const snapshot = fullFixture();
@@ -143,7 +142,7 @@ describe("T5-3 data-fe dışında sayı yok", () => {
   });
 
   it("yasal atıf yalnız kendi belgesinde izinli", () => {
-    const text = "<p>KVKK md. 6</p>";
+    const text = "<p>KVKK md. 11</p>";
     expect(numberFindings(snapshot, page("legal:privacy", "tr"), text)).toEqual([]);
     expect(numberFindings(snapshot, page("legal:terms", "tr"), text)).toHaveLength(1);
   });
@@ -162,6 +161,32 @@ describe("T5-4 durum etiketleri", () => {
     expect(stateFindings(snapshot, matchPage, row("Awaiting close"))[0]).toContain(
       "eksik tur nedenleri",
     );
+  });
+
+  // 9.7g: kapanışı olmayan, başlamış maçın nedeni "kaydedilmedi"; başlamamışınki "bekleniyor".
+  it("kapanış nedeni başlama anına göre: kaydedilmedi ↔ bekleniyor takası kırmızı", () => {
+    const unsealed = snapshot.matches.find((each) => !each.sealed && each.h2h.closing === null);
+    if (!unsealed) throw new Error("fixture kapanışsız mühürsüz maç taşımıyor");
+    const after = { ...snapshot, generated_at: "2099-01-01T00:00:00Z" };
+    const before = { ...snapshot, generated_at: "2000-01-01T00:00:00Z" };
+    const target = page(`match:${unsealed.id}`);
+    const reasons = (closing: string) => {
+      const rows = (["opening", "latest"] as const)
+        .filter((round) => unsealed.h2h[round] === null)
+        .map(
+          (round) =>
+            `<tr><th scope="row">${round === "opening" ? "Opening" : "Latest"}</th><td colSpan="4">Not enough bookmakers</td></tr>`,
+        )
+        .join("");
+      const time = `<time dateTime="${unsealed.commence_time}">${utcText(unsealed.commence_time)}</time>`;
+      const move = unsealed.move === null ? "<p>No move to show.</p>" : "";
+      return `<main><p>${time}</p><table>${rows}<tr><th scope="row">Closing</th><td colSpan="4">${closing}</td></tr></table>${move}</main>`;
+    };
+    const own = (findings: string[]) => findings.filter((f) => f.includes("eksik tur nedenleri"));
+    expect(own(stateFindings(after, target, reasons("Closing not recorded")))).toEqual([]);
+    expect(own(stateFindings(after, target, reasons("Awaiting close")))).toHaveLength(1);
+    expect(own(stateFindings(before, target, reasons("Awaiting close")))).toEqual([]);
+    expect(own(stateFindings(before, target, reasons("Closing not recorded")))).toHaveLength(1);
   });
 
   it("hareket yokken boş durum cümlesi eksikse kırmızı", () => {
@@ -232,34 +257,27 @@ describe("T6-5/6 sicil", () => {
   });
 });
 
-describe("T7-8 TASLAK görünür", () => {
-  const legal = page("legal:terms");
-  const draft = t("en", "legal.draft");
-  const css = () => "";
-
-  it("<main>'de görünür işaret geçer; gizli/şablon/pencere/yorum içinde kırmızı", () => {
-    expect(draftFindings(legal, `<main><p class="d">${draft}</p></main>`, css)).toEqual([]);
-    for (const hidden of [
-      `<main><div hidden=""><p>${draft}</p></div></main>`,
-      `<main><template><p>${draft}</p></template></main>`,
-      `<main><p style="display:none">${draft}</p></main>`,
-      `<main><!-- ${draft} --></main>`,
-      `<dialog><p>${draft}</p></dialog>`,
+describe("AK13 taslak işareti ve yer tutucular yayında yok", () => {
+  it("temiz sayfa geçer; TASLAK ya da avukat/doğrulama yer tutucusu kırmızı", () => {
+    const legal = page("legal:terms");
+    expect(draftFindings(legal, "<main><p>Terms</p></main>")).toEqual([]);
+    for (const marker of [
+      "TASLAK — avukat onayı bekler",
+      "draft, pending legal review",
+      "[AVUKAT SORUSU] x",
+      "[DOĞRULANACAK]",
     ]) {
-      expect(draftFindings(legal, hidden, css)[0]).toContain("görünür TASLAK işareti 0");
+      expect(draftFindings(legal, `<main><p>${marker}</p></main>`)[0], marker).toContain(
+        "yayında olmamalı",
+      );
     }
   });
 
-  it("işaretin sınıfını gizleyen derlenmiş CSS kırmızı", () => {
-    const html = `<link rel="stylesheet" href="/s.css"/><main><p class="m__draft">${draft}</p></main>`;
-    expect(draftFindings(legal, html, () => ".m__draft{color:red}")).toEqual([]);
-    expect(draftFindings(legal, html, () => ".m__draft{display:none}")[0]).toContain(
-      "CSS'te gizleniyor",
-    );
+  it("yalnız yasal sayfalar değil, her sayfa denetlenir (gizli metin dâhil)", () => {
+    const home = page("home");
     expect(
-      cssHidingFindings("p", "@media print{.m__draft{visibility:hidden}}", ["m__draft"]),
+      draftFindings(home, '<main><div hidden=""><p>[DOĞRULANACAK]</p></div></main>'),
     ).toHaveLength(1);
-    expect(cssHidingFindings("p", ".m__draftish{display:none}", ["m__draft"])).toEqual([]);
   });
 });
 
@@ -279,5 +297,16 @@ describe("T7-9/10 olumsuzlama işareti ve 18+ işaretlemesi", () => {
     expect(ageGateFindings(home, gate(""))).toEqual([]);
     expect(ageGateFindings(home, gate(' open=""'))).toHaveLength(1);
     expect(ageGateFindings(home, gate("").replace(/<noscript>.*<\/noscript>/, ""))).toHaveLength(1);
+  });
+});
+
+describe("AK13 yasal sayı izinleri birebir", () => {
+  it("izin listesi genişlemez (her yeni rakam bilinçli bir değişikliktir)", () => {
+    expect(LEGAL_NUMBERS).toEqual({
+      terms: ["18"],
+      privacy: ["2", "5", "11", "18"],
+      cookies: ["18"],
+      "responsible-gambling": ["18", "115", "0808", "8020", "133"],
+    });
   });
 });

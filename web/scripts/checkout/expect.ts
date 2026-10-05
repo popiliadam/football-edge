@@ -14,6 +14,7 @@ import {
   trackRecordPath,
 } from "../../src/lib/routes.ts";
 import type { League, Match, Snapshot } from "../../src/lib/snapshot-types.ts";
+import { closingMissed } from "./closing.ts";
 
 export type PageKind = "home" | "league" | "team" | "match" | "track-record" | "legal";
 export type ExpectedPage = {
@@ -99,7 +100,12 @@ export function expectedLabel(snapshot: Snapshot, key: string, lang: Lang): stri
   if (split === undefined || value === undefined) return undefined;
   const [entity, id, path] = split;
   if (entity === "match" && path === "sealed") {
-    return t(lang, value === true ? "match.sealed" : "match.pending");
+    // 9.7g: mühürsüz maç başladıysa "kaydedilmedi" (denetçinin kendi kuralı, `closing.ts`).
+    const match = snapshot.matches.find((each) => each.id === id);
+    if (value === true) return t(lang, "match.sealed");
+    if (match === undefined) return undefined;
+    const missed = closingMissed(match.commence_time, snapshot.generated_at);
+    return t(lang, missed ? "match.notRecorded" : "match.pending");
   }
   if (entity === "entry" && path === "outcome") {
     if (value === "draw") return t(lang, "match.draw");
