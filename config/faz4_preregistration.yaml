@@ -1,0 +1,167 @@
+# Faz 4 canlı ayağın ön kaydı — Plan 3 spec `docs/superpowers/specs/2026-10-05-faz4-plan3-onkayit-design.md`
+# (R188–R199). Bu dosyanın commit'i + açıklamalı `faz4-onkayit` etiketi MÜHÜRDÜR: ilk kademe 2 turundan
+# (2026-10-09 12:35 UTC) önce, hiçbir Jev'li ΔLL ya da `harman_jev` olasılığı hesaplanmadan. Değiştirilirse
+# ön kayıt bozulur. Yükleyici `football_edge.gate4.preregistration`, mühür denetimi `football_edge.gate4.seal`
+# (`tests/test_gate4_preregistration.py`). Değerlendirme raporu `comparisons` + `counts_printed`ı BİREBİR basar.
+phase: faz4
+leg: live
+seal_tag: faz4-onkayit
+
+# R193: pencere = bu kümenin, ilk `side_status` işaretinin asked_at'i mühür commit'inin committer saatinden
+# sonra olan kararları. tier2_prompt_version = sha256(bytes(jev_questions.yaml) + bytes(faz4_live.yaml)).
+window:
+  tier2_prompt_version: 9b294a616fd62e867c92aa05cc7dc9661090d484a70aaf11f550df8341980c5e
+  start: first_asked_after_seal_commit
+
+# R193/R194: kapanış turu = haberli karar sayısının (sonuçtan bağımsız) ilk kez ≥ n_stop olduğu tur ya da
+# decided_at ≤ date_limit olan son tur; eşitlikte n_stop. Değerlendirme kapanış turunun decided_at'i + 21 gün.
+stop:
+  n_stop: 1800
+  date_limit: 2027-06-30T23:59:59Z
+  tie: n_stop
+  evaluation_lag_days: 21
+
+# R189/R190/R199: f = Z_dep − Z_ev, Z = (Σ weakness − Σ strength) / divisor; seviye = Jev'in seçtiği düzey
+# (none 0, low 1/3, medium 2/3, high 1); sorulmayan taraf "yok" (0); başlama sonrası cevap eksik.
+feature:
+  weakness: [t2_hucum_eksik, t2_savunma_eksik, t2_orta_saha_eksik, t2_kaleci_eksik, t2_supheli, t2_rotasyon]
+  strength: [t2_donus]
+  excluded: [t2_hoca_degisim, t2_yeni_transfer]
+  divisor: 7
+  sign: away_minus_home
+  level_score: choice
+  c_min: 0.0
+  asked_after_kickoff: missing
+
+# R190: düzey → sayı (`features.derive.LEVEL_SCORES` ile birebir; mühür denetimi zorlar).
+level_scores:
+  none: 0.0
+  low: 0.3333333333333333
+  medium: 0.6666666666666666
+  high: 1.0
+
+# R191: β_i = argmax_{lower ≤ β ≤ upper} Σ_{j∈T_i} log p_jev,j(β)[y_j] − λβ²/2; T_i boşsa `empty`.
+# T_i: commence_time_j ≤ decided_at_i − gap_hours VE football-data tarihi_j < UTC tarihi(decided_at_i).
+beta:
+  lambda: 1.0
+  lower: 0.0
+  upper: 5.0
+  solver: projected_bisection
+  tol: 1.0e-10
+  empty: 0.0
+  train:
+    gap_hours: 3
+    result_date: strictly_before_decision_utc_date
+    requires: [haberli, harman_complete, settled, in_window, gate_language]
+
+# Spec §1. D1 kapıdır; ötekiler betimsel (D3 ikincil). D8/D10 sınırı iki yönlü.
+comparisons: [D1, D1b, D1c, D2, D3, D5, D6, D7, D8, D9, D10]
+gate: D1
+descriptive_bounds:
+  lower: -5.0
+  upper: 5.0
+d8_questions:
+  - t2_hucum_eksik
+  - t2_savunma_eksik
+  - t2_orta_saha_eksik
+  - t2_kaleci_eksik
+  - t2_supheli
+  - t2_rotasyon
+  - t2_donus
+  - t2_hoca_degisim
+  - t2_yeni_transfer
+  - t3_oncelik
+  - t3_hoca_baskisi
+  - t3_derbi_gerilim
+  - t3_dead_rubber
+  - t3_taktik_degisim
+  - t3_seyirci_kisiti
+  - t3_saha_zemini
+  - t3_milli_donus
+  - t3_kart_siniri
+d5_leagues: [eng.1, esp.1, ita.1, ger.1, fra.1, tur.1, ned.1, bel.1]
+
+# market.metrics.bootstrap_mean; girdi (decided_at, match_id) artan; her karşılaştırma tek çağrı, aynı tohum.
+bootstrap:
+  resamples: 10000
+  seed: 20261005
+  level: 0.95
+  order: [decided_at, match_id]
+tau: 0.02
+calibration_bins: 10
+
+# Spec §1: hesap yöntemleri — değerlendirme kodu yalnız bunları uygular. LL tabanı 1e-15 (`per_match_log_loss`);
+# bootstrap yüzdelik, maç düzeyi; D1b karar turu kümeli; D3 plasebosu; D9 baz − piyasa SD'si (ddof 1, ilk 4 hafta);
+# D10 kapsam plasebosu f_cov = 1[ev asked] − 1[dep asked].
+methods:
+  log_loss: market.metrics.per_match_log_loss
+  bootstrap: market.metrics.bootstrap_mean
+  d1b: round_cluster
+  d3_placebo: backtest.strategies.Placebo
+  calibration: market.metrics.calibration_or_none
+  d9_sd_ddof: 1
+  d9_sd_weeks: 4
+  d10_feature: coverage_indicator
+
+# Spec §2/§5: kapanış türleri (renderer `closure_kind` olarak basar).
+closure_kinds: [n_stop, date, vendor, user]
+
+# R195: mühürde tr. Başka dil yalnız mühürlü jev_model'le bu eşiği geçen kalibrasyon raporu commit'inden
+# sonraki turlardan itibaren kapı kitlesine girer; eşiksiz giriş kullanıcı kaynaklı kesintidir (spec §5).
+languages:
+  sealed: [tr]
+  entry:
+    min_n: 100
+    min_accuracy: 0.85
+    jev_model: jev-1.13.0
+
+# Mühür anındaki baytlar. Donmuş dosyalar (seal_violations zorlar): model_faz3, blend_weights_faz3, history_lock
+# (kilit), history_leagues (katalog), faz4_live, jev_questions. Kollar (spec §5; yalnız kaydedilir, rapor
+# karşılaştırır): history_aliases, faz4_ops, languages, leagues (D1/D5 kitlesi mühürdeki d5_leagues; sonradan
+# açılan lig kapı dışıdır ve `league_excluded` olarak sayılır).
+sha256:
+  config/model_faz3.yaml: 26b8164271e2a6ee4e9ef86098182d34bc12f281d33d6709578e90ee55975b24
+  config/blend_weights_faz3.yaml: 9163a6b4dcb62aeb5277ffbfd5a4cd01537d0a98ecb2a6fe40478efc27394e67
+  config/history_lock.yaml: 39967912271315e179f11ef3bca63698d8ae2e76569eb36bf2c42e6b7d0d5fc6
+  config/history_leagues.yaml: 6b513c87e35bcac4b5d4d2fe15a581bc4ac03fe9f2a49179a81454e6f345d080
+  config/faz4_live.yaml: d70e43a41ded4349ebfcd2beba8b5f044dfc7db20b479af55511a91517d09d43
+  config/jev_questions.yaml: a967064cf504f90fe696f01dae0c24e8f701e4b30739376770fc9248c54d988b
+  config/history_aliases.yaml: b299ab165d2e867465131792e9d84eb45857dbaca89f84b8e3486488484de786
+  config/faz4_ops.yaml: 387fc11a6a0b8c13775f35baa40dbca1c5de754415556d8a5dda79b71f6e135e
+  config/languages.yaml: 893cc095ca47d7c091a84e9319f384246d92af4b05d15ed06649793860349ba2
+  config/leagues.yaml: b8a19237f8f3c831ca19361cad4d09259810ab74f108d6a26bb0d2a3cd2ddc8b
+
+# Spec §1 "basılan sayımlar" — renderer bu listeyi birebir basar.
+counts_printed:
+  - window_start
+  - seal_tag_sha
+  - preregistration_sha256
+  - closure_kind
+  - closing_round
+  - evaluation_date
+  - closing_haberli_decisions
+  - d1_n
+  - n_stop
+  - shadow_matches
+  - haberli_matches
+  - incomplete
+  - rejected_price
+  - fallback_leagues
+  - unsettled
+  - no_decision
+  - side_status
+  - imputed_sides
+  - asked_after_kickoff
+  - missing_by_question
+  - language_excluded
+  - league_excluded
+  - item_set_hash_mismatch
+  - outside_frozen_set
+  - language_entry_reports
+  - arm_changes
+
+# Spec §2.
+verdicts:
+  passed: "GEÇTİ — D1 GA alt sınırı > 0 ve kapanış kullanıcı kaynaklı değil"
+  failed: "KALDI — D1 GA üst sınırı < 0, ya da pencere n_stop sayımıyla kapandı ve GA alt sınırı ≤ 0"
+  underpowered: "GÜÇ YETERSİZ — öteki her durum: tarih/satıcı kapanışında GA sıfırı içeriyor, kullanıcı kapanışında GA üst sınırı ≥ 0 ya da D1 boş"

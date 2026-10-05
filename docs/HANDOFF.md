@@ -52,8 +52,13 @@ Jev: model `jev-1.13.0` sabit, girdi $0,042/Mtok (çıktı ücretsiz), tavan $25
 
 ### 0.U.4 Kalan işler — sırayla (tamamı; her birinin tetiği ve sahibi yazılı)
 
-**A. Faz 4 Plan 3 — ön kayıt (ZAMANA DUYARLI, asistan; tercihen 2026-10-09 12:35 UTC'den ÖNCE, en geç ilk sonuç
-senkronundan — ~10-13 — önce mühürlenir):**
+**A. Faz 4 Plan 3 — ön kayıt: MÜHÜRLENDİ 2026-10-05** (etiket `faz4-onkayit`; spec
+`docs/superpowers/specs/2026-10-05-faz4-plan3-onkayit-design.md` R188–R199; `config/faz4_preregistration.yaml`;
+`gate4.preregistration` + `gate4.seal`, 114 test; bağımsız spec incelemesi 2C/10I/8M + iki kod incelemesi, 107 mutasyon).
+Kararlar: seçim dilimi yok, tek bileşik özellik (6 eksiklik − dönüş, mod seviyesi), prequential β ≥ 0 (λ 1, ≤ 5),
+`N_stop` 1.800 sabit, kapı D1 (10.000 tekrar, tohum 20261005), EN kalibrasyon eşiğiyle kurala bağlı giriş, `harman_jev`
+canlı yazımı kapıdan SONRAYA (R198), T11 gerekmez + 17e kapandı (R196), `lag_b_p99` betimsel. **Kalan:** değerlendirme
+yarısı (DEFERRED 23b, `writing-plans`), kapanış kaydı yolu (23a). Aşağıdaki 1–6 tarihçedir:
 1. R187 önerisi (kullanıcı kararı devretti — "en iyi senaryo"): ayrı seçim dilimi KALDIRILIR; önceden kayıtlı TEK bileşik
    özellik `f = ortalama(T2 çekirdek seviyeleri)_ev − _dep` (eşit ağırlık, işaret önceden; `derive.side_answers` +
    `IMPUTED` hazır); β prequential (her maçın β'sı yalnız ondan önce sonucu bilinen maçlarla, sırt cezası sabit); kapı D1
