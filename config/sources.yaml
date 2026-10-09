@@ -81,7 +81,7 @@ sources:
     base_url: https://www.tff.org
     user_agent: football-edge/0.1
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-01
+    robots_verified_at: 2026-10-09
     declared_paths:
       - /default.aspx?pageID=238
       - /default.aspx?pageID=246&ftxtID=51404
@@ -316,7 +316,7 @@ sources:
     base_url: https://football-data.co.uk
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 3.0
-    robots_verified_at: 2026-10-01
+    robots_verified_at: 2026-10-09
     enabled: true
     access_basis: robots
     terms_url: ''
