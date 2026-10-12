@@ -272,6 +272,26 @@ Plan: `docs/superpowers/plans/2026-10-02-tff-hakem-site.md`.
 9. `seen_at` toplama turunun `now`udur, TFF'nin yayımladığı an değil (muhafazakâr yön).
 10. Hakem adı TFF'nin büyük harfli yazımıyla basılır; yazım düzeltmesi yok.
 
+## Görsel tasarım (2026-10-12)
+
+Kullanıcı isteği ("tasarım çok zayıf"); öneri onaylandı ("en iyi senaryo"). Tek imza öğesi: **1X2 sonuç renk kodu** —
+ev `#1F6F8B`, beraberlik `#B5AA93`, deplasman `#8C3B5C` (koyu temada açıkları) — bütün sitede aynı anlam: maç
+tablosunda tur başına üç parçalı şerit (`ProbabilityBar`, SVG öznitelikleri; CSP `style-src 'self'` satır içi stili
+yasaklar), tablo başlığı işaretleri, ana sayfanın **yaklaşan maçlar** şeritleri (`lib/upcoming.ts`: dışa aktarımdan
+sonra başlayan, son turu görünen ilk 8; check-out `upcomingOf` bağımsız türetir, `homeFindings` saatleri birebir
+sınar), marka işareti. Geri kalan sessiz: soğuk kâğıt zemin, sistem fontu (CSP dış font yasaklar), `tabular-nums`,
+çizgili satırlar ve çipler (kart ızgarası değil), stat düzeni, durum rozetleri (mühürlü · bekleniyor · kaydedilmedi),
+koyu tema (`prefers-color-scheme`), mobil kuralları. 18+ bildirimi spec §10.2'ye uygun olarak **tam ekran ve opak**
+kalır (ortada kart). Metin, rota, veri ve indeksleme davranışı DEĞİŞMEDİ.
+
+**Kapının ÖLÇMEDİKLERİ (tasarım):** (1) CSS'in kendisi ve renk kontrastı hiçbir kapıda ölçülmez — bağımsız inceleme
+2026-10-12'de hesapladı: bütün metin çiftleri iki temada AA (≥ 4,5), şerit parçaları dekoratif (açık temada
+beraberlik/zemin 2,3; koyu temada komşu parçalar 1,05–1,34 — parçalar arası 2 px ayraç eklendi). (2) Ana sayfa
+şeritlerinin metin karşılığı yok (SVG `aria-hidden`); sayılar bağlantının götürdüğü maç sayfasında — **bilinçli kabul**.
+(3) Maç tablosundaki şerit satırları ekran okuyucuda boş satır olarak görünür (hücre `aria-hidden`). (4) Yapışkan
+başlık odaklanan öğeyi örtebilir (WCAG 2.4.11; mobilde yapışkan değil). (5) "Yaklaşan" anlık görüntü anında donar;
+dışa aktarımlar arasında bayatlar. (6) Next'in hazır 404 sayfaları satır içi `style` taşır (bu değişiklikten değil).
+
 ## Hukuk incelemesi (HANDOFF §0.7/7'ye)
 
 B-2 Task 7 incelemesinin "Content findings for lawyer review" tablosu (C1–C11; inceleme dosyası gitignored SDD

@@ -34,6 +34,7 @@ import {
   ageGateFindings,
   cssContentTexts,
   draftFindings,
+  homeFindings,
   honestyFindings,
   hostFindings,
   internal,
@@ -156,6 +157,7 @@ function pageFindings(site: Site, page: ExpectedPage, html: string): string[] {
     ...honestyFindings(snapshot, page, html),
     ...recordCellFindings(snapshot, page, html),
     ...draftFindings(page, html),
+    ...homeFindings(snapshot, page, html),
     ...markerFindings(page, html),
     ...ageGateFindings(page, html),
   ];

@@ -53,3 +53,25 @@ describe("check-out: taslak işareti ve yer tutucu bağlı", () => {
     expect(run.status).toBe(1);
   });
 });
+
+// Ana sayfa denetimi (`homeFindings`) check-out'a BAĞLI: yaklaşan maç saatleri olmayan ana sayfa, dolu
+// fixture'la (iki yaklaşan maç) bulgu verir.
+describe("check-out: ana sayfanın yaklaşan maçları bağlı", () => {
+  it("yaklaşan maç saatleri eksik ana sayfa bulgu, çıkış kodu 1", () => {
+    const run = spawnSync(
+      process.execPath,
+      [
+        "scripts/check-out.ts",
+        "--snapshot",
+        "fixtures/snapshot.fixture.web-full.json",
+        "--out",
+        "fixtures/checkout-home-upcoming",
+      ],
+      { cwd: WEB_DIR, encoding: "utf8" },
+    );
+    expect(run.stdout).toMatch(
+      /BULGU: \/en\/: yaklaşan maç saatleri \[\] ≠ \[2026-09-26T18:00:00Z, /,
+    );
+    expect(run.status).toBe(1);
+  });
+});

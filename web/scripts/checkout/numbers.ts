@@ -39,6 +39,16 @@ export type NumberContext = {
 };
 
 // Sayfanın gösterdiği anlık görüntü zamanları: yalnız bunları UTC metniyle gösteren `<time>` muaftır.
+// Ana sayfanın yaklaşan maçları — denetçinin kendi türetimi (sitenin `src/lib/upcoming.ts`ini içe
+// aktarmaz): dışa aktarımdan SONRA başlayan, son turu görünen, saate ve kimliğe göre ilk 8.
+export function upcomingOf(snapshot: Snapshot): Snapshot["matches"] {
+  const now = Date.parse(snapshot.generated_at);
+  return snapshot.matches
+    .filter((match) => Date.parse(match.commence_time) > now && match.h2h.latest !== null)
+    .sort((a, b) => a.commence_time.localeCompare(b.commence_time) || a.id.localeCompare(b.id))
+    .slice(0, 8);
+}
+
 export function pageTimes(snapshot: Snapshot, page: ExpectedPage): string[] {
   const [, id = ""] = page.id.split(":");
   const matches = snapshot.matches.filter((match) => {
@@ -54,6 +64,7 @@ export function pageTimes(snapshot: Snapshot, page: ExpectedPage): string[] {
   if (page.kind === "track-record") {
     return [snapshot.generated_at, ...snapshot.record.entries.map((entry) => entry.published_at)];
   }
+  if (page.kind === "home") return upcomingOf(snapshot).map((match) => match.commence_time);
   return ["match", "league", "team"].includes(page.kind)
     ? matches.map((match) => match.commence_time)
     : [];
@@ -67,7 +78,10 @@ export function pageNames(snapshot: Snapshot, page: ExpectedPage): string[] {
   );
   const matchOf = (each: { home: string; away: string }) => [each.home, each.away];
   const names: Record<ExpectedPage["kind"], () => string[]> = {
-    home: () => snapshot.leagues.flatMap((each) => [each.name, each.country]),
+    home: () => [
+      ...snapshot.leagues.flatMap((each) => [each.name, each.country]),
+      ...upcomingOf(snapshot).flatMap(matchOf),
+    ],
     league: () => [
       ...(league ? [league.name, league.country] : []),
       ...snapshot.teams.filter((team) => team.league_id === id).map((team) => team.name),

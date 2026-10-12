@@ -10,6 +10,7 @@ import { pageMetadata } from "../../../lib/meta.ts";
 import { langOf, leagueOf } from "../../../lib/params.ts";
 import { homePath, leaguePath, matchPath, teamPath } from "../../../lib/routes.ts";
 import { loadSnapshot, matchesOf, teamsOf } from "../../../lib/snapshot.ts";
+import styles from "../../../styles/site.module.css";
 
 type Params = { params: Promise<{ lang: string; league: string }> };
 
@@ -42,24 +43,28 @@ export default async function LeaguePage({ params }: Params) {
     <main data-fe-page={`league:${league.id}`}>
       <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{league.name}</h1>
-      <dl>
-        <dt>{t(lang, "league.country")}</dt>
-        <dd>{league.country}</dd>
-        <dt>{t(lang, "league.matches")}</dt>
-        <dd>
-          <Num
-            fe={feKey("league", league.id, "matches")}
-            value={league.matches}
-            kind="int"
-            lang={lang}
-          />
-        </dd>
+      <dl className={styles.stats}>
+        <div>
+          <dt>{t(lang, "league.country")}</dt>
+          <dd>{league.country}</dd>
+        </div>
+        <div>
+          <dt>{t(lang, "league.matches")}</dt>
+          <dd>
+            <Num
+              fe={feKey("league", league.id, "matches")}
+              value={league.matches}
+              kind="int"
+              lang={lang}
+            />
+          </dd>
+        </div>
       </dl>
       <h2>{t(lang, "league.moveTitle")}</h2>
       {distribution === null ? (
         <p>{t(lang, "league.moveTooFew")}</p>
       ) : (
-        <dl>
+        <dl className={styles.stats}>
           {(["p10", "p50", "p90"] as const).map((key) => (
             <div key={key}>
               <dt>{t(lang, `league.${key}`)}</dt>
@@ -76,7 +81,7 @@ export default async function LeaguePage({ params }: Params) {
         </dl>
       )}
       <h2>{t(lang, "league.teams")}</h2>
-      <ul>
+      <ul className={styles.chips}>
         {teamsOf(snapshot, league).map((team) => (
           <li key={teamKey(team.league_id, team.slug)}>
             <a href={teamPath(lang, league, team)}>{team.name}</a>
@@ -84,7 +89,7 @@ export default async function LeaguePage({ params }: Params) {
         ))}
       </ul>
       <h2>{t(lang, "league.matchList")}</h2>
-      <ul>
+      <ul className={styles.rows}>
         {matchesOf(snapshot, league).map((match) => (
           <li key={match.id}>
             <LocalTime iso={match.commence_time} lang={lang} />{" "}

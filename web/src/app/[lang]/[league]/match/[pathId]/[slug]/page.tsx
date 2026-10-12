@@ -17,6 +17,7 @@ import { pageMetadata } from "../../../../../../lib/meta.ts";
 import { langOf, leagueOf, matchOf } from "../../../../../../lib/params.ts";
 import { homePath, leaguePath, matchPath } from "../../../../../../lib/routes.ts";
 import { leagueById, loadSnapshot } from "../../../../../../lib/snapshot.ts";
+import styles from "../../../../../../styles/site.module.css";
 
 // Mühür durumu etiketi (9.7g): başlamış ama mühürlenmemiş maç "bekleniyor" demez.
 const STATUS: Record<ClosingState, DictKey> = {
@@ -70,11 +71,12 @@ export default async function MatchPage({ params }: Params) {
     { name: `${match.home} – ${match.away}`, path },
   ];
   const move = match.move;
+  const state = closingState(match, snapshot.generated_at);
   return (
     <main data-fe-page={`match:${match.id}`}>
       <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{`${match.home} – ${match.away}`}</h1>
-      <p>
+      <p className={styles.meta}>
         <a href={leaguePath(lang, league)}>{league.name}</a> · {t(lang, "match.kickoff")}:{" "}
         <LocalTime iso={match.commence_time} lang={lang} />
       </p>
@@ -82,28 +84,34 @@ export default async function MatchPage({ params }: Params) {
       <ValueBadge value={snapshot.value_badge} />
       <h2>{t(lang, "match.consensus")}</h2>
       <RoundsTable match={match} lang={lang} generatedAt={snapshot.generated_at} />
-      <dl>
-        <dt>{t(lang, "match.rounds")}</dt>
-        <dd>
-          <Num
-            fe={feKey("match", match.id, "rounds")}
-            value={match.rounds}
-            kind="int"
-            lang={lang}
-          />
-        </dd>
-        <dt>{t(lang, "match.status")}</dt>
-        <dd>
-          <Flag fe={feKey("match", match.id, "sealed")} value={match.sealed}>
-            {t(lang, STATUS[closingState(match, snapshot.generated_at)])}
-          </Flag>
-        </dd>
+      <dl className={styles.stats}>
+        <div>
+          <dt>{t(lang, "match.rounds")}</dt>
+          <dd>
+            <Num
+              fe={feKey("match", match.id, "rounds")}
+              value={match.rounds}
+              kind="int"
+              lang={lang}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>{t(lang, "match.status")}</dt>
+          <dd>
+            <span className={`${styles.status} ${styles[state]}`}>
+              <Flag fe={feKey("match", match.id, "sealed")} value={match.sealed}>
+                {t(lang, STATUS[state])}
+              </Flag>
+            </span>
+          </dd>
+        </div>
       </dl>
       <h2>{t(lang, "match.move")}</h2>
       {move === null ? (
         <p>{t(lang, "match.noMove")}</p>
       ) : (
-        <dl>
+        <dl className={styles.stats}>
           {(["home", "draw", "away"] as const).map((side) => (
             <div key={side}>
               <dt>{side === "draw" ? t(lang, "match.draw") : match[side]}</dt>

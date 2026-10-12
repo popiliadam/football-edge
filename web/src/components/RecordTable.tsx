@@ -15,77 +15,82 @@ export function RecordTable({ snapshot, lang }: { snapshot: Snapshot; lang: Lang
   );
   return (
     <>
-      <table className={styles.table}>
-        <caption>{t(lang, "record.tableCaption")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t(lang, "record.colTime")}</th>
-            <th scope="col">{t(lang, "record.colMatch")}</th>
-            <th scope="col">{t(lang, "record.colMarket")}</th>
-            <th scope="col">{t(lang, "record.colOutcome")}</th>
-            <th scope="col">{t(lang, "record.colPrice")}</th>
-            <th scope="col">{t(lang, "record.colFair")}</th>
-            <th scope="col">{t(lang, "record.colClv")}</th>
-            <th scope="col">{t(lang, "record.colLedger")}</th>
-            <th scope="col">{t(lang, "record.colHash")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => {
-            const id = String(entry.publication_id);
-            return (
-              <tr key={id}>
-                <td>
-                  <LocalTime iso={entry.published_at} lang={lang} />
-                </td>
-                <td>{names.get(entry.match_id) ?? entry.match_id}</td>
-                <td>
-                  <Txt fe={feKey("entry", id, "market")} value={entry.market} />
-                </td>
-                <td>
-                  <Flag fe={feKey("entry", id, "outcome")} value={entry.outcome}>
-                    {outcomeLabel(
-                      entry.outcome,
-                      snapshot.matches.find((match) => match.id === entry.match_id),
-                      t(lang, "match.draw"),
-                    )}
-                  </Flag>
-                </td>
-                <td>
-                  <Num
-                    fe={feKey("entry", id, "published_price")}
-                    value={entry.published_price}
-                    kind="price2"
-                    lang={lang}
-                  />
-                </td>
-                <td>
-                  <Num
-                    fe={feKey("entry", id, "closing_fair_price")}
-                    value={entry.closing_fair_price}
-                    kind="price2"
-                    lang={lang}
-                  />
-                </td>
-                <td>
-                  <Num fe={feKey("entry", id, "clv")} value={entry.clv} kind="pct2" lang={lang} />
-                </td>
-                <td>
-                  <Num
-                    fe={feKey("entry", id, "publication_ledger_id")}
-                    value={entry.publication_ledger_id}
-                    kind="int"
-                    lang={lang}
-                  />
-                </td>
-                <td>
-                  <Txt fe={feKey("entry", id, "publication_hash")} value={entry.publication_hash} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <caption>{t(lang, "record.tableCaption")}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{t(lang, "record.colTime")}</th>
+              <th scope="col">{t(lang, "record.colMatch")}</th>
+              <th scope="col">{t(lang, "record.colMarket")}</th>
+              <th scope="col">{t(lang, "record.colOutcome")}</th>
+              <th scope="col">{t(lang, "record.colPrice")}</th>
+              <th scope="col">{t(lang, "record.colFair")}</th>
+              <th scope="col">{t(lang, "record.colClv")}</th>
+              <th scope="col">{t(lang, "record.colLedger")}</th>
+              <th scope="col">{t(lang, "record.colHash")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry) => {
+              const id = String(entry.publication_id);
+              return (
+                <tr key={id}>
+                  <td>
+                    <LocalTime iso={entry.published_at} lang={lang} />
+                  </td>
+                  <td>{names.get(entry.match_id) ?? entry.match_id}</td>
+                  <td>
+                    <Txt fe={feKey("entry", id, "market")} value={entry.market} />
+                  </td>
+                  <td>
+                    <Flag fe={feKey("entry", id, "outcome")} value={entry.outcome}>
+                      {outcomeLabel(
+                        entry.outcome,
+                        snapshot.matches.find((match) => match.id === entry.match_id),
+                        t(lang, "match.draw"),
+                      )}
+                    </Flag>
+                  </td>
+                  <td>
+                    <Num
+                      fe={feKey("entry", id, "published_price")}
+                      value={entry.published_price}
+                      kind="price2"
+                      lang={lang}
+                    />
+                  </td>
+                  <td>
+                    <Num
+                      fe={feKey("entry", id, "closing_fair_price")}
+                      value={entry.closing_fair_price}
+                      kind="price2"
+                      lang={lang}
+                    />
+                  </td>
+                  <td>
+                    <Num fe={feKey("entry", id, "clv")} value={entry.clv} kind="pct2" lang={lang} />
+                  </td>
+                  <td>
+                    <Num
+                      fe={feKey("entry", id, "publication_ledger_id")}
+                      value={entry.publication_ledger_id}
+                      kind="int"
+                      lang={lang}
+                    />
+                  </td>
+                  <td>
+                    <Txt
+                      fe={feKey("entry", id, "publication_hash")}
+                      value={entry.publication_hash}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {summary === null ? null : (
         <>
           <h2>{t(lang, "record.summaryTitle")}</h2>

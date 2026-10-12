@@ -10,6 +10,7 @@ import { pageMetadata } from "../../../../lib/meta.ts";
 import { langOf, leagueOf, teamOf } from "../../../../lib/params.ts";
 import { homePath, leaguePath, matchPath, teamPath } from "../../../../lib/routes.ts";
 import { leagueById, loadSnapshot, matchesOfTeam } from "../../../../lib/snapshot.ts";
+import styles from "../../../../styles/site.module.css";
 
 type Params = { params: Promise<{ lang: string; league: string; team: string }> };
 
@@ -51,23 +52,27 @@ export default async function TeamPage({ params }: Params) {
     <main data-fe-page={`team:${teamKey(team.league_id, team.slug)}`}>
       <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{team.name}</h1>
-      <dl>
-        <dt>{t(lang, "team.league")}</dt>
-        <dd>
-          <a href={leaguePath(lang, league)}>{league.name}</a>
-        </dd>
-        <dt>{t(lang, "team.matches")}</dt>
-        <dd>
-          <Num
-            fe={feKey("team", teamKey(team.league_id, team.slug), "matches")}
-            value={team.matches}
-            kind="int"
-            lang={lang}
-          />
-        </dd>
+      <dl className={styles.stats}>
+        <div>
+          <dt>{t(lang, "team.league")}</dt>
+          <dd>
+            <a href={leaguePath(lang, league)}>{league.name}</a>
+          </dd>
+        </div>
+        <div>
+          <dt>{t(lang, "team.matches")}</dt>
+          <dd>
+            <Num
+              fe={feKey("team", teamKey(team.league_id, team.slug), "matches")}
+              value={team.matches}
+              kind="int"
+              lang={lang}
+            />
+          </dd>
+        </div>
       </dl>
       <h2>{t(lang, "team.matchList")}</h2>
-      <ul>
+      <ul className={styles.rows}>
         {matchesOfTeam(snapshot, team).map((match) => (
           <li key={match.id}>
             <LocalTime iso={match.commence_time} lang={lang} />{" "}

@@ -7,9 +7,14 @@ export function SiteHeader({ lang }: { lang: Lang }) {
   return (
     <header className={styles.header}>
       <a href={homePath(lang)} className={styles.brand}>
+        <span className={styles.mark} aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
         {SITE_NAME}
       </a>
-      <nav aria-label={t(lang, "nav.main")}>
+      <nav aria-label={t(lang, "nav.main")} className={styles.nav}>
         <a href={homePath(lang)}>{t(lang, "nav.home")}</a>{" "}
         <a href={trackRecordPath(lang)}>{t(lang, "nav.trackRecord")}</a>
       </nav>

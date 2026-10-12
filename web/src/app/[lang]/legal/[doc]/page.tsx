@@ -12,6 +12,7 @@ import { breadcrumbLd, pageLd } from "../../../../lib/jsonld.ts";
 import { pageMetadata } from "../../../../lib/meta.ts";
 import { langOf } from "../../../../lib/params.ts";
 import { homePath, legalPath } from "../../../../lib/routes.ts";
+import styles from "../../../../styles/site.module.css";
 
 type Params = { params: Promise<{ lang: string; doc: string }> };
 
@@ -45,7 +46,9 @@ export default async function LegalPage({ params }: Params) {
     <main data-fe-page={`legal:${doc}`}>
       <Breadcrumbs crumbs={crumbs} lang={lang} />
       <h1>{t(lang, `legal.${doc}`)}</h1>
-      <Content />
+      <div className={styles.prose}>
+        <Content />
+      </div>
       <JsonLdScript data={pageLd([breadcrumbLd(crumbs)])} />
     </main>
   );

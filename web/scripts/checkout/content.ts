@@ -9,7 +9,7 @@ import { ALLOW_MARKER, countMarkers } from "./checks.ts";
 import { closingMissed } from "./closing.ts";
 import { decodeNamed } from "./entities.ts";
 import type { ExpectedPage } from "./expect.ts";
-import { utcText } from "./numbers.ts";
+import { upcomingOf, utcText } from "./numbers.ts";
 import { ldStrings, surfaceTexts } from "./surface.ts";
 import { isHidden, joined, squash, textNodes, within } from "./text.ts";
 import {
@@ -282,6 +282,18 @@ export function recordCellFindings(snapshot: Snapshot, page: ExpectedPage, html:
     }
   }
   return findings;
+}
+
+// Ana sayfa (2026-10-12): <main>'deki başlama saatleri denetçinin `upcomingOf` kuralıyla BİREBİR ve aynı
+// sırada — izin listesi tek yönlü olduğu için (fazlası bulgu vermezdi) eşitlik ayrıca sınanır.
+export function homeFindings(snapshot: Snapshot, page: ExpectedPage, html: string): string[] {
+  if (page.kind !== "home") return [];
+  const main = html.slice(html.indexOf("<main"), html.indexOf("</main>") + 1);
+  const shown = tags(main, "time").map((time) => time.datetime ?? "");
+  const want = upcomingOf(snapshot).map((match) => match.commence_time);
+  return shown.join("|") === want.join("|")
+    ? []
+    : [`${page.path}: yaklaşan maç saatleri [${shown.join(", ")}] ≠ [${want.join(", ")}]`];
 }
 
 // AK13 (avukat onayı 2026-10-05): taslak işareti ve avukata soru / doğrulama yer tutucuları yayında

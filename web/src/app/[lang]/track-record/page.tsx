@@ -13,6 +13,7 @@ import { pageMetadata } from "../../../lib/meta.ts";
 import { langOf } from "../../../lib/params.ts";
 import { homePath, trackRecordPath } from "../../../lib/routes.ts";
 import { loadSnapshot } from "../../../lib/snapshot.ts";
+import styles from "../../../styles/site.module.css";
 
 type Params = { params: Promise<{ lang: string }> };
 
@@ -59,7 +60,7 @@ export default async function TrackRecordPage({ params }: Params) {
         <RecordTable snapshot={snapshot} lang={lang} />
       )}
       <h2>{t(lang, "record.ledgerTitle")}</h2>
-      <dl>
+      <dl className={styles.ledger}>
         <dt>{t(lang, "record.head")}</dt>
         <dd>
           <Txt fe={feKey("ledger", "-", "head")} value={ledger.head} />
@@ -74,7 +75,7 @@ export default async function TrackRecordPage({ params }: Params) {
         </dd>
       </dl>
       <h2>{t(lang, "record.anchorTitle")}</h2>
-      <dl>
+      <dl className={styles.ledger}>
         <dt>{t(lang, "record.anchorHistory")}</dt>
         <dd>
           <a href={`${LEDGER_HISTORY_URL}/${ledger.anchor.file}`}>
