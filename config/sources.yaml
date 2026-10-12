@@ -134,7 +134,7 @@ sources:
     base_url: https://www.sportsmole.co.uk
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/football/rss.xml']
     enabled: true
     access_basis: robots
@@ -150,7 +150,7 @@ sources:
     base_url: https://www.independent.co.uk
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/sport/football/rss']
     enabled: true
     access_basis: robots
@@ -164,7 +164,7 @@ sources:
     base_url: https://www.standard.co.uk
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/sport/football/rss']
     enabled: true
     access_basis: robots
@@ -177,7 +177,7 @@ sources:
     base_url: https://www.getfootballnewsfrance.com
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/feed/']
     enabled: false
     access_basis: robots
@@ -196,7 +196,7 @@ sources:
     base_url: https://www.football-oranje.com
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/feed/']
     enabled: true
     access_basis: robots
@@ -210,7 +210,7 @@ sources:
     base_url: https://www.fotomac.com.tr
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/rss/news.xml']
     enabled: true
     access_basis: robots
@@ -224,7 +224,7 @@ sources:
     base_url: https://www.aspor.com.tr
     user_agent: football-edge/0.1 (+https://github.com/popiliadam/football-edge)
     crawl_delay_seconds: 2.0
-    robots_verified_at: 2026-10-04
+    robots_verified_at: 2026-10-12
     declared_paths: ['/rss/futbol.xml']
     enabled: true
     access_basis: robots
